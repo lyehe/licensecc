@@ -1,8 +1,9 @@
 import { mintSession, setSessionCookie, loadSessionPeppers } from "../../auth/portal_session.mjs";
 import { portalRateLimit } from "../../auth/portal_ratelimit.mjs";
+import { loadOtpPeppers } from "../../auth/portal_otp.mjs";
 import { canonicalHttpsOrigin, emailApiOrigin } from "../../auth/portal_destination.mjs";
 import { authSession } from "./auth.js";
-import { clientIp, envelope } from "../support.js";
+import { clientIp, envelope, isCrossSite, readJson, redirect, supportContact } from "../support.js";
 import { digest, exchangeIdentity, providerConfig, randomToken, type Provider } from "../oauth/providers.js";
 import { identityCustomer } from "../oauth/accounts.js";
 import type { Env, TopRoute } from "../env.js";
@@ -16,16 +17,20 @@ function browserToken(request: Request): string {
   const values = (request.headers.get("cookie") ?? "").split(/;\s*/).filter((part) => part.startsWith(`${COOKIE}=`));
   return values.length === 1 ? values[0]!.slice(COOKIE.length + 1) : "";
 }
-function redirect(location: string, cookies: string[] = []): Response {
-  const headers = new Headers({ location, "cache-control": "no-store", "referrer-policy": "no-referrer" });
-  for (const value of cookies) headers.append("set-cookie", value);
-  return new Response(null, { status: 303, headers });
-}
 function originFor(request: Request, env: Env): string | null {
   const origin = canonicalHttpsOrigin(env.PORTAL_PUBLIC_ORIGIN);
   return origin && new URL(request.url).origin === origin ? origin : null;
 }
 const callbackPath = (provider: Provider): string => `/portal/v1/auth/${provider}/callback`;
+// identityCustomer() failures that reach the browser as their own auth_error. Anything else it
+// throws (such as link_failed for an identity another customer owns) stays sign_in_failed.
+const CALLBACK_ERRORS = new Set(["account_link_required", "account_suspended"]);
+const NO_STORE = { "cache-control": "no-store" };
+// What the providers envelope publishes. Unlink reuses both, and for email codes it also requires
+// the OTP peppers (see unlink()); the envelope's `email` also covers password email links, which
+// need delivery but not the peppers.
+const passwordEnabled = (env: Env): boolean => env.PORTAL_PASSWORD_ENABLED === "1";
+const emailCodesEnabled = (env: Env): boolean => Boolean(env.PORTAL_EMAIL_API_KEY && env.PORTAL_EMAIL_FROM && emailApiOrigin(env));
 
 async function start(request: Request, env: Env, reqId: string, now: number, provider: Provider): Promise<Response> {
   const origin = originFor(request, env);
@@ -84,16 +89,70 @@ async function callback(request: Request, env: Env, reqId: string, now: number, 
     if (!minted.ok || !minted.raw) return fail("sign_in_failed");
     return redirect(`${origin}/${flow.link_session_id ? "?auth_result=linked#/account" : "#/apps"}`, [cookie("", 0), setSessionCookie(minted.raw)]);
   } catch (error) {
-    return fail(error instanceof Error && error.message === "account_link_required" ? "account_link_required" : "sign_in_failed");
+    return fail(error instanceof Error && CALLBACK_ERRORS.has(error.message) ? error.message : "sign_in_failed");
   }
+}
+
+// Disconnect a provider only while another sign-in method is usable now: a password while password
+// sign-in is enabled, the other provider's identity while that provider is configured, or a contact
+// email while email codes can be sent (delivery configured and the OTP peppers set). The rule, a
+// still-live session and the delete are one conditional statement, so two tabs disconnecting both
+// providers cannot both succeed, and a session another tab just revoked cannot finish its own
+// unlink. The same transaction revokes the customer's other OAuth sessions, but only when this
+// DELETE removed the row (changes() = 1), so a request that lost a race revokes nothing; a final
+// read-only statement then tells a lost race (404 or 401) from the last-method refusal (409). The
+// current session and non-OAuth sessions are always kept.
+async function unlink(request: Request, env: Env, reqId: string, now: number): Promise<Response> {
+  if (isCrossSite(request, env)) return envelope(reqId, "cross_site_forbidden", undefined, 403, NO_STORE);
+  const session = await authSession(request, env, reqId, now);
+  if (session instanceof Response) return session;
+  const body = await readJson(request, reqId);
+  if (body instanceof Response) return body;
+  const provider = (["google", "github"] as const).find((name) => name === body.provider);
+  if (provider === undefined) return envelope(reqId, "invalid_request", undefined, 400, NO_STORE);
+  const db = env.DB.withSession?.("first-primary") ?? env.DB;
+  if (!await db.prepare("SELECT 1 FROM portal_identities WHERE customer_id = ? AND provider = ?").bind(session.customer_id, provider).first()) {
+    return envelope(reqId, "not_found", undefined, 404, NO_STORE);
+  }
+  if (!env.DB.batch) return envelope(reqId, "config_error", undefined, 503, NO_STORE);
+  const other: Provider = provider === "google" ? "github" : "google";
+  const flag = (usable: boolean): number => (usable ? 1 : 0);
+  // Without the OTP peppers requestOtp answers config_error, so delivery alone is not a way in.
+  const emailCodes = emailCodesEnabled(env) && loadOtpPeppers(env) !== null;
+  // As routes/password.ts's sessionGuard: the session must still be live when the statement runs.
+  const liveSession = "EXISTS (SELECT 1 FROM portal_sessions s JOIN customers c ON c.id = s.customer_id " +
+    "WHERE s.id = ? AND s.customer_id = ? AND s.status = 'active' AND s.expires_at > ? AND c.status = 'active')";
+  const [deleted, , after] = await env.DB.batch([
+    env.DB.prepare(
+      `DELETE FROM portal_identities WHERE customer_id = ? AND provider = ? AND ${liveSession} AND (` +
+      "(? = 1 AND EXISTS (SELECT 1 FROM portal_passwords WHERE customer_id = ?)) OR " +
+      "(? = 1 AND EXISTS (SELECT 1 FROM portal_identities WHERE customer_id = ? AND provider = ?)) OR " +
+      "(? = 1 AND EXISTS (SELECT 1 FROM customers WHERE id = ? AND email <> '' AND instr(email, '@') > 1))) RETURNING provider",
+    ).bind(session.customer_id, provider, session.id, session.customer_id, now, flag(passwordEnabled(env)), session.customer_id,
+      flag(providerConfig(env, other) !== null), session.customer_id, other, flag(emailCodes), session.customer_id),
+    // Directly after the DELETE: changes() is that statement's count.
+    env.DB.prepare(
+      "UPDATE portal_sessions SET status = 'revoked' WHERE changes() = 1 AND customer_id = ? AND auth_method = 'oauth' AND id <> ? " +
+      "AND status = 'active' AND NOT EXISTS (SELECT 1 FROM portal_identities WHERE customer_id = ? AND provider = ?)",
+    ).bind(session.customer_id, session.id, session.customer_id, provider),
+    env.DB.prepare(`SELECT EXISTS (SELECT 1 FROM portal_identities WHERE customer_id = ? AND provider = ?) AS linked, ${liveSession} AS signed_in`)
+      .bind(session.customer_id, provider, session.id, session.customer_id, now),
+  ]);
+  if (deleted?.results.length) return envelope(reqId, "identity_unlinked", { provider }, 200, NO_STORE);
+  const state = after?.results[0] as { linked?: number; signed_in?: number } | undefined;
+  // Lost a race: the provider was disconnected meanwhile, or another unlink revoked this session.
+  if (state?.linked === 0) return envelope(reqId, "not_found", undefined, 404, NO_STORE);
+  if (state?.signed_in === 0) return envelope(reqId, "unauthorized", undefined, 401, NO_STORE);
+  return envelope(reqId, "last_sign_in_method", undefined, 409, NO_STORE);
 }
 
 export const OAUTH_DISPATCH: Record<string, TopRoute> = {
   "GET /portal/v1/auth/providers": (_request, env, _ctx, reqId) => envelope(reqId, "auth_providers", {
     google: providerConfig(env, "google") !== null, github: providerConfig(env, "github") !== null,
-    password: env.PORTAL_PASSWORD_ENABLED === "1",
-    email: Boolean(env.PORTAL_EMAIL_API_KEY && env.PORTAL_EMAIL_FROM && emailApiOrigin(env)),
-  }, 200, { "cache-control": "no-store" }),
+    password: passwordEnabled(env),
+    email: emailCodesEnabled(env),
+    support: supportContact(env),
+  }, 200, NO_STORE),
   "POST /portal/v1/auth/google/start": (request, env, _ctx, reqId, now) => start(request, env, reqId, now, "google"),
   "POST /portal/v1/auth/github/start": (request, env, _ctx, reqId, now) => start(request, env, reqId, now, "github"),
   "GET /portal/v1/auth/google/callback": (request, env, _ctx, reqId, now) => callback(request, env, reqId, now, "google"),
@@ -103,6 +162,7 @@ export const OAUTH_DISPATCH: Record<string, TopRoute> = {
     if (session instanceof Response) return session;
     const db = env.DB.withSession?.("first-primary") ?? env.DB;
     const rows = await db.prepare("SELECT provider, email, created_at FROM portal_identities WHERE customer_id = ? ORDER BY provider").bind(session.customer_id).all();
-    return envelope(reqId, "identities", { items: rows.results }, 200, { "cache-control": "no-store" });
+    return envelope(reqId, "identities", { items: rows.results }, 200, NO_STORE);
   },
+  "POST /portal/v1/auth/identities/unlink": (request, env, _ctx, reqId, now) => unlink(request, env, reqId, now),
 };

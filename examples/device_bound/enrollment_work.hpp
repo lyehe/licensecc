@@ -44,8 +44,14 @@ inline LCC_BOUND_RESULT update(LccDeviceBoundClient* client, bool activation) {
 		if (!persistence(client, detail)) return LCC_BOUND_STORAGE_ERROR;
 		if (result != LCC_BOUND_RETRY && result != LCC_BOUND_BUSY && result != LCC_BOUND_CONFLICT) break;
 		if (attempt >= 2 || result == LCC_BOUND_CONFLICT) {
+			// A full license is not unresolved issuance: the server refused and issued nothing.
+			if (result == LCC_BOUND_CONFLICT && detail.denial_detail == LCC_BOUND_DETAIL_DEVICE_LIMIT)
+				std::cerr << "All device slots for this license are in use. Disconnect a device in the customer portal "
+							 "(Devices), then try again.\n";
+			else
+				std::cerr << "Issuance is unresolved (result " << result << "). ";
 			std::cerr
-				<< "Issuance is unresolved (result " << result << "). Press Enter to retry, quit to stop"
+				<< "Press Enter to retry, quit to stop"
 				<< (!activation && result == LCC_BOUND_CONFLICT
 						? ", or restart to abandon this request and start a new renewal (the server binding remains)"
 						: "")

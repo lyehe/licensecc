@@ -9,4 +9,5 @@ export const webhookRoutes = [
   operationDescriptor("webhooks", "admin", "PATCH", "/api/admin/webhooks/{id}", ["id"]),
   operationDescriptor("webhooks", "admin", "POST", "/api/admin/webhooks/{id}/disable", ["id"]),
   operationDescriptor("webhooks", "admin", "POST", "/api/admin/webhooks/{id}/reenable", ["id"]),
+  operationDescriptor("webhooks", "admin", "POST", "/api/admin/webhooks/{id}/test", ["id"]),
 ] as const;

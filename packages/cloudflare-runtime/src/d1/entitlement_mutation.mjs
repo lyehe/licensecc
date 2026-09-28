@@ -564,6 +564,7 @@ export async function syncEntitlement(env, input, reason, ctx, idempotency) {
  * EXISTING entitlement, preserving every other column (including the entitlement
  * body that createEntitlement owns). Bumps revocation_seq and writes an audit row
  * atomically. Returns null if the entitlement does not exist; throws
+ * "stale_transition" when ctx.expectedEntitlement no longer matches, and
  * "revoked_terminal" if it is revoked. Unknown keys and keys whose value is not a
  * finite non-negative integer are ignored.
  */
@@ -572,6 +573,7 @@ export async function setEntitlementCapacity(env, key, capacity, ctx, idempotenc
   if (prev === null) {
     return null;
   }
+  assertExpectedEntitlement(prev, ctx);
   if (prev.status === "revoked") {
     throw new Error("revoked_terminal");
   }

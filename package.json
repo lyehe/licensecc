@@ -27,7 +27,7 @@
     "test:workflow-pins": "node --test scripts/workflow-action-pins.test.mjs",
     "test:security-governance": "node --test scripts/ci/security-governance.test.mjs",
     "test:native-security": "node --test scripts/native-security-contract.test.mjs",
-    "test:repository": "node --test scripts/ci/check-script-catalog.test.mjs scripts/ci/ownership-contract.test.mjs scripts/ci/repository-doctor.test.mjs scripts/ci/run-offline-docs-quickstart.test.mjs",
+    "test:repository": "node --test scripts/ci/check-script-catalog.test.mjs scripts/ci/ownership-contract.test.mjs scripts/ci/repository-doctor.test.mjs scripts/ci/run-offline-docs-quickstart.test.mjs scripts/ui-token-parity.test.mjs",
     "test:versions": "node --test scripts/check-version-contract.test.mjs",
     "test:release-artifacts": "node --test scripts/release-artifacts.test.mjs",
     "test:worker-rollback": "node --test scripts/check-worker-rollback-health.test.mjs scripts/rollback-workers.test.mjs",

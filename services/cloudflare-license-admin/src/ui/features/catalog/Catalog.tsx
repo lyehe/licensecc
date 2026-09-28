@@ -1,5 +1,7 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useAdminNavigation } from "../../app/navigation";
+import { useFormFeedback } from "../../shared/fieldErrors";
+import { apiFailureFeedback, codeFeedback, refusalOutcome, validationCode } from "../../shared/messages";
 
 import type {
   CatalogFeature,
@@ -7,7 +9,7 @@ import type {
   CatalogPlanFeature,
   Policy,
 } from "../../../shared/api";
-import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
+import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
 import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { useCoreRefresh } from "../../shared/coreRefresh";
 import { loadAllExactPages, loadMore } from "../../shared/pagination";
@@ -42,10 +44,13 @@ import { CatalogFeaturesTable, CatalogPlanFeaturesTable, CatalogPlansTable, Plan
 import { useCatalogImportWorkflow } from "./useCatalogImportWorkflow";
 import { usePlanProjectionWorkflow } from "./usePlanProjectionWorkflow";
 import { useCatalogWorkspace } from "./useCatalogWorkspace";
+import { useCatalogPlanRoute } from "./useCatalogPlanRoute";
 import { useCatalogReadState } from "./useCatalogReadState";
 import { useCatalogConsequences } from "./useCatalogConsequences";
 import { useCatalogExport } from "./useCatalogExport";
 import { ProjectPicker } from "./ProjectPicker";
+import { CATALOG_FEATURE_FORM, CATALOG_PLAN_FEATURE_FORM, CATALOG_PLAN_FORM, catalogFeatureFieldForCode, catalogPlanFeatureFieldForCode, catalogPlanFieldForCode } from "./fieldErrors";
+import { useOpenCreatedPlan } from "./useOpenCreatedPlan";
 
 export function Catalog({ active }: { active: boolean }): React.ReactElement | null {
   const [catalogFeaturesSnapshot, setCatalogFeatures] = useState<CatalogFeature[]>([]);
@@ -62,8 +67,11 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const [catalogPlanFeaturesSnapshot, setCatalogPlanFeatures] = useState<CatalogPlanFeature[]>([]);
   const [catalogPlanFeatureForm, setCatalogPlanFeatureForm] = useState(emptyCatalogPlanFeatureForm);
   const [activePolicies, setActivePolicies] = useState<Policy[]>([]);
-  const { catalogView, setCatalogView } = useAdminNavigation();
-  const { busy: requestBusy, operationLocked, currentReason, requestConfirm, runKeyedMutation, runMutation, setMessage, setReason } = useOperatorControls();
+  const { catalogView, setCatalogView, routeVersion } = useAdminNavigation();
+  const { busy: requestBusy, operationLocked, operationRetained, modalActive, currentReason, requestConfirm, runKeyedMutation, runMutation, setFeedback, setReason } = useOperatorControls();
+  const featureFeedback = useFormFeedback(CATALOG_FEATURE_FORM, routeVersion);
+  const planFeedback = useFormFeedback(CATALOG_PLAN_FORM, routeVersion);
+  const rowFeedback = useFormFeedback(CATALOG_PLAN_FEATURE_FORM, routeVersion);
   const busy = requestBusy || operationLocked;
   const { refreshCore } = useCoreRefresh();
   // Strict recovery reads the currently rendered catalog context, not the
@@ -73,24 +81,23 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const currentCatalogPlansRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
   const currentCatalogPlanFeaturesRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
   const currentCatalogImportRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
-  const planProjection = usePlanProjectionWorkflow({ refreshCore, runKeyedMutation, runMutation, setMessage });
+  const planProjection = usePlanProjectionWorkflow({ refreshCore, runKeyedMutation, runMutation, setFeedback, requestConfirm, modalActive, onApplied: () => workspace.markApplied("projection") });
   const catalogImport = useCatalogImportWorkflow({
     active: active && catalogView === "import",
     invalidatePlanProjection: planProjection.invalidate,
     refreshCurrentCatalog: () => currentCatalogImportRefreshRef.current(),
     requestConfirm,
     runMutation,
-    setMessage,
+    setFeedback,
+    onApplied: () => workspace.markApplied("import"),
   });
   const invalidatePlanProjectionPreview = planProjection.invalidate;
   const invalidateCatalogImportPreview = catalogImport.invalidate;
   const updatePlanProjectionForm = planProjection.updateForm;
 
   const workspace = useCatalogWorkspace({
-    active, view: catalogView, busy: requestBusy, operationLocked,
+    active, view: catalogView, busy: requestBusy, operationRetained,
     snapshots: { featureEditor: JSON.stringify(catalogFeatureForm), planEditor: JSON.stringify(catalogPlanForm), planFeatureEditor: JSON.stringify(catalogPlanFeatureForm), projection: JSON.stringify(planProjection.form), import: catalogImport.text },
-    importApplied: catalogImport.preview !== null && catalogImport.previewBinding === null,
-    projectionApplied: planProjection.preview !== null && planProjection.previewBinding === null,
     invalidate: () => { invalidatePlanProjectionPreview(); invalidateCatalogImportPreview(); },
     onDiscard: (task) => {
       if (task === "featureEditor") cancelCatalogFeatureEdit();
@@ -100,6 +107,8 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       else if (task === "import") catalogImport.updateText("");
     },
   });
+  // Every editor open, discard and route step advances the task revision; no inline error outlives the values it was shown for.
+  useEffect(() => { for (const form of [featureFeedback, planFeedback, rowFeedback, planProjection.feedback, catalogImport.feedback]) form.clear(); }, [workspace.revision]);
 
   const catalogFeaturesUrl = useMemo(() => catalogFeaturesPath(catalogFeatureFilter), [catalogFeatureFilter]);
   const catalogPlansUrl = useMemo(() => catalogPlansPath(catalogPlanFilter), [catalogPlanFilter]);
@@ -146,12 +155,11 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
         return EXACT_READ_PROOF;
       }
     } else if (strict) {
-      featureRead.fail(apiFailureMessage(response));
+      featureRead.fail(apiFailureFeedback(response));
       const failure = apiFailureDetails(response);
       throw new ConfirmRefreshFailure(failure.code, failure.requestId);
     } else {
-      featureRead.fail(apiFailureMessage(response));
-      setMessage(apiFailureMessage(response));
+      featureRead.fail(apiFailureFeedback(response));
     }
     return null;
   }
@@ -178,12 +186,11 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
         return EXACT_READ_PROOF;
       }
     } else if (strict) {
-      planRead.fail(apiFailureMessage(response));
+      planRead.fail(apiFailureFeedback(response));
       const failure = apiFailureDetails(response);
       throw new ConfirmRefreshFailure(failure.code, failure.requestId);
     } else {
-      planRead.fail(apiFailureMessage(response));
-      setMessage(apiFailureMessage(response));
+      planRead.fail(apiFailureFeedback(response));
     }
     return null;
   }
@@ -209,14 +216,13 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       }
     }
     else if (strict) {
-      planFeaturesRead.fail(apiFailureMessage(response));
+      planFeaturesRead.fail(apiFailureFeedback(response));
       const failure = apiFailureDetails(response);
       throw new ConfirmRefreshFailure(failure.code, failure.requestId);
     }
     else {
       setCatalogPlanFeatures([]);
-      planFeaturesRead.fail(apiFailureMessage(response));
-      setMessage(apiFailureMessage(response));
+      planFeaturesRead.fail(apiFailureFeedback(response));
     }
     return null;
   }
@@ -260,9 +266,9 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     void (async () => {
       const result = await loadAllExactPages<Policy>("/api/admin/policies?status=active", "policies_listed", hasPolicyListData, activePoliciesFence, (policy) => policy.id);
       if (result.kind === "success") setActivePolicies(result.items);
-      else if (result.kind === "failure") setMessage(result.message);
+      else if (result.kind === "failure") setFeedback(result.feedback);
     })();
-  }, [active, activePoliciesFence, setMessage]);
+  }, [active, activePoliciesFence, setFeedback]);
 
   function selectCatalogPlan(plan: CatalogPlan): void {
     setSelectedCatalogPlanId(plan.id);
@@ -275,15 +281,22 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     workspace.open("featureEditor", () => { setEditingCatalogFeatureId(feature.id); setCatalogFeatureForm(form); }, JSON.stringify(form));
   }
   function cancelCatalogFeatureEdit(): void {
+    featureFeedback.clear();
     setEditingCatalogFeatureId(null);
     setCatalogFeatureForm(emptyCatalogFeatureForm);
     workspace.markClean("featureEditor", JSON.stringify(emptyCatalogFeatureForm));
+  }
+  /** A created feature opens in its editor, showing what was saved. */
+  function openFeatureRecord(feature: CatalogFeature): void {
+    const form = catalogFeatureFormFromRecord(feature);
+    setEditingCatalogFeatureId(feature.id); setCatalogFeatureForm(form); workspace.markClean("featureEditor", JSON.stringify(form));
   }
   function beginCatalogPlanEdit(plan: CatalogPlan): void {
     const form = catalogPlanFormFromRecord(plan);
     workspace.open("planEditor", () => { setEditingCatalogPlanId(plan.id); setCatalogPlanForm(form); selectCatalogPlan(plan); }, JSON.stringify(form));
   }
   function cancelCatalogPlanEdit(): void {
+    planFeedback.clear();
     setEditingCatalogPlanId(null);
     setCatalogPlanForm(emptyCatalogPlanForm);
     workspace.markClean("planEditor", JSON.stringify(emptyCatalogPlanForm));
@@ -293,7 +306,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     event.preventDefault();
     if (editingCatalogFeatureId !== null && (!catalogFeaturesFence.canLoadMore() || featureRead.error !== null || !catalogFeaturesSnapshot.some((feature) => feature.id === editingCatalogFeatureId))) {
       cancelCatalogFeatureEdit();
-      setMessage("catalog_feature_not_visible");
+      featureFeedback.show("catalog_feature_not_visible", null, catalogFeatureFieldForCode);
       return;
     }
     const contextGeneration = catalogFeatureGeneration;
@@ -305,9 +318,10 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     try {
       body = editingCatalogFeatureId === null ? normalizeCatalogFeatureForm(catalogFeatureForm) : normalizeCatalogFeaturePatch(catalogFeatureForm);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "invalid_catalog_feature");
+      featureFeedback.show(validationCode(error), null, catalogFeatureFieldForCode);
       return;
     }
+    featureFeedback.clear();
     const creating = editingCatalogFeatureId === null;
     const featureId = editingCatalogFeatureId;
     const requestBody = JSON.stringify(body);
@@ -329,16 +343,14 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       }, creating ? mutationFailurePolicies.catalogFeatureCreate : mutationFailurePolicies.catalogFeaturePatch, phase),
       onApplied: async (parsed) => {
         if (!isCurrent()) return;
-        setMessage(`${parsed.code} (${parsed.requestId})`);
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
         invalidatePlanProjectionPreview();
         invalidateCatalogImportPreview();
-        if (isCatalogFeatureFormGenerationCurrent(formGeneration)) cancelCatalogFeatureEdit();
+        if (isCatalogFeatureFormGenerationCurrent(formGeneration)) { if (creating) openFeatureRecord(parsed.data); else cancelCatalogFeatureEdit(); }
       },
       refresh: async () => await currentCatalogFeaturesRefreshRef.current(),
       onUnapplied: (parsed) => {
-        if (isCurrent()) {
-        setMessage(`${parsed.code} (${parsed.requestId})`);
-        }
+        if (isCurrent()) featureFeedback.show(parsed.code, parsed.requestId, catalogFeatureFieldForCode);
       },
       isCurrent,
     });
@@ -388,15 +400,12 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
         return null;
       }
     }, "consequence");
-    if (mutation === undefined) return { ok: false, message: "mutation_busy", retryable: true };
+    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
     if (mutation === null) return confirmMutationUnknown(reconciliation);
     const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.catalogFeatureTransition[action], "initial");
     if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") {
-      setMessage(`${parsed.code} (${parsed.requestId})`);
-      return { ok: false, message: `${parsed.code} (${parsed.requestId})`, retryable: true };
-    }
-    setMessage(`${parsed.code} (${parsed.requestId})`);
+    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
+    setFeedback(codeFeedback(parsed.code, parsed.requestId));
     invalidatePlanProjectionPreview();
     invalidateCatalogImportPreview();
     if (action === "disable") setReason("");
@@ -413,7 +422,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     event.preventDefault();
     if (editingCatalogPlanId !== null && (!catalogPlansFence.canLoadMore() || planRead.error !== null || !catalogPlansSnapshot.some((plan) => plan.id === editingCatalogPlanId))) {
       cancelCatalogPlanEdit();
-      setMessage("catalog_plan_not_visible");
+      planFeedback.show("catalog_plan_not_visible", null, catalogPlanFieldForCode);
       return;
     }
     const contextGeneration = catalogPlanGeneration;
@@ -425,9 +434,10 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     try {
       body = editingCatalogPlanId === null ? normalizeCatalogPlanForm(catalogPlanForm) : normalizeCatalogPlanPatch(catalogPlanForm);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "invalid_catalog_plan");
+      planFeedback.show(validationCode(error), null, catalogPlanFieldForCode);
       return;
     }
+    planFeedback.clear();
     const creating = editingCatalogPlanId === null;
     const planId = editingCatalogPlanId;
     const requestBody = JSON.stringify(body);
@@ -448,19 +458,17 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       }, creating ? mutationFailurePolicies.catalogPlanCreate : mutationFailurePolicies.catalogPlanPatch, phase),
       onApplied: async (parsed) => {
         if (!isCurrent()) return;
-        setMessage(`${parsed.code} (${parsed.requestId})`);
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
         invalidatePlanProjectionPreview();
         invalidateCatalogImportPreview();
         if (isCatalogPlanFormGenerationCurrent(formGeneration)) {
           cancelCatalogPlanEdit();
-          selectCatalogPlan(parsed.data);
+          if (creating) openCreatedPlan({ plan: parsed.data, feedback: codeFeedback(parsed.code, parsed.requestId) }); else selectCatalogPlan(parsed.data);
         }
       },
       refresh: async () => await currentCatalogPlansRefreshRef.current(),
       onUnapplied: (parsed) => {
-        if (isCurrent()) {
-        setMessage(`${parsed.code} (${parsed.requestId})`);
-        }
+        if (isCurrent()) planFeedback.show(parsed.code, parsed.requestId, catalogPlanFieldForCode);
       },
       isCurrent,
     });
@@ -510,15 +518,12 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
         return null;
       }
     }, "consequence");
-    if (mutation === undefined) return { ok: false, message: "mutation_busy", retryable: true };
+    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
     if (mutation === null) return confirmMutationUnknown(reconciliation);
     const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.catalogPlanTransition[action], "initial");
     if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") {
-      setMessage(`${parsed.code} (${parsed.requestId})`);
-      return { ok: false, message: `${parsed.code} (${parsed.requestId})`, retryable: true };
-    }
-    setMessage(`${parsed.code} (${parsed.requestId})`);
+    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
+    setFeedback(codeFeedback(parsed.code, parsed.requestId));
     invalidatePlanProjectionPreview();
     invalidateCatalogImportPreview();
     if (action === "disable") setReason("");
@@ -575,15 +580,12 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
         return null;
       }
     }, "consequence");
-    if (mutation === undefined) return { ok: false, message: "mutation_busy", retryable: true };
+    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
     if (mutation === null) return confirmMutationUnknown(reconciliation);
     const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.catalogPlanFeatureTransition[action], "initial");
     if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") {
-      setMessage(`${parsed.code} (${parsed.requestId})`);
-      return { ok: false, message: `${parsed.code} (${parsed.requestId})`, retryable: true };
-    }
-    setMessage(`${parsed.code} (${parsed.requestId})`);
+    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
+    setFeedback(codeFeedback(parsed.code, parsed.requestId));
     invalidatePlanProjectionPreview();
     invalidateCatalogImportPreview();
     if (action === "disable") setReason("");
@@ -599,14 +601,14 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   async function submitCatalogPlanFeatureCreate(event: FormEvent): Promise<void> {
     event.preventDefault();
     if (settledSelectedCatalogPlanId === "" || !catalogPlansFence.canLoadMore() || planRead.error !== null) {
-      setMessage("catalog_plan_required");
+      rowFeedback.show("catalog_plan_required", null, catalogPlanFeatureFieldForCode);
       return;
     }
     const contextGeneration = catalogPlanFeatureGeneration;
     const formGeneration = catalogPlanFeatureFormGeneration;
     const selectedPlanId = settledSelectedCatalogPlanId;
     if (catalogPlanFeatureForm.policy_id !== "" && (!activePoliciesFence.isSettled() || !activePolicies.some((policy) => policy.id === catalogPlanFeatureForm.policy_id))) {
-      setMessage("catalog_policy_not_available");
+      rowFeedback.show("catalog_policy_not_available", null, catalogPlanFeatureFieldForCode);
       return;
     }
     const isListCurrent = (): boolean => isCatalogPlanFeatureGenerationCurrent(contextGeneration);
@@ -616,9 +618,10 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     try {
       body = normalizeCatalogPlanFeatureForm(catalogPlanFeatureForm);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "invalid_catalog_plan_feature");
+      rowFeedback.show(validationCode(error), null, catalogPlanFeatureFieldForCode);
       return;
     }
+    rowFeedback.clear();
     const requestBody = JSON.stringify(body);
     await runKeyedMutation({
       request: { method: "POST", path: catalogPlanFeaturesPath(selectedPlanId), body: requestBody },
@@ -630,20 +633,20 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       }, mutationFailurePolicies.catalogPlanFeatureSave, phase),
       onApplied: async (parsed) => {
         if (!isCurrent()) return;
-        setMessage(`${parsed.code} (${parsed.requestId})`);
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
         invalidatePlanProjectionPreview();
         invalidateCatalogImportPreview();
         if (isCatalogPlanFeatureFormGenerationCurrent(formGeneration)) {
           const form = { ...emptyCatalogPlanFeatureForm, project: catalogPlanFeatureForm.project };
           setCatalogPlanFeatureForm(form);
           workspace.markClean("planFeatureEditor", JSON.stringify(form));
+          // The saved row opens in its plan's detail.
+          workspace.finish("planFeatureEditor");
         }
       },
       refresh: async () => await currentCatalogPlanFeaturesRefreshRef.current(),
       onUnapplied: (parsed) => {
-        if (isCurrent()) {
-        setMessage(`${parsed.code} (${parsed.requestId})`);
-        }
+        if (isCurrent()) rowFeedback.show(parsed.code, parsed.requestId, catalogPlanFeatureFieldForCode);
       },
       isCurrent,
     });
@@ -656,6 +659,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const catalogFeaturesCursor = catalogFeaturesFence.canLoadMore() ? catalogFeaturesCursorSnapshot : null;
   const catalogPlans = catalogPlansSettled ? catalogPlansSnapshot : [];
   const catalogPlansCursor = catalogPlansFence.canLoadMore() ? catalogPlansCursorSnapshot : null;
+  const loadMorePlans = (): Promise<void> => loadMore(catalogPlansUrl, catalogPlansCursor, catalogPlans, setCatalogPlans, setCatalogPlansCursor, setFeedback, hasCatalogPlanListData, "catalog_plans_listed", catalogPlansFence, (plan) => plan.id);
   const catalogPlanFeatures = catalogPlanFeaturesSettled ? catalogPlanFeaturesSnapshot : [];
   const visibleCatalogFeatures = catalogFeatures;
   const visibleCatalogPlans = catalogPlans;
@@ -667,7 +671,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const planPreviewBinding = planProjection.previewBinding;
   const planPreview = planProjection.preview;
   const submitPlanPreview = planProjection.submitPreview;
-  const applyPlanProjectionFromPreview = planProjection.applyFromPreview;
+  const requestPlanProjectionApply = planProjection.requestApply;
   const catalogImportText = catalogImport.text;
   const catalogImportPreviewBinding = catalogImport.previewBinding;
   const catalogImportPreview = catalogImport.preview;
@@ -679,8 +683,13 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     { run: catalogFeatureTransition, isCurrent: () => isCatalogFeatureGenerationCurrent(catalogFeatureGeneration) },
     { run: catalogPlanFeatureTransition, isCurrent: () => isCatalogPlanFeatureGenerationCurrent(catalogPlanFeatureGeneration) },
   );
+  const openCreatedPlan = useOpenCreatedPlan(requestBusy, ({ plan, feedback }) => workspace.openPlan(plan.id, () => { selectCatalogPlan(plan); setFeedback(feedback); }));
+  const planRoute = useCatalogPlanRoute({
+    planId: workspace.task === "planDetail" ? workspace.planId : null, plans: catalogPlansSettled ? catalogPlansSnapshot : null, listPending: !catalogPlansFence.canLoadMore() && planRead.error === null, listFailed: planRead.error !== null, cursor: catalogPlansCursor, filter: catalogPlanFilter,
+    selectedId: selectedCatalogPlanId, select: selectCatalogPlan, clearFilter: () => setCatalogPlanFilter({ project: "", status: "" }), loadMore: loadMorePlans, reloadList: () => void refreshCatalogPlans(),
+  });
   if (!active) return null;
-  const selectedCatalogPlan = visibleCatalogPlans.find((plan) => plan.id === settledSelectedCatalogPlanId) ?? null;
+  const selectedCatalogPlan = visibleCatalogPlans.find((plan) => plan.id === settledSelectedCatalogPlanId && plan.id === workspace.planId) ?? null;
 
   function prepareProjection(plan: CatalogPlan | null = null): void {
     const form = plan === null ? { ...emptyPlanProjectionForm } : { ...emptyPlanProjectionForm, project: plan.project, plan_id: plan.id, plan_key: plan.plan_key };
@@ -691,18 +700,18 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       {workspace.task === null && catalogView !== "import" && <ProjectPicker onSelect={project => { setCatalogPlanFilter(previous => ({ ...previous, project })); setCatalogFeatureFilter(previous => ({ ...previous, project })); }} />}
       <nav className="sectionTabs" aria-label="Catalog views">{(["plans", "features", "import"] as const).map((view) => <a key={view} href={view === "plans" ? "#/plans" : `#/plans?view=${view}`} aria-current={catalogView === view ? "page" : undefined} onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setCatalogView(view); }}>{view === "plans" ? "Plans" : view === "features" ? "Features" : "Import"}</a>)}</nav>
       {catalogView === "import" ? <section className="importWorkspace"><fieldset disabled={operationLocked}>
-        <CatalogImportEditor text={catalogImportText} previewBinding={catalogImportPreviewBinding} preview={catalogImportPreview} busy={busy} onUpdate={catalogImport.updateText} onPreview={() => void previewCatalogImport()} onApply={requestCatalogImportApply} />
+        <CatalogImportEditor text={catalogImportText} previewBinding={catalogImportPreviewBinding} preview={catalogImportPreview} busy={busy} feedback={catalogImport.feedback} onUpdate={catalogImport.updateText} onPreview={() => void previewCatalogImport()} onApply={requestCatalogImportApply} />
       </fieldset></section> : workspace.task !== null ? <section className={workspace.task === "planDetail" ? "recordDetail" : "editorLayout"} data-focus-section="catalog-task">
         <div className="editorHeader"><button type="button" disabled={busy} onClick={workspace.close}>{catalogView === "features" ? "Back to features" : "Back to plans"}</button></div>
         <fieldset disabled={operationLocked}>
-          {workspace.task === "featureEditor" && <CatalogFeatureEditor form={catalogFeatureForm} editingId={editingCatalogFeatureId} busy={busy} actionable={catalogFeatureEditActionable} onChange={setCatalogFeatureForm} onSubmit={(event) => void submitCatalogFeatureCreate(event)} onCancel={workspace.close} />}
-          {workspace.task === "planEditor" && <CatalogPlanEditor form={catalogPlanForm} editingId={editingCatalogPlanId} busy={busy} actionable={catalogPlanEditActionable} onChange={setCatalogPlanForm} onSubmit={(event) => void submitCatalogPlanCreate(event)} onCancel={workspace.close} />}
-          {workspace.task === "planFeatureEditor" && <CatalogPlanFeatureEditor form={catalogPlanFeatureForm} busy={busy} plansSettled={catalogPlansFence.canLoadMore() && planRead.error === null} activePoliciesSettled={activePoliciesSettled} selectedPlanId={settledSelectedCatalogPlanId} plans={visibleCatalogPlans} features={visibleCatalogFeatures} policies={visibleActivePolicies} onChange={setCatalogPlanFeatureForm} onSelectPlan={selectCatalogPlan} onClearPlan={() => { setSelectedCatalogPlanId(""); invalidatePlanProjectionPreview(); }} onSubmit={(event) => void submitCatalogPlanFeatureCreate(event)} />}
-          {workspace.task === "projection" && <><PlanProjectionEditor form={planForm} previewBinding={planPreviewBinding} busy={busy} onUpdate={updatePlanProjectionForm} onSubmit={(event) => void submitPlanPreview(event)} onApply={() => void applyPlanProjectionFromPreview()} /><PlanProjectionResults preview={planPreview} binding={planPreviewBinding} /></>}
+          {workspace.task === "featureEditor" && <CatalogFeatureEditor form={catalogFeatureForm} editingId={editingCatalogFeatureId} busy={busy} actionable={catalogFeatureEditActionable} feedback={featureFeedback} onChange={setCatalogFeatureForm} onSubmit={(event) => void submitCatalogFeatureCreate(event)} onCancel={workspace.close} />}
+          {workspace.task === "planEditor" && <CatalogPlanEditor form={catalogPlanForm} editingId={editingCatalogPlanId} busy={busy} actionable={catalogPlanEditActionable} feedback={planFeedback} onChange={setCatalogPlanForm} onSubmit={(event) => void submitCatalogPlanCreate(event)} onCancel={workspace.close} />}
+          {workspace.task === "planFeatureEditor" && <CatalogPlanFeatureEditor form={catalogPlanFeatureForm} busy={busy} plansSettled={catalogPlansFence.canLoadMore() && planRead.error === null} activePoliciesSettled={activePoliciesSettled} selectedPlanId={settledSelectedCatalogPlanId} plans={visibleCatalogPlans} features={visibleCatalogFeatures} policies={visibleActivePolicies} feedback={rowFeedback} onChange={setCatalogPlanFeatureForm} onSelectPlan={selectCatalogPlan} onClearPlan={() => { setSelectedCatalogPlanId(""); invalidatePlanProjectionPreview(); }} onSubmit={(event) => void submitCatalogPlanFeatureCreate(event)} />}
+          {workspace.task === "projection" && <><PlanProjectionEditor form={planForm} previewBinding={planPreviewBinding} busy={busy} feedback={planProjection.feedback} onUpdate={updatePlanProjectionForm} onSubmit={(event) => void submitPlanPreview(event)} onApply={requestPlanProjectionApply} /><PlanProjectionResults preview={planPreview} binding={planPreviewBinding} /></>}
         </fieldset>
-        {workspace.task === "planDetail" && (selectedCatalogPlan === null ? <><h2>Plan unavailable</h2><p>The selected plan is not in the current settled list. Return to Plans and select an available record.</p><ReadNotice {...planRead} hasData={false} onRetry={() => void refreshCatalogPlans()} label="plans" /></> : <>
+        {workspace.task === "planDetail" && (selectedCatalogPlan === null ? <><h2>{planRoute.unavailable ? "Plan unavailable" : "Loading plan…"}</h2>{planRoute.unavailable && <div className="readState error" role="alert"><p>Could not load this plan.</p><button type="button" onClick={planRoute.retry}>Retry</button></div>}</> : <>
           <div className="detailHeader"><div><h2>{selectedCatalogPlan.name || selectedCatalogPlan.plan_key}</h2><p>{selectedCatalogPlan.project} / {selectedCatalogPlan.plan_key} · Version {selectedCatalogPlan.version}</p></div><span className={`status ${selectedCatalogPlan.status}`}>{selectedCatalogPlan.status}</span></div>
-          <p>{selectedCatalogPlan.description || "No description provided."}</p>
+          {planRoute.notice !== null && <p className="readState" role="status">{planRoute.notice}</p>}<p>{selectedCatalogPlan.description || "No description provided."}</p>
           <div className="pageActions"><button type="button" className="primary" disabled={busy} onClick={() => { const form = { ...emptyCatalogPlanFeatureForm, project: selectedCatalogPlan.project }; workspace.open("planFeatureEditor", () => setCatalogPlanFeatureForm(form), JSON.stringify(form)); }}>Add feature</button><button type="button" disabled={busy} onClick={() => prepareProjection(selectedCatalogPlan)}>Apply plan</button><button type="button" disabled={busy} onClick={() => beginCatalogPlanEdit(selectedCatalogPlan)}>Edit plan</button></div>
           <details><summary>Technical details</summary><code>{selectedCatalogPlan.id}</code></details>
           <ReadNotice {...planFeaturesRead} hasData={catalogPlanFeatures.length > 0} onRetry={() => void refreshCatalogPlanFeatures()} label="plan features" />
@@ -711,12 +720,12 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       </section> : catalogView === "plans" ? <>
         <div className="listHeader"><div className="pageActions"><button type="button" disabled={busy} onClick={() => prepareProjection()}>Apply plan</button><button type="button" className="primary" disabled={busy} onClick={() => workspace.open("planEditor", cancelCatalogPlanEdit, JSON.stringify(emptyCatalogPlanForm))}>New plan</button></div></div>
         <section className="tablePane" data-focus-section="catalog-list"><ReadNotice {...planRead} hasData={catalogPlans.length > 0} onRetry={() => void refreshCatalogPlans()} label="plans" />
-          <CatalogPlansTable plans={catalogPlans} selectedPlanId={selectedCatalogPlanId} filter={catalogPlanFilter} loaded={catalogPlansSettled} hasMore={catalogPlansCursor !== null} actionsDisabled={busy || planRead.loading || planRead.error !== null} canDisable={(plan) => canRunCatalogAction(plan.status, "disable")} canReenable={(plan) => canRunCatalogAction(plan.status, "reenable")} onFilter={setCatalogPlanFilter} onSelect={(plan) => workspace.open("planDetail", () => selectCatalogPlan(plan))} onEdit={beginCatalogPlanEdit} onExport={(plan) => void exportCatalogPlan(plan)} onDisable={requestPlanDisable} onReenable={runPlanReenable} onLoadMore={() => { if (catalogPlansCursor !== null) void loadMore(catalogPlansUrl, catalogPlansCursor, catalogPlans, setCatalogPlans, setCatalogPlansCursor, setMessage, hasCatalogPlanListData, "catalog_plans_listed", catalogPlansFence, (plan) => plan.id); }} />
+          <CatalogPlansTable plans={catalogPlans} selectedPlanId={selectedCatalogPlanId} filter={catalogPlanFilter} loaded={catalogPlansSettled} hasMore={catalogPlansCursor !== null} actionsDisabled={busy || planRead.loading || planRead.error !== null} canDisable={(plan) => canRunCatalogAction(plan.status, "disable")} canReenable={(plan) => canRunCatalogAction(plan.status, "reenable")} onFilter={setCatalogPlanFilter} onSelect={(plan) => workspace.openPlan(plan.id, () => selectCatalogPlan(plan))} onEdit={beginCatalogPlanEdit} onExport={(plan) => void exportCatalogPlan(plan)} onDisable={requestPlanDisable} onReenable={runPlanReenable} onLoadMore={loadMorePlans} />
         </section>
       </> : <>
         <div className="listHeader"><button type="button" className="primary" disabled={busy} onClick={() => workspace.open("featureEditor", cancelCatalogFeatureEdit, JSON.stringify(emptyCatalogFeatureForm))}>New feature</button></div>
         <section className="tablePane" data-focus-section="catalog-list"><ReadNotice {...featureRead} hasData={catalogFeatures.length > 0} onRetry={() => void refreshCatalogFeatures()} label="features" />
-          <CatalogFeaturesTable features={catalogFeatures} filter={catalogFeatureFilter} loaded={catalogFeaturesSettled} hasMore={catalogFeaturesCursor !== null} actionsDisabled={busy || featureRead.loading || featureRead.error !== null} canDisable={(feature) => canRunCatalogAction(feature.status, "disable")} canReenable={(feature) => canRunCatalogAction(feature.status, "reenable")} onFilter={setCatalogFeatureFilter} onEdit={beginCatalogFeatureEdit} onDisable={requestFeatureDisable} onReenable={runFeatureReenable} onLoadMore={() => { if (catalogFeaturesCursor !== null) void loadMore(catalogFeaturesUrl, catalogFeaturesCursor, catalogFeatures, setCatalogFeatures, setCatalogFeaturesCursor, setMessage, hasCatalogFeatureListData, "catalog_features_listed", catalogFeaturesFence, (feature) => feature.id); }} />
+          <CatalogFeaturesTable features={catalogFeatures} filter={catalogFeatureFilter} loaded={catalogFeaturesSettled} hasMore={catalogFeaturesCursor !== null} actionsDisabled={busy || featureRead.loading || featureRead.error !== null} canDisable={(feature) => canRunCatalogAction(feature.status, "disable")} canReenable={(feature) => canRunCatalogAction(feature.status, "reenable")} onFilter={setCatalogFeatureFilter} onEdit={beginCatalogFeatureEdit} onDisable={requestFeatureDisable} onReenable={runFeatureReenable} onLoadMore={() => { if (catalogFeaturesCursor !== null) void loadMore(catalogFeaturesUrl, catalogFeaturesCursor, catalogFeatures, setCatalogFeatures, setCatalogFeaturesCursor, setFeedback, hasCatalogFeatureListData, "catalog_features_listed", catalogFeaturesFence, (feature) => feature.id); }} />
         </section>
       </>}
     </section>

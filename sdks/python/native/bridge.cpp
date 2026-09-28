@@ -49,7 +49,7 @@ extern "C" std::uint32_t lcc_device_bound_bridge_layout(std::uint32_t index) {
 											FIELD(LccDeviceBoundOutcome, provider_result),
 											FIELD(LccDeviceBoundOutcome, checkpoint_result),
 											FIELD(LccDeviceBoundOutcome, renewal_due),
-											FIELD(LccDeviceBoundOutcome, reserved),
+											FIELD(LccDeviceBoundOutcome, denial_detail),
 											FIELD(LccDeviceBoundOutcome, effective_time)};
 #undef FIELD
 	return index < sizeof(layout) / sizeof(layout[0]) ? layout[index] : UINT32_MAX;

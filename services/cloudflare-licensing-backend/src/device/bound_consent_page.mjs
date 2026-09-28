@@ -1,6 +1,7 @@
 import { encodeBase64url, decodeEnrollmentPageCursor } from "@licensecc/licensing-domain/lease/device_protocol";
+import { boundOccupiedSql } from "@licensecc/cloudflare-runtime/device/bound_capacity";
 import { BoundRequestError } from "./bound_request.mjs";
-import { boundTrialSql, boundTrialDeadlineSql } from "./bound_trial.mjs";
+import { boundTrialSql, boundTrialDeadlineSql } from "@licensecc/cloudflare-runtime/device/bound_trial";
 
 const encode=value=>encodeBase64url(new TextEncoder().encode(JSON.stringify(value)));
 // This unsigned cursor is a position, not authority. Every query rechecks the
@@ -30,7 +31,14 @@ export const CONSENT_PAGE_SQL=`WITH context AS (
       ELSE e.valid_until END AS page_valid_until,e.max_active_devices AS page_device_limit,
     CASE WHEN e.is_trial=1 AND e.trial_started_at IS NULL
       AND e.trial_expiration_basis IN ('from_first_activation','from_first_use')
-      THEN e.trial_duration_sec ELSE NULL END AS page_activation_trial_seconds
+      THEN e.trial_duration_sec ELSE NULL END AS page_activation_trial_seconds,
+    (SELECT count(*) FROM device_bound_bindings b WHERE b.project=e.project AND b.feature=e.feature
+      AND b.license_fingerprint=e.license_fingerprint AND ${boundOccupiedSql("b","a.now")}) AS page_devices_in_use,
+    (SELECT min(b.hold_until) FROM device_bound_bindings b WHERE b.project=e.project AND b.feature=e.feature
+      AND b.license_fingerprint=e.license_fingerprint AND b.state='retiring' AND b.hold_until>a.now) AS page_slot_free_at,
+    EXISTS (SELECT 1 FROM device_bound_bindings b JOIN device_bound_devices d ON d.id=b.device_id
+      WHERE d.key_id=a.key_id AND b.project=e.project AND b.feature=e.feature
+      AND b.license_fingerprint=e.license_fingerprint AND b.state='active') AS page_device_connected
   FROM entitlements e JOIN context a ON e.project=a.project
   WHERE a.current_customer_status='active' AND (a.customer_id IS NULL OR a.customer_id=?)
     AND a.status='pending' AND a.expires_at>a.now

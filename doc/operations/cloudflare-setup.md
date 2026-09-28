@@ -121,7 +121,8 @@ not production-ready configuration.
 | --- | --- | --- |
 | Backend | Account/name, `DB`, canonical client destinations, mode selectors, public verification keys, cron and rate limits | [Backend](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-licensing-backend/README.md) |
 | Admin | Same `DB`, `ENVIRONMENT`, Access issuer/audience and operator allowlist; `ADMIN_DEV_BEARER_ENABLED="0"`; `DEVICE_OPERATOR` targets the backend's `DeviceOperator` entrypoint | [Hosted admin setup](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-license-admin/README.md#hosted-setup) |
-| Portal | Same `DB`, `ENVIRONMENT`, exact `PORTAL_PUBLIC_ORIGIN`, matching `BACKEND_ORIGIN`, chosen sign-in method; `DEVICE_CONSENT` targets the backend's `DeviceConsent` entrypoint; `BACKEND` targets the backend Worker for readiness and self-service proxying (map it per environment) | [Customer portal](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-customer-portal/README.md) |
+| Admin (optional binding) | `WEBHOOK_OPERATOR` targets the backend's `WebhookOperator` entrypoint for **Send test event**. The backend keeps the webhook signing secret; without this binding the button reports that test sends are not set up | [Hosted admin setup](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-license-admin/README.md#hosted-setup) |
+| Portal | Same `DB`, `ENVIRONMENT`, exact `PORTAL_PUBLIC_ORIGIN`, matching `BACKEND_ORIGIN`, chosen sign-in method, optional `PORTAL_SUPPORT_CONTACT` (an `https:` URL or `mailto:` address shown to customers who need help); `DEVICE_CONSENT` targets the backend's `DeviceConsent` entrypoint; `BACKEND` targets the backend Worker for readiness and self-service proxying (map it per environment) | [Customer portal](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-customer-portal/README.md) |
 | Backup | Same account and D1 identifiers, private R2 bucket, prefix, retention, cron and `D1_BACKUP_WORKFLOW` binding | [Backup setup](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-d1-backup/README.md#cloudflare-setup) |
 
 Keep the backend entrypoint as `src/index.ts` and the admin/portal entrypoints
@@ -198,9 +199,11 @@ peppers, and configure email delivery (`PORTAL_EMAIL_API_KEY`,
 password reset send a single-use link valid for 15 minutes; without a working
 sender both return `email_unconfigured` and the portal hides those actions.
 Registration creates an empty customer after the address is verified; it never
-grants a license. Accounts registered before email verification existed can
-recover through reset once, which records the proven address as their contact
-email.
+grants a license. Accounts registered before email verification existed, and
+accounts the admin console's Add user creates -- including invited ones
+(step 8) -- can recover through reset as long as no other customer has
+already verified the address, which records the proven address as their
+contact email.
 
 Alternatively, follow the portal's
 [Google/GitHub setup](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-customer-portal/README.md#google-and-github-sign-in):
@@ -249,14 +252,25 @@ still need review. It does not validate that retained settings match the code.
 
 1. Sign into the admin through Access. This is an operator identity, separate
    from a customer portal account.
-2. In **Customers → Add user**, create a synthetic portal user with an initial
-   password, or let the user register in the portal (requires email delivery,
-   step 6). No welcome email is sent by Add user. Share an initial password
-   through an appropriate private channel.
-3. Create the application's customer license and entitlement. Follow
+2. In **Customers → Add user**, invite a synthetic portal user (the
+   default) so they set their own password from the portal's "Forgot your
+   password?" -- this needs a working sender, so choose **Set an initial
+   password** instead if email delivery is not yet configured (step 6), and
+   share it through an appropriate private channel. Letting the user
+   register directly in the portal also requires step 6. No welcome email is
+   sent by Add user either way.
+3. Grant the application in the console; no SQL is needed. In **License
+   access → New entitlement**, choose **Protected devices**, the application's
+   project and feature, and the user from step 2. **Create license for
+   {project}** creates and selects that user's license record, and **Generate
+   fingerprint** fills in a new fingerprint. Leave **Device limit** blank for
+   this test (a new license gets 1), or choose one of the project's policies,
+   which sets its own limit (**Create policy…** makes one and returns to the
+   draft). Follow
    [protected application access](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-license-admin/README.md#create-protected-application-access)
-   for a new protected grant, its exact project/feature/fingerprint and device
-   limit. Do not convert an existing legacy grant to protected mode in place.
+   for the exact project/feature/fingerprint rules, the device limit, and what
+   each refusal reason means. Do not convert an existing legacy grant to
+   protected mode in place.
 4. Use the configured native app to Connect. Compare the app/browser codes,
    approve the intended license, and verify activation and renewal. The portal
    does not issue a replacement downloadable `.lic` for protected enrollment.
@@ -330,6 +344,13 @@ For every later release:
    A Worker rollback does not roll back D1. Confirm old code is compatible with
    the current schema and signing configuration before routing traffic to it.
 
+Some contracts are exact on both sides of the portal/backend boundary, not
+merely compatible: the customer portal and the licensing backend both validate
+the device-authorizations inspect payload against the identical closed
+entitlement field set. Deploy and roll back the backend and portal together
+for that path; redeploying or rolling back only one of the two makes consent
+inspection return `temporarily_unavailable` (503).
+
 Keep device audit events until an explicit retention policy is adopted. Do not
 remove persistent identities, checkpoints or capacity holds as a shortcut for
 recovering a failed deployment.
@@ -342,7 +363,7 @@ recovering a failed deployment.
 | Admin redirect loop or 403 | Access application audience/issuer, every enabled hostname, operator role allowlist |
 | Portal login returns configuration error | Session peppers, enabled provider/password configuration, exact portal origin |
 | Password request exceeds resources | Workers plan and CPU budget; preserve password hashing parameters |
-| Consent fails or cannot call backend | Backend deployed first; named `DeviceConsent` binding and client registry match |
+| Consent fails or cannot call backend | Backend and portal deployed together (the consent-inspect payload is exact on both sides); named `DeviceConsent` binding and client registry match |
 | Protected token rejected by app | Dedicated signer/public SPKI pairing, issuer/audience, app trust set and clock policy |
 | New UI not visible | Production `dist` rebuilt in the deployed checkout; actual assets path and served version |
 | R2 `NotEntitled` or backup fails | R2 activation/billing state, private bucket binding, export-token authority, Workflow result |

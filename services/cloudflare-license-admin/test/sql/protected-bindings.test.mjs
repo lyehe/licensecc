@@ -63,6 +63,38 @@ test('protected reads paginate without duplicates and use database time rather t
   assert.equal(JSON.stringify(first).includes('spki'),false);
 });
 
+// Operators see per-entitlement device-limit capacity and the customer's most recent refused
+// connections, scoped to the customer and honouring the same project filter as the page.
+test('list read reports device-limit capacity and recent refused connections, scoped to the customer and project filter',async t=>{
+  const f=fixture(t,1);
+  f.sql.exec(`UPDATE entitlements SET max_active_devices=1 WHERE project='APP' AND feature='DEFAULT';
+    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,max_active_devices,created_at,updated_at)
+      VALUES('OTHER','DEFAULT','${'b'.repeat(64)}','owner','active','device_bound_v1',5,1,1);
+    INSERT INTO customers(id,name,created_at,updated_at) VALUES('foreign','Foreign',1,1);
+    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,max_active_devices,created_at,updated_at)
+      VALUES('FOREIGN','DEFAULT','${'c'.repeat(64)}','foreign','active','device_bound_v1',1,1,1);
+    INSERT INTO usage_events(project,feature,license_fingerprint,event_type,device_key_id,reason,ts)
+      VALUES('FOREIGN','DEFAULT','${'c'.repeat(64)}','denied','key-foreign','device_limit_reached',3000);
+    INSERT INTO usage_events(project,feature,license_fingerprint,event_type,device_key_id,reason,ts)
+      VALUES('OTHER','DEFAULT','${'b'.repeat(64)}','denied','key-other','device_limit_reached',2000);`);
+  for(let i=0;i<6;i++) f.sql.prepare(`INSERT INTO usage_events(project,feature,license_fingerprint,event_type,device_key_id,reason,ts)
+    VALUES('APP','DEFAULT',?,'denied',?,'device_limit_reached',?)`).run('a'.repeat(64),`key-denied-${i}`,1000+i);
+
+  const page=await result(authed(path),f.env,200,'customer_bindings');
+  assert.deepEqual(page.capacity,[
+    {project:'APP',feature:'DEFAULT',license_fingerprint:'a'.repeat(64),in_use:1,limit:1},
+    {project:'OTHER',feature:'DEFAULT',license_fingerprint:'b'.repeat(64),in_use:0,limit:5},
+  ]);
+  assert.deepEqual(page.denied,[
+    {project:'OTHER',feature:'DEFAULT',license_fingerprint:'b'.repeat(64),device_key_id:'key-other',ts:2000},
+    ...[5,4,3,2].map(i=>({project:'APP',feature:'DEFAULT',license_fingerprint:'a'.repeat(64),device_key_id:`key-denied-${i}`,ts:1000+i})),
+  ]);
+
+  const filtered=await result(authed(`${path}?project=APP`),f.env,200,'customer_bindings');
+  assert.deepEqual(filtered.capacity,[{project:'APP',feature:'DEFAULT',license_fingerprint:'a'.repeat(64),in_use:1,limit:1}]);
+  assert.deepEqual(filtered.denied,[5,4,3,2,1].map(i=>({project:'APP',feature:'DEFAULT',license_fingerprint:'a'.repeat(64),device_key_id:`key-denied-${i}`,ts:1000+i})));
+});
+
 test('reads require both ownership joins while disabled customers remain inspectable',async t=>{
   const f=fixture(t);f.sql.exec("UPDATE customers SET status='disabled' WHERE id='owner'");
   assert.equal((await result(authed(path),f.env,200)).customer.status,'disabled');

@@ -16,7 +16,8 @@
         "scripts/docs-accuracy.test.mjs",
         "scripts/hotspot-baseline.json",
         "scripts/report-hotspots.mjs",
-        "scripts/report-hotspots.test.mjs"
+        "scripts/report-hotspots.test.mjs",
+        "scripts/ui-token-parity.test.mjs"
       ]
     },
     {

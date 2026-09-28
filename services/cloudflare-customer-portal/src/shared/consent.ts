@@ -32,9 +32,10 @@ export function validConsentResponse(operation: "inspect" | "approve" | "deny", 
     && (data.status==="pending" || (data.next_page_cursor===null && Array.isArray(data.entitlements) && data.entitlements.length===0))
     && Array.isArray(data.entitlements) && data.entitlements.length<=100
     && (!data.has_more || data.entitlements.length===100)
-    && data.entitlements.every(e=>(exact(e,["id","feature","valid_until","device_limit"])
-      || (exact(e,["id","feature","valid_until","device_limit","activation_trial_seconds"])
+    && data.entitlements.every(e=>(exact(e,["id","feature","valid_until","device_limit","devices_in_use","slot_free_at","device_connected"])
+      || (exact(e,["id","feature","valid_until","device_limit","devices_in_use","slot_free_at","device_connected","activation_trial_seconds"])
         && uint(e.activation_trial_seconds) && e.activation_trial_seconds>=2))
-      && text(e.id) && text(e.feature) && (e.valid_until===null || uint(e.valid_until)) && uint(e.device_limit))
+      && text(e.id) && text(e.feature) && (e.valid_until===null || uint(e.valid_until)) && uint(e.device_limit)
+      && uint(e.devices_in_use) && (e.slot_free_at===null || uint(e.slot_free_at)) && typeof e.device_connected==="boolean")
     && new Set(data.entitlements.map(e=>e.id)).size===data.entitlements.length;
 }

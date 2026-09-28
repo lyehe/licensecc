@@ -38,6 +38,13 @@ async function legacy(env, email) {
   await env.DB.prepare("INSERT INTO customers (id,name,email,created_at,updated_at) VALUES ('L','Personal account','',?,?)").bind(NOW, NOW).run();
   await env.DB.prepare("INSERT INTO portal_passwords (customer_id,email_lower,password_hash,created_at,updated_at) VALUES ('L',?,?,?,?)").bind(email, await hashPassword(PASSWORD), NOW, NOW).run();
 }
+// The real admin-invite shape: the seeded hash is for a random secret nobody was ever told, not
+// a chosen/known password like `legacy()` above uses for its other, set-password-style scenarios.
+async function inviteShaped(env, email) {
+  const secret = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  await env.DB.prepare("INSERT INTO customers (id,name,email,created_at,updated_at) VALUES ('I','Personal account','',?,?)").bind(NOW, NOW).run();
+  await env.DB.prepare("INSERT INTO portal_passwords (customer_id,email_lower,password_hash,created_at,updated_at) VALUES ('I',?,?,?,?)").bind(email, await hashPassword(secret), NOW, NOW).run();
+}
 
 test("email proof precedes account creation and creates verified, empty account once", async t => {
   const f = fixture(t);
@@ -128,8 +135,17 @@ test("mail cooldown, missing sender, delivery failure, CSRF and disabled flag fa
   assert.equal((await call(f.env,"POST",`${PATH}/reset`,{headers:{origin:"https://evil.test"},body:{email:"a@x.com"}})).status,403);
   assert.equal((await call({...f.env,PORTAL_PASSWORD_ENABLED:"0"},"POST",`${PATH}/complete`,{body:{token:"a".repeat(43),password:PASSWORD}})).status,404);
   await f.request("register");
-  assert.equal((await f.request("register")).status,429);
-  assert.equal((await f.request("reset")).status,429);
+  // The shared 1/60s mail-send cooldown's 429 carries the exact seconds left in ITS OWN fixed
+  // window (period 60, not the 900s IP/email throttle), so the UI's "Try again in {n} minutes."
+  // reads the real wait, whichever of the two checks tripped.
+  const mailWindow = Math.floor(NOW / 60) * 60;
+  const expectedMailRetryAfter = String(mailWindow + 60 - NOW);
+  const secondRegister = await f.request("register");
+  assert.equal(secondRegister.status,429);
+  assert.equal(secondRegister.res.headers.get("retry-after"), expectedMailRetryAfter);
+  const resetHitByMailCooldown = await f.request("reset");
+  assert.equal(resetHitByMailCooldown.status,429);
+  assert.equal(resetHitByMailCooldown.res.headers.get("retry-after"), expectedMailRetryAfter);
   assert.equal(f.mail.length,1);
   t.mock.method(globalThis,"fetch",async()=>new Response("error",{status:503}));
   const failed=await f.request("register","failed@example.com");
@@ -137,6 +153,16 @@ test("mail cooldown, missing sender, delivery failure, CSRF and disabled flag fa
   assert.equal(f.db.prepare("SELECT count(*) n FROM portal_password_actions WHERE email_lower = 'failed@example.com'").get().n,0);
   assert.equal((await call(f.env,"GET",`${PATH}/complete?token=${f.token()}`)).status,404);
   assert.equal(f.db.prepare("SELECT consumed_at FROM portal_password_actions").get().consumed_at,null);
+});
+
+test("complete over the per-IP cap answers 429 with the exact retry-after for the fixed window", async t => {
+  const f = fixture(t);
+  const window = Math.floor(NOW / 900) * 900;
+  f.db.prepare("INSERT INTO rate_limit_counters (namespace, rate_key, window_start, request_count, expires_at, updated_at) VALUES ('portal', 'password:complete:ip:', ?, 10, ?, ?)").run(window, NOW + 1800, NOW);
+  const result = await call(f.env, "POST", `${PATH}/complete`, { body: { token: "a".repeat(43), password: PASSWORD } });
+  assert.equal(result.status, 429);
+  assert.equal(result.body.code, "rate_limited");
+  assert.equal(result.res.headers.get("retry-after"), String(window + 900 - NOW));
 });
 
 test("pre-verification password accounts recover and adopt the proven email", async t => {
@@ -157,6 +183,22 @@ test("legacy reset stays generic when another customer owns the address", async 
   assert.equal((await f.request("reset", "a@x.com")).status, 202);
   assert.equal(f.mail.length, 0);
   assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = 'L'").get().email, "");
+});
+
+// An admin-invite-shaped account (customers.email='', a portal_passwords hash
+// for a random secret nobody was told) cannot sign in with a guessed password before recovering, and
+// can with the password it chooses during reset.
+test("an admin-invite-shaped account cannot sign in with a guessed password before reset, and can with it after", async t => {
+  const f = fixture(t);
+  await inviteShaped(f.env, "invited-shape@example.com");
+  assert.equal((await call(f.env, "POST", `${PATH}/login`, { body: { email: "invited-shape@example.com", password: PASSWORD } })).status, 401);
+  assert.equal((await f.request("reset", "invited-shape@example.com")).status, 202);
+  assert.equal(f.mail.length, 1);
+  const result = await f.complete();
+  assert.equal(result.status, 200);
+  assert.equal(result.body.data.customer_id, "I");
+  assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = 'I'").get().email, "invited-shape@example.com");
+  assert.equal((await call(f.env, "POST", `${PATH}/login`, { body: { email: "invited-shape@example.com", password: PASSWORD } })).status, 200);
 });
 
 test("link requests answer before any account lookup or delivery", async t => {

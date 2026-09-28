@@ -1,7 +1,8 @@
 // Guarded D1 batches for a *cryptographically verified and signed* candidate.
 // HTTP handlers must verify device proof and reconstruct the candidate from
 // primary DB reads, never pass caller JSON directly to this internal module.
-import { boundTrialSql, boundTrialDeadlineSql } from "./bound_trial.mjs";
+import { boundOccupiedSql } from "@licensecc/cloudflare-runtime/device/bound_capacity";
+import { boundTrialSql, boundTrialDeadlineSql } from "@licensecc/cloudflare-runtime/device/bound_trial";
 const fields = ["keyId", "purpose", "operationId", "invocationId", "requestDigest",
   "customerId", "customerRevision", "project", "feature", "fingerprint", "entitlementRevision",
   "deviceId", "deviceRevision", "publicKeySpki", "deviceLabel", "bindingId",
@@ -63,7 +64,7 @@ export const BOUND_LEASE_GUARD_SQL = input + `INSERT INTO device_bound_operation
           AND NOT EXISTS (SELECT 1 FROM device_bound_bindings b WHERE b.project=p.project AND b.feature=p.feature
             AND b.license_fingerprint=p.fingerprint AND b.device_id=p.deviceId AND b.state='active')
           AND (SELECT COUNT(*) FROM device_bound_bindings b WHERE b.project=p.project AND b.feature=p.feature
-            AND b.license_fingerprint=p.fingerprint AND (b.state='active' OR (b.state='retiring' AND b.hold_until > unixepoch()))) < e.max_active_devices))
+            AND b.license_fingerprint=p.fingerprint AND ${boundOccupiedSql("b", "unixepoch()")}) < e.max_active_devices))
     )
   )`;
 

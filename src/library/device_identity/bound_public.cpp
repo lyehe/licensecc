@@ -88,9 +88,7 @@ LCC_BOUND_RESULT finish(LccDeviceBoundClient& owner, const BoundRenewResult& val
 			owner.enrollment.reset();
 		}
 	}
-	bound_public_result(value.decision, out);
-	const auto primary = value.status == BoundRenewStatus::session_error ? bound_public_result(value.decision, out)
-																		 : bound_public_result(value.status);
+	const auto primary = bound_public_result(value, out);
 	out.checkpoint_result = owner.save();
 	return primary;
 }

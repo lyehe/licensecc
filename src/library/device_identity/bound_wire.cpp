@@ -30,7 +30,8 @@ bool request_id(const std::string& id) {
 	return bound_encoding::utf8_text(id) &&
 		   std::none_of(id.begin(), id.end(), [](unsigned char c) { return c < 32 || c == 127; });
 }
-bool classify_error(BoundWireOperation operation, unsigned status, const std::string& code, BoundWireKind& kind) {
+bool classify_error(BoundWireOperation operation, unsigned status, const std::string& code, BoundWireKind& kind,
+					BoundWireDetail& detail) {
 	const bool enrollment =
 		operation == BoundWireOperation::enrollment_challenge || operation == BoundWireOperation::exchange;
 	if ((status == 503 && code == "temporarily_unavailable") || (status == 429 && code == "rate_limited")) {
@@ -62,6 +63,7 @@ bool classify_error(BoundWireOperation operation, unsigned status, const std::st
 	}
 	if (operation == BoundWireOperation::exchange && status == 409 && code == "device_limit_reached") {
 		kind = BoundWireKind::conflict;
+		detail = BoundWireDetail::device_limit;
 		return true;
 	}
 	if ((status == 410 && code == "challenge_expired") ||
@@ -309,7 +311,7 @@ bool decode_bound_device_response(BoundWireOperation operation, unsigned status,
 		require(request_id(candidate.request_id));
 		if (!ok.boolean) {
 			exact(root, {"ok", "code", "request_id"});
-			require(classify_error(operation, status, candidate.code, candidate.kind));
+			require(classify_error(operation, status, candidate.code, candidate.kind, candidate.detail));
 		} else {
 			require(status == 200);
 			exact(root, {"ok", "code", "request_id", "data"});

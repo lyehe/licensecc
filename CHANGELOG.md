@@ -50,6 +50,46 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   native code (remediation).
 - The protected-device readiness script accepts `--env=<name>` to check
   environment-scoped Wrangler vars (remediation).
+- Protected activation says when a license is full: the result stays
+  `LCC_BOUND_CONFLICT` and the new `LccDeviceBoundOutcome.denial_detail` is
+  `LCC_BOUND_DETAIL_DEVICE_LIMIT`. The .NET (`Outcome.Detail`), Java
+  (`Outcome.detail()`) and Python (`Outcome.detail`) SDKs expose it, and the
+  protected example tells the user to disconnect a device in the customer portal.
+- Customer portal: `POST /portal/v1/auth/identities/unlink` lets a signed-in
+  customer disconnect a linked Google or GitHub identity while another sign-in
+  method (password, the other provider, or email codes) remains usable now;
+  it revokes the customer's other OAuth sessions and answers `409
+  last_sign_in_method` otherwise (remediation).
+- Customer portal: the optional `PORTAL_SUPPORT_CONTACT` var and the
+  providers envelope's `support` field publish an operator support contact —
+  a credential-free `https:` URL or a single `mailto:` address; anything else
+  is treated as unset (remediation).
+- Admin: `POST /api/admin/customers/{id}/licenses` creates a license record
+  for a customer (idempotent, administrator role required); protected-create
+  refusals now name the rule in `data.reason` (`protected_creation_conflict`)
+  instead of a bare conflict (remediation).
+- Admin: `POST /api/admin/webhooks/{id}/test` sends a signed test event to a
+  webhook endpoint through the backend's new `WebhookOperator` entrypoint,
+  reachable only through the admin Worker's optional `WEBHOOK_OPERATOR`
+  service binding; without the binding the route answers 503
+  `webhook_operator_not_configured` (remediation).
+- Admin: `max_active_devices` (a protected grant's device limit, 1 to
+  1,000,000) can be set on `POST /api/admin/entitlements` (without a policy)
+  and alone via `PATCH /api/admin/entitlements/{id}`; a protected grant
+  refuses a limit below its currently connected devices with `409
+  capacity_in_use` (`data.devices_in_use`) on PATCH, or
+  `protected_creation_conflict` (`data.reason`) on create (remediation).
+- Admin: `GET /api/admin/customers/{id}/bindings` also reports each
+  `device_bound_v1` entitlement's device-limit `capacity` and the customer's 5
+  most recent denied connection attempts, backed by new `usage_events`
+  `'denied'` rows with `reason='device_limit_reached'` (remediation).
+- Admin: `GET /api/admin/events` accepts `project`/`feature`/
+  `entitlement_id`/`event_type`/`actor`/`since`/`until` filters and keyset
+  `cursor` paging, instead of returning every event unfiltered (remediation).
+- Admin: Customers → Add user defaults to Invite — a random, never-disclosed
+  credential the customer replaces through the portal's password recovery —
+  instead of requiring the operator to set and share an initial password
+  (remediation).
 
 ### Changed
 - Advanced the unpublished platform candidate from `0.1.0-rc.1` to `0.1.0-rc.2`.
@@ -94,6 +134,28 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   (remediation).
 - Portal OpenAPI: `GET /portal/v1/auth/password` no longer documents
   400/409/413/429 responses (follow-up).
+- Customer portal: password sign-in on a disabled account now answers `403
+  account_suspended` (instead of the same "invalid credentials" as a wrong
+  password), and the OAuth callback reports the same case with
+  `?auth_error=account_suspended`; every other login attempt is unaffected
+  (remediation).
+- Customer portal: `GET /api/portal/me` now includes the signed-in customer's
+  `email` (remediation).
+- Customer portal: `GET /api/portal/entitlements` rows now include
+  `trial_ends_at` and `trial_starts_on_activation` (remediation).
+- Customer portal: seven auth `429` responses (OTP request and verify, the
+  JSON magic-link redeem, and password login/register/reset/complete) now
+  carry a `retry-after` header with the exact remaining wait, instead of
+  leaving the client to guess; the signed-in password-change action is
+  unchanged (remediation).
+- Customer portal: the device-authorizations inspect envelope's entitlement
+  rows also report `devices_in_use`, `slot_free_at` and `device_connected`, so
+  the consent screen can show remaining capacity before an approval is
+  attempted (remediation).
+- Admin: webhook create/edit rejects an `event_types` entry outside the known
+  entitlement/customer/order set with `400 invalid_event_types`
+  (`data.allowed` lists the grouped allow-list), instead of accepting a
+  placeholder value that never matches a delivery (remediation).
 
 ### Upgrade notes
 - Existing Linux build trees that cached `LCC_ENABLE_LINUX_DESKTOP=ON` without
@@ -106,6 +168,24 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
 - Protected-device readiness now fails (`checks.global_rate_limit: false`) when
   `BOUND_GLOBAL_RATE_LIMIT` is set but invalid (non-integer, outside
   100..1000000, or an empty string); leaving it unset is fine.
+- The customer portal and licensing backend now validate the device-authorizations
+  inspect payload against one exact, closed entitlement field set
+  (`additionalProperties: false` on both sides): deploy and roll back the
+  backend and portal together for this path, or consent inspection returns
+  `temporarily_unavailable` (503).
+- Public C ABI compatibility: `LccDeviceBoundOutcome.denial_detail` takes the
+  place of the outcome's former `reserved` member. The change is additive: the
+  structure's size and offsets, `LCC_DEVICE_BOUND_VERSION` and every existing
+  enum value are unchanged, and `lcc_init_device_bound_outcome` still sets it to
+  zero; source that named `reserved` must use `denial_detail`. .NET and Python
+  SDK releases before this change treat a non-zero value there as an invalid
+  outcome and throw on a device-limit refusal instead of returning a conflict, so
+  upgrade the SDK together with the native bridge library. The Java JNI adapter
+  now uses protocol 2 (its outcome arrays carry the detail): build the JNI library
+  from the same SDK version as the JAR, because a mismatched pair fails at load.
+  Java's `DeviceBoundClient.Outcome` record gains a sixth component, `detail`; the
+  five-argument constructor remains, but Java 21 record patterns that name five
+  components must add it.
 
 ### Fixed
 - C++ core: unstable disk-derived hardware ids on device-path fstab entries; `confirm_license`
@@ -137,3 +217,14 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   characters (U+0080–U+009F); the TPM2 provider removes the library's own
   leftover hard links from an interrupted publish or delete under the storage
   lock; keyboard focus lands on the seat after Start seat (follow-up).
+- Admin: a suspended customer is labelled "Suspended" (Overview) and counted
+  as "Customers suspended" (Reports), matching the customer-facing status
+  instead of "Disabled"; the Events Since/Until filters, which are UTC days,
+  now say so ("Since (UTC)"/"Until (UTC)"); while a dismissible failure
+  notice awaits acknowledgement, other console actions are now visibly
+  disabled instead of silently blocked; saving a webhook edit that changes
+  nothing shows "No changes to save." and sends no request (remediation).
+- Customer portal: a seat or device release result is now always reported
+  somewhere on screen, including on the page left showing after a browser
+  Back/Forward navigation moves its own seat or device row off screen,
+  instead of silently disappearing or freezing the page (remediation).

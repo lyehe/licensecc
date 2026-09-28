@@ -10,11 +10,16 @@ export interface ApiEnvelope<T> {
   code: string;
   request_id: string;
   data?: T;
+  // Client-only: the `retry-after` response header (seconds), when the server sent one.
+  // Never part of the server's JSON body -- api() (ui/shared/api.tsx) parses the header and attaches
+  // it here so every caller reads one shape instead of re-parsing headers itself.
+  retryAfter?: number;
 }
 
 // What the portal exposes to its own browser app (never the backend bearer; cookie only).
 export interface PortalMe {
   customer_id: string;
+  email: string | null;
 }
 
 export interface PortalEntitlementSummary {
@@ -31,4 +36,6 @@ export interface PortalEntitlementSummary {
   max_borrow_sec: number;
   heartbeat_grace_sec: number;
   policy_id: string | null;
+  trial_ends_at: number | null;
+  trial_starts_on_activation: boolean;
 }

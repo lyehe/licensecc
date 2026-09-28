@@ -21,6 +21,25 @@ test("admin UI workflow builds filtered entitlement API paths", async () => {
     workflow.entitlementsPath({ project: "DEFAULT", feature: "pro seats", status: "active" }),
     "/api/admin/entitlements?project=DEFAULT&feature=pro+seats&status=active",
   );
+  assert.equal(
+    workflow.entitlementsPath({ project: "", feature: "", status: "", license_id: "lic_1" }),
+    "/api/admin/entitlements?license_id=lic_1",
+  );
+  assert.equal(
+    workflow.entitlementsPath({ project: "", feature: "", status: "", id: "ent-1", customer_id: "cus_1", license_id: "lic_1" }),
+    "/api/admin/entitlements?id=ent-1&customer_id=cus_1&license_id=lic_1",
+  );
+});
+
+test("admin UI workflow flags a single-entitlement deep link and Show all drops its identity filters", async () => {
+  const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
+  assert.equal(workflow.isSingleEntitlementFilter({ project: "", feature: "", status: "" }), false);
+  assert.equal(workflow.isSingleEntitlementFilter({ project: "", feature: "", status: "", id: "" }), false);
+  assert.equal(workflow.isSingleEntitlementFilter({ project: "", feature: "", status: "", id: "ent-1" }), true);
+  assert.deepEqual(
+    workflow.filterAfterShowAll({ project: "DEFAULT", feature: "pro", status: "active", id: "ent-1", customer_id: "cus_1", license_id: "lic_1" }),
+    { project: "DEFAULT", feature: "pro", status: "active" },
+  );
 });
 
 test("admin UI workflow normalizes create form payloads", async () => {
@@ -49,6 +68,8 @@ test("admin UI workflow normalizes create form payloads", async () => {
     customer_id: "cus_123",
     license_id: "lic_123",
   });
+  // An untouched device limit is not sent, so an upsert never overwrites a stored limit the operator did not set.
+  assert.equal(Object.hasOwn(body, "max_active_devices"), false);
   assert.throws(() => workflow.normalizeEntitlementForm({
     ...workflow.emptyEntitlementForm,
     assertion_ttl_seconds: 0,
@@ -220,12 +241,9 @@ test("admin UI workflow renders short device key ids and device confirm copy", a
 test("admin UI workflow builds the bulk transition path and body", async () => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
   assert.equal(workflow.batchPath(), "/api/admin/entitlements/batch");
-  assert.equal(workflow.entitlementBatchSelectionNotice, "Select up to 4 entitlements per batch.");
-  assert.deepEqual(
-    workflow.boundedBatchSelection(["a", "b", "c", "d", "e", "a"]),
-    ["a", "b", "c", "d"],
-    "the UI preserves first-loaded order and never silently selects a fifth row",
-  );
+  // Selection is no longer capped at four; the batch runner splits a larger run into chunks.
+  assert.equal(workflow.boundedBatchSelection, undefined);
+  assert.equal(workflow.entitlementBatchSelectionNotice, undefined);
   assert.deepEqual(workflow.batchBody("disable", ["a", "b"], "audit"), {
     action: "disable",
     reason: "audit",
@@ -264,6 +282,30 @@ test("admin UI workflow summarizes per-row batch results into one operator line"
     "0 ok, 1 invalid-id, 1 failed, 1 weird_code",
   );
   assert.equal(workflow.summarizeBatchResults([]), "0 ok");
+});
+
+test("a finished batch reads as one sentence, with every per-row outcome in words and never a code", async () => {
+  const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
+  assert.equal(workflow.batchResultSentence("disable", [
+    { id: "a", ok: true, code: "entitlement_disabled" },
+    { id: "b", ok: true, code: "entitlement_disabled" },
+  ]), "Disable finished: 2 done.");
+  assert.equal(workflow.batchResultSentence("disable", [
+    { id: "a", ok: true, code: "entitlement_disabled" },
+    { id: "b", ok: false, code: "not_found" },
+  ]), "Disable finished: 1 done, 1 not found.");
+  const mixed = workflow.batchResultSentence("revoke", [
+    { id: "a", ok: false, code: "revoked_entitlement_is_terminal" },
+    { id: "b", ok: false, code: "revoked_entitlement_is_terminal" },
+    { id: "c", ok: false, code: "invalid_entitlement_id" },
+    { id: "d", ok: false, code: "mutation_failed" },
+    { id: "e", ok: false, code: "stale_transition" },
+    { id: "f", ok: false, code: "weird_code" },
+    { id: "g", ok: false, code: "constructor" },
+  ]);
+  assert.equal(mixed, "Revoke finished: 0 done, 2 already revoked, 1 with an invalid ID, 1 failed, 1 changed meanwhile, 2 not changed.");
+  assert.doesNotMatch(mixed, /\b[a-z]+_[a-z_]+\b/);
+  assert.equal(workflow.batchResultSentence("reenable", []), "Reenable finished: 0 done.");
 });
 
 test("force-release confirm copy echoes the exact target and warns it frees all live seats", async () => {

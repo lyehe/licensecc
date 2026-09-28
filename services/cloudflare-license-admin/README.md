@@ -6,6 +6,9 @@ verification entitlements stored in the shared D1 database.
 **Audience:** contributors and authorized operators of the hosted control
 plane. It is not required for offline native licensing.
 
+**Supported browsers:** current evergreen browsers (native `<dialog>`
+required).
+
 | Goal | Start here | Side effects |
 | --- | --- | --- |
 | Validate code locally | [Local validation](#local-validation) | Local build/test output and a disposable local D1 database |
@@ -20,15 +23,27 @@ production require authority for the named environment.
 
 This service is intentionally separate from the public verifier Worker. The
 admin Worker does not bind or use the online assertion signing secret. It owns
-ordinary control-plane D1 operations and delegates protected retirement to the
-backend's named `DeviceOperator` capability.
+ordinary control-plane D1 operations, delegates protected retirement to the
+backend's named `DeviceOperator` capability, and delegates webhook test sends to
+its named `WebhookOperator` capability.
 
 ## Add a customer portal user
 
-Open **Customers → Add user** and enter a name, login email, and initial
-password (15–128 characters). This requires the administrator role. Share the
-initial password with the customer securely; no email is sent. They can sign in
-to the customer portal and change their password in Account.
+Open **Customers → Add user** and enter a name and login email. This requires
+the administrator role. **Invite** is the default: the server stores a
+random, never-disclosed credential, and the success panel tells the operator
+to ask the customer to open the customer portal and choose "Forgot your
+password?" to set their own password. That works because the portal treats
+an admin-created account's empty contact email as eligible for password
+recovery as long as no other customer has already verified that same
+address -- a non-empty contact email that differs from the login is never
+eligible. The first successful recovery records the proven address as the
+account's verified contact, after which it recovers the ordinary way.
+
+Choose **Set an initial password** instead when the customer portal cannot
+send email: enter an initial password (15–128 characters) and share it with
+the customer through a secure channel. No email is sent either way. They can
+sign in to the customer portal and change their password in Account.
 
 The portal must use the same D1 database and have password login enabled.
 Creating a user grants no licenses and does not verify ownership of the login
@@ -38,14 +53,54 @@ use **Reconcile status** to recover the original creation safely.
 
 ## Create protected application access
 
-Create the customer and its license for the application's project, then open
-**License access → New entitlement**. Choose **Protected devices**, set the
-application's project and feature, then choose its customer and existing license
-and enter the license fingerprint. Changing the project clears dependent selections.
-Use the exact lowercase 64-character fingerprint. Protected project and feature
+The whole path runs in the console; no SQL is needed.
+
+1. Create the customer with **Customers → Add user** (above).
+2. Open **License access → New entitlement** and choose **Protected devices**.
+   Set the application's project and feature, then choose the customer: the
+   customer list shows the first 20 matches, and typing part of a name, email,
+   or ID narrows it. The license list shows only that customer's licenses for
+   this project. If it is empty, choose **Create license for {project}**: it
+   creates the customer's license record and selects it. A suspended customer
+   cannot get one.
+3. Optionally set the **Device limit**, the most devices that can be connected
+   at once (1 to 1,000,000). Blank sends none: a new license (entitlement) gets
+   1, and an existing one keeps its limit. Or choose a policy instead: the list
+   shows this project's active policies as "{name} · {n} devices · {project}"
+   ("{n} seats" for a floating policy), and a chosen policy sets the capacity,
+   shown read-only as "Device limit (from policy {name})" or "Seats (from policy
+   {name})". **Create policy…** opens the policy form for this project and
+   brings you back to the unchanged draft with the new policy chosen.
+4. Choose **Generate fingerprint** for a new protected license, or enter its
+   exact lowercase 64-character fingerprint, then choose **Create entitlement**.
+
+Changing the project clears dependent selections. Protected project and feature
 IDs use ASCII letters, numbers, `_`, `.`, `:`, or `-` (127 and 15 characters).
 Leave the legacy device hash empty. A selected policy must have zero floating
 pool, at least one device slot, and usable trial/expiry settings.
+
+To change an existing grant's device limit, open it with **Edit** and use **Save
+device limit**. A protected grant cannot go below the devices already connected;
+the console then says "{n} devices are connected; disconnect one first." See
+[Device limit](#device-limit) for the API rules.
+
+A refused protected create returns `409 protected_creation_conflict`, and its
+`data.reason` names the first rule that failed. The console shows each reason
+as a sentence with the request reference:
+
+| `data.reason` | Rule |
+| --- | --- |
+| `customer_inactive` | The customer is suspended or missing. |
+| `license_missing` | The chosen license record does not exist. |
+| `license_customer_mismatch` | The license belongs to another customer or project. |
+| `fingerprint_in_use` | Another license (entitlement) already pairs this fingerprint or license differently, or a concurrent create took this exact grant. |
+| `plan_assignment_conflict` | The license's plan assignment uses another fingerprint. |
+| `lease_history_exists` | The fingerprint has legacy device, lease, seat, usage, or non-protected audit history for this feature. |
+| `policy_mismatch` | The policy is not an active policy of this project, or it changed or was disabled after it was read. |
+| `invalid_trial` | The trial settings cannot start a protected trial. |
+| `devices_connected` | The create would move the grant to another customer while devices are still connected; disconnect them first. |
+| `invalid_capacity` | The device limit is outside 1–1,000,000, or below the devices already connected. |
+| `unknown` | Any other integrity rule, such as a device hash or a floating pool. |
 
 The application must already use the protected v2 integration. Creating access
 does not enroll a machine or allocate a slot; the customer signs in and consents
@@ -67,6 +122,29 @@ legacy grants never existed. Production still requires the issuer/cohort invento
 and cutover gates in ADR 0006. Apply backend migration 0036 before deploying the
 new entitlement projections; the complete deployment requires the current schema.
 
+### Device limit
+
+`max_active_devices` is the device limit of a license (entitlement), from 1 to
+1,000,000:
+
+- `POST /api/admin/entitlements` accepts it only without a policy. It is written
+  in the create's own batch, behind the create's claim, so it commits with the
+  grant or not at all. Omitted, a new grant gets 1 and a re-create keeps the
+  stored limit; the console sends it only when the field is filled in. With a
+  `policy_id` it returns `400 invalid_request`: the policy stamps its own limit.
+- `PATCH /api/admin/entitlements/{id}` sets it alone, with the optional
+  `expected_customer_id`/`expected_revocation_seq` precondition. With another
+  PATCH field it returns `400 invalid_request`, because the limit is its own
+  audited capacity write; keys a PATCH does not write are ignored, as always.
+  A stale precondition returns `409 stale_transition` and writes nothing.
+- A protected grant refuses a limit below its connected devices, counted as
+  active connections plus disconnected ones still within their hold (ADR 0006).
+  A PATCH returns `409 capacity_in_use` with `data.devices_in_use`, the count
+  read just after the refusal. A create reports the same rule as
+  `protected_creation_conflict` with `data.reason: "invalid_capacity"`, and a
+  create that would move a grant with connected devices to another customer as
+  `data.reason: "devices_connected"`.
+
 ## Hosted setup
 
 Use this Worker alongside the
@@ -85,6 +163,20 @@ exact D1 database name and id. Set these non-secret values:
 - `ADMIN_ACCESS_AUDIENCE`: the Access application's audience tag.
 - `ADMIN_ACCESS_ADMIN_EMAILS`: the authorized operator email allowlist.
 - `ADMIN_ACCESS_READER_EMAILS`: the optional read-only email allowlist.
+
+The example configuration also binds the optional `WEBHOOK_OPERATOR` service to
+the backend's `WebhookOperator` entrypoint for **Webhooks → Send test event**.
+The backend, which alone holds `WEBHOOK_SIGNING_SECRETS`, signs the test event
+the same way as a real delivery. It sends only to an active endpoint's https
+URL, never follows a redirect, and waits at most 5 seconds. It returns only the
+receiver's status class (`2xx`, `3xx`, `4xx`, `5xx` or `network_error`) and
+accepts one test per endpoint per minute. Receivers see
+`Licensecc-Event-Source: test` and a body of
+`{"type":"test","endpoint_id":...,"sent_at":...}`. Without the binding the route
+answers 503 `webhook_operator_not_configured`. Profile materialization pins the
+binding to the same profile's backend, as it does for `DEVICE_OPERATOR`. Deploy
+the backend version that exports `WebhookOperator` before an admin
+configuration that binds it.
 
 Create a Cloudflare Access application and allow policy for the admin hostname
 before exposing it. Protect every enabled hostname, including `workers.dev`
@@ -259,9 +351,20 @@ Customers:
 - `GET /api/admin/customers/{id}`
 - `POST /api/admin/customers/{id}/disable`
 - `POST /api/admin/customers/{id}/reenable`
+- `POST /api/admin/customers/{id}/licenses`
 - `GET /api/admin/customers/{id}/bindings`
 - `GET /api/admin/customers/{id}/bindings/{bindingId}/events`
 - `POST /api/admin/customers/{id}/bindings/{bindingId}/retire`
+
+License creation requires the administrator role and an `idempotency-key`.
+Send `{"project": "<protected project ID>", "label": "<optional>"}`; the label
+is trimmed and at most 128 characters; C0 control characters and DEL are
+rejected. It inserts
+one `lic_<uuid>` record for the customer and returns `license_created` with its
+`id`, `customer_id`, `project`, `label` and `created_at` (`no-store`). The same
+key replays that response without a second record. An unknown customer is
+`404 not_found`; a suspended one is `409 customer_inactive`, checked in the same
+statement as the insert. A license record alone grants no access.
 
 Protected binding reads allow readers and administrators, including inspection
 of disabled customers. They return at most 100 rows with live keyset pagination,
@@ -358,6 +461,7 @@ Webhooks:
 - `PATCH /api/admin/webhooks/{id}`
 - `POST /api/admin/webhooks/{id}/disable`
 - `POST /api/admin/webhooks/{id}/reenable`
+- `POST /api/admin/webhooks/{id}/test`
 
 Entitlements:
 
@@ -409,6 +513,8 @@ operator switch:
 Use policy stamping for normal setup. Enable `POLICY_STAMP_MODE=on`, create a
 policy, then create an entitlement with that `policy_id`. The policy is frozen
 onto the entitlement at stamp time; later policy edits affect new stamps only.
+Edit a policy with **Policies → Edit** (`PATCH /api/admin/policies/{id}`); its
+project, name, and type cannot change.
 
 Node-locked policy example:
 
@@ -467,7 +573,9 @@ Client behavior differs by mode:
 
 The `/api/sync/entitlements` helper creates the base entitlement projection but
 does not expose seat capacity fields. Use policies, catalog plan projection, or
-the admin API paths that stamp capacity when setting up floating licenses.
+the admin API paths that stamp capacity when setting up floating licenses. An
+admin create without a policy, or a PATCH, can set the device limit directly
+([Device limit](#device-limit)).
 
 ### Break-glass CLI
 

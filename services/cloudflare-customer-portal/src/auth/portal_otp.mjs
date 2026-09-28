@@ -154,10 +154,12 @@ function activePepperId(peppers) {
 }
 
 /**
- * requestOtp(env, ctx, email, now?) -> { ok, code }
+ * requestOtp(env, ctx, email, now?) -> { ok, code, retryAfter? }
  *
  *   { ok:false, code:"config_error" }   peppers unset (the worker maps this to 503).
- *   { ok:false, code:"rate_limited" }   always-on RL tripped (per email + per IP, BEFORE any write).
+ *   { ok:false, code:"rate_limited", retryAfter }   always-on RL tripped (per email + per IP, BEFORE
+ *                                       any write). retryAfter is the seconds left in the fixed
+ *                                       window that tripped, sent back to the caller as the retry-after header.
  *   { ok:true,  code:"ok" }             ALWAYS on the success path AND for an unknown email
  *                                       (no enumeration). The secret is NEVER returned.
  *
@@ -184,9 +186,9 @@ export async function requestOtp(env, { email, clientIp = "", sendEmailFn, email
 
   // Always-on rate-limit BEFORE any write: per email AND per IP. (invariant 5)
   const emailRl = await portalRateLimit(env, `request:email:${emailLower}`, 5, 900, now);
-  if (emailRl.limited) return { ok: false, code: "rate_limited" };
+  if (emailRl.limited) return { ok: false, code: "rate_limited", retryAfter: emailRl.retryAfter };
   const ipRl = await portalRateLimit(env, `request:ip:${clientIp}`, 30, 900, now);
-  if (ipRl.limited) return { ok: false, code: "rate_limited" };
+  if (ipRl.limited) return { ok: false, code: "rate_limited", retryAfter: ipRl.retryAfter };
 
   const activeId = activePepperId(peppers);
   // The secret-map contract guarantees a nonempty map here. Keep that legacy
@@ -252,10 +254,11 @@ export async function requestOtp(env, { email, clientIp = "", sendEmailFn, email
 }
 
 /**
- * redeemOtp(env, { email?, code?, secret?, clientIp?, now? }) -> { ok, customerId?, code }
+ * redeemOtp(env, { email?, code?, secret?, clientIp?, now? }) -> { ok, customerId?, code, retryAfter? }
  *
  *   { ok:false, code:"config_error" }   peppers unset (worker -> 503).
- *   { ok:false, code:"rate_limited" }   always-on verify RL tripped.
+ *   { ok:false, code:"rate_limited", retryAfter }   always-on verify RL tripped; retryAfter is the
+ *                                       seconds left in the fixed window that tripped.
  *   { ok:false, code:"invalid_otp" }    wrong code / unknown secret / consumed / expired / capped
  *                                       — all BYTE-IDENTICAL (no oracle on WHY).
  *   { ok:true,  customerId, code:"ok" } the atomic single-use claim matched a live row.
@@ -275,7 +278,7 @@ export async function redeemOtp(env, { email, code, secret, clientIp = "", now =
 
   // Always-on verify rate-limit (per IP). The worker also throttles per (customer,IP) once known.
   const ipRl = await portalRateLimit(env, `verify:ip:${clientIp}`, 30, 900, now);
-  if (ipRl.limited) return { ok: false, code: "rate_limited" };
+  if (ipRl.limited) return { ok: false, code: "rate_limited", retryAfter: ipRl.retryAfter };
 
   const candidates = [];
   let column;

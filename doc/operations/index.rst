@@ -13,3 +13,4 @@ deployment.
    database-backends
    observability
    device-bound-key-rotation
+   customer-account-deletion

@@ -1,0 +1,377 @@
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import type { Dispatch, RefObject, SetStateAction } from "react";
+import { FeedbackText } from "./FeedbackText";
+import { codeFeedback } from "./messages";
+import { CONFIRM_MUTATION_UNKNOWN_MESSAGE, CONFIRM_REFRESH_FAILURE_MESSAGE, type ConfirmAction, type ConfirmActionFailure } from "./operatorActions";
+import type { OperatorFeedback } from "./operatorFeedback";
+import type { OperationGate } from "./operationGate";
+import { focusableElements, useFocusRestoration, type OperatorFocus, type PendingFocus } from "./operatorFocus";
+import { TypedConfirmationField, typedConfirmationMatches } from "./TypedConfirmationField";
+import type { ActionNotice, ActionNoticeControls } from "./useActionNotice";
+
+/*
+ * The shared confirmation dialog: its state, its reason field, focus
+ * management while it is open and after it closes, and its render. It
+ * requires a native <dialog> element (current evergreen browsers).
+ */
+
+export interface ConfirmDialogDependencies {
+  gate: OperationGate;
+  focus: OperatorFocus;
+  notice: ActionNoticeControls;
+}
+
+export interface ConfirmDialogControls {
+  reason: string;
+  setReason: Dispatch<SetStateAction<string>>;
+  currentReason: () => string;
+  requestConfirm: (action: ConfirmAction) => void;
+  modalActive: boolean;
+  confirmActionRef: RefObject<ConfirmAction | null>;
+  /** The dialog element, rendered after the provider's children. */
+  dialog: React.ReactElement | null;
+}
+
+export function useConfirmDialog({ gate, focus, notice }: ConfirmDialogDependencies): ConfirmDialogControls {
+  const { busy, operationOwnerRef, confirmPendingRef, consequencePendingRef, unresolvedOperationRef, setOperationBusy } = gate;
+  const { pendingRestoreFocusRef, pendingSuccessFocusRef, focusSoon, capturePendingFocus } = focus;
+  const { actionNoticeRef, noticePendingRef, publishActionNotice } = notice;
+  const [reason, setReason] = useState("");
+  const reasonRef = useRef("");
+  reasonRef.current = reason;
+  const [typedConfirmationInput, setTypedConfirmationInput] = useState("");
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
+  const [confirmPending, setConfirmPending] = useState(false);
+  const [confirmError, setConfirmError] = useState<Pick<OperatorFeedback, "message" | "detail"> | null>(null);
+  const [confirmUnknown, setConfirmUnknown] = useState(false);
+  const confirmId = useId().replace(/:/g, "-");
+  const titleId = `confirm-title-${confirmId}`;
+  const descriptionId = `confirm-description-${confirmId}`;
+  const errorId = `confirm-error-${confirmId}`;
+  const nativeDialogRef = useRef<HTMLDialogElement | null>(null);
+  const reasonInputRef = useRef<HTMLInputElement | null>(null);
+  const typedConfirmationInputRef = useRef<HTMLInputElement | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const errorRef = useRef<HTMLDivElement | null>(null);
+  const invokingElementRef = useRef<HTMLElement | null>(null);
+  const invokingRowKeyRef = useRef<string | null>(null);
+  const invokingSectionKeyRef = useRef<string | null>(null);
+  const confirmAttemptKeyRef = useRef<string | null>(null);
+  const confirmActionRef = useRef<ConfirmAction | null>(null);
+  confirmActionRef.current = confirmAction;
+
+  const currentReason = useCallback((): string => reasonRef.current, []);
+  const dismissConfirm = useCallback((): void => {
+    if (confirmPendingRef.current) {
+      return;
+    }
+    pendingRestoreFocusRef.current = {
+      invokingElement: invokingElementRef.current,
+      rowKey: invokingRowKeyRef.current,
+      sectionKey: invokingSectionKeyRef.current,
+    };
+    pendingSuccessFocusRef.current = null;
+    invokingElementRef.current = null;
+    invokingRowKeyRef.current = null;
+    invokingSectionKeyRef.current = null;
+    const keepConsequenceOwner = unresolvedOperationRef.current !== null || actionNoticeRef.current?.manualRefresh !== undefined;
+    confirmAttemptKeyRef.current = null;
+    setConfirmPending(false);
+    setConfirmError(null);
+    setConfirmUnknown(false);
+    setConfirmAction(null);
+    setReason("");
+    setTypedConfirmationInput("");
+    if (!keepConsequenceOwner && operationOwnerRef.current === "consequence") {
+      operationOwnerRef.current = null;
+      setOperationBusy(false);
+    }
+  }, [setOperationBusy]);
+  const requestConfirm = useCallback((action: ConfirmAction): void => {
+    if (operationOwnerRef.current !== null || confirmPendingRef.current || consequencePendingRef.current || noticePendingRef.current || unresolvedOperationRef.current !== null || actionNoticeRef.current !== null) {
+      return;
+    }
+    const pendingFocus = capturePendingFocus();
+    invokingElementRef.current = pendingFocus.invokingElement;
+    invokingRowKeyRef.current = pendingFocus.rowKey;
+    invokingSectionKeyRef.current = pendingFocus.sectionKey;
+    pendingRestoreFocusRef.current = null;
+    pendingSuccessFocusRef.current = null;
+    confirmAttemptKeyRef.current = crypto.randomUUID();
+    setConfirmPending(false);
+    setConfirmError(null);
+    setConfirmUnknown(false);
+    setReason("");
+    setTypedConfirmationInput("");
+    operationOwnerRef.current = "consequence";
+    setConfirmAction(action);
+  }, [capturePendingFocus]);
+  const confirmProceed = useCallback(async (): Promise<void> => {
+    const action = confirmAction;
+    if (
+      action === null ||
+      (action.requiresReason && currentReason().trim() === "") ||
+      (action.typedConfirmation !== undefined && !typedConfirmationMatches(typedConfirmationInput, action.typedConfirmation))
+    ) {
+      return;
+    }
+    if (confirmPendingRef.current) {
+      return;
+    }
+    confirmPendingRef.current = true;
+    setConfirmPending(true);
+    setConfirmError(null);
+    setConfirmUnknown(false);
+    setOperationBusy(true);
+    try {
+      const idempotencyKey = confirmAttemptKeyRef.current ?? crypto.randomUUID();
+      confirmAttemptKeyRef.current = idempotencyKey;
+      const outcome = await action.run({ idempotencyKey });
+      if (outcome === undefined || !outcome.ok) {
+        const unknown = outcome === undefined || outcome.unknown === true || outcome.retryable === false;
+        const shown = outcome?.message !== undefined ? { message: outcome.message, detail: outcome.detail }
+          : unknown ? { message: CONFIRM_MUTATION_UNKNOWN_MESSAGE } : codeFeedback("action_failed");
+        if (unknown) {
+          const focusTarget: PendingFocus = {
+            actionTarget: action.successFocusTarget,
+            invokingElement: invokingElementRef.current,
+            rowKey: invokingRowKeyRef.current,
+            sectionKey: invokingSectionKeyRef.current,
+          };
+          const failure = outcome as ConfirmActionFailure | undefined;
+          const reconciliation = failure?.reconciliation ?? action.reconciliation;
+          unresolvedOperationRef.current = { idempotencyKey, focusTarget, reconciliation };
+          publishActionNotice({ message: shown.message, detail: shown.detail, manualRefresh: reconciliation, focusTarget, dismissible: false, unresolvedKey: idempotencyKey });
+        } else {
+          // A documented pre-mutation rejection concludes this attempt.  Keep
+          // the modal editable, but do not reuse its old idempotency key.
+          confirmAttemptKeyRef.current = null;
+        }
+        setConfirmError(shown);
+        setConfirmUnknown(unknown);
+        setConfirmPending(false);
+        confirmPendingRef.current = false;
+        setOperationBusy(false);
+        return;
+      }
+      const successFocusTarget: PendingFocus = {
+        actionTarget: action.successFocusTarget,
+        invokingElement: invokingElementRef.current,
+        rowKey: invokingRowKeyRef.current,
+        sectionKey: invokingSectionKeyRef.current,
+      };
+      pendingSuccessFocusRef.current = action.isCurrent?.() === false ? null : successFocusTarget;
+      invokingElementRef.current = null;
+      invokingRowKeyRef.current = null;
+      invokingSectionKeyRef.current = null;
+      confirmAttemptKeyRef.current = null;
+      setConfirmPending(false);
+      confirmPendingRef.current = false;
+      if (outcome.warning !== undefined || outcome.manualRefresh !== undefined) {
+        const message = outcome.warning ?? CONFIRM_REFRESH_FAILURE_MESSAGE;
+        publishActionNotice({ message, detail: outcome.detail, manualRefresh: outcome.manualRefresh, focusTarget: successFocusTarget });
+      }
+      setConfirmAction(null);
+      setReason("");
+      setTypedConfirmationInput("");
+      const hasManualRefresh = (actionNoticeRef.current as ActionNotice | null)?.manualRefresh !== undefined;
+      if (operationOwnerRef.current === "consequence" && !hasManualRefresh) {
+        operationOwnerRef.current = null;
+      }
+      setOperationBusy(false);
+    } catch (error) {
+      const idempotencyKey = confirmAttemptKeyRef.current ?? crypto.randomUUID();
+      confirmAttemptKeyRef.current = idempotencyKey;
+      const focusTarget: PendingFocus = {
+        actionTarget: action.successFocusTarget,
+        invokingElement: invokingElementRef.current,
+        rowKey: invokingRowKeyRef.current,
+        sectionKey: invokingSectionKeyRef.current,
+      };
+      unresolvedOperationRef.current = { idempotencyKey, focusTarget, reconciliation: action.reconciliation };
+      publishActionNotice({ message: CONFIRM_MUTATION_UNKNOWN_MESSAGE, manualRefresh: action.reconciliation, focusTarget, dismissible: false, unresolvedKey: idempotencyKey });
+      setConfirmError({ message: CONFIRM_MUTATION_UNKNOWN_MESSAGE });
+      setConfirmUnknown(true);
+      setConfirmPending(false);
+      confirmPendingRef.current = false;
+      setOperationBusy(false);
+    }
+  }, [confirmAction, currentReason, publishActionNotice, setOperationBusy, typedConfirmationInput]);
+
+  // The pending-focus pass must stay ahead of the dialog's own layout effects.
+  useFocusRestoration(focus, confirmAction);
+
+  useLayoutEffect(() => {
+    if (confirmAction === null || confirmPending || confirmError === null) {
+      return;
+    }
+    focusSoon(errorRef.current ?? confirmButtonRef.current ?? cancelButtonRef.current);
+  }, [confirmAction, confirmError, confirmPending, focusSoon]);
+
+  useLayoutEffect(() => {
+    if (confirmAction === null || !confirmPending) {
+      return;
+    }
+    const dialog = nativeDialogRef.current;
+    if (dialog !== null) {
+      focusSoon(confirmButtonRef.current ?? dialog);
+    }
+  }, [confirmAction, confirmPending, focusSoon]);
+
+  useLayoutEffect(() => {
+    if (confirmAction === null) {
+      return;
+    }
+    const dialog = nativeDialogRef.current;
+    if (dialog === null) {
+      return;
+    }
+    if (!dialog.open) {
+      dialog.showModal();
+    }
+
+    const backgroundRoot = dialog.parentElement;
+    const backgroundElements = backgroundRoot === null
+      ? []
+      : Array.from(backgroundRoot.children)
+        .filter((element) => element !== dialog)
+        .map((element) => element as HTMLElement);
+    const previousBackgroundState = backgroundElements.map((element) => ({
+      element,
+      inert: element.inert,
+      ariaHidden: element.getAttribute("aria-hidden"),
+    }));
+    for (const element of backgroundElements) {
+      element.inert = true;
+      element.setAttribute("aria-hidden", "true");
+    }
+
+    const initialFocus = confirmAction.typedConfirmation !== undefined
+      ? typedConfirmationInputRef.current
+      : confirmAction.requiresReason ? reasonInputRef.current : cancelButtonRef.current;
+    focusSoon(initialFocus ?? dialog);
+
+    return () => {
+      for (const previous of previousBackgroundState) {
+        previous.element.inert = previous.inert;
+        if (previous.ariaHidden === null) {
+          previous.element.removeAttribute("aria-hidden");
+        } else {
+          previous.element.setAttribute("aria-hidden", previous.ariaHidden);
+        }
+      }
+      if (dialog.open) {
+        dialog.close();
+      }
+    };
+  }, [confirmAction, focusSoon]);
+
+  useEffect(() => {
+    if (confirmAction === null) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      const dialog = nativeDialogRef.current;
+      if (dialog === null) {
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!confirmPendingRef.current) {
+          dismissConfirm();
+        }
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+      const focusable = focusableElements(dialog);
+      event.stopPropagation();
+      event.preventDefault();
+      if (focusable.length === 0) {
+        dialog.focus({ preventScroll: true });
+        return;
+      }
+      const activeElement = document.activeElement;
+      const currentIndex = activeElement instanceof HTMLElement ? focusable.indexOf(activeElement) : -1;
+      if (currentIndex < 0) {
+        (event.shiftKey ? focusable[focusable.length - 1] : focusable[0]).focus({ preventScroll: true });
+      } else if (event.shiftKey) {
+        focusable[(currentIndex - 1 + focusable.length) % focusable.length].focus({ preventScroll: true });
+      } else {
+        focusable[(currentIndex + 1) % focusable.length].focus({ preventScroll: true });
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [confirmAction, dismissConfirm]);
+
+  const modalContent = confirmAction === null ? null : (
+    <div className="modalSurface" onClick={(event) => event.stopPropagation()}>
+      <h2 id={titleId}>{confirmAction.title}</h2>
+      <p id={descriptionId}>{confirmAction.body}</p>
+      {confirmAction.details !== undefined && <section className="modalDetails" aria-label="Action consequences">{confirmAction.details}</section>}
+      {confirmPending && <p className="modalProgress" role="status" aria-live="polite">Working…</p>}
+      {confirmError !== null && <div ref={errorRef} id={errorId} className="modalError" role="alert" tabIndex={-1}><FeedbackText feedback={confirmError} /></div>}
+      {confirmAction.typedConfirmation !== undefined && (
+        <TypedConfirmationField phrase={confirmAction.typedConfirmation} value={typedConfirmationInput} onChange={setTypedConfirmationInput} disabled={confirmPending} inputRef={typedConfirmationInputRef} />
+      )}
+      {confirmAction.requiresReason && (
+        <label className="reason">Reason (required)<input ref={reasonInputRef} autoFocus={confirmAction.typedConfirmation === undefined} disabled={confirmPending} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+      )}
+      {confirmAction.reasonPresets !== undefined && confirmAction.reasonPresets.length > 0 && (
+        <div className="reasonPresets" role="group" aria-label="Common reasons">{confirmAction.reasonPresets.map((preset) => (
+          <button
+            key={preset}
+            type="button"
+            disabled={confirmPending}
+            onClick={() => {
+              setReason(preset);
+              // Move focus to the field so a screen reader announces the value it just received.
+              reasonInputRef.current?.focus();
+            }}
+          >{preset}</button>
+        ))}</div>
+      )}
+      <div className="actions">
+        <button ref={cancelButtonRef} type="button" autoFocus={confirmAction.typedConfirmation === undefined && !confirmAction.requiresReason} disabled={confirmPending} onClick={dismissConfirm}>Cancel</button>
+        <button
+          ref={confirmButtonRef}
+          type="button"
+          className="danger"
+          disabled={!confirmPending && (confirmUnknown || busy || (confirmAction.requiresReason && reason.trim() === "") || (confirmAction.typedConfirmation !== undefined && !typedConfirmationMatches(typedConfirmationInput, confirmAction.typedConfirmation)))}
+          aria-disabled={confirmPending ? "true" : undefined}
+          onClick={() => void confirmProceed()}
+        >{confirmAction.confirmLabel ?? "Confirm"}</button>
+      </div>
+    </div>
+  );
+
+  const dialog = confirmAction === null ? null : (
+    <dialog
+      ref={nativeDialogRef}
+      className="modal danger"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-describedby={confirmError === null ? descriptionId : `${descriptionId} ${errorId}`}
+      aria-busy={confirmPending && !confirmAction.keepDialogLive}
+      tabIndex={-1}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          dismissConfirm();
+        }
+      }}
+      onCancel={(event) => {
+        event.preventDefault();
+        dismissConfirm();
+      }}
+    >
+      {modalContent}
+    </dialog>
+  );
+
+  return { reason, setReason, currentReason, requestConfirm, modalActive: confirmAction !== null, confirmActionRef, dialog };
+}

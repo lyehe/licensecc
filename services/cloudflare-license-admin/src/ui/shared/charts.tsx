@@ -1,4 +1,5 @@
 import React from "react";
+import { formatUtcDate } from "./format";
 
 export interface BarRect {
   x: number;
@@ -152,7 +153,27 @@ export function HealthBadge({ status, validUntil, now }: { status: string; valid
   return <span className={`healthBadge health-${health}`}>{health}</span>;
 }
 
-export function LineAreaChart({ checkouts, denials, label }: { checkouts: number[]; denials: number[]; label: string }): React.ReactElement {
+/**
+ * The axis summary under a line/denial-rate chart: the y-axis unit plus its min/max, and the UTC
+ * dates of the first and last bucket the chart covers. The chart's own `role="img"` `aria-label`
+ * stays the chart's accessible name; this is separate, ordinary text alongside it.
+ */
+function ChartAxes({ unit, min, max, formatValue, bucketStarts }: { unit: string; min: number; max: number; formatValue: (value: number) => string; bucketStarts: ReadonlyArray<number> }): React.ReactElement | null {
+  if (bucketStarts.length === 0) return null;
+  const start = bucketStarts[0];
+  const end = bucketStarts[bucketStarts.length - 1];
+  return (
+    <div className="chartAxes">
+      <p className="chartAxisY muted">{unit} · min {formatValue(min)} · max {formatValue(max)}</p>
+      <p className="chartAxisX muted">{start === end ? formatUtcDate(start) : `${formatUtcDate(start)} to ${formatUtcDate(end)}`}</p>
+    </div>
+  );
+}
+
+const formatCountAxisValue = (value: number): string => String(Math.round(value));
+const formatRateAxisValue = (value: number): string => `${(value * 100).toFixed(1)}%`;
+
+export function LineAreaChart({ checkouts, denials, label, unit = "checkouts / denials per day", bucketStarts = [] }: { checkouts: number[]; denials: number[]; label: string; unit?: string; bucketStarts?: ReadonlyArray<number> }): React.ReactElement {
   if (isEmptySeries(checkouts) && isEmptySeries(denials)) {
     return <div className="chartEmpty muted">No usage activity in this window.</div>;
   }
@@ -163,23 +184,29 @@ export function LineAreaChart({ checkouts, denials, label }: { checkouts: number
   const checkoutLine = linePathScaled(checkouts, scaleMin, scaleMax, CHART_WIDTH, CHART_HEIGHT, CHART_PAD);
   const denialLine = linePathScaled(denials, scaleMin, scaleMax, CHART_WIDTH, CHART_HEIGHT, CHART_PAD);
   return (
-    <svg className="chart lineChart" viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={label}>
-      {area !== "" && <path className="chartArea checkoutsArea" d={area} />}
-      {checkoutLine !== "" && <path className="chartLine checkoutsLine" d={checkoutLine} fill="none" />}
-      {denialLine !== "" && <path className="chartLine denialsLine" d={denialLine} fill="none" />}
-    </svg>
+    <>
+      <svg className="chart lineChart" viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={label}>
+        {area !== "" && <path className="chartArea checkoutsArea" d={area} />}
+        {checkoutLine !== "" && <path className="chartLine checkoutsLine" d={checkoutLine} fill="none" />}
+        {denialLine !== "" && <path className="chartLine denialsLine" d={denialLine} fill="none" />}
+      </svg>
+      <ChartAxes unit={unit} min={scaleMin} max={scaleMax} formatValue={formatCountAxisValue} bucketStarts={bucketStarts} />
+    </>
   );
 }
 
-export function DenialRateChart({ rates, label }: { rates: number[]; label: string }): React.ReactElement {
+export function DenialRateChart({ rates, label, bucketStarts = [] }: { rates: number[]; label: string; bucketStarts?: ReadonlyArray<number> }): React.ReactElement {
   if (isEmptySeries(rates)) {
     return <div className="chartEmpty muted">No denials in this window.</div>;
   }
   const line = linePath(rates, CHART_WIDTH, CHART_HEIGHT, CHART_PAD);
   return (
-    <svg className="chart lineChart" viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={label}>
-      <path className="chartLine denialRateLine" d={line} fill="none" />
-    </svg>
+    <>
+      <svg className="chart lineChart" viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={label}>
+        <path className="chartLine denialRateLine" d={line} fill="none" />
+      </svg>
+      <ChartAxes unit="denial rate %" min={Math.min(...rates)} max={Math.max(...rates)} formatValue={formatRateAxisValue} bucketStarts={bucketStarts} />
+    </>
   );
 }
 

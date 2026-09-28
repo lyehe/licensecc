@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, makeEnvelope } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 // These scenarios deliberately leave unsent drafts; custom consequence dialogs
 // remain under each test's explicit control.
@@ -84,7 +84,7 @@ test("admin UI rejects repeated cursors and duplicate rows from shared and custo
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   api.behavior.catalogPlanRepeatCursor = true;
   await plansPane.getByRole("button", { name: "Load more" }).click();
-  await expect(page.getByText("invalid_api_response (repeated_cursor)")).toBeVisible();
+  await expect(page.getByText("The list returned the same page again. Refresh the list.")).toBeVisible();
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await expect(plansPane.getByRole("button", { name: "Load more" })).toHaveCount(0);
 
@@ -97,7 +97,7 @@ test("admin UI rejects repeated cursors and duplicate rows from shared and custo
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans & features", exact: true }).click();
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await plansPane.getByRole("button", { name: "Load more" }).click();
-  await expect(page.getByText("invalid_api_response (duplicate_page_item)")).toBeVisible();
+  await expect(page.getByText("The next page repeated records already shown. Refresh the list.")).toBeVisible();
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await expect(plansPane.getByRole("button", { name: "Load more" })).toHaveCount(0);
 
@@ -109,7 +109,7 @@ test("admin UI rejects repeated cursors and duplicate rows from shared and custo
   await expect(deliveries.locator("tbody tr")).toHaveCount(1);
   api.behavior.deliveryDuplicatePage = true;
   await deliveries.getByRole("button", { name: "Load more" }).click();
-  await expect(page.getByText("invalid_api_response (duplicate_page_item)")).toBeVisible();
+  await expect(page.getByText("The next page repeated records already shown. Refresh the list.")).toBeVisible();
   await expect(deliveries.locator("tbody tr")).toHaveCount(1);
   await expect(deliveries.getByRole("button", { name: "Load more" })).toHaveCount(0);
 
@@ -121,7 +121,7 @@ test("admin UI rejects repeated cursors and duplicate rows from shared and custo
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   await expect(deliveries.locator("tbody tr")).toHaveCount(1);
   await deliveries.getByRole("button", { name: "Load more" }).click();
-  await expect(page.getByText("invalid_api_response (repeated_cursor)")).toBeVisible();
+  await expect(page.getByText("The list returned the same page again. Refresh the list.")).toBeVisible();
   await expect(deliveries.locator("tbody tr")).toHaveCount(1);
 });
 
@@ -142,7 +142,7 @@ test("admin UI clears a definitive pre-mutation attempt so the next ordinary ret
   await form.getByLabel("URL").fill("https://hooks.example.test/new-key");
   await form.getByRole("button", { name: "Create endpoint" }).click();
   await expect.poll(() => api.requests.webhookCreateAttempts.length).toBe(1);
-  await expect(page.getByText(/missing_access_jwt/)).toBeVisible();
+  await expect(page.getByText("Your sign-in is missing or has expired. Sign in again.")).toBeVisible();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   await expect(form.getByLabel("URL")).toBeEnabled();
 
@@ -165,19 +165,18 @@ test("admin UI keeps a same-key replay conflict indeterminate after a post-commi
   await createForm.getByLabel("Feature").fill("pro");
   await createForm.getByLabel("License fingerprint").fill("1".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
   await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await page.getByRole("button", { name: "Reconcile status" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(2);
   expect(api.requests.transitions[1].idempotencyKey).toBe(api.requests.transitions[0].idempotencyKey);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(page.getByRole("button", { name: "Reconcile status" })).toBeEnabled();
 });
 
@@ -197,7 +196,7 @@ test("admin UI accepts a legitimate empty customer name in a transition RETURNIN
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   await expect(page.locator(".modalError")).toHaveCount(0);
-  await expect(page.locator(".recordDetail .status")).toContainText("disabled");
+  await expect(page.locator(".recordDetail .status")).toContainText("suspended");
 });
 
 test("admin UI reconciles release seats through the exact entitlement GET even when the target is off page one", async ({ page }) => {
@@ -210,8 +209,7 @@ test("admin UI reconciles release seats through the exact entitlement GET even w
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("2".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   api.behavior.releaseSeatTargetOnSecondPage = true;
   await clickAction(row.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first());
@@ -238,15 +236,14 @@ test("admin UI keeps a release-seat result unknown when same-key replay evidence
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("3".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("compare replay proof");
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.releaseSeats.length).toBe(2);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
 });
 
 test("admin UI keeps an undocumented release-seat 4xx indeterminate", async ({ page }) => {
@@ -266,14 +263,13 @@ test("admin UI keeps an undocumented release-seat 4xx indeterminate", async ({ p
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("4".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("unexpected response");
   await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   await expect(page.locator(".operatorNotice")).toContainText("Other actions are unavailable until reconciliation completes.");
   expect(api.requests.releaseSeats).toHaveLength(1);
@@ -296,7 +292,7 @@ test("admin UI clears known webhook recovery only after an additional current-co
   await form.getByLabel("URL").fill("https://hooks.example.test/stale-refresh");
   api.behavior.webhookRefreshFailures.push("response-error");
   await form.getByRole("button", { name: "Create endpoint" }).click();
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
 
   // This changes the list's read context after the known-success POST. The
   // saved recovery callback may not clear solely because its old closure is a
@@ -311,7 +307,7 @@ test("admin UI clears known webhook recovery only after an additional current-co
   await expect.poll(() => api.requests.webhookReads.length).toBe(readsBeforeRecovery + 1);
   expect(new URLSearchParams(api.requests.webhookReads.at(-1)).get("status")).toBe("disabled");
   await expect.poll(() => api.behavior.releaseReads.has("webhooks:disabled")).toBe(true);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   api.behavior.releaseReads.get("webhooks:disabled")();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   expect(api.requests.webhookCreateAttempts).toHaveLength(1);
@@ -334,7 +330,7 @@ test("admin UI retains known webhook recovery after its current read becomes sta
   await form.getByLabel("URL").fill("https://hooks.example.test/noop-refresh");
   api.behavior.webhookRefreshFailures.push("response-error");
   await form.getByRole("button", { name: "Create endpoint" }).click();
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
 
   const filter = page.getByLabel("Filter endpoints by status");
   await filter.selectOption("disabled");
@@ -354,7 +350,7 @@ test("admin UI retains known webhook recovery after its current read becomes sta
   // recovery notice; otherwise this assertion can pass before its no-op
   // callback has actually run.
   await expect(page.getByRole("button", { name: "Refresh status", exact: true })).toBeEnabled();
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   expect(api.requests.webhookCreateAttempts).toHaveLength(1);
 });
 
@@ -379,7 +375,7 @@ test("admin UI reconciles unknown customer transitions from the list using the o
   await page.goto("/#/customers");
 
   for (const scenario of [
-    { id: "cus_acme", action: "Disable", status: "disabled" },
+    { id: "cus_acme", action: "Disable", status: "suspended" },
     { id: "cus_globex", action: "Reenable", status: "active" },
   ]) {
     const openCustomer = page.locator(`#customer-open-${scenario.id}`);
@@ -389,10 +385,10 @@ test("admin UI reconciles unknown customer transitions from the list using the o
       const dialog = page.getByRole("dialog");
       await dialog.getByLabel("Reason (required)").fill("review while returning to the customer list");
       await dialog.getByRole("button", { name: "Confirm", exact: true }).click();
-      await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+      await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
       await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     } else {
-      await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+      await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
     }
     // A retained recovery notice must not cover mobile navigation or search.
     await page.setViewportSize({ width: 320, height: 740 });
@@ -450,7 +446,7 @@ test("admin UI rejects A-to-B-to-A cursor cycles before shared or custom pagers 
   await plansPane.getByRole("button", { name: "Load more", exact: true }).click();
   await expect(plansPane.locator("tbody tr")).toHaveCount(2);
   await plansPane.getByRole("button", { name: "Load more", exact: true }).click();
-  await expect(page.getByText("invalid_api_response (repeated_cursor)")).toBeVisible();
+  await expect(page.getByText("The list returned the same page again. Refresh the list.")).toBeVisible();
   await expect(plansPane.locator("tbody tr")).toHaveCount(2);
   await expect(plansPane.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
 
@@ -463,7 +459,7 @@ test("admin UI rejects A-to-B-to-A cursor cycles before shared or custom pagers 
   await deliveries.getByRole("button", { name: "Load more", exact: true }).click();
   await expect(deliveries.locator("tbody tr")).toHaveCount(2);
   await deliveries.getByRole("button", { name: "Load more", exact: true }).click();
-  await expect(page.getByText("invalid_api_response (repeated_cursor)")).toBeVisible();
+  await expect(page.getByText("The list returned the same page again. Refresh the list.")).toBeVisible();
   await expect(deliveries.locator("tbody tr")).toHaveCount(2);
   await expect(deliveries.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
 });

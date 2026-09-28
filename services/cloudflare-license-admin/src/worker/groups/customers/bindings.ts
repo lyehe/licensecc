@@ -1,8 +1,12 @@
 import { decodeBase64url } from "@licensecc/licensing-domain/lease/device_protocol";
 import { readUnsignedJson,UnsignedJsonError } from "@licensecc/cloudflare-runtime/http/unsigned_json";
 import type { Actor } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
+import { boundOccupiedSql } from "@licensecc/cloudflare-runtime/device/bound_capacity";
 import type { Env } from "../../env.js";
 import { json } from "../../responses.js";
+
+type Capacity={project:string;feature:string;license_fingerprint:string;in_use:number;limit:number};
+type Denied={project:string;feature:string;license_fingerprint:string;device_key_id:string;ts:number};
 
 const respond=(rid:string,code:string,status:number,data?:unknown)=>json({ok:status>=200&&status<300,code,request_id:rid,data},status,{"cache-control":"no-store"});
 const id=(value:unknown,bytes:number):boolean=>{if(typeof value!=="string")return false;try{return decodeBase64url(value,bytes).length===bytes;}catch{return false;}};
@@ -51,8 +55,36 @@ export async function adminBindings(request:Request,env:Env,actor:Actor,customer
       return item;
     });
     const more=page.length>100,items=page.slice(0,100);
+    // Per-entitlement device-limit capacity and the customer's most recent refused connections.
+    // A second, bounded read on the same session rather than folding into the page statement above:
+    // that statement's cardinality is one row per page item, while capacity/denied are independent,
+    // differently-sized rowsets (<=100 entitlements, <=5 denials) that do not share the page's shape.
+    let capacity:Capacity[]=[],denied:Denied[]=[];
+    if(binding===undefined){
+      const capacityRows=await db.prepare(`SELECT e.project,e.feature,e.license_fingerprint,e.max_active_devices,
+          (SELECT count(*) FROM device_bound_bindings b WHERE b.project=e.project AND b.feature=e.feature AND b.license_fingerprint=e.license_fingerprint
+            AND ${boundOccupiedSql("b","unixepoch()")}) AS in_use
+        FROM entitlements e WHERE e.customer_id=? AND e.enforcement_mode='device_bound_v1' ${project===null?"":"AND e.project=?"}
+        ORDER BY e.project,e.feature,e.license_fingerprint LIMIT 100`)
+        .bind(customer,...(project===null?[]:[project])).all<Record<string,unknown>>();
+      capacity=capacityRows.results.map(row=>({project:String(row.project),feature:String(row.feature),license_fingerprint:String(row.license_fingerprint),
+        in_use:Number(row.in_use),limit:Number(row.max_active_devices)}));
+      // Driven from entitlements (idx_entitlements_customer_project on customer_id,project,feature,
+      // license_fingerprint) into usage_events (idx_usage_events_window on the same three columns),
+      // not the reverse: starting from usage_events would scan every customer's rows for a project
+      // before checking ownership.
+      const deniedRows=await db.prepare(`SELECT u.project,u.feature,u.license_fingerprint,u.device_key_id,u.ts
+        FROM entitlements e
+        JOIN usage_events u ON u.project=e.project AND u.feature=e.feature AND u.license_fingerprint=e.license_fingerprint
+        WHERE e.customer_id=? AND e.enforcement_mode='device_bound_v1' AND u.event_type='denied' AND u.reason='device_limit_reached'
+          ${project===null?"":"AND e.project=?"}
+        ORDER BY u.ts DESC,u.id DESC LIMIT 5`)
+        .bind(customer,...(project===null?[]:[project])).all<Record<string,unknown>>();
+      denied=deniedRows.results.map(row=>({project:String(row.project),feature:String(row.feature),license_fingerprint:String(row.license_fingerprint),
+        device_key_id:String(row.device_key_id),ts:Number(row.ts)}));
+    }
     return respond(rid,binding===undefined?"customer_bindings":"binding_events",200,{customer:{id:account.customer_id,status:account.customer_status},operator:principal(actor),server_time:account.server_time,
-      ...(binding===undefined?{}:{binding_id:binding}),items,next_cursor:more?String(items.at(-1)![binding===undefined?"binding_id":"id"]):null});
+      ...(binding===undefined?{capacity,denied}:{binding_id:binding}),items,next_cursor:more?String(items.at(-1)![binding===undefined?"binding_id":"id"]):null});
   }catch{return respond(rid,"temporarily_unavailable",503);}
 }
 

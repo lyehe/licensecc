@@ -39,6 +39,10 @@
     },
     "./lease/device_policy": {
       "default": "./src/lease/device_policy.mjs"
+    },
+    "./orders/intents": {
+      "types": "./src/orders/intents.d.ts",
+      "default": "./src/orders/intents.mjs"
     }
   },
   "scripts": {

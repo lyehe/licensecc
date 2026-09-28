@@ -24,11 +24,11 @@ export const customerPaths: LabeledPathFragment = {
   entries: [
     ["/api/admin/customers", {
     post: {
-      tags: ["admin:customers"], operationId: "createPortalUser", summary: "Create a customer portal user with an initial password", security: ADMIN_SECURITY,
-      description: "Admin-only. Creates a new customer and password credential atomically. Does not attach an existing account, mark email verified, send email, mint a session, or grant licenses. Password sign-in must be enabled on the portal. A required idempotency key replays the original success without creating another user. Creator attribution is stored in customer metadata; passwords/hashes never enter the response or replay cache.",
+      tags: ["admin:customers"], operationId: "createPortalUser", summary: "Create a customer portal user, invited by default", security: ADMIN_SECURITY,
+      description: "Admin-only. Creates a new customer and password credential atomically. Does not attach an existing account, mark email verified, send email, mint a session, or grant licenses. Password sign-in must be enabled on the portal. A required idempotency key replays the original success without creating another user. Creator attribution is stored in customer metadata; passwords/hashes never enter the response or replay cache. Omitting `password` invites the customer: a random, never-disclosed credential is stored, and the customer sets their own password later from the portal's \"Forgot your password?\". Providing `password` sets it directly instead, for use when the portal cannot send email; a present-but-invalid value (including an empty string) is rejected rather than treated as an invite.",
       parameters: [{ ...idempotencyKeyHeader, required: true }],
-      requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["name", "email", "password"], properties: {
-        name: { type: "string", minLength: 1, maxLength: 128 }, email: { type: "string", format: "email", maxLength: 254 }, password: { type: "string", minLength: 15, maxLength: 128, writeOnly: true, description: "15–128 Unicode characters, at most 512 UTF-8 bytes." },
+      requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["name", "email"], properties: {
+        name: { type: "string", minLength: 1, maxLength: 128 }, email: { type: "string", format: "email", maxLength: 254 }, password: { type: "string", minLength: 15, maxLength: 128, writeOnly: true, description: "Optional; omit to invite the customer instead of setting a password. When present: 15–128 Unicode characters, at most 512 UTF-8 bytes." },
       } } } } },
       responses: { "200": okResponse("Created customer with unverified login_email; email remains empty.", "#/components/schemas/CustomerRow", "customer_created"),
         "400": errorResponse("Invalid body or missing/invalid idempotency key.", "invalid_request", "invalid_json", "invalid_idempotency_key"),
@@ -66,6 +66,21 @@ export const customerPaths: LabeledPathFragment = {
         ...ADMIN_AUTH_ERRORS,
         "404": errorResponse("No customer with that id.", "not_found"),
       },
+    },
+  }],
+    ["/api/admin/customers/{id}/licenses", {
+    post: {
+      tags: ["admin:licenses"], operationId: "createCustomerLicense", summary: "Create a license record for an active customer", security: ADMIN_SECURITY,
+      description: "Admin-only. Inserts one license record (id `lic_<uuid>`) for the customer and project, so a protected entitlement can reference it; the record alone grants no access. The customer must be active, checked in the same statement as the insert. A required idempotency key replays the original response without creating another record. Creator attribution is stored in license metadata. The created record and its replays are sent no-store.",
+      parameters: [idParam, { ...idempotencyKeyHeader, required: true }],
+      requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/LicenseCreateInput" } } } },
+      responses: { "200": okResponse("Created license record.", "#/components/schemas/LicenseCreatedData", "license_created"),
+        "400": errorResponse("Invalid body, project, or label, or a missing/invalid idempotency key.", "invalid_request", "invalid_json", "invalid_idempotency_key"),
+        ...ADMIN_MUTATION_AUTH_ERRORS,
+        "404": errorResponse("No customer with that id.", "not_found"),
+        "409": errorResponse("The customer is suspended.", "customer_inactive"),
+        "413": errorResponse("Body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Creation failed or development authentication is forbidden here.", "mutation_failed", "dev_bearer_forbidden_in_environment") },
     },
   }],
     ["/api/admin/customers/{id}/disable", {

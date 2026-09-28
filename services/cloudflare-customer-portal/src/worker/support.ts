@@ -43,6 +43,13 @@ export function envelope<T>(reqId: string, code: string, data?: T, status = 200,
   return json(body, status, headers);
 }
 
+// A `retry-after` header (seconds) for a 429 whose wait time portalRateLimit already computed.
+// Returns {} when no value is given, so `{ ...HEADERS, ...retryAfterHeaders(x) }` is always
+// safe to spread regardless of whether this specific 429 was in the header rollout.
+export function retryAfterHeaders(retryAfter?: number): HeadersInit {
+  return typeof retryAfter === "number" && Number.isFinite(retryAfter) ? { "retry-after": String(retryAfter) } : {};
+}
+
 export function entitlementId(project: string, feature: string, licenseFingerprint: string): string {
   const raw = JSON.stringify([project, feature, licenseFingerprint]);
   const bytes = new TextEncoder().encode(raw);
@@ -71,7 +78,10 @@ function licenseMode(row: { is_trial?: number; pool_size?: number }): LicenseMod
   return Number(row.pool_size ?? 0) > 0 ? "floating" : "node_locked";
 }
 
-export function withPortalEntitlement(row: Omit<OwnedEntitlement, "id" | "license_mode">): OwnedEntitlement {
+// Keeps any extra column a caller selected (the list's trial_ends_at) in the returned row's type.
+export function withPortalEntitlement<Row extends Omit<OwnedEntitlement, "id" | "license_mode">>(
+  row: Row,
+): Row & Pick<OwnedEntitlement, "id" | "license_mode"> {
   return {
     ...row,
     id: entitlementId(row.project, row.feature, row.license_fingerprint),
@@ -116,4 +126,33 @@ export async function readJson(request: Request, reqId: string): Promise<Record<
 
 export function publicOrigin(env: Env): string {
   return (env.PORTAL_PUBLIC_ORIGIN ?? "").replace(/\/$/, "");
+}
+
+// One address only: no query, no list separator (",", ";" or a percent-encoded one), no controls.
+// eslint-disable-next-line no-control-regex -- control characters are rejected deliberately
+const SUPPORT_MAILTO = /^mailto:[^\s@?,;%\u0000-\u001f\u007f]+@[^\s@?,;%\u0000-\u001f\u007f]+$/i;
+
+// The operator's customer-facing support contact, published by the providers envelope and placed
+// in an href by the UI. Only a credential-free https: URL or a single mailto: address qualifies;
+// anything else (javascript:, http:, data:, a relative path, empty) counts as unset. This is its
+// own check because canonicalHttpsOrigin() deliberately rejects both mailto: and URL paths.
+export function supportContact(env: Pick<Env, "PORTAL_SUPPORT_CONTACT">): string | null {
+  const value = (env.PORTAL_SUPPORT_CONTACT ?? "").trim();
+  if (SUPPORT_MAILTO.test(value)) return value;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  return url.protocol === "https:" && url.username === "" && url.password === "" ? url.href : null;
+}
+
+// Bodyless 303 redirect: no-store, no-referrer, with zero or more Set-Cookie values appended in
+// order. Shared by every browser-facing auth redirect (oauth start/callback, and the magic-link
+// form-encoded redeem branch) so they all go through one hardened response shape.
+export function redirect(location: string, cookies: string[] = []): Response {
+  const headers = new Headers({ location, "cache-control": "no-store", "referrer-policy": "no-referrer" });
+  for (const value of cookies) headers.append("set-cookie", value);
+  return new Response(null, { status: 303, headers });
 }

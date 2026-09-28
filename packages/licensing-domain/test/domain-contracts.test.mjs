@@ -18,6 +18,7 @@ import {
   normalizePlanProjectionInput,
   planProjectionMatchesDesired,
 } from "../src/catalog/plan_projection.mjs";
+import { KNOWN_INTENTS, ORDER_INTENTS } from "../src/orders/intents.mjs";
 
 const DOMAIN_SUBPATHS = [
   "@licensecc/licensing-domain/audit/audit_digest",
@@ -28,6 +29,7 @@ const DOMAIN_SUBPATHS = [
   "@licensecc/licensing-domain/lease/canonical_payload",
   "@licensecc/licensing-domain/lease/trial",
   "@licensecc/licensing-domain/usage/usage_report",
+  "@licensecc/licensing-domain/orders/intents",
 ];
 
 test("every explicit domain export resolves without Worker bindings", async () => {
@@ -118,4 +120,14 @@ test("plan projection support_until is a safe, bounded epoch second", () => {
   for (const support_until of [MAX_SUPPORT_UNTIL_EPOCH_SECONDS + 1, 1e100, 1.5]) {
     assert.throws(() => normalizePlanProjectionInput({ ...base, support_until }), /invalid_support_until/);
   }
+});
+
+test("order intents form a frozen closed set backing KNOWN_INTENTS", () => {
+  assert.ok(Object.isFrozen(ORDER_INTENTS));
+  assert.equal(KNOWN_INTENTS.size, ORDER_INTENTS.length);
+  for (const intent of ORDER_INTENTS) {
+    assert.equal(KNOWN_INTENTS.has(intent), true);
+  }
+  assert.equal(KNOWN_INTENTS.has("subscription.active"), true);
+  assert.equal(KNOWN_INTENTS.has("not_a_real_intent"), false);
 });

@@ -41,6 +41,14 @@
       "types": "./src/d1/idempotency_store.d.ts",
       "default": "./src/d1/idempotency_store.mjs"
     },
+    "./device/bound_capacity": {
+      "types": "./src/device/bound_capacity.d.ts",
+      "default": "./src/device/bound_capacity.mjs"
+    },
+    "./device/bound_trial": {
+      "types": "./src/device/bound_trial.d.ts",
+      "default": "./src/device/bound_trial.mjs"
+    },
     "./entitlements/policy_store": {
       "types": "./src/entitlements/policy_store.d.ts",
       "default": "./src/entitlements/policy_store.mjs"
@@ -57,10 +65,19 @@
       "default": "./src/lease/seat_reclaim.mjs"
     },
     "./lease/trial_store": {
+      "types": "./src/lease/trial_store.d.ts",
       "default": "./src/lease/trial_store.mjs"
     },
     "./webhooks/webhook": {
       "default": "./src/webhooks/webhook.mjs"
+    },
+    "./webhooks/event_types": {
+      "types": "./src/webhooks/event_types.d.ts",
+      "default": "./src/webhooks/event_types.mjs"
+    },
+    "./webhooks/webhook_endpoint": {
+      "types": "./src/webhooks/webhook_endpoint.d.ts",
+      "default": "./src/webhooks/webhook_endpoint.mjs"
     },
     "./auth/password": {
       "types": "./src/auth/password.d.ts",
@@ -74,7 +91,7 @@
   "scripts": {
     "build": "npm run typecheck",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --experimental-sqlite --test test/*.test.mjs"
   },
   "devDependencies": {
     "typescript": "7.0.2"

@@ -81,6 +81,26 @@ class ProviderResult(IntEnum):
     INTERNAL_ERROR = 255
 
 
+class DenialDetail(IntEnum):
+    """Why the native library refused, when it can tell; never permission.
+
+    ``DEVICE_LIMIT`` comes with ``Result.CONFLICT`` from activation: every device slot of
+    the license is in use. A value newer than this SDK keeps its number (named
+    ``UNKNOWN_<n>``); treat it like ``NONE``.
+    """
+
+    NONE = 0
+    DEVICE_LIMIT = 1
+
+    @classmethod
+    def _missing_(cls, value):
+        if type(value) is not int or not 0 <= value <= 0xFFFFFFFF:
+            return None
+        unknown = int.__new__(cls, value)
+        unknown._name_, unknown._value_ = f"UNKNOWN_{value}", value
+        return unknown
+
+
 @dataclass(frozen=True)
 class Outcome:
     code: Result
@@ -88,6 +108,7 @@ class Outcome:
     checkpoint_result: CheckpointResult = CheckpointResult.NOT_ATTEMPTED
     renewal_due: bool = False
     effective_time: int = 0
+    detail: DenialDetail = DenialDetail.NONE  # Why a refusal happened; handle code first.
 
     def __bool__(self) -> bool:
         raise TypeError("Inspect outcome.code explicitly; only authorize Result.OK grants access")
@@ -145,10 +166,11 @@ class Configuration:
 
 
 def _outcome(code: int, raw: abi.Outcome) -> Outcome:
-    if raw.size != ct.sizeof(abi.Outcome) or raw.version != 1 or raw.reserved != 0 or raw.renewal_due not in (0, 1):
+    if raw.size != ct.sizeof(abi.Outcome) or raw.version != 1 or raw.renewal_due not in (0, 1):
         raise RuntimeError("Invalid native outcome ABI")
+    # A detail never grants access, so a value newer than this SDK is kept rather than rejected.
     return Outcome(Result(code), ProviderResult(raw.provider_result), CheckpointResult(raw.checkpoint_result),
-                   raw.renewal_due == 1, raw.effective_time)
+                   raw.renewal_due == 1, raw.effective_time, DenialDetail(raw.denial_detail))
 
 
 def _encode_configuration(api, configuration: Configuration) -> abi.Options:

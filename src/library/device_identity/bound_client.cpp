@@ -107,6 +107,7 @@ BoundRenewResult BoundRenewalClient::exchange(BoundWireOperation operation, cons
 			break;
 		case BoundWireKind::conflict:
 			out.status = BoundRenewStatus::conflict;
+			out.detail = decoded.detail;
 			break;
 		case BoundWireKind::request_rejected:
 			out.status = BoundRenewStatus::rejected;

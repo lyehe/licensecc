@@ -1,7 +1,7 @@
 import { encodeBase64url, deviceEnrollmentComparisonInput, formatDeviceEnrollmentComparison } from "@licensecc/licensing-domain/lease/device_protocol";
 import { importBoundDeviceKey, sha256Hex } from "./bound_crypto.mjs";
 import { BoundRequestError, validateBoundClient, validateBoundRequest } from "./bound_request.mjs";
-import { boundTrialSql } from "./bound_trial.mjs";
+import { boundTrialSql } from "@licensecc/cloudflare-runtime/device/bound_trial";
 
 const encoder = new TextEncoder();
 export const boundSecretHash = value => sha256Hex(encoder.encode(value));

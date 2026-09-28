@@ -28,7 +28,8 @@ final class DeviceBoundNative implements DeviceBoundApi {
             // JVM owns library lifetime. Never fall back to PATH, extract a DLL, or switch implementations.
             loadedPath = canonical;
             System.load(canonical.toString());
-            if (version() != 1) throw new UnsatisfiedLinkError("Incompatible Licensecc JNI protocol");
+            // Protocol 2 added the refusal detail to every outcome array.
+            if (version() != 2) throw new UnsatisfiedLinkError("Incompatible Licensecc JNI protocol");
             ready = true;
         }
         return new DeviceBoundNative();

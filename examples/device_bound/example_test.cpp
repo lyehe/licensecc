@@ -7,6 +7,12 @@ bool busy_save = false;
 unsigned saves = 0;
 unsigned abandons = 0;
 LCC_BOUND_RESULT abandon_result = LCC_BOUND_ONLINE_REQUIRED;
+uint32_t detail = LCC_BOUND_DETAIL_NONE;
+LCC_BOUND_RESULT activate(LccDeviceBoundClient*, LccDeviceBoundOutcome* out) {
+	out->checkpoint_result = LCC_BOUND_CHECKPOINT_NOT_ATTEMPTED;
+	out->denial_detail = detail;
+	return primary;
+}
 LCC_BOUND_RESULT abandon(LccDeviceBoundClient*, LccDeviceBoundOutcome* out) {
 	++abandons;
 	out->checkpoint_result = LCC_BOUND_CHECKPOINT_UNCHANGED;
@@ -26,6 +32,7 @@ LCC_BOUND_RESULT save(LccDeviceBoundClient*, LccDeviceBoundOutcome* out) {
 	return LCC_BOUND_OK;
 }
 }  // namespace example_fault
+#define lcc_device_bound_activate example_fault::activate
 #define lcc_device_bound_renew example_fault::renew
 #define lcc_device_bound_save_checkpoint example_fault::save
 #define lcc_device_bound_abandon_pending example_fault::abandon
@@ -35,6 +42,7 @@ LCC_BOUND_RESULT save(LccDeviceBoundClient*, LccDeviceBoundOutcome* out) {
 #undef lcc_device_bound_save_checkpoint
 #undef lcc_device_bound_abandon_pending
 #undef lcc_device_bound_renew
+#undef lcc_device_bound_activate
 
 namespace {
 struct Console {
@@ -85,6 +93,26 @@ int main() {
 			require(update(client, false) == LCC_BOUND_BUSY);
 			require(example_fault::primary == LCC_BOUND_CONFLICT);
 			require(example_fault::abandons == 2);
+		}
+		const std::string device_limit =
+			"All device slots for this license are in use. Disconnect a device in the customer portal (Devices), then "
+			"try again.";
+		const std::string unresolved = "Issuance is unresolved (result 7).";
+		{
+			Console console("quit\n");
+			example_fault::primary = LCC_BOUND_CONFLICT;
+			example_fault::detail = LCC_BOUND_DETAIL_DEVICE_LIMIT;
+			require(update(client, true) == LCC_BOUND_CANCELLED);
+			require(console.output.str().find(device_limit) != std::string::npos);
+			require(console.output.str().find(unresolved) == std::string::npos);
+			require(example_fault::abandons == 2);
+		}
+		{
+			Console console("quit\n");
+			example_fault::detail = LCC_BOUND_DETAIL_NONE;
+			require(update(client, true) == LCC_BOUND_CANCELLED);
+			require(console.output.str().find(device_limit) == std::string::npos);
+			require(console.output.str().find(unresolved) != std::string::npos);
 		}
 		{
 			Console console("quit\n");

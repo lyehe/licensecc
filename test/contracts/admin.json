@@ -25,6 +25,10 @@
       "path": "/api/admin/customers"
     },
     {
+      "method": "POST",
+      "path": "/api/admin/customers/{id}/licenses"
+    },
+    {
       "method": "GET",
       "path": "/api/admin/customers/{id}/apps"
     },
@@ -229,6 +233,10 @@
       "path": "/api/admin/webhooks/{id}/reenable"
     },
     {
+      "method": "POST",
+      "path": "/api/admin/webhooks/{id}/test"
+    },
+    {
       "method": "GET",
       "path": "/api/admin/entitlements"
     },
@@ -308,6 +316,7 @@
     "GET /api/admin/catalog/projects",
     "GET /api/admin/customers",
     "POST /api/admin/customers",
+    "POST /api/admin/customers/{id}/licenses",
     "GET /api/admin/customers/{id}",
     "POST /api/admin/customers/{id}/disable",
     "POST /api/admin/customers/{id}/reenable",
@@ -349,6 +358,7 @@
     "PATCH /api/admin/webhooks/{id}",
     "POST /api/admin/webhooks/{id}/disable",
     "POST /api/admin/webhooks/{id}/reenable",
+    "POST /api/admin/webhooks/{id}/test",
     "GET /api/admin/entitlements",
     "POST /api/admin/entitlements",
     "POST /api/admin/entitlements/batch",
@@ -463,6 +473,42 @@
             "ids"
           ],
           "type": "object"
+        },
+        "CapacityInUseData": {
+          "additionalProperties": false,
+          "properties": {
+            "devices_in_use": {
+              "description": "Devices holding a slot on this license (entitlement): active, or disconnected but still within their hold. Read after the refusal, so it is advisory.",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "devices_in_use"
+          ],
+          "type": "object"
+        },
+        "CapacityInUseError": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            {
+              "properties": {
+                "code": {
+                  "const": "capacity_in_use"
+                },
+                "data": {
+                  "$ref": "#/components/schemas/CapacityInUseData"
+                }
+              },
+              "required": [
+                "code",
+                "data"
+              ],
+              "type": "object"
+            }
+          ]
         },
         "CatalogFeature": {
           "properties": {
@@ -1616,6 +1662,12 @@
                     "device_bound_v1"
                   ],
                   "type": "string"
+                },
+                "max_active_devices": {
+                  "description": "Device limit for a create that selects no policy; omitted, the create keeps the stored limit (1 for a new grant). It is written in the create's own batch. A selected policy stamps its own limit, so sending both returns 400 invalid_request. On a protected grant, a limit below the devices already connected is refused as protected_creation_conflict with data.reason invalid_capacity.",
+                  "maximum": 1000000,
+                  "minimum": 1,
+                  "type": "integer"
                 }
               },
               "then": {
@@ -1668,6 +1720,26 @@
                 ]
               },
               "type": "object"
+            },
+            {
+              "if": {
+                "properties": {
+                  "policy_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "policy_id"
+                ]
+              },
+              "then": {
+                "not": {
+                  "required": [
+                    "max_active_devices"
+                  ]
+                }
+              }
             }
           ]
         },
@@ -1818,7 +1890,50 @@
           "type": "object"
         },
         "EntitlementPatch": {
-          "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable.",
+          "dependentSchemas": {
+            "max_active_devices": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "device_hash"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "assertion_ttl_seconds"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "valid_from"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "valid_until"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "notes"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "customer_id"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "license_id"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the optional expected_* precondition may), or the PATCH returns 400 invalid_request.",
           "not": {
             "required": [
               "enforcement_mode"
@@ -1847,6 +1962,12 @@
                 "string",
                 "null"
               ]
+            },
+            "max_active_devices": {
+              "description": "Device limit. A protected grant refuses a limit below its connected devices with 409 capacity_in_use and data.devices_in_use.",
+              "maximum": 1000000,
+              "minimum": 1,
+              "type": "integer"
             },
             "notes": {
               "maxLength": 1000,
@@ -1914,6 +2035,11 @@
                 "string",
                 "null"
               ]
+            },
+            "max_active_devices": {
+              "description": "Device limit: the most devices this license (entitlement) may have connected at once.",
+              "minimum": 0,
+              "type": "integer"
             },
             "notes": {
               "type": "string"
@@ -2071,6 +2197,9 @@
                   "created_at": {
                     "type": "integer"
                   },
+                  "detail": {
+                    "type": "string"
+                  },
                   "event_type": {
                     "type": "string"
                   },
@@ -2108,6 +2237,13 @@
                 "type": "object"
               },
               "type": "array"
+            },
+            "next_cursor": {
+              "description": "Opaque keyset page token; pass back as `cursor` for the next page. null on the last page.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "type": "object"
@@ -2123,11 +2259,21 @@
                       "null"
                     ]
                   },
+                  "customer_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "days_left": {
                     "description": "ceil((valid_until - now)/86400); >=1 for a still-future expiry.",
                     "type": "integer"
                   },
                   "feature": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "description": "The entitlement's canonical id (project+feature+license_fingerprint), for deep-linking the exact record.",
                     "type": "string"
                   },
                   "license_fingerprint": {
@@ -2137,11 +2283,12 @@
                     "type": "string"
                   },
                   "valid_until": {
-                    "description": "Epoch seconds the entitlement expires at.",
+                    "description": "Epoch seconds the entitlement expires at (an activated activation-basis trial reports its trial deadline here instead).",
                     "type": "integer"
                   }
                 },
                 "required": [
+                  "id",
                   "project",
                   "feature",
                   "license_fingerprint",
@@ -2159,6 +2306,53 @@
               ]
             }
           },
+          "type": "object"
+        },
+        "LicenseCreatedData": {
+          "properties": {
+            "created_at": {
+              "type": "integer"
+            },
+            "customer_id": {
+              "type": "string"
+            },
+            "id": {
+              "pattern": "^lic_[0-9a-f-]{36}$",
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "customer_id",
+            "project",
+            "label",
+            "created_at"
+          ],
+          "type": "object"
+        },
+        "LicenseCreateInput": {
+          "properties": {
+            "label": {
+              "default": "",
+              "description": "Optional operator label. Trimmed; C0 control characters and DEL are rejected.",
+              "maxLength": 128,
+              "type": "string"
+            },
+            "project": {
+              "description": "Protected project ID, under the same rule a protected entitlement uses.",
+              "pattern": "^[A-Za-z0-9_.:-]{1,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project"
+          ],
           "type": "object"
         },
         "LicensesListData": {
@@ -3010,6 +3204,52 @@
           },
           "type": "object"
         },
+        "ProtectedCreationConflictData": {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "enum": [
+                "customer_inactive",
+                "license_missing",
+                "license_customer_mismatch",
+                "fingerprint_in_use",
+                "plan_assignment_conflict",
+                "lease_history_exists",
+                "policy_mismatch",
+                "invalid_trial",
+                "devices_connected",
+                "invalid_capacity",
+                "unknown"
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
+        },
+        "ProtectedCreationConflictError": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            {
+              "properties": {
+                "code": {
+                  "const": "protected_creation_conflict"
+                },
+                "data": {
+                  "$ref": "#/components/schemas/ProtectedCreationConflictData"
+                }
+              },
+              "required": [
+                "code",
+                "data"
+              ],
+              "type": "object"
+            }
+          ]
+        },
         "ReasonRequiredBody": {
           "properties": {
             "reason": {
@@ -3463,7 +3703,7 @@
             },
             "event_types": {
               "default": "",
-              "description": "CSV event-type filter; '' = all.",
+              "description": "CSV event-type filter; '' = all. Each token must be one of the entitlement/customer/order event types the dispatcher actually emits (else 400 invalid_event_types with data.allowed).",
               "maxLength": 1024,
               "type": "string"
             },
@@ -3498,6 +3738,7 @@
               "type": "string"
             },
             "event_types": {
+              "description": "CSV event-type filter; '' = all. Each token must be one of the entitlement/customer/order event types the dispatcher actually emits (else 400 invalid_event_types with data.allowed).",
               "maxLength": 1024,
               "type": "string"
             },
@@ -8066,7 +8307,7 @@
           ]
         },
         "post": {
-          "description": "Admin-only. Creates a new customer and password credential atomically. Does not attach an existing account, mark email verified, send email, mint a session, or grant licenses. Password sign-in must be enabled on the portal. A required idempotency key replays the original success without creating another user. Creator attribution is stored in customer metadata; passwords/hashes never enter the response or replay cache.",
+          "description": "Admin-only. Creates a new customer and password credential atomically. Does not attach an existing account, mark email verified, send email, mint a session, or grant licenses. Password sign-in must be enabled on the portal. A required idempotency key replays the original success without creating another user. Creator attribution is stored in customer metadata; passwords/hashes never enter the response or replay cache. Omitting `password` invites the customer: a random, never-disclosed credential is stored, and the customer sets their own password later from the portal's \"Forgot your password?\". Providing `password` sets it directly instead, for use when the portal cannot send email; a present-but-invalid value (including an empty string) is rejected rather than treated as an invite.",
           "operationId": "createPortalUser",
           "parameters": [
             {
@@ -8096,7 +8337,7 @@
                       "type": "string"
                     },
                     "password": {
-                      "description": "15–128 Unicode characters, at most 512 UTF-8 bytes.",
+                      "description": "Optional; omit to invite the customer instead of setting a password. When present: 15–128 Unicode characters, at most 512 UTF-8 bytes.",
                       "maxLength": 128,
                       "minLength": 15,
                       "type": "string",
@@ -8105,8 +8346,7 @@
                   },
                   "required": [
                     "name",
-                    "email",
-                    "password"
+                    "email"
                   ],
                   "type": "object"
                 }
@@ -8308,7 +8548,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Create a customer portal user with an initial password",
+          "summary": "Create a customer portal user, invited by default",
           "tags": [
             "admin:customers"
           ]
@@ -8879,7 +9119,7 @@
       },
       "/api/admin/customers/{id}/bindings": {
         "get": {
-          "description": "At most 100 rows ordered by binding ID. Live keyset pages recheck both device and entitlement ownership; refresh to see inserts before a cursor. State is projected using database server_time: active bindings retain capacity after lease expiry; retiring bindings at the hold deadline are released. Last verified contact is not live presence. No private keys or proofs are exposed. The operator object comes from current authentication and supports the retirement precondition.",
+          "description": "At most 100 rows ordered by binding ID. Live keyset pages recheck both device and entitlement ownership; refresh to see inserts before a cursor. State is projected using database server_time: active bindings retain capacity after lease expiry; retiring bindings at the hold deadline are released. Last verified contact is not live presence. No private keys or proofs are exposed. The operator object comes from current authentication and supports the retirement precondition. capacity reports device-limit occupancy (the same active-or-held-retiring rule as the lease path) for the customer's device_bound_v1 entitlements honouring the project filter; denied is the 5 most recent device_limit_reached refusals across those entitlements, newest first. Both are read separately from the page on the same database session.",
           "operationId": "listCustomerBindings",
           "parameters": [
             {
@@ -8933,6 +9173,42 @@
                       "data": {
                         "additionalProperties": false,
                         "properties": {
+                          "capacity": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "feature": {
+                                  "type": "string"
+                                },
+                                "in_use": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "license_fingerprint": {
+                                  "type": "string"
+                                },
+                                "limit": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "project": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "project",
+                                "feature",
+                                "license_fingerprint",
+                                "in_use",
+                                "limit"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 100,
+                            "type": "array"
+                          },
                           "customer": {
                             "additionalProperties": false,
                             "properties": {
@@ -8951,6 +9227,40 @@
                               "status"
                             ],
                             "type": "object"
+                          },
+                          "denied": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "device_key_id": {
+                                  "type": "string"
+                                },
+                                "feature": {
+                                  "type": "string"
+                                },
+                                "license_fingerprint": {
+                                  "type": "string"
+                                },
+                                "project": {
+                                  "type": "string"
+                                },
+                                "ts": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "project",
+                                "feature",
+                                "license_fingerprint",
+                                "device_key_id",
+                                "ts"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 5,
+                            "type": "array"
                           },
                           "items": {
                             "items": {
@@ -9066,6 +9376,8 @@
                           "customer",
                           "operator",
                           "server_time",
+                          "capacity",
+                          "denied",
                           "items",
                           "next_cursor"
                         ],
@@ -10110,6 +10422,260 @@
           ]
         }
       },
+      "/api/admin/customers/{id}/licenses": {
+        "post": {
+          "description": "Admin-only. Inserts one license record (id `lic_<uuid>`) for the customer and project, so a protected entitlement can reference it; the record alone grants no access. The customer must be active, checked in the same statement as the insert. A required idempotency key replays the original response without creating another record. Creator attribution is stored in license metadata. The created record and its replays are sent no-store.",
+          "operationId": "createCustomerLicense",
+          "parameters": [
+            {
+              "description": "Resource identifier from the URL path. For entitlements this is the encoded entitlement id; for customers it is the URI-decoded customer id.",
+              "in": "path",
+              "name": "id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Optional idempotency key (max 128 chars). Mutations with the same scope+key+actor are cached and replayed from D1. An invalid (over-long/empty) value returns 400 invalid_idempotency_key.",
+              "in": "header",
+              "name": "idempotency-key",
+              "required": true,
+              "schema": {
+                "maxLength": 128,
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LicenseCreateInput"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/SuccessEnvelope"
+                      },
+                      {
+                        "properties": {
+                          "code": {
+                            "const": "license_created"
+                          },
+                          "data": {
+                            "$ref": "#/components/schemas/LicenseCreatedData"
+                          }
+                        },
+                        "required": [
+                          "data"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                }
+              },
+              "description": "Created license record."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_idempotency_key": {
+                      "value": {
+                        "code": "invalid_idempotency_key",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_json": {
+                      "value": {
+                        "code": "invalid_json",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid body, project, or label, or a missing/invalid idempotency key."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_auth_not_configured": {
+                      "value": {
+                        "code": "admin_auth_not_configured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "missing_access_jwt": {
+                      "value": {
+                        "code": "missing_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authentication failed."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_role_denied": {
+                      "value": {
+                        "code": "admin_role_denied",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "admin_role_required": {
+                      "value": {
+                        "code": "admin_role_required",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_access_jwt": {
+                      "value": {
+                        "code": "invalid_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authorization failed (RBAC / invalid JWT / admin role required)."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "No customer with that id."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "customer_inactive": {
+                      "value": {
+                        "code": "customer_inactive",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "The customer is suspended."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "body_too_large": {
+                      "value": {
+                        "code": "body_too_large",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Body exceeds 8192 bytes."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "dev_bearer_forbidden_in_environment": {
+                      "value": {
+                        "code": "dev_bearer_forbidden_in_environment",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "mutation_failed": {
+                      "value": {
+                        "code": "mutation_failed",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Creation failed or development authentication is forbidden here."
+            }
+          },
+          "security": [
+            {
+              "cloudflareAccess": []
+            },
+            {
+              "devBearer": []
+            }
+          ],
+          "summary": "Create a license record for an active customer",
+          "tags": [
+            "admin:licenses"
+          ]
+        }
+      },
       "/api/admin/customers/{id}/reenable": {
         "post": {
           "operationId": "reenableCustomer",
@@ -10710,6 +11276,15 @@
               }
             },
             {
+              "description": "Exact license ownership filter.",
+              "in": "query",
+              "name": "license_id",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
               "description": "Exact-match project filter.",
               "in": "query",
               "name": "project",
@@ -10991,7 +11566,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / id / idempotency key, or a policy_id was supplied while POLICY_STAMP_MODE is off."
+              "description": "Invalid request / json / id / idempotency key (including max_active_devices outside 1-1,000,000 or sent with a policy_id), or a policy_id was supplied while POLICY_STAMP_MODE is off."
             },
             "401": {
               "content": {
@@ -11099,6 +11674,9 @@
                     "protected_creation_conflict": {
                       "value": {
                         "code": "protected_creation_conflict",
+                        "data": {
+                          "reason": "customer_inactive"
+                        },
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
@@ -11119,11 +11697,38 @@
                     }
                   },
                   "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
+                    "oneOf": [
+                      {
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/ErrorEnvelope"
+                          },
+                          {
+                            "properties": {
+                              "code": {
+                                "enum": [
+                                  "revoked_entitlement_is_terminal",
+                                  "stale_transition",
+                                  "enforcement_mode_conflict",
+                                  "idempotency_request_conflict"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "code"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      {
+                        "$ref": "#/components/schemas/ProtectedCreationConflictError"
+                      }
+                    ]
                   }
                 }
               },
-              "description": "Terminal or concurrent state, enforcement mismatch, protected eligibility failure, or an idempotency key already used for another tuple/mode."
+              "description": "Terminal or concurrent state, enforcement mismatch, protected eligibility failure (data.reason names the failed rule), or an idempotency key already used for another tuple/mode."
             },
             "413": {
               "content": {
@@ -11462,7 +12067,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / id / idempotency key."
+              "description": "Invalid request / json / id / idempotency key, or max_active_devices outside 1-1,000,000 or sent with another patch field."
             },
             "401": {
               "content": {
@@ -11546,6 +12151,16 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "capacity_in_use": {
+                      "value": {
+                        "code": "capacity_in_use",
+                        "data": {
+                          "devices_in_use": 3
+                        },
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
                     "revoked_entitlement_is_terminal": {
                       "value": {
                         "code": "revoked_entitlement_is_terminal",
@@ -11562,11 +12177,36 @@
                     }
                   },
                   "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
+                    "oneOf": [
+                      {
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/ErrorEnvelope"
+                          },
+                          {
+                            "properties": {
+                              "code": {
+                                "enum": [
+                                  "revoked_entitlement_is_terminal",
+                                  "stale_transition"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "code"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      {
+                        "$ref": "#/components/schemas/CapacityInUseError"
+                      }
+                    ]
                   }
                 }
               },
-              "description": "Target entitlement is revoked (terminal), or it changed after this request observed it; refetch and retry the latter."
+              "description": "Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry), or a protected grant has more connected devices than the requested device limit (data.devices_in_use; disconnect devices first)."
             },
             "413": {
               "content": {
@@ -14220,6 +14860,80 @@
           "operationId": "listEvents",
           "parameters": [
             {
+              "description": "Exact-match project filter.",
+              "in": "query",
+              "name": "project",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Exact-match feature filter.",
+              "in": "query",
+              "name": "feature",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Exact canonical entitlement ID; scopes to that one entitlement's events.",
+              "in": "query",
+              "name": "entitlement_id",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Exact-match event type filter.",
+              "in": "query",
+              "name": "event_type",
+              "required": false,
+              "schema": {
+                "enum": [
+                  "create",
+                  "update",
+                  "disable",
+                  "reenable",
+                  "revoke",
+                  "upsert",
+                  "revoked-override"
+                ],
+                "type": "string"
+              }
+            },
+            {
+              "description": "Exact-match actor filter.",
+              "in": "query",
+              "name": "actor",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Only events at or after this epoch-second timestamp.",
+              "in": "query",
+              "name": "since",
+              "required": false,
+              "schema": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            {
+              "description": "Only events at or before this epoch-second timestamp.",
+              "in": "query",
+              "name": "until",
+              "required": false,
+              "schema": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            {
               "allowEmptyValue": true,
               "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
@@ -14230,6 +14944,17 @@
                 "maximum": 100,
                 "minimum": 1,
                 "type": "integer"
+              }
+            },
+            {
+              "allowEmptyValue": true,
+              "description": "Opaque keyset page token from a previous page's next_cursor (\"created_at:id\"); omit for the first page. Malformed values return 400 invalid_request.",
+              "in": "query",
+              "name": "cursor",
+              "required": false,
+              "schema": {
+                "pattern": "^[0-9]+:[0-9]+$",
+                "type": "string"
               }
             },
             {
@@ -14272,7 +14997,7 @@
                   }
                 }
               },
-              "description": "Audit-event list (JSON), or a CSV attachment when ?format=csv."
+              "description": "Audit-event page (JSON), or a CSV attachment when ?format=csv (same filters, no cursor)."
             },
             "400": {
               "content": {
@@ -14291,7 +15016,7 @@
                   }
                 }
               },
-              "description": "Invalid limit query parameter (omitted or empty values use documented defaults; explicit values must be safe integers within the documented bounds)."
+              "description": "Invalid limit or cursor query parameter (omitted or empty values use documented defaults; explicit values must be safe integers within the documented bounds)."
             },
             "401": {
               "content": {
@@ -14354,7 +15079,7 @@
               "devBearer": []
             }
           ],
-          "summary": "List entitlement audit events (most recent first)",
+          "summary": "List entitlement audit events (most recent first), optionally filtered",
           "tags": [
             "admin:entitlements"
           ]
@@ -17510,6 +18235,13 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "invalid_event_types": {
+                      "value": {
+                        "code": "invalid_event_types",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
                     "invalid_idempotency_key": {
                       "value": {
                         "code": "invalid_idempotency_key",
@@ -17544,7 +18276,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / idempotency key, or a non-https URL."
+              "description": "Invalid request / json / idempotency key, a non-https URL, or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list)."
             },
             "401": {
               "content": {
@@ -17859,6 +18591,13 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "invalid_event_types": {
+                      "value": {
+                        "code": "invalid_event_types",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
                     "invalid_idempotency_key": {
                       "value": {
                         "code": "invalid_idempotency_key",
@@ -17893,7 +18632,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / idempotency key, or a non-https URL (status/id are not patchable)."
+              "description": "Invalid request / json / idempotency key, a non-https URL (status/id are not patchable), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list)."
             },
             "401": {
               "content": {
@@ -18575,6 +19314,304 @@
             }
           ],
           "summary": "Re-enable a disabled webhook endpoint (admin-only)",
+          "tags": [
+            "admin:webhooks"
+          ]
+        }
+      },
+      "/api/admin/webhooks/{id}/test": {
+        "post": {
+          "description": "The licensing backend, which alone holds the webhook signing secret, re-checks the stored URL is https and POSTs {\"type\":\"test\",\"endpoint_id\",\"sent_at\"} signed exactly like a real delivery, with Licensecc-Event-Source: test and a fresh test- Licensecc-Webhook-Id. It never follows a redirect and waits at most 5 seconds. Only the status class is returned. One test per endpoint per 60 seconds. Not idempotent and not recorded as a delivery. Responses are no-store.",
+          "operationId": "sendWebhookTest",
+          "parameters": [
+            {
+              "description": "Resource identifier from the URL path. For entitlements this is the encoded entitlement id; for customers it is the URI-decoded customer id.",
+              "in": "path",
+              "name": "id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyBody"
+                }
+              }
+            },
+            "description": "Empty JSON object accepted; no body fields are read.",
+            "required": false
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/SuccessEnvelope"
+                      },
+                      {
+                        "properties": {
+                          "code": {
+                            "const": "webhook_test_sent"
+                          },
+                          "data": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "status_class": {
+                                "description": "The class of the receiver's HTTP status (redirects are never followed), or network_error when it could not be reached or did not answer within 5 seconds. Nothing else from the receiver is returned.",
+                                "enum": [
+                                  "2xx",
+                                  "3xx",
+                                  "4xx",
+                                  "5xx",
+                                  "network_error"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "status_class"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "data"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                }
+              },
+              "description": "The test event was sent; data carries only the receiver's status class."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_json": {
+                      "value": {
+                        "code": "invalid_json",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_url": {
+                      "value": {
+                        "code": "invalid_url",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid endpoint id or JSON body, or the stored endpoint URL is not an https URL."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_auth_not_configured": {
+                      "value": {
+                        "code": "admin_auth_not_configured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "missing_access_jwt": {
+                      "value": {
+                        "code": "missing_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authentication failed."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_role_denied": {
+                      "value": {
+                        "code": "admin_role_denied",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "admin_role_required": {
+                      "value": {
+                        "code": "admin_role_required",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_access_jwt": {
+                      "value": {
+                        "code": "invalid_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authorization failed (RBAC / invalid JWT / admin role required)."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "No active webhook endpoint with that id (unknown or disabled); nothing was sent."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "body_too_large": {
+                      "value": {
+                        "code": "body_too_large",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Request body exceeds 8192 bytes."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "rate_limited": {
+                      "value": {
+                        "code": "rate_limited",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "A test event was sent to this endpoint less than 60 seconds ago; data.retry_after gives the seconds to wait.",
+              "headers": {
+                "retry-after": {
+                  "description": "Seconds until this endpoint accepts another test (1-60).",
+                  "schema": {
+                    "maximum": 60,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                }
+              }
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "dev_bearer_forbidden_in_environment": {
+                      "value": {
+                        "code": "dev_bearer_forbidden_in_environment",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Dev bearer enabled outside development."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "temporarily_unavailable": {
+                      "value": {
+                        "code": "temporarily_unavailable",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "webhook_operator_not_configured": {
+                      "value": {
+                        "code": "webhook_operator_not_configured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "webhook_signing_unconfigured": {
+                      "value": {
+                        "code": "webhook_signing_unconfigured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Nothing was sent: the WEBHOOK_OPERATOR backend capability is not bound, webhook signing is not configured on the backend, or the backend is unavailable."
+            }
+          },
+          "security": [
+            {
+              "cloudflareAccess": []
+            },
+            {
+              "devBearer": []
+            }
+          ],
+          "summary": "Send one signed test event to an active endpoint (admin-only)",
           "tags": [
             "admin:webhooks"
           ]
@@ -19348,8 +20385,8 @@
       }
     ]
   },
-  "openApiOperationCount": 73,
-  "routeCount": 73,
-  "routeKeyCount": 71,
+  "openApiOperationCount": 75,
+  "routeCount": 75,
+  "routeKeyCount": 73,
   "service": "cloudflare-license-admin"
 }

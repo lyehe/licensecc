@@ -27,11 +27,6 @@ export function apiFailureDetails(value: unknown): { code: string; requestId: st
   return { code: "invalid_api_response", requestId: "missing_request_id" };
 }
 
-export function apiFailureMessage(value: unknown): string {
-  const { code, requestId } = apiFailureDetails(value);
-  return `${code} (${requestId})`;
-}
-
 /**
  * The admin UI consumes only envelopes that prove the exact route contract.
  * A generic `ok` flag is not enough: a proxy can preserve it on a different

@@ -67,12 +67,37 @@ public sealed unsafe class DeviceBoundBridgeTests
     public void MalformedNativeOutcomesNeverBecomePermission()
     {
         var api=new Fake(); using var library=new DeviceBoundLibrary(api); using var client=library.OpenResume(Config()).Client!;
-        foreach(var malformed in new[]{1,2,3,4,5,6,7})
+        foreach(var malformed in new[]{1,2,4,5,6,7})
         {
             api.Malformed=malformed; Assert.ThrowsExactly<InvalidDataException>(()=>client.Authorize());
         }
         api.Malformed=0; api.Next=(Result)99; Assert.ThrowsExactly<InvalidDataException>(()=>client.Authorize());
         api.Next=Result.Ok; Assert.AreEqual(Result.Ok,client.Authorize().Code);
+    }
+    [TestMethod]
+    public void DenialDetailReusesTheFormerReservedSlot()
+    {
+        // Old and new native libraries share one outcome layout; only the member's meaning changed.
+        Assert.AreEqual(32,sizeof(Abi.Outcome));
+        Assert.AreEqual(20,Marshal.OffsetOf<Abi.Outcome>("DenialDetail").ToInt32());
+        Assert.AreEqual(24,Marshal.OffsetOf<Abi.Outcome>("EffectiveTime").ToInt32());
+        Assert.AreEqual(0u,(uint)DeviceBoundDenialDetail.None); Assert.AreEqual(1u,(uint)DeviceBoundDenialDetail.DeviceLimit);
+    }
+    [TestMethod]
+    public void FullLicenseIsConflictWithDeviceLimitAndUnknownDetailsNeverThrow()
+    {
+        var api=new Fake(); using var library=new DeviceBoundLibrary(api);
+        var opened=library.OpenEnrollment(Config()); using var client=opened.Client!;
+        Assert.AreEqual(DeviceBoundDenialDetail.None,opened.Outcome.Detail);
+        api.Next=Result.Conflict; api.Detail=1;
+        var refused=client.Activate();
+        Assert.AreEqual(Result.Conflict,refused.Code); Assert.AreEqual(DeviceBoundDenialDetail.DeviceLimit,refused.Detail);
+        api.Detail=7;
+        var future=client.Activate();
+        Assert.AreEqual(Result.Conflict,future.Code); Assert.AreEqual(7u,(uint)future.Detail);
+        api.Next=Result.Ok; api.Detail=0;
+        Assert.AreEqual(DeviceBoundDenialDetail.None,client.Authorize().Detail);
+        Assert.AreEqual(DeviceBoundDenialDetail.None,new Outcome(Result.Busy).Detail);
     }
     [TestMethod]
     public void LibraryDisposalLeavesExistingClientPinnedAndCloseIsExactlyOnce()
@@ -185,6 +210,7 @@ public sealed unsafe class DeviceBoundBridgeTests
     private sealed class Fake : INativeApi
     {
         internal int Pins,Closes,Disposals,Invocations,Malformed,OpenMode;
+        internal uint Detail;
         internal bool Resumed,BadComparison,Block;
         internal Result Next=Result.Ok;
         internal ProviderResult Provider=ProviderResult.Ok;
@@ -198,7 +224,7 @@ public sealed unsafe class DeviceBoundBridgeTests
         public int Open(bool resume,Abi.Options* options,IntPtr* handle,Abi.Outcome* outcome)
         {
             Resumed=resume; CapturedOptions=*options; *handle=OpenMode is 2 or 5?IntPtr.Zero:new IntPtr(42);
-            if(OpenMode==3)outcome->Reserved=1;
+            if(OpenMode==3)outcome->Version=2;
             if(OpenMode==4)return 99;
             if(OpenMode==6)throw new InvalidDataException("Injected native open exception after handle publication.");
             return OpenMode is 1 or 5?(int)Result.InvalidArgument:0;
@@ -206,10 +232,10 @@ public sealed unsafe class DeviceBoundBridgeTests
         public int Invoke(Call call,IntPtr handle,Abi.Outcome* outcome)
         {
             Invocations++; if(Block) { Entered.Set(); if(!Release.Wait(5000))throw new TimeoutException(); }
-            outcome->ProviderResult=(uint)Provider; outcome->CheckpointResult=(uint)Checkpoint;
+            outcome->ProviderResult=(uint)Provider; outcome->CheckpointResult=(uint)Checkpoint; outcome->DenialDetail=Detail;
             switch(Malformed)
             {
-                case 1:outcome->Size=0;break; case 2:outcome->Version=2;break; case 3:outcome->Reserved=1;break;
+                case 1:outcome->Size=0;break; case 2:outcome->Version=2;break;
                 case 4:outcome->RenewalDue=2;break; case 5:outcome->ProviderResult=99;break;
                 case 6:outcome->CheckpointResult=99;break; case 7:outcome->ProviderResult=uint.MaxValue;break;
             }

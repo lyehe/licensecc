@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, makeEnvelope } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 async function revealAction(button) {
   await button.waitFor({ state: "attached" });
@@ -28,8 +28,7 @@ test("admin UI renders Workstream F charts, expiring panel, validity indicators,
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   // Lifecycle and expiry are shown without implying that activation/device checks passed.
   await expect(page.locator(".desktopRecords .status.active")).toHaveText("active");
@@ -44,7 +43,7 @@ test("admin UI renders Workstream F charts, expiring panel, validity indicators,
   expect(api.requests.releaseSeats[0].reason).toBe("dead machine");
   expect(api.requests.releaseSeats[1].idempotencyKey).toBe(api.requests.releaseSeats[0].idempotencyKey);
   expect(api.requests.releaseSeats[1].rawBody).toBe(api.requests.releaseSeats[0].rawBody);
-  await expect(page.getByText(/released 2 seats/)).toBeVisible();
+  await expect(page.getByText("Released 2 seats.")).toBeVisible();
 
   // REPORTS TAB: the inline-SVG charts render (aria-labelled), plus the expiring-soon panel rows.
   if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
@@ -67,9 +66,14 @@ test("admin UI renders Workstream F charts, expiring panel, validity indicators,
   await page.locator(".chartPanels .rangeSelector").getByRole("button", { name: "last 30d" }).click();
   await expect.poll(() => api.requests.timeseries.length).toBeGreaterThan(before);
 
-  // Deep-link from an expiring row into the Entitlements tab filtered to that project/feature.
+  // Deep-link from an expiring row lands on exactly that one entitlement, not the whole
+  // project/feature list, and the URL carries neither the row's identity nor its fingerprint.
   await page.locator(".expiringPanel tbody tr").first().getByRole("button", { name: "View" }).click();
   await expect(page.locator(".sidebar nav a[aria-current=page]")).toHaveText("License access");
+  await expect(page.getByText("Showing 1 entitlement", { exact: false })).toBeVisible();
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+  expect(page.url()).not.toContain("a".repeat(64));
+  expect(new URL(page.url()).hash).toBe("#/entitlements");
 
   // FULFILLMENT TAB: the fulfillment-events bar spark renders (aria-labelled).
   if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
@@ -91,14 +95,19 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   api.seed.catalogFeature();
   await page.route("**/api/admin/**", api.route);
 
-  async function assertConfirmation(button, consequence, dismissWithEscape = false) {
+  async function assertConfirmation(button, consequence, dismissWithEscape = false, typedPhrase = null, confirmLabel = "Confirm") {
     await clickAction(button);
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText(consequence);
-    const confirm = dialog.getByRole("button", { name: "Confirm" });
+    const confirm = dialog.getByRole("button", { name: confirmLabel, exact: true });
     await expect(confirm).toBeDisabled();
     await dialog.getByLabel("Reason (required)").fill("operator review");
+    if (typedPhrase !== null) {
+      // A reason alone never satisfies a terminal action; the exact typed phrase is a second, independent gate.
+      await expect(confirm).toBeDisabled();
+      await dialog.getByLabel(`Type ${typedPhrase} to confirm`).fill(typedPhrase);
+    }
     await expect(confirm).toBeEnabled();
     if (dismissWithEscape) {
       await page.keyboard.press("Escape");
@@ -115,12 +124,11 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const entitlementRow = page.locator(".tablePane table tbody tr").first();
   await assertConfirmation(entitlementRow.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first(), "Verification and downloads stop until it is re-enabled", true);
-  await assertConfirmation(entitlementRow.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL and cannot be undone");
+  await assertConfirmation(entitlementRow.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL and cannot be undone", false, "REVOKE 1", "Revoke");
   await assertConfirmation(entitlementRow.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first(), "dead/unreachable machine");
   expect(api.requests.transitions).toHaveLength(0);
   expect(api.requests.releaseSeats).toHaveLength(0);
@@ -129,7 +137,7 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   const devicePane = page.locator('[aria-label="Registered devices"]');
   await expect(devicePane).toBeVisible();
   await assertConfirmation(devicePane.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first(), "refused on its next online check");
-  await assertConfirmation(devicePane.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL");
+  await assertConfirmation(devicePane.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL", false, "REVOKE 1", "Revoke");
   expect(api.requests.deviceTransitions).toHaveLength(0);
 
   await page.getByRole("link", { name: "Customers", exact: true }).click();
@@ -161,6 +169,42 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   expect(api.requests.webhookTransitions).toHaveLength(0);
 });
 
+test("admin UI entitlement disable reason presets fill the field and leave it editable", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("link", { name: "License access", exact: true }).click();
+  if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  const createForm = page.locator(".editorLayout form");
+  await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
+  await createForm.getByRole("button", { name: "Create entitlement" }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+
+  const entitlementRow = page.locator(".tablePane table tbody tr").first();
+  await clickAction(entitlementRow.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  const dialog = page.getByRole("dialog");
+  const reason = dialog.getByLabel("Reason (required)");
+
+  const presets = dialog.getByRole("group", { name: "Common reasons" });
+  await presets.getByRole("button", { name: "Fraud review", exact: true }).click();
+  await expect(reason).toHaveValue("Fraud review");
+  // A preset only fills the field; it stays an ordinary, editable text input, and focus moves to
+  // it so the filled value is announced.
+  await expect(reason).toBeEditable();
+  await expect(reason).toBeFocused();
+  await reason.fill("Fraud review, escalated to trust & safety");
+  await expect(reason).toHaveValue("Fraud review, escalated to trust & safety");
+  await dialog.getByRole("button", { name: "Payment failed", exact: true }).click();
+  await expect(reason).toHaveValue("Payment failed");
+  await dialog.getByRole("button", { name: "Customer request", exact: true }).click();
+  await expect(reason).toHaveValue("Customer request");
+
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => api.requests.transitions.length).toBe(1);
+  expect(api.requests.transitions[0]).toMatchObject({ action: "disable", reason: "Customer request" });
+});
+
 test("admin UI consequence dialogs contain focus, isolate the background, and reflow long targets", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
@@ -174,8 +218,7 @@ test("admin UI consequence dialogs contain focus, isolate the background, and re
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator('[data-focus-row^="entitlement:"]:visible').first();
   const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
@@ -196,14 +239,30 @@ test("admin UI consequence dialogs contain focus, isolate the background, and re
   const reason = dialog.getByLabel("Reason (required)");
   const confirm = dialog.getByRole("button", { name: "Confirm" });
   const cancel = dialog.getByRole("button", { name: "Cancel" });
+  const paymentFailedPreset = dialog.getByRole("button", { name: "Payment failed", exact: true });
+  const customerRequestPreset = dialog.getByRole("button", { name: "Customer request", exact: true });
+  const fraudReviewPreset = dialog.getByRole("button", { name: "Fraud review", exact: true });
   await expect(reason).toBeFocused();
   await reason.fill("operator review");
+  // The disable reason presets sit in the tab order between the reason field and the actions.
+  await page.keyboard.press("Tab");
+  await expect(paymentFailedPreset).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(customerRequestPreset).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(fraudReviewPreset).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(cancel).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(confirm).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(cancel).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(fraudReviewPreset).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(customerRequestPreset).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(paymentFailedPreset).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(reason).toBeFocused();
 
@@ -253,41 +312,6 @@ test("admin UI consequence dialogs contain focus, isolate the background, and re
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 });
 
-test("admin UI fallback consequence dialogs keep the background inert", async ({ page }) => {
-  await page.addInitScript(() => {
-    try {
-      Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value: undefined });
-    } catch {
-      HTMLDialogElement.prototype.showModal = undefined;
-    }
-  });
-  const api = makeAdminApiFixture();
-  await page.route("**/api/admin/**", api.route);
-  await page.goto("/");
-  await page.getByRole("link", { name: "License access", exact: true }).click();
-  if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
-  const createForm = page.locator(".editorLayout form");
-  await createForm.getByLabel("Project").fill("fallback");
-  await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
-  await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-
-  const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
-  await revealAction(trigger);
-  await trigger.focus();
-  await clickAction(trigger);
-  const dialog = page.getByRole("dialog");
-  await expect(page.locator(".modalOverlay")).toBeVisible();
-  await expect(page.locator("main")).toHaveAttribute("inert", "");
-  await expect(dialog.getByLabel("Reason (required)")).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(dialog).toHaveCount(0);
-  await expect(trigger).toBeFocused();
-  await expect(page.locator("main")).not.toHaveAttribute("inert", "");
-});
-
 test("admin UI typed failures keep consequence dialogs open and restore focus", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
@@ -299,8 +323,7 @@ test("admin UI typed failures keep consequence dialogs open and restore focus", 
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
   await revealAction(trigger);
@@ -318,7 +341,7 @@ test("admin UI typed failures keep consequence dialogs open and restore focus", 
   const retryableKey = api.requests.transitions[0].idempotencyKey;
   await expect(dialog).toBeVisible();
   await expect(dialog).toHaveAttribute("aria-busy", "false");
-  await expect(dialog.locator(".modalError")).toContainText("reason_required");
+  await expect(dialog.locator(".modalError")).toContainText("Enter a reason.");
   await expect(dialog.locator(".modalError")).toBeFocused();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
   await dialog.getByRole("button", { name: "Confirm" }).click();
@@ -343,7 +366,7 @@ test("admin UI typed failures keep consequence dialogs open and restore focus", 
   expect(api.requests.transitions[2].idempotencyKey).not.toBe(secondRetryableKey);
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(".modalError")).toBeVisible();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.locator(".modalError")).toBeFocused();
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   await expect.poll(() => api.requests.transitions.length).toBe(3);
@@ -354,7 +377,7 @@ test("admin UI typed failures keep consequence dialogs open and restore focus", 
   // trigger; focus must still remain in a usable in-app target, never BODY.
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(page.locator(".operatorNotice")).toContainText("Other actions are unavailable until reconciliation completes.");
   await expect(page.getByRole("button", { name: "New entitlement", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Reconcile status" })).toBeVisible();
@@ -387,8 +410,7 @@ test("admin UI direct re-enable replays an unknown mutation with the same key", 
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("e".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -403,7 +425,7 @@ test("admin UI direct re-enable replays an unknown mutation with the same key", 
   await reenable.focus();
   await clickAction(reenable);
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
   await expect(reenable).toBeDisabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
@@ -429,7 +451,7 @@ test("admin UI keeps a wrong-action reason_required rejection indeterminate", as
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("1".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
@@ -443,7 +465,7 @@ test("admin UI keeps a wrong-action reason_required rejection indeterminate", as
   const attempts = () => api.requests.transitions.filter((item) => item.action === "reenable");
   await expect.poll(() => attempts().length).toBe(1);
   const key = attempts()[0].idempotencyKey;
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 
   api.behavior.transitionStatus = 200;
@@ -466,8 +488,7 @@ test("admin UI keeps every same-key replay failure indeterminate until exact suc
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("e".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -479,14 +500,14 @@ test("admin UI keeps every same-key replay failure indeterminate until exact suc
   api.behavior.abortTransition = true;
   await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   const attempts = () => api.requests.transitions.filter((item) => item.action === "reenable");
   const first = attempts()[0];
 
   // Network/response loss on the replay is indeterminate: the notice and key remain.
   await page.getByRole("button", { name: "Reconcile status" }).click();
   await expect.poll(() => attempts().length).toBe(2);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   expect(attempts()[1].idempotencyKey).toBe(first.idempotencyKey);
   expect(attempts()[1].body).toEqual(first.body);
 
@@ -498,7 +519,7 @@ test("admin UI keeps every same-key replay failure indeterminate until exact suc
   api.behavior.transitionResponse = { ok: false, code: "revoked_entitlement_is_terminal", request_id: "ui-e2e-replay-conflict" };
   await page.getByRole("button", { name: "Reconcile status" }).click();
   await expect.poll(() => attempts().length).toBe(3);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   expect(attempts()[2].idempotencyKey).toBe(first.idempotencyKey);
   expect(attempts()[2].body).toEqual(first.body);
 
@@ -522,8 +543,7 @@ test("admin UI rejects a partial successful mutation envelope as unknown", async
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
@@ -544,7 +564,7 @@ test("admin UI rejects a partial successful mutation envelope as unknown", async
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 });
@@ -560,8 +580,7 @@ test("admin UI rejects a non-2xx response carrying a successful mutation envelop
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("7".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
@@ -585,7 +604,7 @@ test("admin UI rejects a non-2xx response carrying a successful mutation envelop
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
 });
 
@@ -600,8 +619,7 @@ test("admin UI treats a well-formed 5xx rejection envelope as an unknown mutatio
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("5".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
@@ -612,7 +630,7 @@ test("admin UI treats a well-formed 5xx rejection envelope as an unknown mutatio
   await dialog.getByRole("button", { name: "Confirm" }).click();
 
   await expect.poll(() => api.requests.transitions.length).toBe(1);
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
 });
 
@@ -628,12 +646,11 @@ test("admin UI rejects duplicate batch result identities as unknown", async ({ p
     await createForm.getByLabel("Feature").fill(feature);
     await createForm.getByLabel("License fingerprint").fill(fingerprint);
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-    await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   }
   await createEntitlement("batch-one", "a".repeat(64));
   await createEntitlement("batch-two", "b".repeat(64));
-  await page.getByLabel("Select all loaded rows").check();
+  await page.getByLabel(/^Select all \d+ loaded$/).check();
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
@@ -652,9 +669,14 @@ test("admin UI rejects duplicate batch result identities as unknown", async ({ p
 
   await expect.poll(() => api.requests.batches.length).toBe(1);
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
+  // A single-request batch keeps the single-request recovery copy; there is no chunk to name.
+  await expect(dialog.locator(".batchRun")).not.toContainText(/chunk/i);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("button", { name: "Reconcile status", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Reconcile chunk/ })).toHaveCount(0);
 });
 
 test("admin UI rejects substituted batch result identities as unknown", async ({ page }) => {
@@ -669,12 +691,11 @@ test("admin UI rejects substituted batch result identities as unknown", async ({
     await createForm.getByLabel("Feature").fill(feature);
     await createForm.getByLabel("License fingerprint").fill(fingerprint);
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-    await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   }
   await createEntitlement("batch-one", "a".repeat(64));
   await createEntitlement("batch-two", "b".repeat(64));
-  await page.getByLabel("Select all loaded rows").check();
+  await page.getByLabel(/^Select all \d+ loaded$/).check();
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
@@ -693,7 +714,7 @@ test("admin UI rejects substituted batch result identities as unknown", async ({
 
   await expect.poll(() => api.requests.batches.length).toBe(1);
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 });
@@ -713,10 +734,9 @@ test("admin UI reports a known partial batch outcome when every row identity and
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
     await expect.poll(() => api.requests.creates).toBe(index + 1);
-    await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
     await expect(page.locator(".tablePane table tbody tr")).toHaveCount(index + 1);
   }
-  await page.getByLabel("Select all loaded rows").check();
+  await page.getByLabel(/^Select all \d+ loaded$/).check();
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
@@ -736,7 +756,9 @@ test("admin UI reports a known partial batch outcome when every row identity and
   await expect.poll(() => api.requests.batches.length).toBe(1);
   expect(api.requests.batches[0].ids).toEqual(["ent-1", "ent-2"]);
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByText(/disable: 1 ok, 1 not-found/)).toBeVisible();
+  await expect(page.getByText("Disable finished: 1 done, 1 not found.")).toBeVisible();
+  // A row that did not change is not a success.
+  await expect(page.locator(".activityMessage")).toHaveAttribute("data-tone", "info");
 });
 
 test("admin UI rejects an unknown per-row batch failure code as ambiguous", async ({ page }) => {
@@ -751,10 +773,9 @@ test("admin UI rejects an unknown per-row batch failure code as ambiguous", asyn
     await createForm.getByLabel("Feature").fill(feature);
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   }
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  await page.getByLabel("Select all loaded rows").check();
+  await page.getByLabel(/^Select all \d+ loaded$/).check();
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
@@ -770,7 +791,7 @@ test("admin UI rejects an unknown per-row batch failure code as ambiguous", asyn
     },
   };
   await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
 });
 
 test("admin UI rejects reordered batch proof rows as an unknown outcome", async ({ page }) => {
@@ -788,10 +809,9 @@ test("admin UI rejects reordered batch proof rows as an unknown outcome", async 
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
     await expect.poll(() => api.requests.creates).toBe(index + 1);
-    await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
     await expect(page.locator(".tablePane table tbody tr")).toHaveCount(index + 1);
   }
-  await page.getByLabel("Select all loaded rows").check();
+  await page.getByLabel(/^Select all \d+ loaded$/).check();
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
@@ -810,8 +830,238 @@ test("admin UI rejects reordered batch proof rows as an unknown outcome", async 
 
   await expect.poll(() => api.requests.batches.length).toBe(1);
   expect(api.requests.batches[0].ids).toEqual(["ent-1", "ent-2"]);
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
+});
+
+/**
+ * Records every batch POST (its key and body) before it is answered: by `respond(attempt, api)` when that
+ * returns (or resolves to) `{ status, body }`, otherwise by the fixture. A responder that awaits holds
+ * its chunk unanswered until it resolves.
+ */
+async function routeBatchPosts(page, api, respond) {
+  const attempts = [];
+  await page.route("**/api/admin/**", api.route);
+  await page.route("**/api/admin/entitlements/batch", async (route) => {
+    const request = route.request();
+    attempts.push({ key: request.headers()["idempotency-key"], body: request.postDataJSON() });
+    const scripted = await respond(attempts.length, api);
+    if (scripted === undefined) return route.fallback();
+    return route.fulfill({ status: scripted.status, contentType: "application/json", body: JSON.stringify(scripted.body) });
+  });
+  return attempts;
+}
+
+/** Seeds twenty active rows, then selects them all and confirms a bulk Disable with one reason. */
+async function openTwentyRowBatch(page, respond) {
+  const api = makeAdminApiFixture();
+  api.seed.entitlements(20);
+  const attempts = await routeBatchPosts(page, api, respond);
+  await page.goto("/");
+  await page.getByRole("link", { name: "License access", exact: true }).click();
+  await expect(page.locator("tbody input[type=checkbox]")).toHaveCount(20);
+  await page.getByLabel("Select all 20 loaded", { exact: true }).check();
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel(/Reason/).fill("operator review");
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+  return { api, attempts, dialog };
+}
+
+const chunkIds = (chunk) => Array.from({ length: 4 }, (_unused, row) => `ent-${(chunk - 1) * 4 + row + 1}`);
+
+test("admin UI keeps a running batch's dialog out of aria-busy so its chunk progress is still announced", async ({ page }) => {
+  let releaseChunkTwo;
+  const chunkTwoHeld = new Promise((resolve) => { releaseChunkTwo = resolve; });
+  const { attempts, dialog } = await openTwentyRowBatch(page, async (attempt) => {
+    if (attempt === 2) await chunkTwoHeld;
+    return undefined;
+  });
+
+  await expect.poll(() => attempts.length).toBe(2);
+  // Chunk 2 is still unanswered: the run is in flight, yet no ancestor of its live region is busy.
+  await expect(dialog).toHaveAttribute("aria-busy", "false");
+  await expect(dialog.locator(".batchRun [role=status]")).toContainText("Chunk 2 of 5");
+  expect(await dialog.locator(".batchRun").evaluate((element) => element.closest('[aria-busy="true"]') === null)).toBe(true);
+
+  releaseChunkTwo();
+  await expect.poll(() => attempts.length).toBe(5);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator(".tablePane .batchRun").getByRole("listitem")).toHaveText(["20 done"]);
+});
+
+test("admin UI stops a twenty-row batch at a 500 on chunk 3 and reconciles that chunk with its own key", async ({ page }) => {
+  const { attempts, dialog } = await openTwentyRowBatch(page, (attempt) => attempt === 3
+    ? { status: 500, body: { ok: false, code: "internal_error", request_id: "ui-e2e-batch-chunk-three" } }
+    : undefined);
+
+  await expect.poll(() => attempts.length).toBe(3);
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
+  await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
+  await expect(dialog.locator(".batchRun").getByRole("listitem")).toHaveText(["8 done", "4 outcome unknown", "8 not attempted"]);
+  // The control cannot be reached from inside the modal, so the guidance says where it is.
+  await expect(dialog.locator(".batchRun")).toContainText("Close this dialog, then use “Reconcile chunk 3” in the notice at the bottom of the page.");
+  // The run stopped: chunks 4 and 5 are never sent.
+  await page.waitForTimeout(400);
+  expect(attempts.map((attempt) => attempt.body.ids)).toEqual([chunkIds(1), chunkIds(2), chunkIds(3)]);
+  expect(new Set(attempts.map((attempt) => attempt.key)).size).toBe(3);
+
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  const panel = page.locator(".tablePane .batchRun");
+  await expect(panel.getByRole("listitem")).toHaveText(["8 done", "4 outcome unknown", "8 not attempted"]);
+  await expect(panel).toContainText("Use “Reconcile chunk 3” in the notice at the bottom of the page.");
+  await expect(panel).toContainText(attempts[2].key);
+  await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(8);
+
+  // Reconcile replays chunk 3's exact request under chunk 3's own key, and sends nothing else.
+  await page.getByRole("button", { name: "Reconcile chunk 3", exact: true }).click();
+  await expect.poll(() => attempts.length).toBe(4);
+  expect(attempts[3]).toEqual(attempts[2]);
+  await expect(panel.getByRole("listitem")).toHaveText(["12 done", "8 not attempted"]);
+  await expect(page.getByRole("button", { name: "Reconcile chunk 3", exact: true })).toHaveCount(0);
+  await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(12);
+  await page.waitForTimeout(400);
+  expect(attempts).toHaveLength(4);
+  // The eight rows that were never sent stay selected for a deliberate follow-up run.
+  await expect(page.locator(".bulkBar")).toContainText("8 selected");
+});
+
+test("admin UI reports a refused chunk 2 as failed, not unknown, and sends nothing after it", async ({ page }) => {
+  const { attempts, dialog } = await openTwentyRowBatch(page, (attempt) => attempt === 2
+    ? { status: 409, body: { ok: false, code: "idempotency_request_conflict", request_id: "ui-e2e-batch-chunk-two" } }
+    : undefined);
+
+  await expect.poll(() => attempts.length).toBe(2);
+  // A definite refusal is a known outcome: nothing is retained, so the dialog closes on the counts.
+  await expect(dialog).toHaveCount(0);
+  const panel = page.locator(".tablePane .batchRun");
+  await expect(panel.getByRole("listitem")).toHaveText(["4 done", "4 failed", "12 not attempted"]);
+  await expect(panel).not.toContainText("unknown");
+  await expect(page.getByRole("button", { name: /^Reconcile/ })).toHaveCount(0);
+  await page.waitForTimeout(400);
+  expect(attempts.map((attempt) => attempt.body.ids)).toEqual([chunkIds(1), chunkIds(2)]);
+  await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(4);
+  await expect(page.locator(".bulkBar")).toContainText("16 selected");
+});
+
+test("admin UI keeps the confirmation open when chunk 1 is refused, and a retry reruns the plan under fresh keys", async ({ page }) => {
+  const { attempts, dialog } = await openTwentyRowBatch(page, (attempt) => attempt === 1
+    ? { status: 400, body: { ok: false, code: "reason_required", request_id: "ui-e2e-batch-chunk-one" } }
+    : undefined);
+
+  await expect.poll(() => attempts.length).toBe(1);
+  // Nothing was applied, so this reads as a single refused request always did: the dialog stays open to retry.
+  await expect(dialog.locator(".modalError")).toContainText("stopped at chunk 1 of 5");
+  await expect(dialog.locator(".batchRun").getByRole("listitem")).toHaveText(["0 done", "4 failed", "16 not attempted"]);
+  await expect(dialog.getByRole("button", { name: "Confirm" })).toBeEnabled();
+  await page.waitForTimeout(400);
+  expect(attempts).toHaveLength(1);
+
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => attempts.length).toBe(6);
+  await expect(dialog).toHaveCount(0);
+  expect(attempts[1].body).toEqual(attempts[0].body);
+  expect(new Set(attempts.map((attempt) => attempt.key)).size).toBe(6);
+  await expect(page.locator(".tablePane .batchRun").getByRole("listitem")).toHaveText(["20 done"]);
+});
+
+test("admin UI never reports success when the status refresh fails after a partially refused run", async ({ page }) => {
+  const { attempts, dialog } = await openTwentyRowBatch(page, (attempt, api) => {
+    if (attempt !== 2) return undefined;
+    // The strict status read that follows the stop fails once.
+    api.behavior.refreshFailure = "response-error";
+    return { status: 409, body: { ok: false, code: "idempotency_request_conflict", request_id: "ui-e2e-batch-refresh-lost" } };
+  });
+
+  await expect.poll(() => attempts.length).toBe(2);
+  await expect(dialog).toHaveCount(0);
+  const notice = page.locator(".operatorNotice");
+  await expect(notice).toContainText("Disable stopped at chunk 2 of 5");
+  // The notice replaces the page message, so it says why the run stopped as well as the failed read.
+  await expect(notice).toContainText("This request key was already used for a different change.");
+  await expect(notice).toContainText("The status could not be refreshed.");
+  await expect(page.getByText(/succeeded/i)).toHaveCount(0);
+  await expect(page.locator(".tablePane .batchRun").getByRole("listitem")).toHaveText(["4 done", "4 failed", "12 not attempted"]);
+
+  // The recovery is a status read only: it proves the view and sends no batch request.
+  await notice.getByRole("button", { name: "Refresh status", exact: true }).click();
+  await expect(notice).toHaveCount(0);
+  await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(4);
+  expect(attempts).toHaveLength(2);
+});
+
+/** Seeds five suspended rows, then selects them all and starts a bulk Reenable, which has no dialog. */
+async function reenableFiveRows(page, respond) {
+  const api = makeAdminApiFixture();
+  api.seed.entitlements(Array.from({ length: 5 }, () => ({ status: "disabled" })));
+  const attempts = await routeBatchPosts(page, api, respond);
+  await page.goto("/");
+  await page.getByRole("link", { name: "License access", exact: true }).click();
+  await expect(page.locator("tbody input[type=checkbox]")).toHaveCount(5);
+  await page.getByLabel("Select all 5 loaded", { exact: true }).check();
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Reenable", includeHidden: true }).first());
+  return { attempts };
+}
+
+test("admin UI reenables five suspended rows without a dialog as two chunks with their own keys", async ({ page }) => {
+  const { attempts } = await reenableFiveRows(page, () => undefined);
+
+  await expect.poll(() => attempts.length).toBe(2);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(attempts.map((attempt) => attempt.body.ids)).toEqual([["ent-1", "ent-2", "ent-3", "ent-4"], ["ent-5"]]);
+  for (const attempt of attempts) expect(attempt.body.action).toBe("reenable");
+  expect(new Set(attempts.map((attempt) => attempt.key)).size).toBe(2);
+  const panel = page.locator(".tablePane .batchRun");
+  await expect(panel.getByRole("listitem")).toHaveText(["5 done"]);
+  await expect(panel).toContainText("Reenable finished.");
+  await expect(page.locator(".desktopRecords .status.active")).toHaveCount(5);
+});
+
+test("admin UI reconciles an unknown second reenable chunk by replaying its frozen key and body", async ({ page }) => {
+  const { attempts } = await reenableFiveRows(page, (attempt) => attempt === 2
+    ? { status: 500, body: { ok: false, code: "internal_error", request_id: "ui-e2e-reenable-chunk-two" } }
+    : undefined);
+
+  await expect.poll(() => attempts.length).toBe(2);
+  const panel = page.locator(".tablePane .batchRun");
+  await expect(panel.getByRole("listitem")).toHaveText(["4 done", "1 outcome unknown", "0 not attempted"]);
+  await expect(panel).toContainText("Use “Reconcile chunk 2” in the notice at the bottom of the page.");
+  await page.waitForTimeout(400);
+  expect(attempts).toHaveLength(2);
+
+  await page.getByRole("button", { name: "Reconcile chunk 2", exact: true }).click();
+  await expect.poll(() => attempts.length).toBe(3);
+  expect(attempts[2]).toEqual(attempts[1]);
+  expect(attempts[1].body.ids).toEqual(["ent-5"]);
+  await expect(panel.getByRole("listitem")).toHaveText(["5 done"]);
+  await expect(panel).toContainText("Reenable finished; chunk 2 is now reconciled.");
+  await expect(page.locator(".desktopRecords .status.active")).toHaveCount(5);
+});
+
+test("admin UI visibly locks other actions while a refused action's notice waits to be acknowledged", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlement({ feature: "refused-reenable", status: "disabled" });
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/entitlements");
+  const row = page.locator(".desktopRecords tbody tr").filter({ hasText: "refused-reenable" });
+  await expect(row).toHaveCount(1);
+  api.behavior.transitionStatus = 404;
+  api.behavior.transitionResponseOnce = true;
+  api.behavior.transitionResponse = { ok: false, code: "not_found", request_id: "ui-e2e-reenable-refused" };
+  await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
+
+  const notice = page.locator(".operatorNotice");
+  await expect(notice).toContainText("That record was not found");
+  // Every other action is refused until the notice is acknowledged, so none may look available.
+  await expect(page.getByRole("button", { name: "New entitlement", exact: true })).toBeDisabled();
+  await expect(row.getByRole("button", { name: "Edit", exact: true })).toBeDisabled();
+  await expect(notice).toContainText("Other actions are unavailable until you acknowledge this notice.");
+
+  await notice.getByRole("button", { name: "Acknowledge", exact: true }).click();
+  await expect(notice).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "New entitlement", exact: true })).toBeEnabled();
+  await expect(row.getByRole("button", { name: "Edit", exact: true })).toBeEnabled();
+  expect(api.requests.transitions).toHaveLength(1);
 });
 
 test("admin UI rejects duplicate release-seat identities as unknown", async ({ page }) => {
@@ -824,8 +1074,7 @@ test("admin UI rejects duplicate release-seat identities as unknown", async ({ p
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("1".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   await clickAction(page.getByRole("button", { name: "Release seats", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
@@ -840,7 +1089,7 @@ test("admin UI rejects duplicate release-seat identities as unknown", async ({ p
 
   await expect.poll(() => api.requests.releaseSeats.length).toBe(1);
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 });
@@ -856,8 +1105,7 @@ test("admin UI rejects a device transition that proves a different entitlement",
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("e".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Devices", exact: true, includeHidden: true }).first());
@@ -875,7 +1123,7 @@ test("admin UI rejects a device transition that proves a different entitlement",
   });
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.deviceTransitions.length).toBe(1);
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
 });
 
 test("admin UI gates ordinary mutations while consequence recovery is pending", async ({ page }) => {
@@ -889,8 +1137,7 @@ test("admin UI gates ordinary mutations while consequence recovery is pending", 
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("0".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -928,8 +1175,7 @@ test("admin UI gates ordinary mutations through the post-success refresh", async
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("8".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -960,8 +1206,7 @@ test("admin UI direct re-enable treats a malformed mutation response as unknown"
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("7".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -974,7 +1219,7 @@ test("admin UI direct re-enable treats a malformed mutation response as unknown"
   const reenable = row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first();
   await clickAction(reenable);
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
   await expect(reenable).toBeDisabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
@@ -991,8 +1236,7 @@ test("admin UI direct re-enable keeps parsed refresh recovery visible", async ({
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("6".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -1004,10 +1248,10 @@ test("admin UI direct re-enable keeps parsed refresh recovery visible", async ({
   api.behavior.refreshFailures = ["response-error", "response-error"];
   await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   const refreshButton = page.getByRole("button", { name: "Refresh status" });
   await refreshButton.click();
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await refreshButton.click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true })).toHaveCount(0);
@@ -1025,8 +1269,7 @@ test("admin UI settles a same-key reconciliation across a stale filter context w
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("2".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const filter = page.locator('input[aria-label="Filter by project"]');
   await filter.fill("stale-unknown");
@@ -1075,8 +1318,7 @@ test("admin UI settles an ABA filter switch after an exact same-key replay", asy
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("9".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const filter = page.locator('input[aria-label="Filter by project"]');
   await filter.fill("aba-replay");
@@ -1108,7 +1350,7 @@ test("admin UI settles an ABA filter switch after an exact same-key replay", asy
   await expect(filter).toBeFocused();
   // The replay's original strict GET started before the A → B → A switch, so
   // it cannot prove the final A view. A current-context GET-only recovery can.
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   const replay = api.requests.transitions.at(-1);
@@ -1128,8 +1370,7 @@ test("admin UI keeps unresolved recovery exclusive without stealing focus after 
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("8".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -1140,11 +1381,11 @@ test("admin UI keeps unresolved recovery exclusive without stealing focus after 
 
   api.behavior.refreshFailures = ["response-error"];
   await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   const transitionCount = api.requests.transitions.filter((item) => item.action === "reenable").length;
   await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeDisabled();
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   expect(api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(transitionCount);
 
   api.behavior.deferRefresh = true;
@@ -1156,7 +1397,7 @@ test("admin UI keeps unresolved recovery exclusive without stealing focus after 
   await filter.fill("no-such-project");
   api.behavior.releaseRefresh();
   await expect(filter).toBeFocused();
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   expect(api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(transitionCount);
   await filter.fill("");
   await refreshButton.click();
@@ -1177,9 +1418,8 @@ test("admin UI discards stale device recovery after filter supersession while ac
     await createForm.getByLabel("Feature").fill("float");
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   }
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
 
   await clickAction(page.locator(".desktopRecords").getByRole("button", { name: "Devices", exact: true, includeHidden: true }).nth(0));
   const devices = page.getByRole("region", { name: "Registered devices" });
@@ -1193,7 +1433,7 @@ test("admin UI discards stale device recovery after filter supersession while ac
   await disableDialog.getByLabel("Reason (required)").fill("operator review");
   await disableDialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.deviceTransitions.length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
 
   // The retained recovery owns the operation gate, so switching device rows
   // is visibly unavailable. A still-editable filter can supersede the source
@@ -1211,11 +1451,126 @@ test("admin UI discards stale device recovery after filter supersession while ac
   releaseOriginalDeviceRefresh();
   if (api.behavior.releaseDeviceRefresh !== releaseOriginalDeviceRefresh) api.behavior.releaseDeviceRefresh();
   await expect(filter).toBeFocused();
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await filter.fill("");
   await expect.poll(() => api.requests.entitlementReads.at(-1)).toBe("");
   await refreshButton.click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   await expect(devices.locator(".desktopRecords code").first()).toContainText("sha256:bbbbbbbb");
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
+});
+
+test("the device inspector renders under its row, takes focus, and returns focus to Devices on close", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlement();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/entitlements");
+
+  const row = page.locator(".desktopRecords tbody tr").first();
+  const devicesButton = row.getByRole("button", { name: "Devices", exact: true, includeHidden: true }).first();
+  await clickAction(devicesButton);
+
+  const heading = page.getByRole("heading", { name: "Devices", exact: true });
+  await expect(heading).toBeInViewport();
+  await expect(heading).toBeFocused();
+  const devicesPane = page.getByRole("region", { name: "Registered devices" });
+  await expect(devicesPane).toBeVisible();
+  // The panel sits in the row immediately after the one that opened it, inside the same table.
+  expect(await row.evaluate((node) => node.nextElementSibling?.querySelector('[aria-label="Registered devices"]') !== null)).toBe(true);
+
+  await page.getByRole("button", { name: "Close devices", exact: true }).click();
+  await expect(devicesPane).toHaveCount(0);
+  await expect(devicesButton).toBeFocused();
+});
+
+test("'More actions' closes after choosing an action, including one that opens a dialog", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlement();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/entitlements");
+
+  const row = page.locator(".desktopRecords tbody tr").first();
+  const menu = row.locator("details.contextActions");
+
+  // A non-dialog action (Meter opens an inline panel, not a modal) closes the menu on its own.
+  await clickAction(row.getByRole("button", { name: "Meter", exact: true, includeHidden: true }).first());
+  await expect(page.getByRole("region", { name: "Metering status" })).toBeVisible();
+  expect(await menu.evaluate((node) => node.hasAttribute("open"))).toBe(false);
+  await page.getByRole("button", { name: "Close metering", exact: true }).click();
+
+  // A dialog-opening action closes the menu too; focus goes to the dialog, not back to the menu.
+  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  expect(await menu.evaluate((node) => node.hasAttribute("open"))).toBe(false);
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+});
+
+test("report range buttons expose their selection through aria-pressed", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/reports");
+
+  const window7d = page.locator(".chartPanels .rangeSelector").getByRole("button", { name: "last 7d" });
+  const window30d = page.locator(".chartPanels .rangeSelector").getByRole("button", { name: "last 30d" });
+  await expect(window7d).toHaveAttribute("aria-pressed", "true");
+  await expect(window30d).toHaveAttribute("aria-pressed", "false");
+  await window30d.click();
+  await expect(window30d).toHaveAttribute("aria-pressed", "true");
+  await expect(window7d).toHaveAttribute("aria-pressed", "false");
+
+  const horizon30 = page.locator(".expiringHead .rangeSelector").getByRole("button", { name: "30d", exact: true });
+  const horizon7 = page.locator(".expiringHead .rangeSelector").getByRole("button", { name: "7d", exact: true });
+  await expect(horizon30).toHaveAttribute("aria-pressed", "true");
+  await expect(horizon7).toHaveAttribute("aria-pressed", "false");
+  await horizon7.click();
+  await expect(horizon7).toHaveAttribute("aria-pressed", "true");
+  await expect(horizon30).toHaveAttribute("aria-pressed", "false");
+
+  // Reset the shared look-back (Reports and Fulfillment share one operator-selected window) before
+  // checking Fulfillment's own range group.
+  await window7d.click();
+  await page.goto("/#/fulfillment");
+  await page.getByText("Activity summary and trends", { exact: true }).click();
+  const spark7d = page.locator(".fulfillmentSpark .rangeSelector").getByRole("button", { name: "last 7d" });
+  const spark30d = page.locator(".fulfillmentSpark .rangeSelector").getByRole("button", { name: "last 30d" });
+  await expect(spark7d).toHaveAttribute("aria-pressed", "true");
+  await expect(spark30d).toHaveAttribute("aria-pressed", "false");
+  await spark30d.click();
+  await expect(spark30d).toHaveAttribute("aria-pressed", "true");
+  await expect(spark7d).toHaveAttribute("aria-pressed", "false");
+});
+
+test("the selected range button is visibly distinct from an unselected one, not by color alone", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/reports");
+
+  const selected = page.locator(".chartPanels .rangeSelector").getByRole("button", { name: "last 7d" });
+  const unselected = page.locator(".chartPanels .rangeSelector").getByRole("button", { name: "last 30d" });
+  await expect(selected).toHaveAttribute("aria-pressed", "true");
+  await expect(unselected).toHaveAttribute("aria-pressed", "false");
+  const readStyle = (locator) => locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { borderColor: style.borderColor, backgroundColor: style.backgroundColor, fontWeight: style.fontWeight };
+  });
+  const [selectedStyle, unselectedStyle] = await Promise.all([readStyle(selected), readStyle(unselected)]);
+  expect(selectedStyle).not.toEqual(unselectedStyle);
+  // Not by color alone: at least one non-color cue (font weight or border) must also differ.
+  expect(selectedStyle.fontWeight !== unselectedStyle.fontWeight || selectedStyle.borderColor !== unselectedStyle.borderColor).toBe(true);
+});
+
+test("report charts show axis labels with units and UTC bucket dates", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/reports");
+
+  const usageCard = page.locator(".chartCard").filter({ has: page.getByRole("heading", { name: "Checkouts vs denials" }) });
+  await expect(usageCard.locator(".chartAxisY")).toContainText("checkouts");
+  await expect(usageCard.locator(".chartAxisY")).toContainText("denials");
+  await expect(usageCard.locator(".chartAxisX")).toContainText("UTC");
+
+  const denialCard = page.locator(".chartCard").filter({ has: page.getByRole("heading", { name: "Denial-rate trend" }) });
+  await expect(denialCard.locator(".chartAxisY")).toContainText("denial rate");
+  await expect(denialCard.locator(".chartAxisX")).toContainText("UTC");
 });

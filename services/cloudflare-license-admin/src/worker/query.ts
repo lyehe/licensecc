@@ -50,7 +50,7 @@ export const PAGINATION_ROUTE_OPTIONS = {
   "GET /api/admin/orders": DEFAULT_PAGINATION_OPTIONS,
   "GET /api/admin/search": SEARCH_PAGINATION_OPTIONS,
   "GET /api/admin/entitlements": DEFAULT_PAGINATION_OPTIONS,
-  "GET /api/admin/events": LIMIT_ONLY_PAGINATION_OPTIONS,
+  "GET /api/admin/events": DEFAULT_PAGINATION_OPTIONS,
   "GET /api/admin/policies": DEFAULT_PAGINATION_OPTIONS,
   "GET /api/admin/catalog/features": DEFAULT_PAGINATION_OPTIONS,
   "GET /api/admin/catalog/plans": DEFAULT_PAGINATION_OPTIONS,
@@ -89,6 +89,62 @@ export function boundedCursor(url: URL, options: PaginationOptions = DEFAULT_PAG
     ? 0
     : parsePageInteger(url.searchParams.get("cursor"), 0, 0, Number.MAX_SAFE_INTEGER, allowEmptyValue);
   return limit === null || cursor === null ? null : { limit, cursor };
+}
+
+/** A non-negative safe-integer epoch-seconds query parameter: absent/empty -> undefined (no
+ * filter), malformed -> null (400), otherwise the parsed value. The same digit-only, safe-integer
+ * discipline as parsePageInteger, without a default (this is a bare filter, not a page value). */
+export function epochQueryParam(url: URL, name: string): number | null | undefined {
+  const raw = url.searchParams.get(name);
+  if (raw === null || raw === "") {
+    return undefined;
+  }
+  if (!/^[0-9]+$/.test(raw)) {
+    return null;
+  }
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+export interface EventsCursor {
+  readonly createdAt: number;
+  readonly id: number;
+}
+
+/** Encodes an opaque (created_at, id) keyset bookmark. A caller never constructs one -- it only
+ * ever echoes a previous page's next_cursor back verbatim -- so a plain "createdAt:id" digit-pair
+ * token is fine to validate directly against unsafe or malformed input. */
+export function encodeEventsCursor(createdAt: number, id: number): string {
+  return `${createdAt}:${id}`;
+}
+
+function parseEventsCursorToken(raw: string): EventsCursor | null {
+  const match = /^([0-9]+):([0-9]+)$/.exec(raw);
+  if (match === null) {
+    return null;
+  }
+  const createdAt = Number(match[1]);
+  const id = Number(match[2]);
+  return Number.isSafeInteger(createdAt) && Number.isSafeInteger(id) ? { createdAt, id } : null;
+}
+
+/**
+ * limit is validated exactly like boundedCursor; cursor is a (created_at, id) keyset bookmark
+ * rather than an offset count, so a page boundary that lands on several equal created_at values
+ * neither skips nor repeats a row when newer events land between page reads (an offset would).
+ */
+export function boundedEventsCursor(url: URL, options: PaginationOptions = DEFAULT_PAGINATION_OPTIONS): { limit: number; cursor: EventsCursor | null } | null {
+  const limitOnly = boundedCursor(url, { ...options, includeCursor: false });
+  if (limitOnly === null) {
+    return null;
+  }
+  const allowEmptyValue = options.allowEmptyValue ?? true;
+  const raw = url.searchParams.get("cursor");
+  if (raw === null || (allowEmptyValue && raw === "")) {
+    return { limit: limitOnly.limit, cursor: null };
+  }
+  const cursor = parseEventsCursorToken(raw);
+  return cursor === null ? null : { limit: limitOnly.limit, cursor };
 }
 
 // ── Workstream C BACKEND: CSV export, global search, bulk transitions ─────────

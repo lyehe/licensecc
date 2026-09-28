@@ -3,8 +3,10 @@ import { api, parseExactApiSuccess } from '../../shared/api';
 export type Operator={subject:string;actor_type:'access'|'dev';role:'reader'|'admin'};
 export type Connection={binding_id:string;project:string;feature:string;license_fingerprint:string;label:string;state:'active'|'retiring'|'released';generation:number;revision:number;hold_until:number;last_proof_at:number;created_at:number};
 export type BindingEvent={id:number;event_type:'exchange'|'renew'|'retire';actor:string;occurred_at:number};
+export type Capacity={project:string;feature:string;license_fingerprint:string;in_use:number;limit:number};
+export type Denied={project:string;feature:string;license_fingerprint:string;device_key_id:string;ts:number};
 export type Context={customer:{id:string;status:'active'|'disabled'};operator:Operator;server_time:number};
-export type Page=Context&{items:Connection[];next_cursor:string|null};
+export type Page=Context&{capacity:Capacity[];denied:Denied[];items:Connection[];next_cursor:string|null};
 export type History=Context&{binding_id:string;items:BindingEvent[];next_cursor:string|null};
 export type Pending={customer:string;binding:string;revision:number;key:string;operator:Operator;label:string;project:string;feature:string;hold:number};
 type Retirement={binding_id:string;state:'retiring';revision:number;generation:number;effective_release_at:number};
@@ -27,8 +29,13 @@ function connection(v:unknown):v is Connection {
   return record(v) && keys(v,['binding_id','project','feature','license_fingerprint','label','state','generation','revision','hold_until','last_proof_at','created_at']) && canonicalId(v.binding_id,16) && ['project','feature','license_fingerprint','label'].every(k=>typeof v[k]==='string')
     && typeof v.state==='string' && ['active','retiring','released'].includes(v.state) && ['generation','revision','hold_until','last_proof_at','created_at'].every(k=>integer(v[k])) && Number(v.generation)>=1;
 }
+const capacityRow=(v:unknown):v is Capacity=>record(v) && keys(v,['project','feature','license_fingerprint','in_use','limit']) && ['project','feature','license_fingerprint'].every(k=>typeof v[k]==='string') && integer(v.in_use) && integer(v.limit);
+const deniedRow=(v:unknown):v is Denied=>record(v) && keys(v,['project','feature','license_fingerprint','device_key_id','ts']) && ['project','feature','license_fingerprint','device_key_id'].every(k=>typeof v[k]==='string') && integer(v.ts);
 export function validPage(v:unknown,customer:string,cursor='',exact?:string):v is Page {
-  if(!record(v) || !keys(v,['customer','operator','server_time','items','next_cursor']) || !context(v,customer) || !Array.isArray(v.items) || v.items.length>100 || !v.items.every(connection))return false;
+  if(!record(v) || !keys(v,['customer','operator','server_time','capacity','denied','items','next_cursor']) || !context(v,customer)
+    || !Array.isArray(v.capacity) || v.capacity.length>100 || !v.capacity.every(capacityRow)
+    || !Array.isArray(v.denied) || v.denied.length>5 || !v.denied.every(deniedRow)
+    || !Array.isArray(v.items) || v.items.length>100 || !v.items.every(connection))return false;
   let previous=cursor;for(const row of v.items){if(row.binding_id<=previous || (exact && row.binding_id!==exact)
     || (row.state==='retiring' && row.hold_until<=v.server_time) || (row.state==='released' && row.hold_until>v.server_time))return false;previous=row.binding_id;}
   return exact ? v.items.length<=1 && v.next_cursor===null : v.next_cursor===null || (v.items.length===100 && v.next_cursor===previous && canonicalId(v.next_cursor,16));

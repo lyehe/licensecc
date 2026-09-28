@@ -185,10 +185,19 @@ function insertOrderEvent(db, eventId, receivedAt, status = "accepted") {
   ).run(eventId, status, receivedAt);
 }
 
-function insertEntitlement(db, fp, { status = "active", validUntil = null, customerId = null, now = 1000 } = {}) {
+function insertEntitlement(db, fp, {
+  status = "active", validUntil = null, customerId = null, now = 1000,
+  isTrial = 0, trialBasis = "from_issue", trialDurationSec = 0, trialStartedAt = null,
+  enforcementMode = "legacy",
+} = {}) {
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, valid_until, customer_id, created_at, updated_at) VALUES ('DEFAULT','DEFAULT',?,?,?,?,?,?)",
-  ).run(fp, status, validUntil, customerId, now, now);
+    `INSERT INTO entitlements (project, feature, license_fingerprint, status, valid_until, customer_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_started_at, enforcement_mode, created_at, updated_at)
+     VALUES ('DEFAULT','DEFAULT',?,?,?,?,?,?,?,?,?,?,?)`,
+  ).run(fp, status, validUntil, customerId, isTrial, trialBasis, trialDurationSec, trialStartedAt, enforcementMode, now, now);
+}
+
+function insertCustomer(db, id, name, now = 1000) {
+  db.prepare("INSERT INTO customers (id, name, email, created_at, updated_at) VALUES (?,?,?,?,?)").run(id, name, "", now, now);
 }
 
 function insertSeat(db, fp, seatId, heartbeatDeadline, { mode = "live", now = 1000 } = {}) {
@@ -374,6 +383,128 @@ test("expiring: cursor pagination over valid_until ASC", async () => {
   assert.equal(page2.items.length, 1);
   assert.equal(page2.next_cursor, null);
   assert.equal(page2.items[0].days_left, 3);
+});
+
+test("expiring: each row carries the entitlement's canonical id and, when a customer is set, its name", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const now = Math.floor(Date.now() / 1000);
+  const DAY = 86400;
+  insertCustomer(db, "cus_a", "Acme Co", now);
+  insertEntitlement(db, FP_A, { validUntil: now + 5 * DAY, customerId: "cus_a", now });
+  insertEntitlement(db, FP_B, { validUntil: now + 6 * DAY, customerId: null, now });
+
+  const data = (await body(await worker.fetch(devReq("/api/admin/report/expiring"), env))).data;
+  assert.equal(data.items.length, 2);
+  const withCustomer = data.items.find((item) => item.license_fingerprint === FP_A);
+  const withoutCustomer = data.items.find((item) => item.license_fingerprint === FP_B);
+  assert.equal(withCustomer.id, entitlementId("DEFAULT", "DEFAULT", FP_A));
+  assert.equal(withCustomer.customer_name, "Acme Co");
+  assert.equal(withoutCustomer.id, entitlementId("DEFAULT", "DEFAULT", FP_B));
+  assert.equal(withoutCustomer.customer_id, null);
+  assert.equal(withoutCustomer.customer_name, null);
+});
+
+test("expiring: an activated activation-basis trial is included via its trial deadline; one not yet activated is excluded", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const now = Math.floor(Date.now() / 1000);
+  const DAY = 86400;
+  // Activated: trial_started_at + trial_duration_sec falls inside the horizon even though
+  // valid_until was never stamped (the clock started at first activation, not at issue).
+  insertEntitlement(db, FP_A, {
+    validUntil: null, now,
+    isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 5 * DAY, trialStartedAt: now,
+  });
+  // Not yet activated: no known deadline yet, so it cannot be "expiring soon".
+  insertEntitlement(db, FP_B, {
+    validUntil: null, now,
+    isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 5 * DAY, trialStartedAt: null,
+  });
+  // from_issue trial: unchanged behavior, still keyed off the stamped valid_until.
+  insertEntitlement(db, FP_C, {
+    validUntil: now + 2 * DAY, now,
+    isTrial: 1, trialBasis: "from_issue", trialDurationSec: 2 * DAY,
+  });
+
+  const data = (await body(await worker.fetch(devReq("/api/admin/report/expiring"), env))).data;
+  assert.deepEqual(data.items.map((item) => item.license_fingerprint).sort(), [FP_A, FP_C].sort());
+  const activated = data.items.find((item) => item.license_fingerprint === FP_A);
+  assert.equal(activated.days_left, 5);
+  assert.equal(activated.valid_until, now + 5 * DAY);
+});
+
+// A policy may stamp an explicit valid_until on an activation-basis trial before its clock has
+// started. The grant still stops at valid_until whatever the trial clock later does, so the report
+// must list it by that date; an unknown trial deadline must never hide the known one.
+test("expiring: an unstarted activation-basis trial is listed by its stamped valid_until", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const now = Math.floor(Date.now() / 1000);
+  const DAY = 86400;
+  // Legacy grant: no first activation yet, but the license itself ends in 2 days.
+  insertEntitlement(db, FP_A, {
+    validUntil: now + 2 * DAY, now,
+    isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 20 * DAY, trialStartedAt: null,
+  });
+  // The same shape for a protected (device_bound_v1) grant, whose clock rule has its own SQL twin.
+  insertEntitlement(db, FP_B, {
+    validUntil: now + 3 * DAY, now,
+    isTrial: 1, trialBasis: "from_first_use", trialDurationSec: 20 * DAY, trialStartedAt: null,
+    enforcementMode: "device_bound_v1",
+  });
+  // Unstarted and without any valid_until: still no known deadline, so still not expiring soon.
+  insertEntitlement(db, FP_C, {
+    validUntil: null, now,
+    isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 2 * DAY, trialStartedAt: null,
+  });
+
+  const data = (await body(await worker.fetch(devReq("/api/admin/report/expiring"), env))).data;
+  assert.deepEqual(data.items.map((item) => item.license_fingerprint), [FP_A, FP_B]);
+  const legacy = data.items.find((item) => item.license_fingerprint === FP_A);
+  assert.equal(legacy.valid_until, now + 2 * DAY);
+  assert.equal(legacy.days_left, 2);
+  const bound = data.items.find((item) => item.license_fingerprint === FP_B);
+  assert.equal(bound.valid_until, now + 3 * DAY);
+  assert.equal(bound.days_left, 3);
+});
+
+// An operator can set valid_until on a trial grant; every enforcing path (the lease issuer, the
+// protected-device store, the portal's self-service list) then clamps the trial clock to it, since a
+// trial never outlives its license. The report must use the same min(valid_until, trial deadline)
+// clamp, not the trial deadline alone, or it shows the wrong date (or a wrong inclusion/exclusion).
+test("expiring: an activated trial clamps to an EARLIER valid_until, exactly like the enforcing rules", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const now = Math.floor(Date.now() / 1000);
+  const DAY = 86400;
+  // Trial clock would end in 20 days, but the operator's valid_until is only 2 days out: the earlier
+  // date must win, and the row must appear at day 2 (not day 20).
+  insertEntitlement(db, FP_A, {
+    validUntil: now + 2 * DAY, now,
+    isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 20 * DAY, trialStartedAt: now,
+  });
+  // Same shape, but the operator's valid_until is already in the past: the row is fully expired by
+  // the license itself and must be excluded even though the trial clock alone still has 20 days left.
+  insertEntitlement(db, FP_B, {
+    validUntil: now - DAY, now,
+    isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 20 * DAY, trialStartedAt: now,
+  });
+  // The same clamp, for a protected (device_bound_v1) grant using its own enforcing rule's twin.
+  insertEntitlement(db, FP_C, {
+    validUntil: now + 3 * DAY, now,
+    isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 20 * DAY, trialStartedAt: now,
+    enforcementMode: "device_bound_v1",
+  });
+
+  const data = (await body(await worker.fetch(devReq("/api/admin/report/expiring"), env))).data;
+  assert.deepEqual(data.items.map((item) => item.license_fingerprint).sort(), [FP_A, FP_C].sort());
+  const legacyClamped = data.items.find((item) => item.license_fingerprint === FP_A);
+  assert.equal(legacyClamped.valid_until, now + 2 * DAY, "the earlier valid_until wins over the later trial clock");
+  assert.equal(legacyClamped.days_left, 2);
+  const boundClamped = data.items.find((item) => item.license_fingerprint === FP_C);
+  assert.equal(boundClamped.valid_until, now + 3 * DAY);
+  assert.equal(boundClamped.days_left, 3);
 });
 
 // ── Force-release ───────────────────────────────────────────────────────────────

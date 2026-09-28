@@ -1,6 +1,57 @@
-import { expect, test } from "@playwright/test";
+import { expect, test as base } from "@playwright/test";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { catalogImportManifestSnapshot } from "@licensecc/licensing-domain/catalog/import_preview";
+
+/**
+ * Every result code a scenario could leak: the codes the console has copy for and the codes this
+ * fixture answers with. A visible line that is exactly one of them is a code shown as text.
+ */
+const KNOWN_RESULT_CODES = (() => {
+  const codes = new Set();
+  const messages = readFileSync(new URL("../src/ui/shared/messages.ts", import.meta.url), "utf8");
+  for (const match of messages.matchAll(/^ {2}([a-z][a-z0-9_]*): (?:failed|done)\(/gm)) codes.add(match[1]);
+  const fixture = readFileSync(new URL(import.meta.url), "utf8");
+  for (const match of fixture.matchAll(/(?:makeEnvelope\(|code: )"([a-z][a-z0-9_]*)"/g)) codes.add(match[1]);
+  return [...codes].filter((code) => code.includes("_"));
+})();
+
+/**
+ * No visible text outside a <details> disclosure may read as a raw result code: neither the old
+ * `code (request_id)` shape nor a bare snake_case code on its own line. Form controls are hidden
+ * for the scan too, since an option or a typed value is data, not a message (a label's text would
+ * otherwise include its select's chosen option).
+ */
+export async function expectNoRawResultCodes(page) {
+  if (page.isClosed()) return;
+  const offenders = await page.evaluate((known) => {
+    const codes = new Set(known);
+    const hidden = [...document.querySelectorAll("details, select, textarea, datalist")].map((element) => [element, element.style.display]);
+    for (const [details] of hidden) details.style.display = "none";
+    try {
+      const found = new Set();
+      for (const element of document.body.querySelectorAll("*")) {
+        if (element.closest("details, script, style, template, select, option, textarea, datalist")) continue;
+        if (!(element instanceof HTMLElement) || !element.checkVisibility()) continue;
+        for (const line of element.innerText.split("\n").map((text) => text.trim()).filter(Boolean)) {
+          if (/^[a-z_]+ \(/.test(line) || codes.has(line)) found.add(line);
+        }
+      }
+      return [...found];
+    } finally {
+      for (const [details, display] of hidden) details.style.display = display;
+    }
+  }, KNOWN_RESULT_CODES);
+  expect(offenders, "a result code is shown outside Technical details").toEqual([]);
+}
+
+/** Every admin browser scenario ends with the raw-code check above. */
+export const test = base.extend({
+  page: async ({ page }, use) => {
+    await use(page);
+    await expectNoRawResultCodes(page);
+  },
+});
 
 export function makeEnvelope(code, data) {
   makeEnvelope.nextRequestId += 1;
@@ -40,14 +91,19 @@ export function makeAdminApiFixture() {
     catalogPlanPatches: [],
     catalogPlanTransitions: [],
     catalogPlanExports: [],
+    catalogPlanReads: [],
     catalogPlanFeatures: [],
     catalogPlanFeatureTransitions: [],
     catalogImports: [],
+    customerWorkspaceReads: [],
     policyCreates: [],
+    policyPatches: [],
     webhookCreates: [],
     webhookCreateAttempts: [],
+    webhookPatches: [],
     webhookReads: [],
     webhookRedrives: [],
+    webhookTests: [],
     customerTransitions: [],
     policyTransitions: [],
     webhookTransitions: [],
@@ -63,6 +119,12 @@ export function makeAdminApiFixture() {
     entitlementDetailReads: [],
     customerReads: [],
     customerCursors: [],
+    // A filter-driven list reload must never fan out to the cross-feature
+    // summary/events core refresh; these count every GET regardless of which feature triggers it.
+    summaryReads: [],
+    eventsReads: [],
+    policyReads: [],
+    licenseReads: [],
   };
   const catalogFeatures = [];
   const catalogPlans = [];
@@ -118,11 +180,15 @@ export function makeAdminApiFixture() {
     customerTransitionEmptyName: false,
     webhookCreateResponses: [],
     webhookRefreshFailures: [],
+    // Scripted { status, body } answers for POST /api/admin/webhooks/{id}/test, in call order.
+    webhookTestResponses: [],
     catalogPlanPagination: false,
     catalogPlanRepeatCursor: false,
     catalogPlanDuplicatePage: false,
     catalogPlanCursorCycle: false,
     catalogPlanAppendResponses: [],
+    // Queued raw responses for GET /catalog/plans/{id}, served before the fixture's own answer.
+    catalogPlanReadResponses: [],
     deliveryRepeatCursor: false,
     deliveryDuplicatePage: false,
     deliveryCursorCycle: false,
@@ -141,6 +207,11 @@ export function makeAdminApiFixture() {
     deviceTransitionResponse: null,
     reportVersioned: false,
     activePolicyPagination: false,
+    // A number here pages the entitlements list for real (offset cursor), so Load More can be
+    // exercised across a genuine tab switch instead of the fixed single-cursor release-seat page.
+    entitlementsPageSize: null,
+    // A number here pages the events list for real (keyset cursor), so Next page can be exercised.
+    eventsPageSize: null,
     deliveryPagination: false,
     ordersPagination: false,
     expiringPagination: false,
@@ -162,26 +233,30 @@ export function makeAdminApiFixture() {
     customerPageSize: null,
     settingsFailure: null,
     settingsResponse: null,
+    // Protected devices holding a slot on every grant; a PATCH below it models the capacity trigger.
+    devicesInUse: 0,
   };
   let nextProjectionPreviewId = 1;
   let nextCatalogImportPreviewId = 1;
 
-  function seedPolicy(id = "pol_confirm", name = "Confirm policy") {
+  function seedPolicy(id = "pol_confirm", name = "Confirm policy", overrides = {}) {
     const policy = {
       id, project: "DEFAULT", name, type: "trial", status: "active",
       valid_from_offset_sec: null, duration_sec: null, assertion_ttl_seconds: 300, pool_size: 0,
       max_active_devices: 1, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000,
       expiry_strategy: "fixed_window", trial_expiration_basis: "from_issue", trial_duration_sec: 0,
       trial_one_per_device: 0, trial_require_device_proof: 0, notes: "", created_at: now, updated_at: now,
+      ...overrides,
     };
     policies.push(policy);
     return policy;
   }
 
-  function seedWebhook(id = "wh_confirm", url = "https://hooks.example.test/confirm") {
+  function seedWebhook(id = "wh_confirm", url = "https://hooks.example.test/confirm", overrides = {}) {
     const endpoint = {
       id, url, event_types: "", status: "active",
       description: "", scope_project: null, scope_customer_id: null, created_at: now, updated_at: now,
+      ...overrides,
     };
     webhooks.push(endpoint);
     return endpoint;
@@ -700,6 +775,7 @@ export function makeAdminApiFixture() {
     }
 
     if (method === "GET" && path === "/api/admin/summary") {
+      requests.summaryReads.push(true);
       return fulfill(200, makeEnvelope("summary", summary()));
     }
     if (method === "GET" && path === "/api/admin/settings") {
@@ -764,9 +840,16 @@ export function makeAdminApiFixture() {
         const response = behavior.expiringAppendResponses.shift();
         return fulfill(response.status ?? 200, fixtureResponseBody(response));
       }
+      // The id/customer_id a real deep link needs come from a seeded entitlement sharing the row's
+      // fingerprint when one exists (so a click resolves to exactly that record); otherwise a
+      // synthetic id is used that matches nothing, same as this fixture's other unlinked rows.
+      const linkToRealEntitlement = (spec) => {
+        const real = entitlements.find((item) => item.license_fingerprint === spec.license_fingerprint);
+        return { ...spec, id: real ? real.id : spec.id, customer_id: real ? real.customer_id : spec.customer_id };
+      };
       const items = [
-        { project: "DEFAULT", feature: `pro-${withinDays}`, license_fingerprint: "a".repeat(64), customer_id: "cus_acme", valid_until: 1_760_500_000, days_left: 3 },
-        { project: "DEFAULT", feature: "ent", license_fingerprint: "b".repeat(64), customer_id: null, valid_until: 1_762_000_000, days_left: 21 },
+        linkToRealEntitlement({ id: "exp-1", project: "DEFAULT", feature: `pro-${withinDays}`, license_fingerprint: "a".repeat(64), customer_id: "cus_acme", customer_name: "Acme Corp", valid_until: 1_760_500_000, days_left: 3 }),
+        linkToRealEntitlement({ id: "exp-2", project: "DEFAULT", feature: "ent", license_fingerprint: "b".repeat(64), customer_id: null, customer_name: null, valid_until: 1_762_000_000, days_left: 21 }),
       ];
       const page = behavior.expiringPagination ? (cursor === null ? items.slice(0, 1) : items.slice(1)) : items;
       return fulfill(200, makeEnvelope("report_expiring", {
@@ -863,6 +946,7 @@ export function makeAdminApiFixture() {
       }));
     }
     if (method === "GET" && path === "/api/admin/licenses") {
+      requests.licenseReads.push(url.search);
       return fulfill(200, makeEnvelope("licenses_listed", { items: behavior.licenseRows.map((item) => ({ ...item })), next_cursor: null }));
     }
     if (method === "GET" && path === "/api/admin/catalog/projects") {
@@ -871,7 +955,7 @@ export function makeAdminApiFixture() {
     }
     const protectedListMatch = /^\/api\/admin\/customers\/([^/]+)\/bindings$/.exec(path);
     if(method === "GET" && protectedListMatch) return fulfill(200,makeEnvelope("customer_bindings",{
-      customer:{id:decodeURIComponent(protectedListMatch[1]),status:"active"},operator:{subject:"test-admin",actor_type:"access",role:"admin"},server_time:now,items:[],next_cursor:null,
+      customer:{id:decodeURIComponent(protectedListMatch[1]),status:"active"},operator:{subject:"test-admin",actor_type:"access",role:"admin"},server_time:now,capacity:[],denied:[],items:[],next_cursor:null,
     }));
     const workspaceMatch = /^\/api\/admin\/customers\/([^/]+)\/(apps|access|resources)$/.exec(path);
     if (method === "GET" && workspaceMatch) {
@@ -880,6 +964,7 @@ export function makeAdminApiFixture() {
       if (!detail) return fulfill(404, makeEnvelope("not_found", undefined, false));
       const owned = entitlements.filter(item => item.customer_id === customerId && (!url.searchParams.has("project") || item.project === url.searchParams.get("project")));
       const view = workspaceMatch[2];
+      requests.customerWorkspaceReads.push(`${view}${url.search}`);
       const items = view === "access" ? owned.map(publicRecord) : view === "resources" ? [] : [...new Set(owned.map(item => item.project))].sort().map(project => {
         const grants = owned.filter(item => item.project === project);
         const expiries = grants.map(item => item.valid_until).filter(value => value !== null);
@@ -948,7 +1033,39 @@ export function makeAdminApiFixture() {
       return fulfill(200, makeEnvelope("batch_done", { results }));
     }
     if (method === "GET" && path === "/api/admin/events") {
-      return fulfill(200, makeEnvelope("events_listed", { items: events.map((item) => ({ ...item })) }));
+      requests.eventsReads.push(true);
+      // Mirrors the real worker's filters + keyset cursor closely enough for e2e purposes: exact
+      // match on project/feature/event_type/actor, entitlement_id decoded to project/feature/
+      // license_fingerprint, since/until bound created_at, and "<created_at>:<id>" pages forward
+      // (the `events` array is already newest-first, matching ORDER BY created_at DESC, id DESC).
+      let matches = events;
+      for (const [param, field] of [["project", "project"], ["feature", "feature"], ["event_type", "event_type"], ["actor", "actor"]]) {
+        const value = url.searchParams.get(param);
+        if (value) matches = matches.filter((item) => item[field] === value);
+      }
+      // The real worker decodes entitlement_id to a project/feature/license_fingerprint triple;
+      // this fixture's rows carry an opaque "ent-N" id instead (see findById), so it resolves the
+      // SAME triple by looking the row up directly rather than reimplementing that encoding here.
+      const entitlementIdParam = url.searchParams.get("entitlement_id");
+      if (entitlementIdParam) {
+        const target = findById(entitlementIdParam);
+        matches = target === undefined ? [] : matches.filter((item) =>
+          item.project === target.project && item.feature === target.feature && item.license_fingerprint === target.license_fingerprint);
+      }
+      const since = url.searchParams.get("since");
+      if (since) matches = matches.filter((item) => item.created_at >= Number(since));
+      const until = url.searchParams.get("until");
+      if (until) matches = matches.filter((item) => item.created_at <= Number(until));
+      const cursor = url.searchParams.get("cursor");
+      if (cursor) {
+        const [afterCreatedAt, afterId] = cursor.split(":").map(Number);
+        matches = matches.filter((item) => item.created_at < afterCreatedAt || (item.created_at === afterCreatedAt && item.id < afterId));
+      }
+      const pageSize = behavior.eventsPageSize ?? matches.length;
+      const page = matches.slice(0, pageSize);
+      const last = page.at(-1);
+      const nextCursor = page.length < matches.length && last !== undefined ? `${last.created_at}:${last.id}` : null;
+      return fulfill(200, makeEnvelope("events_listed", { items: page.map((item) => ({ ...item })), next_cursor: nextCursor }));
     }
     const entitlementDetailMatch = /^\/api\/admin\/entitlements\/([^/]+)$/.exec(path);
     if (method === "GET" && entitlementDetailMatch !== null) {
@@ -997,10 +1114,18 @@ export function makeAdminApiFixture() {
       const filteredEntitlements = entitlements.filter((item) =>
         (!url.searchParams.has("id") || item.id === url.searchParams.get("id")) &&
         (!url.searchParams.has("customer_id") || item.customer_id === url.searchParams.get("customer_id")) &&
+        (!url.searchParams.has("license_id") || item.license_id === url.searchParams.get("license_id")) &&
         (project === null || item.project === project) &&
         (feature === null || item.feature === feature) &&
         (status === null || item.status === status),
       );
+      if (behavior.entitlementsPageSize !== null) {
+        const offset = Number(url.searchParams.get("cursor") ?? "0");
+        const page = filteredEntitlements.slice(offset, offset + behavior.entitlementsPageSize).map(publicRecord);
+        const nextOffset = offset + behavior.entitlementsPageSize;
+        const nextCursor = nextOffset < filteredEntitlements.length ? String(nextOffset) : null;
+        return fulfill(200, makeEnvelope("entitlements_listed", { items: page, next_cursor: nextCursor }));
+      }
       const releaseTargetOnSecondPage = behavior.releaseSeatTargetOnSecondPage && behavior.releaseSeatTargetId !== null;
       const items = releaseTargetOnSecondPage
         ? filteredEntitlements.filter((item) => item.id !== behavior.releaseSeatTargetId).map(publicRecord)
@@ -1009,6 +1134,7 @@ export function makeAdminApiFixture() {
     }
     // The Entitlements and Plans tabs load active policies for policy selectors.
     if (method === "GET" && path === "/api/admin/policies") {
+      requests.policyReads.push(url.search);
       const status = url.searchParams.get("status");
       const project = url.searchParams.get("project");
       const type = url.searchParams.get("type");
@@ -1057,6 +1183,17 @@ export function makeAdminApiFixture() {
       };
       policies.push(row);
       return fulfill(200, makeEnvelope("policy_created", { ...row }));
+    }
+    const policyDetailMatch = /^\/api\/admin\/policies\/([^/]+)$/.exec(path);
+    if (method === "PATCH" && policyDetailMatch !== null) {
+      const body = await jsonBody(request);
+      requests.policyPatches.push({ id: decodeURIComponent(policyDetailMatch[1]), body, idempotencyKey: request.headers()["idempotency-key"] ?? null });
+      const policy = policies.find((item) => item.id === decodeURIComponent(policyDetailMatch[1]));
+      if (policy === undefined) return fulfill(404, { ok: false, code: "not_found", request_id: "ui-e2e-policy-missing" });
+      if (["project", "name", "type", "status"].some((field) => field in body)) return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-policy-identity" });
+      now += 1;
+      Object.assign(policy, body, { updated_at: now });
+      return fulfill(200, makeEnvelope("policy_patched", { ...policy }));
     }
     const policyActionMatch = /^\/api\/admin\/policies\/([^/]+)\/(disable|reenable)$/.exec(path);
     if (method === "POST" && policyActionMatch !== null) {
@@ -1109,6 +1246,22 @@ export function makeAdminApiFixture() {
       };
       webhooks.push(row);
       return fulfill(200, makeEnvelope("webhook_created", { ...row }));
+    }
+    const webhookDetailMatch = /^\/api\/admin\/webhooks\/([^/]+)$/.exec(path);
+    if (method === "PATCH" && webhookDetailMatch !== null) {
+      const id = decodeURIComponent(webhookDetailMatch[1]);
+      const body = await jsonBody(request);
+      requests.webhookPatches.push({ id, body, idempotencyKey: request.headers()["idempotency-key"] ?? null });
+      const endpoint = webhooks.find((item) => item.id === id);
+      if (endpoint === undefined) return fulfill(404, { ok: false, code: "not_found", request_id: "ui-e2e-webhook-missing" });
+      now += 1;
+      if ("url" in body) endpoint.url = body.url;
+      if ("event_types" in body) endpoint.event_types = body.event_types;
+      if ("description" in body) endpoint.description = body.description;
+      if ("scope_project" in body) endpoint.scope_project = body.scope_project === "" ? null : body.scope_project;
+      if ("scope_customer_id" in body) endpoint.scope_customer_id = body.scope_customer_id === "" ? null : body.scope_customer_id;
+      endpoint.updated_at = now;
+      return fulfill(200, makeEnvelope("webhook_patched", { ...endpoint }));
     }
     if (method === "GET" && path === "/api/admin/webhooks/deliveries") {
       const endpointId = url.searchParams.get("endpoint_id") ?? "";
@@ -1175,6 +1328,16 @@ export function makeAdminApiFixture() {
       row.next_attempt_at = now;
       row.delivered_at = null;
       return fulfill(200, makeEnvelope("webhook_delivery_redriven", { ...row }));
+    }
+    const webhookTestMatch = /^\/api\/admin\/webhooks\/([^/]+)\/test$/.exec(path);
+    if (method === "POST" && webhookTestMatch !== null) {
+      const id = decodeURIComponent(webhookTestMatch[1]);
+      requests.webhookTests.push(id);
+      const scripted = behavior.webhookTestResponses.shift();
+      if (scripted !== undefined) return fulfill(scripted.status, scripted.body);
+      const endpoint = webhooks.find((item) => item.id === id && item.status === "active");
+      if (endpoint === undefined) return fulfill(404, { ok: false, code: "not_found", request_id: "ui-e2e-webhook-test-missing" });
+      return fulfill(200, makeEnvelope("webhook_test_sent", { status_class: "2xx" }));
     }
     const webhookActionMatch = /^\/api\/admin\/webhooks\/([^/]+)\/(disable|reenable)$/.exec(path);
     if (method === "POST" && webhookActionMatch !== null) {
@@ -1413,6 +1576,20 @@ export function makeAdminApiFixture() {
       }));
     }
     const catalogPlanDetailMatch = /^\/api\/admin\/catalog\/plans\/([^/]+)$/.exec(path);
+    if (method === "GET" && catalogPlanDetailMatch !== null) {
+      const id = decodeURIComponent(catalogPlanDetailMatch[1]);
+      requests.catalogPlanReads.push(id);
+      await deferRead(`catalog-plan:${id}`);
+      if (behavior.catalogPlanReadResponses.length > 0) {
+        const response = behavior.catalogPlanReadResponses.shift();
+        return fulfill(response.status ?? 200, fixtureResponseBody(response));
+      }
+      const row = catalogPlans.find((item) => item.id === id);
+      if (row === undefined) {
+        return fulfill(404, { ok: false, code: "catalog_plan_not_found", request_id: "ui-e2e-plan-read-missing" });
+      }
+      return fulfill(200, makeEnvelope("catalog_plan", { ...row }));
+    }
     if (method === "PATCH" && catalogPlanDetailMatch !== null) {
       const id = decodeURIComponent(catalogPlanDetailMatch[1]);
       const body = await jsonBody(request);
@@ -1761,6 +1938,19 @@ export function makeAdminApiFixture() {
       if (method === "PATCH" && match[2] === undefined) {
         const body = await jsonBody(request);
         requests.patches.push(body);
+        // The device limit is patched alone, and a protected grant keeps room for its connected devices.
+        if (body.max_active_devices !== undefined) {
+          if (Object.keys(body).some((field) => !["max_active_devices", "expected_customer_id", "expected_revocation_seq"].includes(field))) {
+            return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-limit-combined" });
+          }
+          if (row.enforcement_mode === "device_bound_v1" && body.max_active_devices < behavior.devicesInUse) {
+            return fulfill(409, { ok: false, code: "capacity_in_use", request_id: "ui-e2e-capacity-in-use", data: { devices_in_use: behavior.devicesInUse } });
+          }
+          now += 1;
+          Object.assign(row, { max_active_devices: body.max_active_devices, revocation_seq: row.revocation_seq + 1, updated_at: now });
+          addEvent("update", row);
+          return fulfill(200, makeEnvelope("entitlement_patched", publicRecord(row)));
+        }
         now += 1;
         Object.assign(row, {
           device_hash: body.device_hash ?? row.device_hash,
@@ -1841,7 +2031,9 @@ export function makeAdminApiFixture() {
 
 export function makeProtectedConnectionsFixture(){
   const base=makeAdminApiFixture(),id=Buffer.alloc(16,1).toString('base64url'),posts=[];
-  const behavior={drop:false,failRead:false,malformed:false,role:'admin',subject:'operator-one',status:'active',postFailure:null,reviewGate:null,detailFailure:false};
+  const behavior={drop:false,failRead:false,malformed:false,role:'admin',subject:'operator-one',status:'active',postFailure:null,reviewGate:null,detailFailure:false,
+    capacity:[{project:'COLMAP',feature:'PRO',license_fingerprint:'a'.repeat(64),in_use:1,limit:2}],
+    denied:[{project:'COLMAP',feature:'PRO',license_fingerprint:'a'.repeat(64),device_key_id:`sha256:${'d'.repeat(64)}`,ts:1750000000}]};
   const row={binding_id:id,label:'Design workstation',project:'COLMAP',feature:'PRO',license_fingerprint:'a'.repeat(64),state:'active',generation:1,revision:0,hold_until:1900000000,last_proof_at:1760000000,created_at:1750000000};
   const context=()=>({customer:{id:'cus_acme',status:behavior.status},operator:{subject:behavior.subject,actor_type:'access',role:behavior.role},server_time:1760000000});
   return {behavior,posts,row,async route(route){
@@ -1859,6 +2051,6 @@ export function makeProtectedConnectionsFixture(){
     if(behavior.failRead)return send(503,{ok:false,code:'temporarily_unavailable',request_id:'read-failure'});
     if(url.searchParams.has('binding_id') && behavior.reviewGate)await behavior.reviewGate;
     if(url.pathname.endsWith('/events'))return send(200,makeEnvelope('binding_events',{...context(),binding_id:id,items:posts.length?[{id:1,event_type:'retire',actor:'operator:access:operator-one',occurred_at:1760000000}]:[],next_cursor:null}));
-    return send(200,makeEnvelope('customer_bindings',{...context(),items:behavior.malformed===true?[null]:behavior.malformed==='array-state'?[{...row,state:['active']}]:[{...row}],next_cursor:null}));
+    return send(200,makeEnvelope('customer_bindings',{...context(),capacity:behavior.capacity,denied:behavior.denied,items:behavior.malformed===true?[null]:behavior.malformed==='array-state'?[{...row,state:['active']}]:[{...row}],next_cursor:null}));
   }};
 }

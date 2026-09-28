@@ -50,6 +50,27 @@ test("every canonical route has one bounded-context owner and preserves raw temp
   }
 });
 
+test("customer license creation is an admin-only customers route that captures the raw customer id", () => {
+  assert.ok(API_ROUTES.some((route) => route.method === "POST" && route.path === "/api/admin/customers/{id}/licenses"));
+  const matched = matchRoute("POST", "/api/admin/customers/cust%2F1/licenses");
+  assert.ok(matched, "POST /api/admin/customers/{id}/licenses did not resolve");
+  assert.equal(matched.descriptor.path, "/api/admin/customers/{id}/licenses");
+  assert.equal(matched.descriptor.group, "customers");
+  assert.equal(matched.descriptor.authorization, "admin");
+  assert.deepEqual(matched.params, { id: "cust%2F1" });
+  assert.equal(matchRoute("GET", "/api/admin/customers/cust_1/licenses"), null, "license listing stays on GET /api/admin/licenses");
+});
+
+test("webhook test sends are an admin-only webhooks route distinct from the disable/reenable transitions", () => {
+  assert.ok(API_ROUTES.some((route) => route.method === "POST" && route.path === "/api/admin/webhooks/{id}/test"));
+  const matched = matchRoute("POST", "/api/admin/webhooks/wh_1/test");
+  assert.ok(matched, "POST /api/admin/webhooks/{id}/test did not resolve");
+  assert.equal(matched.descriptor.path, "/api/admin/webhooks/{id}/test");
+  assert.equal(matched.descriptor.group, "webhooks");
+  assert.equal(matched.descriptor.authorization, "admin");
+  assert.equal(matchRoute("POST", "/api/admin/webhooks/deliveries/1/test"), null, "a delivery has no test route");
+});
+
 test("route descriptors make API authorization explicit for every bounded context", () => {
   for (const descriptor of ROUTE_DESCRIPTORS) {
     if (descriptor.group === "meta") {

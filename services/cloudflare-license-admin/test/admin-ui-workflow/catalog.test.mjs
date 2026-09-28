@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { loadWorkflowModule } from "./helpers.mjs";
+import { loadWorkflowModule, loadWorkflowModules } from "./helpers.mjs";
 
 test("admin UI workflow builds plan projection paths and payloads", async () => {
   const workflow = await loadWorkflowModule("features/catalog/workflow.ts");
@@ -378,4 +378,71 @@ test("admin UI workflow preserves catalog-import target tuples and typed delta v
   assert.equal(workflow.catalogImportEffectValueLabel(null), "<null>");
   assert.equal(workflow.catalogImportEffectValueLabel("null"), '"null"');
   assert.equal(workflow.catalogImportEffectValueLabel("unset"), '"unset"');
+});
+
+test("admin UI workflow freezes a confirmed plan projection binding against the live one, not a stray self-comparison", async () => {
+  const binding = await loadWorkflowModule("features/catalog/planProjectionBinding.ts");
+  const bindingA = { input: {}, digest: "a", preview: {} };
+  const bindingB = { input: {}, digest: "b", preview: {} };
+  // The exact confirmed binding, at the exact confirmed revision, is usable.
+  assert.equal(binding.planProjectionBindingIsUsable(bindingA, 1, bindingA, 1), true);
+  // A different revision (the form changed and bumped it) makes it stale, even with the same binding.
+  assert.equal(binding.planProjectionBindingIsUsable(bindingA, 1, bindingA, 2), false);
+  // A different binding object at the same revision (a fresh preview replaced it) is also stale.
+  assert.equal(binding.planProjectionBindingIsUsable(bindingA, 1, bindingB, 1), false);
+  // No live binding at all (invalidated) is stale.
+  assert.equal(binding.planProjectionBindingIsUsable(bindingA, 1, null, 1), false);
+});
+
+test("each catalog validation code names the field of its own form, and whole-form codes name none", async () => {
+  const [workflow, fields, messages] = await loadWorkflowModules(["features/catalog/workflow.ts", "features/catalog/fieldErrors.ts", "shared/messages.ts"]);
+  const codeOf = (run) => {
+    try {
+      run();
+    } catch (error) {
+      return error.message;
+    }
+    assert.fail("the form should be refused");
+  };
+  const feature = (patch) => codeOf(() => workflow.normalizeCatalogFeatureForm({ ...workflow.emptyCatalogFeatureForm, feature_key: "export", name: "Export", ...patch }));
+  assert.equal(fields.catalogFeatureFieldForCode(feature({ feature_key: "x".repeat(16) })), "feature_key");
+  assert.equal(fields.catalogFeatureFieldForCode(feature({ name: "" })), "name");
+  assert.equal(fields.catalogFeatureFieldForCode(feature({ project: "" })), "project");
+  assert.equal(fields.catalogFeatureFieldForCode(feature({ category: "a\nb" })), "category");
+  assert.equal(fields.catalogFeatureFieldForCode(feature({ description: "a\nb" })), "description");
+  assert.equal(fields.catalogFeatureFieldForCode("catalog_feature_conflict"), "feature_key");
+  assert.equal(messages.describeCode(feature({ feature_key: "x".repeat(16) })).text, "Required. Use one line within the length limit.");
+
+  const plan = (patch) => codeOf(() => workflow.normalizeCatalogPlanForm({ ...workflow.emptyCatalogPlanForm, plan_key: "pro", name: "Pro", ...patch }));
+  assert.equal(fields.catalogPlanFieldForCode(plan({ version: 0 })), "version");
+  assert.equal(fields.catalogPlanFieldForCode(plan({ plan_key: "" })), "plan_key");
+  assert.equal(fields.catalogPlanFieldForCode(plan({ description: "a\nb" })), "description");
+  assert.equal(fields.catalogPlanFieldForCode("catalog_plan_conflict"), "plan_key");
+  assert.equal(messages.describeCode(plan({ version: 0 })).text, "Enter a whole number from 1 to 1,000,000.");
+
+  const row = (patch) => codeOf(() => workflow.normalizeCatalogPlanFeatureForm({ ...workflow.emptyCatalogPlanFeatureForm, feature_key: "export", ...patch }));
+  assert.equal(fields.catalogPlanFeatureFieldForCode(row({ feature_inclusion: "addon" })), "addon_key");
+  assert.equal(fields.catalogPlanFeatureFieldForCode(row({ pool_size: "-1" })), "pool_size");
+  assert.equal(fields.catalogPlanFeatureFieldForCode(row({ max_active_devices: "1.5" })), "max_active_devices");
+  assert.equal(fields.catalogPlanFeatureFieldForCode(row({ max_borrow_sec: "-1" })), "max_borrow_sec");
+  assert.equal(fields.catalogPlanFeatureFieldForCode(row({ display_order: -1 })), "display_order");
+  assert.equal(fields.catalogPlanFeatureFieldForCode("catalog_feature_not_found"), "feature_key");
+  assert.equal(fields.catalogPlanFeatureFieldForCode("catalog_policy_not_available"), "policy_id");
+  assert.equal(fields.catalogPlanFeatureFieldForCode("policy_disabled"), "policy_id");
+  // Rules for fields this editor does not show stay with the whole form.
+  assert.equal(fields.catalogPlanFeatureFieldForCode(row({ meter_quota: "-1" })), null);
+
+  const projection = (patch) => codeOf(() => workflow.normalizePlanProjectionForm({ ...workflow.emptyPlanProjectionForm, license_id: "lic_1", plan_key: "pro", ...patch }));
+  assert.equal(fields.planProjectionFieldForCode(projection({ plan_key: "" })), "plan_key");
+  assert.equal(fields.planProjectionFieldForCode(projection({ license_id: "" })), "license_id");
+  assert.equal(fields.planProjectionFieldForCode(projection({ addons: "x".repeat(129) })), "addons");
+  assert.equal(fields.planProjectionFieldForCode(projection({ support_until: "31/12/2026" })), "support_until");
+  assert.equal(fields.planProjectionFieldForCode("unknown_addon"), "addons");
+  assert.equal(fields.catalogImportFieldForCode("invalid_catalog_import_manifest"), "manifest");
+
+  for (const code of ["invalid_request", "catalog_mutation_failed", "catalog_plan_feature_conflict", "constructor", "definitely_not_a_code"]) {
+    for (const fieldFor of [fields.catalogFeatureFieldForCode, fields.catalogPlanFieldForCode, fields.catalogPlanFeatureFieldForCode, fields.planProjectionFieldForCode, fields.catalogImportFieldForCode]) {
+      assert.equal(fieldFor(code), null, code);
+    }
+  }
 });

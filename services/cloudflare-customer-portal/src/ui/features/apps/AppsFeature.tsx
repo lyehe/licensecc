@@ -1,15 +1,18 @@
 import React from "react";
-import { appLocation } from "../../shared/navigation";
+import { LICENSE_ATTENTION_COPY, licenseNeedsAttention } from "../../portalWorkflow";
+import { appLocation, devicesLocation } from "../../shared/navigation";
+import { useLicenseClock } from "../../shared/useLicenseClock";
 import { EntitlementsFeature } from "../entitlements/EntitlementsFeature";
 import { type LicenseDownloads } from "../downloads/DownloadsFeature";
 import { UsageFeature } from "../usage/UsageFeature";
 import type { EntitlementRow, UsageRow } from "../../types";
 
-export function AppsFeature({ entitlements, usage, usageAvailable, retry, downloads, busy, project }: {
+export function AppsFeature({ entitlements, usage, usageAvailable, retry, downloads, busy, project, email }: {
   usageAvailable: boolean; retry(): Promise<void>;
   entitlements: EntitlementRow[]; usage: UsageRow[]; downloads: LicenseDownloads;
-  busy: boolean; project: string | null;
+  busy: boolean; project: string | null; email: string | null;
 }): React.ReactElement {
+  const now = useLicenseClock();
   const accessByProject = new Map<string, EntitlementRow[]>();
   for (const item of entitlements) {
     const access = accessByProject.get(item.project) ?? [];
@@ -21,7 +24,7 @@ export function AppsFeature({ entitlements, usage, usageAvailable, retry, downlo
     const access = accessByProject.get(project) ?? [];
     return <div className="appDetail">
       <a className="backLink" href="#/apps">← Back to apps</a>
-      <div className="pageHeading"><div><h1>{project}</h1></div><a className="button" href="#/nodes">View devices</a></div>
+      <div className="pageHeading"><div><h1>{project}</h1></div><a className="button" href={devicesLocation(project)}>View devices</a></div>
       {access.length === 0 ? <div className="emptyState"><h2>App not found</h2><p>This app is not in the access returned for your account.</p></div> : <>
         <EntitlementsFeature entitlements={access} downloads={downloads} busy={busy} />
         <UsageFeature available={usageAvailable} busy={busy} retry={retry} usage={usage.filter((item) => item.project === project)} />
@@ -30,14 +33,16 @@ export function AppsFeature({ entitlements, usage, usageAvailable, retry, downlo
   }
   return <>
     <div className="pageHeading"><div><h1>Apps</h1></div></div>
-    {projects.length === 0 ? <div className="emptyState"><h2>No apps assigned yet</h2><p>Apps appear here when a license is assigned to your account.</p></div> : <div className="appList">
+    {projects.length === 0 ? <div className="emptyState"><h2>No apps assigned yet</h2><p>{email !== null ? <>Signed in as {email}. No apps are assigned to this account yet.</> : "No apps are assigned to this account yet."}</p></div> : <div className="appList">
       {projects.map(([name, access]) => {
         const featureCount = new Set(access.map((item) => item.feature)).size;
+        // Words, not colour alone: the badge text is what a screen reader and a colour-blind reader get.
+        const needsAttention = access.some((item) => licenseNeedsAttention(item, now));
         return <article className="appRow" key={name}>
           <div className="appMark" aria-hidden="true">{name.slice(0, 1).toUpperCase()}</div>
-          <div className="appIdentity"><h2>{name}</h2><p>{access.length} {access.length === 1 ? "license" : "licenses"} · {featureCount} {featureCount === 1 ? "feature" : "features"}</p></div>
+          <div className="appIdentity"><h2>{name}</h2><p>{access.length} {access.length === 1 ? "license" : "licenses"} · {featureCount} {featureCount === 1 ? "feature" : "features"}</p>{needsAttention && <p><span className="attentionBadge">{LICENSE_ATTENTION_COPY}</span></p>}</div>
 
-          <a className="button" href={appLocation(name)} aria-label={`View app ${name}`}>View licenses</a>
+          <a className="button" href={appLocation(name)} aria-label={`View licenses for ${name}`}>View licenses</a>
         </article>;
       })}
     </div>}

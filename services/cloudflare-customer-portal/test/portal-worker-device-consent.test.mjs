@@ -99,13 +99,13 @@ test("consent inspection forwards only a bounded optional cursor and validates p
   assert.equal(calls.length,1);
   const valid=await f.env.DEVICE_CONSENT.inspect("A",{attempt_handle:handle});
   for(const duration of [2,86400,0,1,-1,1.5,'86400',null]){
-    const entitlement={id:'trial',feature:'DEFAULT',valid_until:null,device_limit:1,activation_trial_seconds:duration};
+    const entitlement={id:'trial',feature:'DEFAULT',valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false,activation_trial_seconds:duration};
     f.env.DEVICE_CONSENT.inspect=async()=>({...valid,data:{...valid.data,entitlements:[entitlement]}});
     const reply=await call(f.env,'POST',prefix+'inspect',{cookie,body:{attempt_handle:handle}});
     assert.equal(reply.status,typeof duration==='number' && Number.isSafeInteger(duration) && duration>=2?200:503);
     if(reply.status===200)assert.deepEqual(reply.body.data.entitlements,[entitlement]);
   }
-  for(const patch of [{comparison_code:"3885-783e-2c02"},{comparison_code:undefined},{next_page_cursor:"cGFnZTI"},{has_more:true,next_page_cursor:"cGFnZTI"},{entitlements:[{id:"duplicate",feature:"DEFAULT",valid_until:null,device_limit:1},{id:"duplicate",feature:"DEFAULT",valid_until:null,device_limit:1}]}]){
+  for(const patch of [{comparison_code:"3885-783e-2c02"},{comparison_code:undefined},{next_page_cursor:"cGFnZTI"},{has_more:true,next_page_cursor:"cGFnZTI"},{entitlements:[{id:"duplicate",feature:"DEFAULT",valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false},{id:"duplicate",feature:"DEFAULT",valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false}]}]){
     f.env.DEVICE_CONSENT.inspect=async()=>({...valid,data:{...valid.data,...patch}});
     assert.equal((await call(f.env,"POST",prefix+"inspect",{cookie,body:{attempt_handle:handle}})).status,503);
   }

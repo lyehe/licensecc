@@ -1,13 +1,15 @@
 import { useState } from "react";
 
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
+
 export function useCatalogReadState(context: string): {
   loading: boolean;
-  error: string | null;
+  error: OperatorFeedback | null;
   begin: () => void;
   settle: () => void;
-  fail: (error: string) => void;
+  fail: (error: OperatorFeedback) => void;
 } {
-  const [state, setState] = useState({ context, loading: true, error: null as string | null });
+  const [state, setState] = useState({ context, loading: true, error: null as OperatorFeedback | null });
   const visible = state.context === context ? state : { loading: true, error: null };
   return {
     ...visible,

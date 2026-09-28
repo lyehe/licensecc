@@ -116,6 +116,7 @@ repository for auditability but is not part of the maintained reader path.
    architecture/system-map
    architecture/change-guide
    architecture/ownership
+   architecture/glossary
    architecture/decisions/0001-module-boundaries
    architecture/decisions/0002-node-workspace
    architecture/decisions/0003-route-openapi-ownership

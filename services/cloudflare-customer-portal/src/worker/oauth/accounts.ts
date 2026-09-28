@@ -23,12 +23,12 @@ export async function identityCustomer(env: Env, identity: Identity, linkSession
     return linked.customer_id;
   }
   if (existing) {
-    if (existing.status !== "active") throw new Error("sign_in_failed");
+    // The provider just proved this identity, so naming the suspension discloses nothing new.
+    if (existing.status !== "active") throw new Error("account_suspended");
     return existing.customer_id;
   }
-  if (await db.prepare("SELECT id FROM customers WHERE lower(email) = ? LIMIT 1").bind(identity.email).first()) {
-    throw new Error("account_link_required");
-  }
+  if (await db.prepare("SELECT id FROM customers WHERE lower(email) = ? UNION ALL SELECT customer_id FROM portal_passwords WHERE email_lower = ? LIMIT 1")
+    .bind(identity.email, identity.email).first()) throw new Error("account_link_required");
   if (!env.DB.batch) throw new Error("registration_unavailable");
   const customerId = `cust_${crypto.randomUUID()}`;
   await env.DB.batch([

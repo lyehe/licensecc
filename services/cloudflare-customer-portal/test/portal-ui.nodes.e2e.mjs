@@ -37,6 +37,11 @@ test('nodes: retirement confirmation preserves hold, refreshes status and explai
   await expect(dialog).not.toBeVisible();await expect(page.getByText(/Renewal stopped for Work laptop/)).toBeVisible();
   await expect(page.getByRole('heading',{name:'Connected devices'})).toBeFocused();
   await expect(page.getByRole('cell',{name:/Disconnecting/})).toBeVisible();
+  // "Disconnecting · slot available" is wrapped in its own <span> so it styles and
+  // wraps as one unit, separate from the <time> that follows it in the same cell.
+  const statusCell=page.locator('.protectedNodes td[data-label="Status"]');
+  await expect(statusCell.locator('span')).toHaveText('Disconnecting · slot available');
+  await expect(statusCell.locator('time')).toBeVisible();
   expect(calls).toHaveLength(1);expect(calls[0].customer).toBe('A');expect(calls[0].body).toEqual({binding_id:id,expected_revision:0});expect(calls[0].key).toMatch(/^[A-Za-z0-9_-]{43}$/);
   expect(await page.evaluate(()=>sessionStorage.getItem('licensecc.retirement.v1:A'))).toBeNull();
   await page.screenshot({path:testInfo.outputPath('nodes-desktop.png'),fullPage:true});
@@ -87,7 +92,7 @@ test('nodes: mobile layout, dialog focus and escape remain usable',async({page},
 test('nodes: protected recovery remains available when legacy account data fails',async({page})=>{
   await setup(page);
   await page.route('**/api/portal/entitlements',route=>route.fulfill({status:503,json:{ok:false,code:'temporarily_unavailable'}}));
-  await page.goto('/#/nodes');await expect(page.getByText('Registered machines unavailable')).toBeVisible();
+  await page.goto('/#/nodes');await expect(page.getByRole('heading',{name:'Activated devices and seats unavailable'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Disconnect',exact:true})).toBeEnabled();
   await page.getByRole('button',{name:'Disconnect',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible();
 });

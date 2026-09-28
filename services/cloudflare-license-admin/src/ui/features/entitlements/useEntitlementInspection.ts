@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { EntitlementDeviceRecord } from "../../../shared/api";
-import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
+import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
 import { ConfirmRefreshFailure, EXACT_READ_PROOF, type ExactReadProof, useContextGeneration } from "../../shared/controls";
+import { apiFailureFeedback } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { hasDeviceListData, hasMeterStatusData } from "../../shared/mutationGuards";
+import { resolvePendingFocus } from "../../shared/operatorFocus";
 import { useRequestFence } from "../../shared/requestFence";
+import { focusWorkspaceTarget } from "../../shared/workspaceFocus";
 import { entitlementDevicesPath, entitlementMeterPath } from "./workflow";
 
 export interface MeterStatus {
@@ -15,10 +19,31 @@ export interface MeterStatus {
   server_time: number;
 }
 
-interface ReadState { context: string; loading: boolean; error: string | null }
+interface ReadState { context: string; loading: boolean; error: OperatorFeedback | null }
 
-/** Owns read snapshots only; consequence ownership and same-key recovery stay in the controller. */
-export function useEntitlementInspection(active: boolean, filterContextKey: string, setMessage: (message: string) => void) {
+interface InspectorFocusEntry { entitlementId: string; invokingElement: HTMLElement | null }
+
+/** The panel rendered inline under its own row carries this marker; the heading inside it takes
+ * initial focus, wherever the caller placed the panel (a table row or a narrow-layout card). */
+function findInspectorHeading(entitlementId: string): HTMLElement | null {
+  for (const panel of Array.from(document.querySelectorAll<HTMLElement>("[data-inspector-row]"))) {
+    if (panel.getAttribute("data-inspector-row") === entitlementId) {
+      return panel.querySelector<HTMLElement>("[data-inspector-heading]");
+    }
+  }
+  return null;
+}
+
+/**
+ * Owns read snapshots only; consequence ownership and same-key recovery stay in the controller. A
+ * failed read is reported by the inspector's own read notice.
+ *
+ * Only one of the device or metering panel is ever open (opening one closes the other), and it
+ * renders inline under its own entitlement row. Opening or switching rows focuses the panel's
+ * heading; closing it (without opening a different one) restores focus to the row control that
+ * opened it, reopening a collapsed "More actions" menu around that control if needed.
+ */
+export function useEntitlementInspection(active: boolean, filterContextKey: string) {
   const [deviceEntitlementId, setDeviceEntitlementId] = useState<string | null>(null);
   const [devices, setDevices] = useState<EntitlementDeviceRecord[]>([]);
   const [meterEntitlementId, setMeterEntitlementId] = useState<string | null>(null);
@@ -31,6 +56,15 @@ export function useEntitlementInspection(active: boolean, filterContextKey: stri
   const devicesFence = useRequestFence(deviceContextKey);
   const meterFence = useRequestFence(meterContextKey);
   const currentDevicesRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
+  // Set only when a toggle opens (or switches) a panel, never on the click that closes it, so a
+  // close restores focus to the control that opened the panel currently on screen -- never to
+  // "Close devices"/"Close metering" itself.
+  const pendingCloseFocusRef = useRef<InspectorFocusEntry | null>(null);
+
+  function captureOpenFocus(entitlementId: string): void {
+    const activeElement = document.activeElement;
+    pendingCloseFocusRef.current = { entitlementId, invokingElement: activeElement instanceof HTMLElement ? activeElement : null };
+  }
 
   async function loadDevices(entitlementId: string, strict = false, isCurrent: () => boolean = () => true): Promise<ExactReadProof | null> {
     if (!isCurrent()) return null;
@@ -44,20 +78,27 @@ export function useEntitlementInspection(active: boolean, filterContextKey: stri
       setDeviceRead({ context: deviceContextKey, loading: false, error: null });
       return EXACT_READ_PROOF;
     }
-    setDeviceRead({ context: deviceContextKey, loading: false, error: apiFailureMessage(response) });
+    setDeviceRead({ context: deviceContextKey, loading: false, error: apiFailureFeedback(response) });
     if (strict) {
       const failure = apiFailureDetails(response);
       throw new ConfirmRefreshFailure(failure.code, failure.requestId);
     }
-    setMessage(apiFailureMessage(response));
     return null;
   }
 
   currentDevicesRefreshRef.current = () => active && deviceEntitlementId !== null ? loadDevices(deviceEntitlementId, true) : Promise.resolve(null);
 
   function toggleDevices(entitlementId: string): void {
-    setDeviceEntitlementId(deviceEntitlementId === entitlementId ? null : entitlementId);
+    const opening = deviceEntitlementId !== entitlementId;
+    if (opening) captureOpenFocus(entitlementId);
+    setDeviceEntitlementId(opening ? entitlementId : null);
     setDevices([]);
+    // Only one inspector panel is ever open: opening (or switching) the device panel closes an
+    // open metering panel, on any row.
+    if (meterEntitlementId !== null) {
+      setMeterEntitlementId(null);
+      setMeterStatus(null);
+    }
   }
 
   useEffect(() => {
@@ -74,19 +115,37 @@ export function useEntitlementInspection(active: boolean, filterContextKey: stri
       setMeterStatus(parsed.data);
       setMeterRead({ context: meterContextKey, loading: false, error: null });
     } else {
-      setMeterRead({ context: meterContextKey, loading: false, error: apiFailureMessage(response) });
-      setMessage(apiFailureMessage(response));
+      setMeterRead({ context: meterContextKey, loading: false, error: apiFailureFeedback(response) });
     }
   }
 
   function toggleMeter(entitlementId: string): void {
-    setMeterEntitlementId(meterEntitlementId === entitlementId ? null : entitlementId);
+    const opening = meterEntitlementId !== entitlementId;
+    if (opening) captureOpenFocus(entitlementId);
+    setMeterEntitlementId(opening ? entitlementId : null);
     setMeterStatus(null);
+    if (deviceEntitlementId !== null) {
+      setDeviceEntitlementId(null);
+      setDevices([]);
+    }
   }
 
   useEffect(() => {
     if (active && meterEntitlementId !== null) void loadMeterStatus(meterEntitlementId);
   }, [active, meterEntitlementId, meterContextKey, meterFence]);
+
+  useLayoutEffect(() => {
+    const openEntitlementId = deviceEntitlementId ?? meterEntitlementId;
+    if (openEntitlementId !== null) {
+      focusWorkspaceTarget(findInspectorHeading(openEntitlementId));
+      return;
+    }
+    const pending = pendingCloseFocusRef.current;
+    pendingCloseFocusRef.current = null;
+    if (pending === null) return;
+    const target = resolvePendingFocus({ invokingElement: pending.invokingElement, rowKey: `entitlement:${pending.entitlementId}`, sectionKey: null });
+    focusWorkspaceTarget(target);
+  }, [deviceEntitlementId, meterEntitlementId]);
 
   return {
     deviceEntitlementId, meterEntitlementId, toggleDevices, toggleMeter, loadDevices, loadMeterStatus,

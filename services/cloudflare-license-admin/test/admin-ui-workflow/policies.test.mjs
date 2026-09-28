@@ -95,3 +95,37 @@ test("disable-policy confirm copy echoes the policy and clarifies frozen entitle
   assert.match(copy, /Disable policy "Trial 14d" \(trial\)/);
   assert.match(copy, /already-stamped entitlements are frozen and unaffected/);
 });
+
+test("each policy validation code names the field it belongs to, and whole-form codes name none", async () => {
+  const [workflow, messages] = await Promise.all([loadWorkflowModule("features/policies/workflow.ts"), loadWorkflowModule("shared/messages.ts")]);
+  const codeFor = (patch) => {
+    try {
+      workflow.normalizePolicyForm({ ...workflow.emptyPolicyForm, name: "Trial", ...patch });
+    } catch (error) {
+      return error.message;
+    }
+    assert.fail(`${JSON.stringify(patch)} should be refused`);
+  };
+  const cases = [
+    [{ duration_sec: "-5" }, "duration_sec", "Enter a whole number from 0 to 3,153,600,000."],
+    [{ valid_from_offset_sec: "1.5" }, "valid_from_offset_sec", "Enter a whole number from -3,153,600,000 to 3,153,600,000."],
+    [{ assertion_ttl_seconds: 0 }, "assertion_ttl_seconds", "Enter a whole number from 1 to 3,600."],
+    [{ type: "floating", pool_size: 0 }, "pool_size", "A floating policy needs a pool of at least 1 seat."],
+    [{ type: "node_locked", pool_size: 3 }, "pool_size", "A device-locked policy has no seat pool; set the pool size to 0."],
+    [{ max_active_devices: -1 }, "max_active_devices", "Enter a whole number from 0 to 1,000,000."],
+    [{ max_borrow_sec: -1 }, "max_borrow_sec", "Enter a whole number from 0 to 3,153,600,000."],
+    [{ meter_quota: 1.5 }, "meter_quota", "Enter a whole number from 0 to 1,000,000,000."],
+    [{ meter_period_sec: -1 }, "meter_period_sec", "Enter a whole number from 0 to 3,153,600,000."],
+    [{ trial_duration_sec: -1 }, "trial_duration_sec", "Enter a whole number from 0 to 3,153,600,000."],
+    [{ notes: "a\nb" }, "notes", "Use one line of at most 1000 characters."],
+  ];
+  for (const [patch, field, text] of cases) {
+    const code = codeFor(patch);
+    assert.equal(workflow.policyFieldForCode(code), field, code);
+    assert.equal(messages.describeCode(code)?.text, text, code);
+  }
+  assert.equal(workflow.policyFieldForCode("policy_name_conflict"), "name");
+  for (const code of ["invalid_request", "mutation_failed", "definitely_not_a_code", "constructor", "name_must_be_between_0_and_1"]) {
+    assert.equal(workflow.policyFieldForCode(code), null, code);
+  }
+});

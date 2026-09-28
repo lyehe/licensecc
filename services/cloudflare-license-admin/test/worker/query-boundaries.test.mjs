@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { boundedCursor, csvField, PAGINATION_ROUTE_OPTIONS, toCsv } from "../../dist-worker/worker/query.js";
+import { boundedCursor, boundedEventsCursor, csvField, encodeEventsCursor, epochQueryParam, PAGINATION_ROUTE_OPTIONS, toCsv } from "../../dist-worker/worker/query.js";
 import { authed, baseEnv, MockD1, json, worker } from "./fixtures.mjs";
 
 const INVALID_LIMIT_VALUES = [
@@ -52,6 +52,36 @@ test("boundedCursor rejects malformed, unsafe, and out-of-range explicit values"
   assert.equal(boundedCursor(new URL("https://admin.example/api/admin/customers?limit=101")), null);
   assert.equal(boundedCursor(new URL("https://admin.example/api/admin/customers?limit= 1")), null);
   assert.equal(boundedCursor(new URL("https://admin.example/api/admin/customers?cursor= 1")), null);
+});
+
+test("boundedEventsCursor treats an absent or empty cursor as page one, and round-trips an encoded keyset token", () => {
+  assert.deepEqual(boundedEventsCursor(new URL("https://admin.example/api/admin/events")), { limit: 50, cursor: null });
+  assert.deepEqual(boundedEventsCursor(new URL("https://admin.example/api/admin/events?cursor=")), { limit: 50, cursor: null });
+  const token = encodeEventsCursor(1700000000, 42);
+  assert.equal(token, "1700000000:42");
+  assert.deepEqual(
+    boundedEventsCursor(new URL(`https://admin.example/api/admin/events?limit=10&cursor=${token}`)),
+    { limit: 10, cursor: { createdAt: 1700000000, id: 42 } },
+  );
+  // A same-second tie (created_at 0) still round-trips: id alone still breaks the tie.
+  assert.deepEqual(boundedEventsCursor(new URL(`https://admin.example/api/admin/events?cursor=${encodeEventsCursor(0, 0)}`)), { limit: 50, cursor: { createdAt: 0, id: 0 } });
+});
+
+test("boundedEventsCursor rejects a plain digit, negative, or otherwise malformed cursor", () => {
+  for (const cursor of ["1", "-1:2", "1:-2", "1.5:2", "abc", "1:2:3", "1:", ":2", "Infinity:1"]) {
+    assert.equal(boundedEventsCursor(new URL(`https://admin.example/api/admin/events?cursor=${encodeURIComponent(cursor)}`)), null, cursor);
+  }
+  assert.equal(boundedEventsCursor(new URL("https://admin.example/api/admin/events?limit=-1")), null, "malformed limit still rejects");
+});
+
+test("epochQueryParam distinguishes absent, malformed, and valid values", () => {
+  assert.equal(epochQueryParam(new URL("https://admin.example/api/admin/events"), "since"), undefined);
+  assert.equal(epochQueryParam(new URL("https://admin.example/api/admin/events?since="), "since"), undefined);
+  for (const value of ["-1", "1.5", "abc", "Infinity", "9007199254740992"]) {
+    assert.equal(epochQueryParam(new URL(`https://admin.example/api/admin/events?since=${encodeURIComponent(value)}`), "since"), null, value);
+  }
+  assert.equal(epochQueryParam(new URL("https://admin.example/api/admin/events?since=1700000000"), "since"), 1700000000);
+  assert.equal(epochQueryParam(new URL("https://admin.example/api/admin/events?since=0"), "since"), 0);
 });
 
 function routePath(routeKey) {
@@ -152,7 +182,9 @@ function rejectingDb() {
 }
 
 test("limit-only route families ignore undocumented cursor values", async () => {
-  for (const path of ["/api/admin/search?q=needle", "/api/admin/events", "/api/admin/events?format=csv"]) {
+  // events is deliberately absent here now: it went from ignoring cursor entirely to a real
+  // keyset cursor (see the events-specific cursor tests below), so a garbage value 400s instead.
+  for (const path of ["/api/admin/search?q=needle"]) {
     for (const cursor of ["-1", "1"]) {
       const db = recordingDb();
       const requestPath = `${path}${path.includes("?") ? "&" : "?"}cursor=${cursor}`;
@@ -160,6 +192,23 @@ test("limit-only route families ignore undocumented cursor values", async () => 
       assert.equal(response.status, 200, requestPath);
       assert.ok(db.prepareCalls > 0, `${requestPath} reaches its bounded query`);
     }
+  }
+});
+
+test("events accepts a well-formed keyset cursor and rejects a plain digit (the old offset shape)", async () => {
+  for (const path of ["/api/admin/events", "/api/admin/events?format=csv"]) {
+    const accepted = recordingDb();
+    const acceptedPath = `${path}${path.includes("?") ? "&" : "?"}cursor=1700000000:42`;
+    const acceptedResponse = await worker.fetch(authed(acceptedPath), baseEnv(accepted));
+    assert.equal(acceptedResponse.status, 200, acceptedPath);
+    assert.ok(accepted.prepareCalls > 0, `${acceptedPath} reaches its bounded query`);
+
+    const rejected = rejectingDb();
+    const rejectedPath = `${path}${path.includes("?") ? "&" : "?"}cursor=1`;
+    const rejectedResponse = await worker.fetch(authed(rejectedPath), baseEnv(rejected));
+    assert.equal(rejectedResponse.status, 400, rejectedPath);
+    assert.equal((await json(rejectedResponse)).code, "invalid_request", rejectedPath);
+    assert.equal(rejected.prepareCalls, 0, rejectedPath);
   }
 });
 

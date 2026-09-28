@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, makeEnvelope } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 // These scenarios deliberately leave unsent drafts; custom consequence dialogs
 // remain under each test's explicit control.
@@ -256,7 +256,7 @@ test("admin UI keeps 5xx null and scalar append cursors retryable", async ({ pag
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await plansMore.click();
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
-  await expect(page.getByText("invalid_api_response (missing_request_id)")).toBeVisible();
+  await expect(page.getByText("The server's response could not be read. Check your connection and try again.")).toBeVisible();
   await expect(plansMore).toBeVisible();
   await plansMore.click();
   await expect(plansPane.locator("tbody tr")).toHaveCount(2);
@@ -276,7 +276,7 @@ test("admin UI keeps 5xx null and scalar append cursors retryable", async ({ pag
   await expect(deliveriesMore).toHaveCount(0);
 });
 
-test("admin UI invalidates a batch selection when its entitlement filter context changes", async ({ page }) => {
+test("admin UI keeps a batch selection and its row visible through a filter reload, then clears it once the row is confirmed gone", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -286,9 +286,9 @@ test("admin UI invalidates a batch selection when its entitlement filter context
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+  const region = page.getByRole("region", { name: "Entitlement records", exact: true });
+  const row = region.locator("tbody tr").first();
   const selectRow = row.getByLabel("Select selection-context/float");
   await selectRow.check();
   await expect(page.locator(".bulkBar")).toContainText("1 selected");
@@ -306,16 +306,209 @@ test("admin UI invalidates a batch selection when its entitlement filter context
   const projectFilter = page.locator('input[aria-label="Filter by project"]');
   await projectFilter.fill("no-such-project");
   await expect.poll(() => filteredReadStarted).toBe(true);
-  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(0);
-  await expect(page.locator(".bulkBar")).toHaveCount(0);
+  // The new filter's request is in flight, but the previous row and its selection stay on screen
+  // (no blanking), with the region marked busy instead of emptied.
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(1);
+  await expect(row).toBeVisible();
+  await expect(selectRow).toBeChecked();
+  await expect(page.locator(".bulkBar")).toContainText("1 selected");
+  await expect(region).toHaveAttribute("aria-busy", "true");
   expect(api.requests.batches).toHaveLength(0);
 
-  await projectFilter.fill("selection-context");
-  try {
-    await expect(selectRow).not.toBeChecked();
-  } finally {
-    releaseFilteredRead();
-  }
+  releaseFilteredRead();
+  // Once the "no-such-project" response settles with zero rows, the selected row is confirmed
+  // gone and only then does the selection clear.
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(0);
+  await expect(page.locator(".bulkBar")).toHaveCount(0);
+  await expect(region).toHaveAttribute("aria-busy", "false");
+});
+
+test("admin UI debounces a single entitlements filter change to one request and triggers no summary or events reads", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
+  await expect.poll(() => api.requests.entitlementReads.length).toBeGreaterThan(0);
+  const entitlementReadsBefore = api.requests.entitlementReads.length;
+  const summaryReadsBefore = api.requests.summaryReads.length;
+  const eventsReadsBefore = api.requests.eventsReads.length;
+
+  // A single change event, matching how a real keystroke settles once typing pauses.
+  await page.locator('input[aria-label="Filter by project"]').fill("DEFAULT");
+  // Longer than the 300ms debounce, so the coalesced request has time to land.
+  await page.waitForTimeout(600);
+
+  expect(api.requests.entitlementReads.length - entitlementReadsBefore).toBeLessThanOrEqual(1);
+  expect(api.requests.entitlementReads.length).toBeGreaterThan(entitlementReadsBefore);
+  expect(api.requests.summaryReads.length).toBe(summaryReadsBefore);
+  expect(api.requests.eventsReads.length).toBe(eventsReadsBefore);
+});
+
+test("admin UI issues zero entitlements requests when leaving and reentering the tab without changing the filter", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
+  await expect.poll(() => api.requests.entitlementReads.length).toBeGreaterThan(0);
+  const before = api.requests.entitlementReads.length;
+
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Overview", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
+  await expect(page.locator(".tablePane")).toBeVisible();
+  await page.waitForTimeout(600);
+
+  expect(api.requests.entitlementReads.length).toBe(before);
+});
+
+test("admin UI keeps Load More working across a tab switch and still sends zero requests on reentry", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlements([{}, {}, {}]);
+  api.behavior.entitlementsPageSize = 1;
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(1);
+  const loadMore = page.getByRole("button", { name: "Load more", exact: true });
+  await expect(loadMore).toBeVisible();
+  await expect.poll(() => api.requests.entitlementReads.length).toBeGreaterThan(0);
+  const readsAfterFirstPage = api.requests.entitlementReads.length;
+
+  // Leaving and reentering the tab with the filter unchanged must still cost zero requests, and
+  // the request fence must not have gotten stuck by the tab switch: Load More must still work.
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Overview", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(1);
+  await page.waitForTimeout(600);
+  expect(api.requests.entitlementReads.length).toBe(readsAfterFirstPage);
+
+  await expect(loadMore).toBeVisible();
+  await loadMore.click();
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(2);
+  expect(api.requests.entitlementReads.length).toBe(readsAfterFirstPage + 1);
+});
+
+test("admin UI entitlement list renders exactly one of table rows or cards at any viewport", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
+  const createForm = await newEntitlementForm(page);
+  await createForm.getByLabel("Project").fill("layout-check");
+  await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("License fingerprint").fill("b".repeat(64));
+  await createForm.getByRole("button", { name: "Create entitlement" }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(1);
+  await expect(page.locator(".tablePane .recordCards .recordCard")).toHaveCount(0);
+
+  await page.setViewportSize({ width: 500, height: 900 });
+  await expect(page.locator(".tablePane .recordCards .recordCard")).toHaveCount(1);
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(0);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(1);
+  await expect(page.locator(".tablePane .recordCards .recordCard")).toHaveCount(0);
+});
+
+test("admin UI keeps license rows visible with aria-busy during a filter reload and debounces the request", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.behavior.licenseRows = [
+    { id: "lic_keep", customer_id: null, project: "keep-project", label: null, created_at: 1_760_000_000, updated_at: 1_760_000_000 },
+  ];
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  if (await page.getByRole("button", { name: "Related records", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Related records", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Issued licenses", exact: true }).click();
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+  await expect.poll(() => api.requests.licenseReads.length).toBeGreaterThan(0);
+  const readsBefore = api.requests.licenseReads.length;
+
+  let releaseFilteredRead;
+  let filteredReadStarted = false;
+  const filteredRead = new Promise((resolve) => { releaseFilteredRead = resolve; });
+  await page.route("**/api/admin/licenses?**", async (route) => {
+    filteredReadStarted = true;
+    await filteredRead;
+    await route.fallback();
+  });
+  await page.getByLabel("Project", { exact: true }).fill("no-such-project");
+  await expect.poll(() => filteredReadStarted).toBe(true);
+  // The previous row stays on screen while the reload is in flight; the region is marked busy
+  // instead of being emptied, and the reload itself is exactly one request.
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+  await expect(page.locator(".desktopRecords")).toHaveAttribute("aria-busy", "true");
+
+  releaseFilteredRead();
+  await expect.poll(() => api.requests.licenseReads.length).toBe(readsBefore + 1);
+  await expect(page.locator(".desktopRecords")).toHaveAttribute("aria-busy", "false");
+});
+
+test("admin UI marks the events table busy during a filtered reload, then clears it", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Events", exact: true }).click();
+  await expect.poll(() => api.requests.eventsReads.length).toBeGreaterThan(0);
+  const region = page.getByRole("region", { name: "Audit event records", exact: true });
+  await expect(region).toHaveAttribute("aria-busy", "false");
+
+  let releaseFilteredRead;
+  let filteredReadStarted = false;
+  const filteredRead = new Promise((resolve) => { releaseFilteredRead = resolve; });
+  await page.route("**/api/admin/events?**", async (route) => {
+    filteredReadStarted = true;
+    await filteredRead;
+    await route.fallback();
+  });
+  await page.getByLabel("Filter events by project", { exact: true }).fill("no-such-project");
+  await expect.poll(() => filteredReadStarted).toBe(true);
+  // The reload is in flight (debounced 300ms, then the intercepted request holds), so the region
+  // is marked busy until the response settles.
+  await expect(region).toHaveAttribute("aria-busy", "true");
+
+  releaseFilteredRead();
+  await expect(region).toHaveAttribute("aria-busy", "false");
+});
+
+test("admin UI debounces policy and webhook filter reloads to one request each", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Policies", exact: true }).click();
+  await expect.poll(() => api.requests.policyReads.length).toBeGreaterThan(0);
+  const policyReadsBefore = api.requests.policyReads.length;
+  await page.getByLabel("Project", { exact: true }).fill("policy-project");
+  await page.waitForTimeout(600);
+  expect(api.requests.policyReads.length - policyReadsBefore).toBe(1);
+
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
+  await expect.poll(() => api.requests.webhookReads.length).toBeGreaterThan(0);
+  const webhookReadsBefore = api.requests.webhookReads.length;
+  await page.getByLabel("Filter endpoints by status", { exact: true }).selectOption("active");
+  await page.waitForTimeout(600);
+  expect(api.requests.webhookReads.length - webhookReadsBefore).toBe(1);
+
+  // Leaving and reentering either tab with its filter unchanged must cost zero further requests.
+  const policyReadsSettled = api.requests.policyReads.length;
+  const webhookReadsSettled = api.requests.webhookReads.length;
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Overview", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Policies", exact: true }).click();
+  await expect(page.locator(".tablePane")).toBeVisible();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
+  await expect(page.locator(".tablePane")).toBeVisible();
+  await page.waitForTimeout(600);
+  expect(api.requests.policyReads.length).toBe(policyReadsSettled);
+  expect(api.requests.webhookReads.length).toBe(webhookReadsSettled);
 });
 
 test("admin UI fences ordinary device and meter reads across an ABA selection", async ({ page }) => {
@@ -325,15 +518,16 @@ test("admin UI fences ordinary device and meter reads across an ABA selection", 
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const createForm = await newEntitlementForm(page);
   for (const [project, fingerprint] of [["fence-device-one", "a"], ["fence-device-two", "b"]]) {
+    if (!await createForm.isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
     await createForm.getByLabel("Project").fill(project);
     await createForm.getByLabel("Feature").fill("float");
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   }
 
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  const rows = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr");
+  // Excludes the inline inspector's own <tr>, which sits between two entitlement rows once open.
+  const rows = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr[data-focus-row]");
   const devicePane = page.getByRole("region", { name: "Registered devices" });
   api.behavior.deferReads.add("devices:ent-1");
   await clickAction(rows.nth(0).getByRole("button", { name: "Devices", exact: true, includeHidden: true }).first());
@@ -420,9 +614,8 @@ test("admin UI treats accepted mutation plus aborted refresh as success with man
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
@@ -435,7 +628,7 @@ test("admin UI treats accepted mutation plus aborted refresh as success with man
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
   await expect(row.locator(".status")).toBeFocused();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
@@ -456,9 +649,8 @@ test("admin UI treats malformed post-success refresh as success with manual reco
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("b".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
@@ -469,7 +661,7 @@ test("admin UI treats malformed post-success refresh as success with manual reco
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
   await expect(row.locator(".status")).toBeFocused();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
@@ -491,8 +683,7 @@ for (const refreshFailure of ["truncated", "wrong-enum"]) {
     await createForm.getByLabel("Feature").fill("float");
     await createForm.getByLabel("License fingerprint").fill((refreshFailure === "truncated" ? "a" : "b").repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-    await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
     const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
     await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -502,7 +693,7 @@ for (const refreshFailure of ["truncated", "wrong-enum"]) {
     await dialog.getByRole("button", { name: "Confirm" }).click();
 
     await expect.poll(() => api.requests.transitions.length).toBe(1);
-    await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+    await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
     const refreshButton = page.getByRole("button", { name: "Refresh status" });
     await refreshButton.click();
     await expect(page.locator(".operatorNotice")).toHaveCount(0);
@@ -528,7 +719,7 @@ test("admin UI rejects a nested-null customer detail refresh before clearing a s
   await dialog.getByRole("button", { name: "Confirm" }).click();
 
   await expect.poll(() => api.requests.customerTransitions.length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   const reenable = page.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first();
@@ -546,9 +737,8 @@ test("admin UI rejects a non-2xx refresh carrying an ok response", async ({ page
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("e".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -558,7 +748,7 @@ test("admin UI rejects a non-2xx refresh carrying an ok response", async ({ page
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
   await expect(row.locator(".status")).toBeFocused();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
@@ -574,9 +764,8 @@ test("admin UI keeps the success warning after a parsed refresh error and clears
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("c".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
@@ -587,13 +776,13 @@ test("admin UI keeps the success warning after a parsed refresh error and clears
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   const refreshButton = page.getByRole("button", { name: "Refresh status" });
   await expect(refreshButton).toBeVisible();
   await expect(row.locator(".status")).toBeFocused();
 
   await refreshButton.click();
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await expect(row.locator(".status")).toBeFocused();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
 
@@ -615,9 +804,8 @@ test("admin UI treats missing refresh data as success with manual recovery", asy
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("d".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
@@ -628,7 +816,7 @@ test("admin UI treats missing refresh data as success with manual recovery", asy
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   const refreshButton = page.getByRole("button", { name: "Refresh status" });
   await expect(row.locator(".status")).toBeFocused();
   await refreshButton.click();
@@ -650,9 +838,8 @@ test("admin UI falls back to a stable section when a successful row disappears",
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
@@ -688,7 +875,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   await expect.poll(() => api.behavior.completedMutations.has("webhook-create")).toBe(true);
   await expect(webhookForm.getByLabel("URL")).toHaveValue("https://hooks.example.test/new-draft");
   await expect(page.locator(".tablePane table tbody tr")).toHaveCount(0);
-  await expect(page.getByText(/webhook_created/)).toHaveCount(0);
+  await expect(page.getByText("Webhook endpoint created.")).toHaveCount(0);
 
   // The policy editor follows the same contract independently of webhooks.
   if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
@@ -707,7 +894,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   await expect.poll(() => api.behavior.completedMutations.has("policy-create")).toBe(true);
   await expect(policyForm.getByLabel("Name")).toHaveValue("replacement policy draft");
   await expect(page.locator(".tablePane table tbody tr")).toHaveCount(0);
-  await expect(page.getByText(/policy_created/)).toHaveCount(0);
+  await expect(page.getByText("Policy created.")).toHaveCount(0);
 
   if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans & features", exact: true }).click();
@@ -727,7 +914,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   api.behavior.releaseMutations.get("catalog-feature-create")();
   await expect.poll(() => api.behavior.completedMutations.has("catalog-feature-create")).toBe(true);
   await expect(featureForm.getByLabel("Name", { exact: true })).toHaveValue("Feature draft after save");
-  await expect(page.getByText(/catalog_feature_created/)).toHaveCount(0);
+  await expect(page.getByText("Feature created.")).toHaveCount(0);
   await page.getByRole("button", { name: "Back to features" }).click();
   const featurePane = page.getByRole("heading", { name: "Catalog features" }).locator("..");
   await featurePane.getByLabel("Feature status").selectOption("disabled");
@@ -754,7 +941,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   api.behavior.releaseMutations.get("catalog-plan-create")();
   await expect.poll(() => api.behavior.completedMutations.has("catalog-plan-create")).toBe(true);
   await expect(planForm.getByLabel("Name", { exact: true })).toHaveValue("Plan draft after save");
-  await expect(page.getByText(/catalog_plan_created/)).toHaveCount(0);
+  await expect(page.getByText("Plan created.")).toHaveCount(0);
   await page.getByRole("button", { name: "Back to plans" }).click();
   const planPane = page.getByRole("heading", { name: "Catalog plans" }).locator("..");
   await planPane.getByLabel("Plan status").selectOption("disabled");
@@ -779,7 +966,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   api.behavior.releaseMutations.get("catalog-feature-patch")();
   await expect.poll(() => api.behavior.completedMutations.has("catalog-feature-patch")).toBe(true);
   await expect(featureForm.getByLabel("Name", { exact: true })).toHaveValue("Feature patch draft");
-  await expect(page.getByText(/catalog_feature_patched/)).toHaveCount(0);
+  await expect(page.getByText("Feature changes saved.")).toHaveCount(0);
   await page.getByRole("button", { name: "Back to features" }).click();
   await featurePane.getByLabel("Feature status").selectOption("disabled");
   await expect(featurePane.locator("tbody tr")).toHaveCount(0);
@@ -798,7 +985,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   api.behavior.releaseMutations.get("catalog-plan-patch")();
   await expect.poll(() => api.behavior.completedMutations.has("catalog-plan-patch")).toBe(true);
   await expect(planForm.getByLabel("Name", { exact: true })).toHaveValue("Plan patch draft");
-  await expect(page.getByText(/catalog_plan_patched/)).toHaveCount(0);
+  await expect(page.getByText("Plan changes saved.")).toHaveCount(0);
   await page.getByRole("button", { name: "Back to plans" }).click();
   await planPane.getByLabel("Plan status").selectOption("disabled");
   await expect(planPane.locator("tbody tr")).toHaveCount(0);
@@ -829,7 +1016,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   await expect(planFeatureForm.getByLabel("Feature key")).toHaveValue("attachedfeat");
   await expect(planFeatureForm.getByLabel("Selected plan")).toHaveValue("");
   await expect(planFeatureForm.getByRole("button", { name: "Save plan feature" })).toBeDisabled();
-  await expect(page.getByText(/catalog_plan_feature_saved/)).toHaveCount(0);
+  await expect(page.getByText("Plan feature saved.")).toHaveCount(0);
 
   // A replacement manifest cannot retain a late preview's capability.
   await catalogViews.getByRole("link", { name: "Import", exact: true }).click();
@@ -852,7 +1039,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   await expect(importForm.getByLabel("Manifest JSON")).toHaveValue(replacementManifest);
   await expect(importForm.getByRole("button", { name: "Apply import" })).toBeDisabled();
   await expect(page.getByText("Imported old")).toHaveCount(0);
-  await expect(page.getByText(/catalog_import_previewed/)).toHaveCount(0);
+  await expect(page.getByText("Import preview ready. Review it before you apply it.")).toHaveCount(0);
 });
 
 test("admin UI discards a stale webhook redrive follow-up after delivery-filter supersession", async ({ page }) => {
@@ -888,7 +1075,7 @@ test("admin UI discards a stale webhook redrive follow-up after delivery-filter 
   api.behavior.releaseMutations.get("webhook-redrive")();
   await expect.poll(() => api.behavior.completedMutations.has("webhook-redrive")).toBe(true);
   await expect(deliveries.locator("tbody tr")).toHaveCount(0);
-  await expect(page.getByText(/webhook_delivery_redriven/)).toHaveCount(0);
+  await expect(page.getByText("Delivery queued for another attempt.")).toHaveCount(0);
 });
 
 test("admin UI retains an ambiguous keyed ordinary mutation and replays its immutable request", async ({ page }) => {
@@ -911,7 +1098,7 @@ test("admin UI retains an ambiguous keyed ordinary mutation and replays its immu
   await form.getByLabel("URL").fill("https://hooks.example.test/recovered");
   await form.getByRole("button", { name: "Create endpoint" }).click();
   await expect.poll(() => api.requests.webhookCreateAttempts.length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(form.getByLabel("URL")).toBeDisabled();
   await expect(form.getByRole("button", { name: "Create endpoint" })).toBeDisabled();
 
@@ -922,7 +1109,7 @@ test("admin UI retains an ambiguous keyed ordinary mutation and replays its immu
   await expect.poll(() => api.requests.webhookCreateAttempts.length).toBe(2);
   expect(api.requests.webhookCreateAttempts[1].idempotencyKey).toBe(api.requests.webhookCreateAttempts[0].idempotencyKey);
   expect(api.requests.webhookCreateAttempts[1].body).toBe(api.requests.webhookCreateAttempts[0].body);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await expect(page.locator(".operatorNotice")).not.toContainText("Other actions are unavailable until reconciliation completes.");
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
@@ -948,9 +1135,32 @@ test("admin UI keeps an exact ordinary success in GET-only recovery after a 5xx 
   api.behavior.webhookRefreshFailures.push("response-error");
   await form.getByRole("button", { name: "Create endpoint" }).click();
   await expect.poll(() => api.requests.webhookCreateAttempts.length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
-  await expect(form.getByRole("button", { name: "Create endpoint" })).toBeDisabled();
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
+  // The known write opened its endpoint; the editor stays locked until the status read succeeds.
+  await expect(form.getByLabel("URL (required)")).toHaveValue("https://hooks.example.test/exact-refresh");
+  await expect(form.getByRole("button", { name: "Save changes" })).toBeDisabled();
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   expect(api.requests.webhookCreateAttempts).toHaveLength(1);
+});
+
+test("a whitespace-only entitlement filter counts as unfiltered for the empty state", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/entitlements");
+
+  const unfilteredEmptyState = page.getByText("No entitlements yet. Create an entitlement to grant access.", { exact: true });
+  const filteredEmptyState = page.getByText("No entitlements match these filters.", { exact: true });
+  const clearFilters = page.getByRole("button", { name: "Clear filters", exact: true });
+
+  await expect(unfilteredEmptyState).toBeVisible();
+  await expect(clearFilters).toBeDisabled();
+
+  await page.getByLabel("Filter by project").fill("   ");
+  await expect(unfilteredEmptyState).toBeVisible();
+  await expect(clearFilters).toBeDisabled();
+
+  await page.getByLabel("Filter by project").fill("acme");
+  await expect(filteredEmptyState).toBeVisible();
+  await expect(clearFilters).toBeEnabled();
 });

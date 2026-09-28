@@ -1,6 +1,6 @@
 import { validConsentResponse } from "../../shared/consent";
 export type ConsentInspection = {app:{name:string;project:string};device:{label:string};status:"pending"|"approved"|"consumed"|"denied";revision:number;expires_at:number;
-  entitlements:Array<{id:string;feature:string;valid_until:number|null;device_limit:number;activation_trial_seconds?:number}>;has_more:boolean;next_page_cursor:string|null;comparison_code:string};
+  entitlements:Array<{id:string;feature:string;valid_until:number|null;device_limit:number;devices_in_use:number;slot_free_at:number|null;device_connected:boolean;activation_trial_seconds?:number}>;has_more:boolean;next_page_cursor:string|null;comparison_code:string};
 export type ConsentApproval = {callback_url:string;expires_at:number;revision:number};
 export type ConsentResult<T> = {ok:true;data:T}|{ok:false;code:string;retryAfter?:number};
 const success={inspect:"authorization_inspected",approve:"authorization_approved",deny:"authorization_denied"};

@@ -1,6 +1,6 @@
 /* Trial sub-panel inside the policy editor (only shown when type === 'trial'). */
 .trialPanel {
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--border);
   border-radius: 4px;
   display: grid;
   gap: 10px;
@@ -38,30 +38,18 @@ label.checkboxRow input {
 /* Destructive action buttons (Revoke entitlement, Disable customer, modal Confirm). */
 button.danger {
   border-color: #714848;
-  color: #db9292;
+  color: var(--status-danger-ink);
 }
 
 button.danger:hover:not(:disabled) {
-  background: #db9292;
-  border-color: #db9292;
-  color: #0f0f0f;
+  background: var(--status-danger-ink);
+  border-color: var(--status-danger-ink);
+  color: var(--canvas);
 }
 
-/* Typed-confirm modal for irreversible / broad-blast actions. */
-.modalOverlay {
-  align-items: center;
-  background: rgba(27, 31, 35, 0.45);
-  display: flex;
-  inset: 0;
-  justify-content: center;
-  overflow: auto;
-  padding: 16px;
-  position: fixed;
-  z-index: 50;
-}
-
+/* Typed-confirm modal for irreversible / broad-blast actions (native <dialog>). */
 .modal {
-  background: #161616;
+  background: var(--surface);
   border-radius: 6px;
   border: 0;
   box-sizing: border-box;
@@ -79,7 +67,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .modal.danger {
-  border-top: 4px solid #db9292;
+  border-top: 4px solid var(--status-danger-ink);
 }
 
 .modalSurface {
@@ -139,9 +127,9 @@ button.danger:hover:not(:disabled) {
 }
 
 .modal .modalError {
-  background: #302020;
-  border-left: 3px solid #db9292;
-  color: #db9292;
+  background: var(--status-danger-bg);
+  border-left: 3px solid var(--status-danger-ink);
+  color: var(--status-danger-ink);
   padding: 8px 10px;
 }
 
@@ -158,13 +146,14 @@ button.danger:hover:not(:disabled) {
   max-width: 100%;
 }
 
-.modal .reason input {
+.modal .reason input,
+.modal .typedConfirmation input {
   min-width: 0;
 }
 
 .operatorNotice {
   align-items: center;
-  background: #302a20;
+  background: var(--status-warn-bg);
   border: 1px solid #76613d;
   border-radius: 4px;
   box-shadow: 0 6px 20px rgba(27, 31, 35, 0.18);
@@ -186,11 +175,6 @@ button.danger:hover:not(:disabled) {
 }
 
 @media (max-width: 520px) {
-  .modalOverlay {
-    align-items: flex-start;
-    padding: 8px;
-  }
-
   .modal {
     max-height: calc(100% - 16px);
   }
@@ -230,6 +214,27 @@ button.danger:hover:not(:disabled) {
   margin-right: 4px;
 }
 
+/* A chunked batch run: "Chunk k of m" while sending, then done / unknown or failed / not attempted. */
+.batchRun {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+}
+
+.batchRun p {
+  margin: 4px 0;
+}
+
+.batchCounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+}
+
 /* The checkbox column (select-all header + per-row) is narrow and centered. */
 .checkCol {
   text-align: center;
@@ -240,11 +245,6 @@ button.danger:hover:not(:disabled) {
   margin: 0;
   min-height: 0;
   width: auto;
-}
-
-.eventsToolbar {
-  grid-template-columns: max-content;
-  justify-content: flex-end;
 }
 
 @media (max-width: 920px) {
@@ -276,6 +276,14 @@ button.danger:hover:not(:disabled) {
   padding: 4px 10px;
 }
 
+/* The selected window/horizon reads as selected by more than color: a stronger border, a soft
+   fill and bold text together, so the state survives grayscale or a color-vision difference. */
+.rangeSelector button.active, .rangeSelector button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: var(--weight-strong);
+}
+
 .chartPanels {
   display: grid;
   gap: 14px;
@@ -289,8 +297,8 @@ button.danger:hover:not(:disabled) {
 }
 
 .chartCard {
-  background: #161616;
-  border: 1px solid #2a2a2a;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 6px;
   display: grid;
   gap: 10px;
@@ -312,7 +320,7 @@ button.danger:hover:not(:disabled) {
    stretch to the container. A subtle inner backdrop separates it from the card. */
 .chart {
   background: #1e1e1e;
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--border);
   border-radius: 4px;
   display: block;
   height: 120px;
@@ -347,20 +355,20 @@ button.danger:hover:not(:disabled) {
 }
 
 .checkoutsLine {
-  stroke: #9bc49b;
+  stroke: var(--status-ok-ink);
 }
 
 .denialsLine {
-  stroke: #db9292;
+  stroke: var(--status-danger-ink);
   stroke-dasharray: 4 3;
 }
 
 .denialRateLine {
-  stroke: #d6b783;
+  stroke: var(--status-warn-ink);
 }
 
 .chartBar {
-  fill: #9bc49b;
+  fill: var(--status-ok-ink);
 }
 
 /* Legend chips beneath the line/area chart. */
@@ -386,11 +394,11 @@ button.danger:hover:not(:disabled) {
 }
 
 .checkoutsLegend::before {
-  background: #9bc49b;
+  background: var(--status-ok-ink);
 }
 
 .denialsLegend::before {
-  background: #db9292;
+  background: var(--status-danger-ink);
 }
 
 .fulfillmentSpark {
@@ -408,7 +416,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .expiringSoonRow td {
-  background: #302a20;
+  background: var(--status-warn-bg);
 }
 
 .daysLeft {
@@ -421,8 +429,8 @@ button.danger:hover:not(:disabled) {
 }
 
 .daysLeft.urgent {
-  background: #302a20;
-  color: #d6b783;
+  background: var(--status-warn-bg);
+  color: var(--status-warn-ink);
 }
 
 /* Entitlement-health badge next to the status pill. Reuses the .status palette
@@ -438,19 +446,19 @@ button.danger:hover:not(:disabled) {
 }
 
 .health-healthy {
-  background: #203020;
-  color: #9bc49b;
+  background: var(--status-ok-bg);
+  color: var(--status-ok-ink);
 }
 
 .health-expiring {
-  background: #302a20;
-  color: #d6b783;
+  background: var(--status-warn-bg);
+  color: var(--status-warn-ink);
 }
 
 .health-expired,
 .health-suspended {
-  background: #302020;
-  color: #db9292;
+  background: var(--status-danger-bg);
+  color: var(--status-danger-ink);
 }
 
 @media (max-width: 920px) {
@@ -512,12 +520,17 @@ button.danger:hover:not(:disabled) {
 .protectedConnection h4 { margin: 0; }
 .protectedConnection details { margin: 12px 0; }
 .connectionNotice { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; }
+.connectionCapacity, .recentRefusals { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; }
+.connectionCapacity h4, .recentRefusals h4 { margin: 0 0 8px; }
+.connectionCapacity ul, .recentRefusals ul { padding-left: 20px; margin: 0; }
+.connectionCapacity li, .recentRefusals li { margin: 4px 0; }
 .connectionHistory { padding-left: 20px; }
 .connectionHistory li { margin: 12px 0; }
 .connectionHistory span { display: block; overflow-wrap: anywhere; }
 .connectionDialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--ink); font: inherit; overflow: auto; overflow-wrap: anywhere; }
 .connectionDialog::backdrop { background: rgb(15 23 42 / 40%); }
 .connectionDialog p + p { margin-top: 12px; }
+.connectionDialog .typedConfirmation input { min-width: 0; }
 .connectionDialog .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
 
 .navDisclosure { width:100%; text-align:left; border:0; background:none; color:var(--muted); min-height:44px; margin-top:12px; }

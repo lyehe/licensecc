@@ -1,5 +1,6 @@
 import { customerAccess } from "./groups/customers/access.js";
 import { createPortalUser } from "./groups/customers/create.js";
+import { createCustomerLicense } from "./groups/customers/licenses.js";
 import { customerWorkspace } from "./groups/customers/workspace.js";
 import { adminBindings,adminRetireBinding } from "./groups/customers/bindings.js";
 import { listProjects } from "./groups/catalog/projects.js";
@@ -49,6 +50,7 @@ import {
   validateWebhookInput,
   validateWebhookPatch,
 } from "./webhooks.js";
+import { sendWebhookTest } from "./groups/webhooks/test-send.js";
 import { validatePolicyInput, validatePolicyPatch } from "./policy_validation.js";
 import { validateEntitlementInput, validateEntitlementPatch } from "./groups/entitlements/validation.js";
 import { validatePlanProjectionInput } from "./groups/catalog/validation.js";
@@ -76,6 +78,7 @@ const HANDLERS: Record<string, BoundRun> = {
   "GET /api/admin/catalog/projects": (request, env, _g, rid) => listProjects(request, env, rid),
   "GET /api/admin/customers": (request, env, _g, rid) => listCustomers(request, env, rid),
   "POST /api/admin/customers": (request, env, _g, rid, actor) => createPortalUser(request, env, actor, rid),
+  "POST /api/admin/customers/{id}/licenses": (request, env, g, rid, actor) => createCustomerLicense(request, env, actor, decodeURIComponent(g[0] ?? ""), rid),
   "GET /api/admin/customers/{id}": (_r, env, g, rid) => getCustomer(env, decodeURIComponent(g[0] ?? ""), rid),
   "POST /api/admin/customers/{id}/disable": (request, env, g, rid, actor) => handleCustomerTransition(request, env, actor, decodeURIComponent(g[0] ?? ""), "disable", rid),
   "POST /api/admin/customers/{id}/reenable": (request, env, g, rid, actor) => handleCustomerTransition(request, env, actor, decodeURIComponent(g[0] ?? ""), "reenable", rid),
@@ -117,6 +120,7 @@ const HANDLERS: Record<string, BoundRun> = {
   "PATCH /api/admin/webhooks/{id}": (request, env, _g, rid, actor) => handleWebhookMutation(request, env, actor, rid),
   "POST /api/admin/webhooks/{id}/disable": (request, env, _g, rid, actor) => handleWebhookMutation(request, env, actor, rid),
   "POST /api/admin/webhooks/{id}/reenable": (request, env, _g, rid, actor) => handleWebhookMutation(request, env, actor, rid),
+  "POST /api/admin/webhooks/{id}/test": (request, env, g, rid, actor) => sendWebhookTest(request, env, actor, g[0] ?? "", rid),
   "GET /api/admin/entitlements": (request, env, _g, rid) => listEntitlements(request, env, rid),
   "POST /api/admin/entitlements": (request, env, _g, rid, actor) => handleMutation(request, env, actor, rid),
   "POST /api/admin/entitlements/batch": (request, env, _g, rid, actor) => handleBatchTransition(request, env, actor, rid),

@@ -1,7 +1,15 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { ERR_BODY_TOO_LARGE, ERR_CROSS_SITE, ERR_INVALID_JSON, errorResponse, LEASE_ACTION_REQUEST } from "../components.js";
+import { ERR_BODY_TOO_LARGE, ERR_CROSS_SITE, ERR_INVALID_JSON, errorResponse, LEASE_ACTION_REQUEST, RETRY_AFTER_HEADER } from "../components.js";
 
-const ERR_INVALID_MAGIC_BODY = errorResponse("Body was not valid JSON or application/x-www-form-urlencoded.", ["invalid_json", "invalid_request"]);
+// OTP request/verify and magic-redeem's JSON branch now answer their 429 with a real
+// retry-after header (the form-encoded/redirect branch of magic-redeem never gets one -- a top-level
+// navigation has no script to read a header with -- so its own 429... there is none: see the 303
+// response below, which covers every outcome of that branch instead).
+const rateLimited = (description: string): Record<string, unknown> => ({ ...errorResponse(description, "rate_limited"), headers: RETRY_AFTER_HEADER });
+
+// The form-encoded caller never gets a 400 (a malformed/undecodable form redirects to
+// sign_in_failed instead — see the 303 response below). This 400 is JSON-caller-only.
+const ERR_INVALID_MAGIC_BODY = errorResponse("Body was not valid JSON (application/json caller only).", "invalid_json");
 const ERR_UNSUPPORTED_MEDIA_TYPE = errorResponse("Content-Type must be application/json or application/x-www-form-urlencoded.", "unsupported_media_type");
 
 export const authPaths: LabeledPathFragment = {
@@ -45,7 +53,7 @@ export const authPaths: LabeledPathFragment = {
           "400": ERR_INVALID_JSON,
           "403": ERR_CROSS_SITE,
           "413": ERR_BODY_TOO_LARGE,
-          "429": errorResponse("Rate limited (per-email 5/900s + per-IP 30/900s, fail-closed).", "rate_limited"),
+          "429": rateLimited("Rate limited (per-email 5/900s + per-IP 30/900s, fail-closed). Answers with a retry-after header giving the exact seconds left in the fixed window."),
           "503": errorResponse("PORTAL_OTP_PEPPERS unset.", "config_error"),
         },
       },
@@ -97,7 +105,7 @@ export const authPaths: LabeledPathFragment = {
           "401": errorResponse("Invalid OTP (wrong/consumed/expired/over-cap code), or unauthorized config_error from redeemOtp. Byte-identical for all failure reasons.", "invalid_otp"),
           "403": ERR_CROSS_SITE,
           "413": ERR_BODY_TOO_LARGE,
-          "429": errorResponse("Rate limited (per-IP verify 30/900s).", "rate_limited"),
+          "429": rateLimited("Rate limited (per-IP verify 30/900s). Answers with a retry-after header giving the exact seconds left in the fixed window."),
           "503": errorResponse("PORTAL_OTP_PEPPERS or PORTAL_SESSION_PEPPERS unset.", "config_error"),
         },
       },
@@ -138,7 +146,12 @@ export const authPaths: LabeledPathFragment = {
           "Accepts the token either as JSON { token } or as application/x-www-form-urlencoded " +
           "token=<secret> (posted by the interstitial form). The request body is capped at 8192 " +
           "bytes before parsing; multipart and other media types are rejected. Email-independent; " +
-          "single-use via an atomic UPDATE. On success sets the lccp_session cookie.",
+          "single-use via an atomic UPDATE. On success sets the lccp_session cookie. The " +
+          "form-encoded caller never receives JSON: every outcome of that branch (success or " +
+          "failure) is instead a 303 redirect — see the 303 response. The 200/400/401/413/429/503 " +
+          "envelopes below apply to JSON callers only; 403 (cross-site) is decided before either " +
+          "media type is known, and 415 is returned for any Content-Type that is neither JSON nor " +
+          "form-encoded.",
         security: [],
         requestBody: {
 
@@ -182,12 +195,29 @@ export const authPaths: LabeledPathFragment = {
               },
             },
           },
+          "303": {
+            description:
+              "Form-encoded caller only (application/x-www-form-urlencoded): every outcome is a " +
+              "no-store redirect instead of JSON. Success redirects to /#/apps with the lccp_session " +
+              "cookie. Failure redirects to /?auth_error=<code>: link_expired (invalid, consumed, " +
+              "expired, or over-cap secret — the same no-oracle 401 the JSON branch would otherwise " +
+              "return as invalid_otp), rate_limited, or sign_in_failed (config_error, a body/token " +
+              "parsing failure such as an oversized or undecodable form, or any unexpected server " +
+              "error).",
+            headers: {
+              Location: { schema: { type: "string", format: "uri" } },
+              "Set-Cookie": {
+                description: "lccp_session=<opaque>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=86400 (success only).",
+                schema: { type: "string" },
+              },
+            },
+          },
           "400": ERR_INVALID_MAGIC_BODY,
           "401": errorResponse("Invalid OTP (wrong/consumed/expired/over-cap secret), or unauthorized config_error from redeemOtp.", "invalid_otp"),
           "403": ERR_CROSS_SITE,
           "413": ERR_BODY_TOO_LARGE,
           "415": ERR_UNSUPPORTED_MEDIA_TYPE,
-          "429": errorResponse("Rate limited (per-IP verify 30/900s).", "rate_limited"),
+          "429": rateLimited("Rate limited (per-IP verify 30/900s). JSON caller only (application/json); the form-encoded caller's own rate limit redirects to /?auth_error=rate_limited instead, with no header a top-level navigation could read. Answers with a retry-after header giving the exact seconds left in the fixed window."),
           "503": errorResponse("PORTAL_OTP_PEPPERS or PORTAL_SESSION_PEPPERS unset.", "config_error"),
         },
       },
@@ -199,8 +229,9 @@ export const authPaths: LabeledPathFragment = {
         summary: "Revoke the session and clear the cookie (idempotent).",
         description:
           "No auth required (the session is optional — logout is idempotent). Marks the session row " +
-          "revoked and bumps account_token_revocations.revocation_seq to kill any in-flight 120s " +
-          "account token (invariant 9). Always clears the cookie (Max-Age=0).",
+          "revoked and bumps the per-customer revocation floor (account_token_revocations.revocation_seq, " +
+          "invariant 9), which the backend uses to reject reads from a stale replica; in-flight 120s " +
+          "proxy tokens expire on their own TTL. Always clears the cookie (Max-Age=0).",
         security: [{ sessionCookie: [] }, {}],
         responses: {
           "200": {

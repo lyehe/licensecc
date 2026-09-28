@@ -3,7 +3,7 @@ import {
   ENTITLEMENT_BATCH_MAX_IDS,
   ENTITLEMENT_BATCH_TOO_LARGE_CODE,
 } from "../../../shared/api.js";
-import { LIMIT_ONLY_PAGINATION_OPTIONS } from "../../query.js";
+import { DEFAULT_PAGINATION_OPTIONS } from "../../query.js";
 import {
   ADMIN_AUTH_ERRORS,
   ADMIN_MUTATION_AUTH_ERRORS,
@@ -22,6 +22,8 @@ import {
   SYNC_SECURITY,
   transitionOkResponse,
 } from "../components.js";
+import { protectedCreationConflictResponse } from "../protected-onboarding.js";
+import { capacityConflictResponse } from "../device-limit.js";
 
 const expectedState = {
   type: "object",
@@ -42,6 +44,7 @@ export const entitlementPaths: LabeledPathFragment = {
       parameters: [
         { name: "id", in: "query", required: false, description: "Exact canonical entitlement ID.", schema: { type: "string" } },
         { name: "customer_id", in: "query", required: false, description: "Exact customer ownership filter.", schema: { type: "string" } },
+        { name: "license_id", in: "query", required: false, description: "Exact license ownership filter.", schema: { type: "string" } },
         { name: "project", in: "query", required: false, description: "Exact-match project filter.", schema: { type: "string" } },
         { name: "feature", in: "query", required: false, description: "Exact-match feature filter.", schema: { type: "string" } },
         { name: "status", in: "query", required: false, description: "Exact-match status filter.", schema: { type: "string", enum: ["active", "disabled", "revoked"] } },
@@ -66,10 +69,10 @@ export const entitlementPaths: LabeledPathFragment = {
       },
       responses: {
         "200": okResponse("Entitlement created (directly, or stamped from a policy).", "#/components/schemas/EntitlementRecord", "entitlement_saved"),
-        "400": errorResponse("Invalid request / json / id / idempotency key, or a policy_id was supplied while POLICY_STAMP_MODE is off.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request", "policy_stamping_disabled"),
+        "400": errorResponse("Invalid request / json / id / idempotency key (including max_active_devices outside 1-1,000,000 or sent with a policy_id), or a policy_id was supplied while POLICY_STAMP_MODE is off.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request", "policy_stamping_disabled"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("Referenced resource not found, or the policy_id is unknown/disabled.", "not_found", "policy_not_found"),
-        "409": errorResponse("Terminal or concurrent state, enforcement mismatch, protected eligibility failure, or an idempotency key already used for another tuple/mode.", "revoked_entitlement_is_terminal", "stale_transition", "enforcement_mode_conflict", "protected_creation_conflict", "idempotency_request_conflict"),
+        "409": protectedCreationConflictResponse("Terminal or concurrent state, enforcement mismatch, protected eligibility failure (data.reason names the failed rule), or an idempotency key already used for another tuple/mode.", "revoked_entitlement_is_terminal", "stale_transition", "enforcement_mode_conflict", "protected_creation_conflict", "idempotency_request_conflict"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },
@@ -102,10 +105,10 @@ export const entitlementPaths: LabeledPathFragment = {
       responses: {
         "200": okResponse("Entitlement updated.", "#/components/schemas/EntitlementRecord", "entitlement_patched"),
 
-        "400": errorResponse("Invalid request / json / id / idempotency key.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request"),
+        "400": errorResponse("Invalid request / json / id / idempotency key, or max_active_devices outside 1-1,000,000 or sent with another patch field.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No entitlement with that id.", "not_found"),
-        "409": errorResponse("Target entitlement is revoked (terminal), or it changed after this request observed it; refetch and retry the latter.", "revoked_entitlement_is_terminal", "stale_transition"),
+        "409": capacityConflictResponse("Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry), or a protected grant has more connected devices than the requested device limit (data.devices_in_use; disconnect devices first).", "revoked_entitlement_is_terminal", "stale_transition", "capacity_in_use"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },
@@ -181,16 +184,31 @@ export const entitlementPaths: LabeledPathFragment = {
     ["/api/admin/events", {
     get: {
       tags: ["admin:entitlements"],
-      summary: "List entitlement audit events (most recent first)",
+      summary: "List entitlement audit events (most recent first), optionally filtered",
       operationId: "listEvents",
       security: ADMIN_SECURITY,
       parameters: [
-        ...limitCursorParams(LIMIT_ONLY_PAGINATION_OPTIONS),
+        { name: "project", in: "query", required: false, description: "Exact-match project filter.", schema: { type: "string" } },
+        { name: "feature", in: "query", required: false, description: "Exact-match feature filter.", schema: { type: "string" } },
+        { name: "entitlement_id", in: "query", required: false, description: "Exact canonical entitlement ID; scopes to that one entitlement's events.", schema: { type: "string" } },
+        { name: "event_type", in: "query", required: false, description: "Exact-match event type filter.", schema: { type: "string", enum: ["create", "update", "disable", "reenable", "revoke", "upsert", "revoked-override"] } },
+        { name: "actor", in: "query", required: false, description: "Exact-match actor filter.", schema: { type: "string" } },
+        { name: "since", in: "query", required: false, description: "Only events at or after this epoch-second timestamp.", schema: { type: "integer", minimum: 0 } },
+        { name: "until", in: "query", required: false, description: "Only events at or before this epoch-second timestamp.", schema: { type: "integer", minimum: 0 } },
+        ...limitCursorParams({ ...DEFAULT_PAGINATION_OPTIONS, includeCursor: false }),
+        {
+          name: "cursor",
+          in: "query",
+          required: false,
+          allowEmptyValue: true,
+          description: "Opaque keyset page token from a previous page's next_cursor (\"created_at:id\"); omit for the first page. Malformed values return 400 invalid_request.",
+          schema: { type: "string", pattern: "^[0-9]+:[0-9]+$" },
+        },
         formatCsvParam,
       ],
       responses: {
-        "200": okResponse("Audit-event list (JSON), or a CSV attachment when ?format=csv.", "#/components/schemas/EventsListData", "events_listed"),
-        "400": invalidPaginationResponse(LIMIT_ONLY_PAGINATION_OPTIONS),
+        "200": okResponse("Audit-event page (JSON), or a CSV attachment when ?format=csv (same filters, no cursor).", "#/components/schemas/EventsListData", "events_listed"),
+        "400": invalidPaginationResponse(DEFAULT_PAGINATION_OPTIONS),
         ...ADMIN_AUTH_ERRORS,
       },
     },

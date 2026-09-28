@@ -22,6 +22,7 @@ import { test } from "node:test";
 import { scryptSync } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { verifyPassword } from "@licensecc/cloudflare-runtime/auth/password";
 
 import worker from "../../dist-worker/worker/index.js";
 
@@ -196,10 +197,16 @@ async function body(response) {
 }
 
 // Seed an entitlement through the worker so createEntitlement owns the full column set (no drift).
-async function createEntitlementFor(env, customerId, fingerprint) {
+async function createEntitlementFor(env, customerId, fingerprint, licenseId) {
   const res = await worker.fetch(devReq("/api/admin/entitlements", {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint, customer_id: customerId }),
+    body: JSON.stringify({
+      project: "DEFAULT",
+      feature: "DEFAULT",
+      license_fingerprint: fingerprint,
+      customer_id: customerId,
+      ...(licenseId === undefined ? {} : { license_id: licenseId }),
+    }),
   }), env);
   assert.equal(res.status, 200, "seed entitlement");
 }
@@ -231,6 +238,70 @@ test("console: admin creates an isolated password user atomically with safe same
   db.exec("CREATE TRIGGER fail_password_insert BEFORE INSERT ON portal_passwords BEGIN SELECT RAISE(ABORT,'forced'); END");
   assert.equal((await create("rollback@example.test", "rollback-key")).status, 500);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM customers").get().n, before, "credential failure rolls back customer creation");
+});
+
+// No plaintext initial password by default. Omitting `password` invites the customer instead of
+// setting one: the server hashes a fresh, random, never-disclosed secret so the account has no
+// usable credential until the customer sets their own via the portal's "Forgot your password?".
+test("console: inviting a customer without a password stores a random, unusable credential and never returns or caches it", async () => {
+  const db = freshDb(); seed(db); db.exec("PRAGMA foreign_keys=ON"); const env = devEnv(db);
+  const invite = (email, key = "invite-1", name = "Invited user") =>
+    worker.fetch(devReq("/api/admin/customers", { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify({ name, email }) }), env);
+  const response = await invite("invited@example.test");
+  assert.equal(response.status, 200);
+  const created = await response.json();
+  assert.equal(created.code, "customer_created");
+  const credential = db.prepare("SELECT * FROM portal_passwords WHERE customer_id = ?").get(created.data.id);
+  assert.ok(credential, "invite still stores a credential row shaped like a real one");
+  assert.match(credential.password_hash, /^scrypt-32768-8-3\$[a-f0-9]{32}\$[a-f0-9]{64}$/);
+  assert.equal(await verifyPassword("", credential.password_hash), false);
+  assert.equal(await verifyPassword("A long initial passphrase 123!", credential.password_hash), false);
+  assert.equal(db.prepare("SELECT email FROM customers WHERE id = ?").get(created.data.id).email, "");
+  const cache = db.prepare("SELECT response_json FROM mutation_idempotency WHERE idempotency_key = ?").get("invite-1").response_json;
+  assert.ok(!JSON.stringify(created).includes(credential.password_hash) && !cache.includes(credential.password_hash));
+  // A same-key replay never regenerates or re-hashes the secret.
+  const replay = await invite("invited@example.test");
+  assert.deepEqual(await replay.json(), created);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM portal_passwords WHERE customer_id = ?").get(created.data.id).n, 1);
+  // Each invite's secret is independently random.
+  const other = await (await invite("invited-two@example.test", "invite-2", "Invited two")).json();
+  const otherCredential = db.prepare("SELECT password_hash FROM portal_passwords WHERE customer_id = ?").get(other.data.id);
+  assert.notEqual(otherCredential.password_hash, credential.password_hash);
+});
+
+test("console: a present password must still be valid, and an invalid one is never treated as an invite", async () => {
+  const db = freshDb(); seed(db); db.exec("PRAGMA foreign_keys=ON"); const env = devEnv(db);
+  const attempt = (password, key) => worker.fetch(devReq("/api/admin/customers", { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify({ name: "Reject", email: "reject@example.test", password }) }), env);
+  for (const [password, key] of [[null, "bad-null"], ["", "bad-empty"], [12345, "bad-number"], ["too short", "bad-short"], ["x".repeat(129), "bad-long"], [true, "bad-bool"]]) {
+    const response = await attempt(password, key);
+    assert.equal(response.status, 400, `password ${JSON.stringify(password)} should be rejected`);
+    assert.equal((await response.json()).code, "invalid_request");
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM customers").get().n, 2, "no rejected attempt created a customer");
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM portal_passwords").get().n, 0);
+});
+
+// Invite and Set-password use separate idempotency scopes, so a key reused
+// across modes is a fresh request against the OTHER mode's already-claimed email, not a replay.
+test("console: reusing an idempotency key across Invite and Set-password modes never replays the other mode's cached success", async () => {
+  const db = freshDb(); seed(db); db.exec("PRAGMA foreign_keys=ON"); const env = devEnv(db);
+  const post = (body, key) => worker.fetch(devReq("/api/admin/customers", { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify(body) }), env);
+
+  const invited = await post({ name: "First", email: "invite-then-set@example.test" }, "cross-mode-a");
+  assert.equal(invited.status, 200);
+  assert.equal((await invited.json()).code, "customer_created");
+  const setAfterInvite = await post({ name: "First", email: "invite-then-set@example.test", password: "A long initial passphrase 123!" }, "cross-mode-a");
+  assert.equal(setAfterInvite.status, 409, "the same key under Set-password never replays the Invite success");
+  assert.equal((await setAfterInvite.json()).code, "email_in_use");
+
+  const withPassword = await post({ name: "Second", email: "set-then-invite@example.test", password: "A long initial passphrase 123!" }, "cross-mode-b");
+  assert.equal(withPassword.status, 200);
+  assert.equal((await withPassword.json()).code, "customer_created");
+  const inviteAfterSet = await post({ name: "Second", email: "set-then-invite@example.test" }, "cross-mode-b");
+  assert.equal(inviteAfterSet.status, 409, "the same key under Invite never replays the Set-password success");
+  assert.equal((await inviteAfterSet.json()).code, "email_in_use");
+
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM customers").get().n, 4, "each pair created exactly one customer, from its first call only");
 });
 
 test("console: customer access pagination exceeds legacy detail cap and cannot change customer scope", async () => {
@@ -319,6 +390,21 @@ test("console: exact grant selection and optional owner/revision preconditions r
   assert.equal(staleDisable.status, 409);
   assert.equal((await patch({})).status, 200, "legacy callers remain supported");
   assert.equal(db.prepare("SELECT status FROM entitlements WHERE license_fingerprint=?").get(FP_A).status, "active");
+});
+
+test("console: the entitlement list filters by license_id, exactly like the other identity filters", async () => {
+  const db = freshDb(); seed(db); const env = devEnv(db);
+  await createEntitlementFor(env, "cus_a", FP_A, "lic_a1");
+  await createEntitlementFor(env, "cus_b", FP_B, "lic_b1");
+  const matched = await body(await worker.fetch(devReq("/api/admin/entitlements?license_id=lic_a1"), env));
+  assert.equal(matched.data.items.length, 1);
+  assert.equal(matched.data.items[0].license_fingerprint, FP_A);
+  assert.equal(matched.data.items[0].license_id, "lic_a1");
+  const noMatch = await body(await worker.fetch(devReq("/api/admin/entitlements?license_id=does-not-exist"), env));
+  assert.equal(noMatch.data.items.length, 0);
+  // Combined with another filter, both must hold (same posture as customer_id + project today).
+  const combined = await body(await worker.fetch(devReq("/api/admin/entitlements?license_id=lic_a1&customer_id=cus_b"), env));
+  assert.equal(combined.data.items.length, 0);
 });
 
 test("console: workspace query plans and bounded responses at 20000 grants", async t => {

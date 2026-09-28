@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { entitlementId } from "@licensecc/licensing-domain/entitlements/contracts";
+import { contrastRatio, parseRgb } from "./e2e-contrast.mjs";
 
 const handle = "E".repeat(42) + "A";
 const storageKey = "licensecc.enrollment.v1";
@@ -10,8 +11,8 @@ const inspection = (overrides = {}) => ({
   app: { name: "Colmap", project: "COLMAP" }, device: { label: "My workstation" },
   status: "pending", revision: 0, expires_at: Math.floor(Date.now() / 1000) + 300,
   entitlements: [
-    { id: "license-basic", feature: "BASIC", valid_until: null, device_limit: 1 },
-    { id: "license-pro", feature: "PRO", valid_until: null, device_limit: 2 },
+    { id: "license-basic", feature: "BASIC", valid_until: null, device_limit: 1, devices_in_use: 0, slot_free_at: null, device_connected: false },
+    { id: "license-pro", feature: "PRO", valid_until: null, device_limit: 2, devices_in_use: 0, slot_free_at: null, device_connected: false },
   ], has_more: false, next_page_cursor:null, comparison_code:"0000-1111-2222", ...overrides,
 });
 
@@ -20,11 +21,22 @@ async function approve(page){
   await page.getByRole("button",{name:"Approve",exact:true}).click();
 }
 
-async function fixture(page, { signedIn = true, inspect, approve, deny, logout } = {}) {
-  const state = { signedIn, customer: "customer-a", requests: [], logins: [] };
+// Both consent capacity messages must meet the same contrast rule the
+// primary-button hover check does, computed the same way -- from the element's own computed color
+// against its card's actual background, not by inspection.
+async function colorAndContrast(locator) {
+  const [color, background] = await locator.evaluate((element) => {
+    const card = element.closest(".authCard");
+    return [getComputedStyle(element).color, getComputedStyle(card).backgroundColor];
+  });
+  return { color, contrast: contrastRatio(parseRgb(color), parseRgb(background)) };
+}
+
+async function fixture(page, { signedIn = true, inspect, approve, deny, logout, support, email = null } = {}) {
+  const state = { signedIn, customer: "customer-a", email, requests: [], logins: [] };
   await page.route("**/portal/v1/auth/**", async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
-    if (path.endsWith("/providers")) return route.fulfill({ json: envelope("auth_providers", { password: true, github: true, google: false, email: false }) });
+    if (path.endsWith("/providers")) return route.fulfill({ json: envelope("auth_providers", { password: true, github: true, google: false, email: false, ...(support === undefined ? {} : { support }) }) });
     if (path.endsWith("/password/login")) {
       state.logins.push(request.postDataJSON()); state.signedIn = true;
       return route.fulfill({ json: envelope("signed_in", { customer_id: state.customer }) });
@@ -40,7 +52,7 @@ async function fixture(page, { signedIn = true, inspect, approve, deny, logout }
     const request = route.request(), path = new URL(request.url()).pathname;
     state.requests.push({ path, url: request.url(), referer: request.headers().referer });
     if (!state.signedIn) return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } });
-    if (path.endsWith("/me")) return route.fulfill({ json: envelope("ok", { customer_id: state.customer }) });
+    if (path.endsWith("/me")) return route.fulfill({ json: envelope("ok", { customer_id: state.customer, email: state.email }) });
     if(path.includes("/device-authorizations/") && request.headers()["x-expected-customer-id"]!==encodeURIComponent(state.customer)) return route.fulfill({status:409,json:{ok:false,code:"account_changed"}});
     if (path.endsWith("/inspect")) return inspect ? inspect(route, state) : route.fulfill({ json: envelope("authorization_inspected", inspection()) });
     if (path.endsWith("/approve")) return approve ? approve(route, state) : route.fulfill({ json: envelope("authorization_approved", { callback_url: callback, expires_at: Math.floor(Date.now()/1000)+60, revision: 1 }) });
@@ -52,7 +64,7 @@ async function fixture(page, { signedIn = true, inspect, approve, deny, logout }
 
 test("consent: an unstarted trial explains activation timing without claiming no expiry",async({page})=>{
   await fixture(page,{inspect:route=>route.fulfill({json:envelope('authorization_inspected',inspection({
-    entitlements:[{id:'trial',feature:'DEFAULT',valid_until:null,device_limit:1,activation_trial_seconds:86400}]
+    entitlements:[{id:'trial',feature:'DEFAULT',valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false,activation_trial_seconds:86400}]
   }))})});
   await page.goto(entry);
   await expect(page.getByText('1 day from app activation. Approving here does not start the trial.')).toBeVisible();
@@ -60,15 +72,35 @@ test("consent: an unstarted trial explains activation timing without claiming no
   await expect(page.getByRole('button',{name:'Approve',exact:true})).toBeDisabled();
 });
 
+test("consent: a signed-in account with no eligible license is pointed to the configured support contact", async ({ page }) => {
+  await fixture(page, { support: "https://support.example.com/help", inspect: route => route.fulfill({ json: envelope("authorization_inspected", inspection({ entitlements: [] })) }) });
+  await page.goto(entry);
+  const guidance = page.getByText("No eligible license is available for this app. Contact support.", { exact: true });
+  await expect(guidance).toBeVisible();
+  await expect(guidance.getByRole("link", { name: "Contact support", exact: true })).toHaveAttribute("href", "https://support.example.com/help");
+});
+
+test("consent: a request that cannot be submitted names the support contact for repeat failures", async ({ page }) => {
+  await fixture(page, { support: "mailto:help@example.com", inspect: route => route.fulfill({ status: 400, json: { ok: false, code: "invalid_request" } }) });
+  await page.goto(entry);
+  const alert = page.getByRole("alert");
+  await expect(alert).toHaveText("This connection request cannot be submitted. Restart from your app. Contact support if it happens again.");
+  await expect(alert.getByRole("link", { name: "Contact support", exact: true })).toHaveAttribute("href", "mailto:help@example.com");
+});
+
 test("consent: password login retains the attempt without leaking it into navigation or credentials", async ({ page }) => {
   const state = await fixture(page, { signedIn: false });
   await page.goto(entry);
   await expect(page.getByText("Sign in to approve this device connection.")).toBeVisible();
+  // Still on the sign-in form itself (no consent content yet): the title says so, not "Connect a device".
+  await expect(page).toHaveTitle("Sign in · Licensecc");
   expect(new URL(page.url()).hash).toBe("");
   await page.getByLabel("Email", { exact: true }).fill("customer@example.com");
   await page.getByLabel("Password", { exact: true }).fill("A test password for browser 1!");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "License", exact: true })).toBeVisible();
+  // The Connect flow's document.title, once past sign-in and onto the consent screen itself.
+  await expect(page).toHaveTitle("Connect a device · Licensecc");
   expect(state.logins).toEqual([{ email: "customer@example.com", password: "A test password for browser 1!" }]);
   expect(JSON.stringify(state.requests)).not.toContain(handle);
   expect(await page.locator("body").innerHTML()).not.toContain(handle);
@@ -145,6 +177,23 @@ test("consent: sign-out clears the attempt and another account cannot reuse a sa
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
   expect(await page.evaluate(key => sessionStorage.getItem(key), storageKey)).toBeNull();
+});
+
+test("consent: shows the resolved account email visibly while keeping the customer id inside Account details", async ({ page }) => {
+  await fixture(page, { email: "alice@example.com" });
+  await page.goto(entry);
+  await expect(page.getByRole("combobox", { name: "License", exact: true })).toBeVisible();
+  await expect(page.getByText("Connecting to alice@example.com", { exact: true })).toBeVisible();
+  await expect(page.getByText("customer-a", { exact: true })).toBeHidden();
+  await page.getByText("Account details", { exact: true }).click();
+  await expect(page.getByText("customer-a", { exact: true })).toBeVisible();
+});
+
+test("consent: a null account email never renders a dangling \"Connecting to\"", async ({ page }) => {
+  await fixture(page);
+  await page.goto(entry);
+  await expect(page.getByRole("combobox", { name: "License", exact: true })).toBeVisible();
+  await expect(page.getByText("Connecting to", { exact: false })).toHaveCount(0);
 });
 
 test("consent: malformed handles are scrubbed and never inspected", async ({ page }) => {
@@ -267,14 +316,14 @@ for(const corrupt of ["expired","null-mutation","unknown-field","unbound-mutatio
 
 test("consent: otherwise identical licenses remain distinguishable",async({page})=>{
   await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
-    {id:"license-a",feature:"PRO",valid_until:null,device_limit:1},
-    {id:"license-b",feature:"PRO",valid_until:null,device_limit:3},
+    {id:"license-a",feature:"PRO",valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false},
+    {id:"license-b",feature:"PRO",valid_until:null,device_limit:3,devices_in_use:0,slot_free_at:null,device_connected:false},
   ]}))})});
   await page.goto(entry);
-  await expect(page.getByRole("option",{name:"1. PRO — license-a",exact:true})).toHaveCount(1);
-  await expect(page.getByRole("option",{name:"2. PRO — license-b",exact:true})).toHaveCount(1);
+  await expect(page.getByRole("option",{name:/PRO.*expires never.*0\/1 device$/})).toHaveCount(1);
+  await expect(page.getByRole("option",{name:/PRO.*expires never.*0\/3 devices$/})).toHaveCount(1);
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-b");
-  await expect(page.getByText("3 devices",{exact:true})).toBeVisible();
+  await expect(page.getByText("0 of 3 devices in use",{exact:true})).toBeVisible();
 });
 
 test("consent: failed loopback handoff allows Back and exact approval recovery",async({page})=>{
@@ -398,11 +447,17 @@ test("consent: a late approval from an old attempt cannot redirect or erase a ne
 test("consent: real encoded license references stay readable on mobile",async({page})=>{
   const project="A_LONG_PROJECT_".repeat(12),fingerprints=["a".repeat(52)+"000000000001","a".repeat(52)+"000000000002"];
   const ids=fingerprints.map(fp=>entitlementId(project,"PRO",fp));
-  await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:ids.map(id=>({id,feature:"PRO",valid_until:null,device_limit:2}))}))})});
+  await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:ids.map(id=>({id,feature:"PRO",valid_until:null,device_limit:2,devices_in_use:0,slot_free_at:null,device_connected:false}))}))})});
   await page.setViewportSize({width:390,height:844});
   await page.goto(entry);
-  await expect(page.getByRole("option",{name:"1. PRO — …000000000001",exact:true})).toHaveCount(1);
-  await expect(page.getByRole("option",{name:"2. PRO — …000000000002",exact:true})).toHaveCount(1);
+  const options=page.locator("select option");
+  await expect(options).toHaveCount(3);
+  for(const idx of [0,1]) {
+    const text=await options.nth(idx+1).textContent();
+    expect(text).toContain("expires");
+    expect(text).toContain("0/2 devices");
+    expect(text).not.toContain(fingerprints[idx].slice(-12));
+  }
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption(ids[1]);
   await expect(page.getByText(fingerprints[1],{exact:true})).toBeHidden();
   await page.getByText("License details", {exact:true}).click();
@@ -410,13 +465,51 @@ test("consent: real encoded license references stay readable on mobile",async({p
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
 
-const firstLicensePage=()=>Array.from({length:100},(_,i)=>({id:`license-${i+1}`,feature:"PRO",valid_until:null,device_limit:1}));
+// A viewer west of UTC: a validity end at a UTC midnight is the previous evening in local time, so any
+// local-time rendering of it would show a different calendar day than the UTC date license dates use.
+test.describe("in a time zone west of UTC",()=>{
+  test.use({timezoneId:"America/Los_Angeles"});
+  test("consent: license choice options show meaningful labels with expiry and usage, and the summary shows the same expiry day",async({page})=>{
+    const expiryTime=Date.UTC(2031,11,31)/1000;
+    await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
+      {id:"license-basic",feature:"BASIC",valid_until:expiryTime,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false},
+      {id:"license-pro",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:1,slot_free_at:null,device_connected:false},
+    ]}))})});
+    await page.goto(entry);
+    const basicOption=page.getByRole("option",{name:/BASIC.*expires.*0\/1 device$/});
+    const proOption=page.getByRole("option",{name:/PRO.*expires.*never.*1\/2 devices/});
+    await expect(basicOption).toHaveCount(1);
+    await expect(proOption).toHaveCount(1);
+    const basicText=await basicOption.textContent();
+    const proText=await proOption.textContent();
+    expect(basicText).not.toContain("license-basic");
+    expect(proText).not.toContain("license-pro");
+    expect(basicText).toContain("expires 2031-12-31");
+    await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-basic");
+    const summaryExpiry=page.locator(".consentLicense div").filter({has:page.locator("dt",{hasText:/^Expires$/})}).locator("dd");
+    await expect(summaryExpiry).toHaveText("2031-12-31");
+  });
+});
+
+test("consent: a connected device option shows the connection note",async({page})=>{
+  await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
+    {id:"license-basic",feature:"BASIC",valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false},
+    {id:"license-pro",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:2,slot_free_at:null,device_connected:true},
+  ]}))})});
+  await page.goto(entry);
+  const select=page.locator("select");
+  await expect(select).toBeVisible();
+  const innerHTML=await select.innerHTML();
+  expect(innerHTML).toContain("this device");
+});
+
+const firstLicensePage=()=>Array.from({length:100},(_,i)=>({id:`license-${i+1}`,feature:"PRO",valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false}));
 const pageTwoCursor=Buffer.from(JSON.stringify(["ep1","a".repeat(64),"b".repeat(64),"DEFAULT","c".repeat(64)])).toString("base64url");
-const laterLicense={id:"license-101",feature:"PRO",valid_until:null,device_limit:2};
+const laterLicense={id:"license-101",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:0,slot_free_at:null,device_connected:false};
 test("consent: malformed next cursors fail before page navigation",async({page})=>{
   await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:firstLicensePage(),has_more:true,next_page_cursor:"cGFnZTI"}))})});
   await page.goto(entry);
-  await expect(page.getByRole("alert")).toHaveText("We couldn’t load this request. Please try again.");
+  await expect(page.getByRole("alert")).toHaveText("We couldn't load this request. Please try again.");
   await expect(page.getByRole("button",{name:"Next",exact:true})).toHaveCount(0);
   await expect(page.getByRole("button",{name:"Approve",exact:true})).toHaveCount(0);
 });
@@ -476,6 +569,59 @@ test("consent: comparison mismatch can cancel but cannot approve without confirm
   await expect(page.getByRole("heading",{name:"Connection cancelled"})).toBeVisible();
 });
 
+// The busy label names the operation actually running: only an approval reads "Connecting…".
+test("consent: paging to the next licenses keeps Approve's own label",async({page})=>{
+  let releaseNextPage;
+  await fixture(page,{inspect:async route=>{
+    const cursor=route.request().postDataJSON().page_cursor;
+    if(cursor)await new Promise(resolve=>{releaseNextPage=resolve;});
+    return route.fulfill({json:envelope("authorization_inspected",inspection(cursor?{entitlements:[laterLicense]}:{entitlements:firstLicensePage(),has_more:true,next_page_cursor:pageTwoCursor}))});
+  }});
+  await page.goto(entry);
+  await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-5");
+  await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
+  await page.getByRole("button",{name:"Next",exact:true}).click();
+  await expect.poll(()=>typeof releaseNextPage).toBe("function");
+  await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeDisabled();
+  await expect(page.getByRole("button",{name:"Connecting…",exact:true})).toHaveCount(0);
+  releaseNextPage();
+  await expect(page.getByText("Page 2",{exact:true})).toBeVisible();
+});
+
+test("consent: Cancel reads Cancelling… while cancelling",async({page})=>{
+  let releaseDeny;
+  await fixture(page,{deny:async route=>{
+    await new Promise(resolve=>{releaseDeny=resolve;});
+    return route.fulfill({json:envelope("authorization_denied",{status:"authorization_denied",revision:1})});
+  }});
+  await page.goto(entry);
+  await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-pro");
+  await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
+  await page.getByRole("button",{name:"Cancel",exact:true}).click();
+  await expect.poll(()=>typeof releaseDeny).toBe("function");
+  await expect(page.getByRole("button",{name:"Cancelling…",exact:true})).toBeDisabled();
+  await expect(page.getByRole("button",{name:/Connecting…|Checking…/})).toHaveCount(0);
+  releaseDeny();
+  await expect(page.getByRole("heading",{name:"Connection cancelled"})).toBeVisible();
+});
+
+test("consent: Approve reads Connecting… while approving",async({page})=>{
+  let releaseApproval;
+  await fixture(page,{approve:async route=>{
+    await new Promise(resolve=>{releaseApproval=resolve;});
+    return route.fulfill({json:envelope("authorization_approved",{callback_url:callback,expires_at:Math.floor(Date.now()/1000)+60,revision:1})});
+  }});
+  await page.route("http://127.0.0.1:44888/**",route=>route.fulfill({status:204}));
+  await page.goto(entry);
+  await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-pro");
+  await approve(page);
+  await expect.poll(()=>typeof releaseApproval).toBe("function");
+  await expect(page.getByRole("button",{name:"Connecting…",exact:true})).toBeDisabled();
+  await expect(page.getByRole("button",{name:/Cancelling…|Checking…/})).toHaveCount(0);
+  releaseApproval();
+  await expect(page.getByRole("link",{name:"Open app"})).toBeVisible();
+});
+
 test("consent: a changed comparison code cannot reuse a saved approval",async({page})=>{
   let comparison="0000-1111-2222";
   await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({comparison_code:comparison}))}),
@@ -501,4 +647,97 @@ test("consent: cursor cycles and account changes cannot append a new page",async
   await page.getByRole("button",{name:"Next",exact:true}).click();
   await expect(page.getByRole("alert")).toContainText("Your account changed");
   await expect(page.getByRole("navigation",{name:"License pages"})).toHaveCount(0);
+});
+
+// A full license blocks Approve until Check again finds a free slot. The selection
+// survives the re-inspect, focus lands on Approve once it re-enables, and the approve body never
+// carries a capacity claim.
+test("consent: a full license disables Approve; Check again labels itself, keeps the selection, finds a free slot, moves focus to Approve, and approves with an unchanged body",async({page})=>{
+  const freeAt=Math.floor(Date.now()/1000)+120;
+  let checks=0,approveBody=null,releaseSecondInspect,signalSecondInspectStarted;
+  const secondInspectStarted=new Promise(resolve=>{signalSecondInspectStarted=resolve;});
+  await fixture(page,{
+    inspect:async route=>{
+      checks++;
+      if(checks===2){signalSecondInspectStarted();await new Promise(resolve=>{releaseSecondInspect=resolve;});}
+      return route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
+        {id:"license-basic",feature:"BASIC",valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false},
+        {id:"license-pro",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:checks===1?2:1,slot_free_at:checks===1?freeAt:null,device_connected:false},
+      ]}))});
+    },
+    approve:route=>{approveBody=route.request().postDataJSON();return route.fulfill({json:envelope("authorization_approved",{callback_url:callback,expires_at:Math.floor(Date.now()/1000)+60,revision:1})});},
+  });
+  await page.route("http://127.0.0.1:44888/**",route=>route.fulfill({status:204}));
+  await page.goto(entry);
+  await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-pro");
+  await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
+  await expect(page.getByText("2 of 2 devices in use",{exact:true})).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("All 2 device slots are in use. Disconnect a device under Devices, then check again.");
+  const expectedFreeAt=await page.evaluate(t=>new Date(t*1000).toLocaleString(),freeAt);
+  await expect(page.getByText(`A recently disconnected slot frees at ${expectedFreeAt}.`,{exact:true})).toBeVisible();
+  await expect(page.getByText("This request expires before then",{exact:false})).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeDisabled();
+  await page.getByRole("button",{name:"Check again",exact:true}).click();
+  await secondInspectStarted;
+  await expect(page.getByRole("button",{name:"Checking…",exact:true})).toBeVisible();
+  await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeVisible();
+  releaseSecondInspect();
+  await expect(page.getByRole("combobox",{name:"License",exact:true})).toHaveValue("license-pro");
+  await expect(page.getByText("1 of 2 devices in use",{exact:true})).toBeVisible();
+  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeEnabled();
+  await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeFocused();
+  await page.getByRole("button",{name:"Approve",exact:true}).click();
+  await expect(page.getByRole("link",{name:"Open app"})).toBeVisible();
+  expect(approveBody).toEqual({attempt_handle:handle,expected_attempt_revision:0,entitlement_id:"license-pro"});
+  expect(checks).toBe(2);
+});
+
+test("consent: a device already connected to a full license leaves Approve enabled, names the connection, and drops the device-slot note",async({page})=>{
+  await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
+    {id:"license-pro",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:2,slot_free_at:null,device_connected:true},
+  ]}))})});
+  await page.goto(entry);
+  await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
+  const connectedMessage=page.getByText("This device is already connected to this license.",{exact:true});
+  await expect(connectedMessage).toBeVisible();
+  await expect(connectedMessage).toHaveClass("consentConnected");
+  await expect(page.getByText("All 2 device slots are in use",{exact:false})).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"Check again",exact:true})).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeEnabled();
+  await expect(page.getByText("Uses one device slot when your app finishes connecting.",{exact:true})).toHaveCount(0);
+  // Not left at the default muted paragraph colour, and meets the
+  // contrast rule against its card's actual background.
+  const connected=await colorAndContrast(connectedMessage);
+  expect(connected.color).toBe("rgb(232, 232, 232)");
+  expect(connected.contrast).toBeGreaterThanOrEqual(4.5);
+});
+
+test("consent: a device limit of 1 uses singular copy when full",async({page})=>{
+  await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
+    {id:"license-solo",feature:"SOLO",valid_until:null,device_limit:1,devices_in_use:1,slot_free_at:null,device_connected:false},
+  ]}))})});
+  await page.goto(entry);
+  await expect(page.getByText("1 of 1 device in use",{exact:true})).toBeVisible();
+  await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
+  const capacityMessage=page.getByText("This license's only device slot is in use. Disconnect a device under Devices, then check again.",{exact:true});
+  await expect(capacityMessage).toBeVisible();
+  await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeDisabled();
+  // The full-license message gets clear (error/attention) emphasis,
+  // reusing the same error colour `.statusline.error` uses, and meets the contrast rule.
+  const capacity=await colorAndContrast(capacityMessage);
+  expect(capacity.color).toBe("rgb(219, 146, 146)");
+  expect(capacity.contrast).toBeGreaterThanOrEqual(4.5);
+});
+
+test("consent: a slot that frees after this request expires warns before the free time",async({page})=>{
+  const freeAt=Math.floor(Date.now()/1000)+400;
+  await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
+    {id:"license-pro",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:2,slot_free_at:freeAt,device_connected:false},
+  ]}))})});
+  await page.goto(entry);
+  await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
+  const expectedFreeAt=await page.evaluate(t=>new Date(t*1000).toLocaleString(),freeAt);
+  await expect(page.getByText(`A recently disconnected slot frees at ${expectedFreeAt}.`,{exact:true})).toBeVisible();
+  await expect(page.getByText("This request expires before then. Start connecting again from your app after that time.",{exact:true})).toBeVisible();
 });

@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 async function openCatalogView(page, name) {
   const back = page.getByRole("button", { name: /^Back to (features|plans)$/ });
@@ -113,7 +113,7 @@ test("admin UI reconciles an unknown catalog-import Apply with the original prev
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.catalogImports.length).toBe(2);
   const first = api.requests.catalogImports[1];
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(page.getByRole("button", { name: "Reconcile catalog import" })).toBeVisible();
 
   // The modal remains a true modal while the error is announced. Closing it
@@ -154,7 +154,7 @@ test("admin UI replays a retained catalog-import Apply after a tab round-trip wi
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.catalogImports.length).toBe(2);
   const first = api.requests.catalogImports[1];
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Reconcile catalog import" })).toBeVisible();
@@ -227,7 +227,7 @@ test("admin UI retains a substituted initial catalog-import Apply response for e
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.catalogImports.length).toBe(2);
   const first = api.requests.catalogImports[1];
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await page.getByRole("button", { name: "Reconcile catalog import" }).click();
   await expect.poll(() => api.requests.catalogImports.length).toBe(3);
@@ -259,7 +259,7 @@ test("admin UI retains a substituted replayed catalog-import response until an e
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.catalogImports.length).toBe(2);
   const first = api.requests.catalogImports[1];
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   api.behavior.catalogImportApplyResponseTransforms.push((preview) => ({
@@ -271,7 +271,7 @@ test("admin UI retains a substituted replayed catalog-import response until an e
   const substitutedReplay = api.requests.catalogImports[2];
   expect(substitutedReplay.idempotency_key).toBe(first.idempotency_key);
   expect(substitutedReplay.body).toEqual(first.body);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(page.getByRole("button", { name: "Reconcile catalog import" })).toBeVisible();
 
   await page.getByRole("button", { name: "Reconcile catalog import" }).click();
@@ -310,7 +310,7 @@ test("admin UI surfaces catalog-import capability failures exactly and recovers 
   await preview();
   api.catalogImportState.claimAsOtherOperator(api.catalogImportState.latestPreviewId());
   let dialog = await attempt();
-  await expect(dialog.locator(".modalError")).toContainText("stale_catalog_import_preview — preview again");
+  await expect(dialog.locator(".modalError")).toContainText("This import preview is out of date. Preview the import again.");
   await expect(page.getByRole("row", { name: /Capability capability/ })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(form.getByRole("button", { name: "Apply import" })).toBeDisabled();
@@ -318,26 +318,26 @@ test("admin UI surfaces catalog-import capability failures exactly and recovers 
   await preview();
   api.catalogImportState.expire(api.catalogImportState.latestPreviewId());
   dialog = await attempt();
-  await expect(dialog.locator(".modalError")).toContainText("expired_catalog_import_preview — preview again");
+  await expect(dialog.locator(".modalError")).toContainText("This import preview expired. Preview the import again.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   await preview();
   api.catalogImportState.claim(api.catalogImportState.latestPreviewId());
   dialog = await attempt();
-  await expect(dialog.locator(".modalError")).toContainText("claimed_catalog_import_preview — preview again");
+  await expect(dialog.locator(".modalError")).toContainText("This import preview was already used. Preview the import again.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   await preview();
   api.behavior.catalogImportApplyErrors.push("catalog_import_too_large");
   dialog = await attempt();
-  await expect(dialog.locator(".modalError")).toContainText("catalog_import_too_large — preview again");
+  await expect(dialog.locator(".modalError")).toContainText("This import is too large to apply at once. Narrow the manifest and preview it again.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   await preview();
   api.behavior.catalogImportReadFailures.push("response-error");
   dialog = await attempt();
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await expect(form.getByRole("button", { name: "Apply import" })).toBeDisabled();
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
@@ -379,17 +379,266 @@ test("admin UI clears its bound preview for stale and fingerprint-conflict Apply
 
   api.projectionState.staleNextPlanApply = true;
   await applyButton.click();
-  await expect(page.getByText(/stale_projection_preview.*preview again/)).toBeVisible();
+  await expect(page.getByText("The license or catalog changed after this preview. Preview again before you apply.")).toBeVisible();
   await expect(applyButton).toBeDisabled();
   await projectionForm.getByRole("button", { name: "Preview" }).click();
   await expect(applyButton).toBeEnabled();
 
   api.projectionState.nextPlanApplyError = "license_fingerprint_conflict";
   await applyButton.click();
-  await expect(page.getByText(/license_fingerprint_conflict.*preview again/)).toBeVisible();
+  await expect(page.getByText("This license fingerprint conflicts with existing access. Preview again before you apply.")).toBeVisible();
   await expect(applyButton).toBeDisabled();
   // Both simulated 409s return before the fixture's entitlement/event/assignment
   // mutation path; the UI has only sent the server-bound preview_id.
   expect(api.requests.planApplies).toHaveLength(2);
   expect(api.requests.planApplies.every((body) => Object.keys(body).length === 1 && typeof body.preview_id === "string")).toBe(true);
+});
+
+test("admin UI opens a confirm dialog before a plan projection Apply that would disable a grant", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  const previewId = "ppv_ui_disable_test";
+  const fingerprint = "e".repeat(64);
+  let lastPreviewBody = null;
+  function buildPreview(body) {
+    return {
+      plan: { id: "plan_pro", project: "DEFAULT", plan_key: "pro", name: "Pro", status: "active", version: 1 },
+      assignment: {
+        project: body.project,
+        license_id: body.license_id,
+        license_fingerprint: body.license_fingerprint,
+        customer_id: body.customer_id ?? null,
+        plan_id: "plan_pro",
+        plan_key: "pro",
+        support_until: body.support_until ?? null,
+        addons: body.addons ?? [],
+      },
+      desired: [],
+      will_create: [],
+      will_update: [],
+      will_disable: [{
+        project: "DEFAULT",
+        feature: "legacy",
+        license_fingerprint: body.license_fingerprint,
+        policy_id: null,
+        source: "included",
+        addon_key: null,
+        license_mode: "node_locked",
+        status: "active",
+        valid_from: null,
+        valid_until: null,
+        assertion_ttl_seconds: 600,
+        pool_size: 0,
+        max_active_devices: 1,
+        max_borrow_sec: 0,
+        meter_quota: 0,
+        meter_period_sec: 2592000,
+        reason: "not_in_plan",
+      }],
+      blocked: [],
+      unchanged: [],
+      summary: { create: 0, update: 0, disable: 1, blocked: 0, unchanged: 0 },
+      preview_id: previewId,
+      effective_at: 0,
+      expires_at: 9999999999,
+      source_generation: 1,
+    };
+  }
+  await page.route("**/api/admin/license-plans/preview", async (route) => {
+    lastPreviewBody = route.request().postDataJSON();
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(makeEnvelope("license_plan_projection_previewed", buildPreview(lastPreviewBody))) });
+  });
+  const applyRequests = [];
+  await page.route("**/api/admin/license-plans/apply", async (route) => {
+    applyRequests.push(route.request().postDataJSON());
+    const preview = buildPreview(lastPreviewBody);
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(makeEnvelope("license_plan_projection_applied", { ...preview, applied: { created: [], updated: [], disabled: [], assignment: null } })) });
+  });
+
+  await page.goto("/");
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("link", { name: "Plans & features" }).click();
+  await openProjectionTask(page);
+  const projectionForm = page.getByRole("form", { name: "Plan projection" });
+  await projectionForm.getByLabel("License ID").fill("lic_disable_test");
+  await projectionForm.getByLabel("Fingerprint").fill(fingerprint);
+  await projectionForm.getByLabel("Plan key").fill("pro");
+  await projectionForm.getByRole("button", { name: "Preview" }).click();
+  await expect.poll(() => lastPreviewBody !== null).toBe(true);
+  const applyButton = projectionForm.getByRole("button", { name: "Apply" });
+  await expect(applyButton).toBeEnabled();
+
+  // Cancelling the warning sends no apply request, and Apply is immediately usable again.
+  await applyButton.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("This will disable 1 entitlement.");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(applyRequests).toHaveLength(0);
+  await expect(applyButton).toBeEnabled();
+
+  // Escape is an equivalent dismissal: it also sends nothing and leaves Apply usable.
+  await applyButton.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(applyRequests).toHaveLength(0);
+  await expect(applyButton).toBeEnabled();
+
+  // Confirming runs the exact same Apply the ungated path would have sent: only the preview id.
+  await applyButton.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Apply" }).click();
+  await expect.poll(() => applyRequests.length).toBe(1);
+  expect(applyRequests[0]).toEqual({ preview_id: previewId });
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+function recordLeavePrompts(page) {
+  const prompts = [];
+  page.on("dialog", (dialog) => {
+    prompts.push(dialog.message());
+    void dialog.dismiss();
+  });
+  return prompts;
+}
+
+async function leaveForOverview(page) {
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Overview", exact: true }).click();
+}
+
+test("an applied plan projection or catalog import leaves no unsaved-changes prompt for the next navigation", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  const prompts = recordLeavePrompts(page);
+  const heading = page.locator("[data-workspace-heading]");
+
+  await page.goto("/#/plans");
+  await page.getByRole("button", { name: "Apply plan", exact: true }).click();
+  const projectionForm = page.getByRole("form", { name: "Plan projection" });
+  await projectionForm.getByLabel("License ID").fill("lic_applied_then_leave");
+  await projectionForm.getByLabel("Fingerprint").fill("a".repeat(64));
+  await projectionForm.getByLabel("Plan key").fill("pro");
+  await projectionForm.getByRole("button", { name: "Preview" }).click();
+  const applyProjection = projectionForm.getByRole("button", { name: "Apply" });
+  await expect(applyProjection).toBeEnabled();
+  await applyProjection.click();
+  await expect(page.getByText("Plan applied.")).toBeVisible();
+  await leaveForOverview(page);
+  await expect(heading).toHaveText("Overview");
+  expect(api.requests.planApplies).toHaveLength(1);
+  expect(prompts).toEqual([]);
+
+  await page.goto("/#/plans?view=import");
+  const importForm = page.getByRole("form", { name: "Catalog import" });
+  await importForm.getByLabel("Manifest JSON").fill(JSON.stringify({
+    format_version: 1,
+    features: [{ project: "DEFAULT", feature_key: "applied_then_leave", name: "Applied then leave" }],
+    plans: [],
+  }));
+  await importForm.getByRole("button", { name: "Preview import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(1);
+  await importForm.getByRole("button", { name: "Apply import" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
+  await expect(page.getByText("Catalog import applied.")).toBeVisible();
+  await leaveForOverview(page);
+  await expect(heading).toHaveText("Overview");
+  expect(api.requests.catalogImports).toHaveLength(2);
+  expect(prompts).toEqual([]);
+});
+
+test("an unsaved catalog draft still asks before a link or Back discards it", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const plan = api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  const prompts = recordLeavePrompts(page);
+  const discardPrompt = "Discard this unsaved catalog task? Choose Cancel to keep editing.";
+  await page.goto("/#/plans");
+  await page.getByRole("row", { name: /Plan confirm/ }).getByRole("button", { name: "View plan", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Plan confirm", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Edit plan", exact: true }).click();
+  const name = page.getByRole("form", { name: "Catalog plan" }).getByLabel("Name");
+  await name.fill("Unsaved plan name");
+
+  await leaveForOverview(page);
+  await expect.poll(() => prompts).toEqual([discardPrompt]);
+  await expect(name).toHaveValue("Unsaved plan name");
+  await expect(page.locator("[data-workspace-heading]")).toHaveText("Plans & features");
+
+  await page.goBack();
+  await expect.poll(() => prompts).toEqual([discardPrompt, discardPrompt]);
+  await expect(name).toHaveValue("Unsaved plan name");
+  await expect.poll(() => new URL(page.url()).hash).toBe(`#/plans?plan=${plan.id}`);
+});
+
+async function editPlanDetail(page, plan, name) {
+  await page.goto("/#/plans");
+  await page.getByRole("row", { name: /Plan confirm/ }).getByRole("button", { name: "View plan", exact: true }).click();
+  await page.getByRole("button", { name: "Edit plan", exact: true }).click();
+  const form = page.getByRole("form", { name: "Catalog plan" });
+  await form.getByLabel("Name").fill(name);
+  await expect.poll(() => new URL(page.url()).hash).toBe(`#/plans?plan=${plan.id}`);
+  return form;
+}
+
+async function expectLeaveRefused(page, plan, form, name) {
+  await leaveForOverview(page);
+  await expect(page.locator("[data-workspace-heading]")).toHaveText("Plans & features");
+  await page.goBack();
+  await expect.poll(() => new URL(page.url()).hash).toBe(`#/plans?plan=${plan.id}`);
+  await expect(page.locator("[data-workspace-heading]")).toHaveText("Plans & features");
+  await expect(form.getByLabel("Name")).toHaveValue(name);
+}
+
+test("a plan save in flight blocks leaving, and a save that fails keeps its draft", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const plan = api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  let releasePatch;
+  const patchGate = new Promise((resolve) => { releasePatch = resolve; });
+  let patches = 0;
+  await page.route(`**/api/admin/catalog/plans/${plan.id}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    patches += 1;
+    await patchGate;
+    return route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ ok: false, code: "invalid_request", request_id: "ui-e2e-plan-patch-rejected" }) });
+  });
+  const prompts = recordLeavePrompts(page);
+  const form = await editPlanDetail(page, plan, "Kept draft");
+  await form.getByRole("button", { name: "Update plan" }).click();
+  await expect.poll(() => patches).toBe(1);
+
+  // Neither a link nor browser Back may leave while the save owns this editor.
+  await expectLeaveRefused(page, plan, form, "Kept draft");
+  expect(prompts).toEqual([]);
+
+  releasePatch();
+  await expect(page.getByText("The request was not accepted. Check the values and try again.")).toBeVisible();
+  await expect(form.getByLabel("Name")).toHaveValue("Kept draft");
+  // The draft the save did not take is still unsaved: leaving asks before discarding it.
+  await leaveForOverview(page);
+  await expect.poll(() => prompts).toEqual(["Discard this unsaved catalog task? Choose Cancel to keep editing."]);
+  await expect(form.getByLabel("Name")).toHaveValue("Kept draft");
+  await expect.poll(() => new URL(page.url()).hash).toBe(`#/plans?plan=${plan.id}`);
+});
+
+test("a plan save in flight blocks leaving until it succeeds, then navigation works again", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const plan = api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  const prompts = recordLeavePrompts(page);
+  const form = await editPlanDetail(page, plan, "Renamed plan");
+  api.behavior.deferMutations.add("catalog-plan-patch");
+  await form.getByRole("button", { name: "Update plan" }).click();
+  await expect.poll(() => api.behavior.releaseMutations.has("catalog-plan-patch")).toBe(true);
+
+  await expectLeaveRefused(page, plan, form, "Renamed plan");
+  api.behavior.releaseMutations.get("catalog-plan-patch")();
+  await expect(page.getByText("Plan changes saved.")).toBeVisible();
+  await leaveForOverview(page);
+  await expect(page.locator("[data-workspace-heading]")).toHaveText("Overview");
+  await page.goBack();
+  await expect.poll(() => new URL(page.url()).hash).toBe(`#/plans?plan=${plan.id}`);
+  await expect(page.getByRole("heading", { name: "Renamed plan", exact: true })).toBeVisible();
+  expect(prompts).toEqual([]);
 });

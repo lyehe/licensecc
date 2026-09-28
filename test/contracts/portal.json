@@ -78,6 +78,11 @@
     {
       "inSpec": true,
       "method": "POST",
+      "path": "/portal/v1/auth/identities/unlink"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
       "path": "/portal/v1/auth/request"
     },
     {
@@ -1227,7 +1232,17 @@
                                   "minimum": 2,
                                   "type": "integer"
                                 },
+                                "device_connected": {
+                                  "description": "True when this attempt's own device already holds an active binding for this license. That device reconnects without using another slot, so a full license does not block it.",
+                                  "type": "boolean"
+                                },
                                 "device_limit": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "devices_in_use": {
+                                  "description": "Bindings currently occupying a device slot for this license: active, or retiring within its hold (ADR 0006's shared occupancy predicate).",
                                   "maximum": 9007199254740991,
                                   "minimum": 0,
                                   "type": "integer"
@@ -1237,6 +1252,19 @@
                                 },
                                 "id": {
                                   "type": "string"
+                                },
+                                "slot_free_at": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "Earliest time a retiring hold releases a slot; null when no hold is retiring."
                                 },
                                 "valid_until": {
                                   "anyOf": [
@@ -1256,7 +1284,10 @@
                                 "id",
                                 "feature",
                                 "valid_until",
-                                "device_limit"
+                                "device_limit",
+                                "devices_in_use",
+                                "slot_free_at",
+                                "device_connected"
                               ],
                               "type": "object"
                             },
@@ -2651,6 +2682,17 @@
                                 "status": {
                                   "type": "string"
                                 },
+                                "trial_ends_at": {
+                                  "description": "When the trial ends (epoch seconds), by the rule that enforces the row: the protected-device trial rule for a protected row, the legacy lease trial rule otherwise; never after valid_until. null for a license that is not a trial, for a trial whose clock starts at its first activation and has not started yet (trial_starts_on_activation), and for a trial with no end of its own.",
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ]
+                                },
+                                "trial_starts_on_activation": {
+                                  "description": "True for a trial whose clock starts at its first activation and has not started yet, with a duration the enforcing rule accepts: at least 2 seconds for a protected row, more than 0 for a legacy row. Otherwise false.",
+                                  "type": "boolean"
+                                },
                                 "valid_from": {
                                   "type": [
                                     "integer",
@@ -2981,10 +3023,18 @@
                         "properties": {
                           "customer_id": {
                             "type": "string"
+                          },
+                          "email": {
+                            "description": "customers.email, else portal_passwords.email_lower, else the earliest portal_identities.email, else null.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
-                          "customer_id"
+                          "customer_id",
+                          "email"
                         ],
                         "type": "object"
                       }
@@ -3626,7 +3676,7 @@
       },
       "/portal/v1/auth/github/callback": {
         "get": {
-          "description": "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking. Provider tokens are not persisted.",
+          "description": "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking (auth_error=account_link_required). An identity whose customer is suspended redirects with auth_error=account_suspended and no session. Provider tokens are not persisted.",
           "operationId": "authCallbackGitHub",
           "parameters": [
             {
@@ -3825,7 +3875,7 @@
       },
       "/portal/v1/auth/google/callback": {
         "get": {
-          "description": "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking. Provider tokens are not persisted.",
+          "description": "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking (auth_error=account_link_required). An identity whose customer is suspended redirects with auth_error=account_suspended and no session. Provider tokens are not persisted.",
           "operationId": "authCallbackGoogle",
           "parameters": [
             {
@@ -4114,9 +4164,226 @@
           ]
         }
       },
+      "/portal/v1/auth/identities/unlink": {
+        "post": {
+          "description": "Requires a session and a same-site request. Allowed only while another sign-in method is usable now: a password while password sign-in is enabled (PORTAL_PASSWORD_ENABLED=1), the other provider's identity while that provider is configured, or a non-empty contact email while email codes can be sent, which needs email delivery configured and PORTAL_OTP_PEPPERS set (stricter than the providers envelope's `email`, which reports delivery only). Configuration is judged per request. The rule, a still-live session and the delete are one conditional statement, so concurrent requests cannot remove the last method, and a session revoked by a concurrent unlink cannot finish its own. The same transaction revokes the customer's other OAuth sessions; the current session and sessions from other sign-in methods are kept.",
+          "operationId": "authUnlinkIdentity",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "provider": {
+                      "enum": [
+                        "google",
+                        "github"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "provider"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/Envelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "identity_unlinked"
+                      },
+                      "data": {
+                        "properties": {
+                          "provider": {
+                            "enum": [
+                              "google",
+                              "github"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "provider"
+                        ],
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "The provider was disconnected and no longer appears in GET /portal/v1/auth/identities.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "no-store",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_json",
+                          "invalid_request"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Body was not a JSON object, or provider is not google or github."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Missing, invalid or expired session, including one a concurrent unlink revoked before this delete ran."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "cross_site_forbidden"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "not_found"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "This customer has no identity for that provider (absent and foreign identities look the same), including one a concurrent unlink removed first."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "last_sign_in_method"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "No other sign-in method is usable now; nothing was changed."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeded 8192 bytes."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session or database configuration unavailable."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Disconnect one of this customer's linked providers.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
       "/portal/v1/auth/logout": {
         "post": {
-          "description": "No auth required (the session is optional — logout is idempotent). Marks the session row revoked and bumps account_token_revocations.revocation_seq to kill any in-flight 120s account token (invariant 9). Always clears the cookie (Max-Age=0).",
+          "description": "No auth required (the session is optional — logout is idempotent). Marks the session row revoked and bumps the per-customer revocation floor (account_token_revocations.revocation_seq, invariant 9), which the backend uses to reject reads from a stale replica; in-flight 120s proxy tokens expire on their own TTL. Always clears the cookie (Max-Age=0).",
           "operationId": "authLogout",
           "responses": {
             "200": {
@@ -4271,7 +4538,7 @@
       },
       "/portal/v1/auth/magic-redeem": {
         "post": {
-          "description": "Accepts the token either as JSON { token } or as application/x-www-form-urlencoded token=<secret> (posted by the interstitial form). The request body is capped at 8192 bytes before parsing; multipart and other media types are rejected. Email-independent; single-use via an atomic UPDATE. On success sets the lccp_session cookie.",
+          "description": "Accepts the token either as JSON { token } or as application/x-www-form-urlencoded token=<secret> (posted by the interstitial form). The request body is capped at 8192 bytes before parsing; multipart and other media types are rejected. Email-independent; single-use via an atomic UPDATE. On success sets the lccp_session cookie. The form-encoded caller never receives JSON: every outcome of that branch (success or failure) is instead a 303 redirect — see the 303 response. The 200/400/401/413/429/503 envelopes below apply to JSON callers only; 403 (cross-site) is decided before either media type is known, and 415 is returned for any Content-Type that is neither JSON nor form-encoded.",
           "operationId": "authMagicRedeem",
           "requestBody": {
             "content": {
@@ -4345,6 +4612,23 @@
                 }
               }
             },
+            "303": {
+              "description": "Form-encoded caller only (application/x-www-form-urlencoded): every outcome is a no-store redirect instead of JSON. Success redirects to /#/apps with the lccp_session cookie. Failure redirects to /?auth_error=<code>: link_expired (invalid, consumed, expired, or over-cap secret — the same no-oracle 401 the JSON branch would otherwise return as invalid_otp), rate_limited, or sign_in_failed (config_error, a body/token parsing failure such as an oversized or undecodable form, or any unexpected server error).",
+              "headers": {
+                "Location": {
+                  "schema": {
+                    "format": "uri",
+                    "type": "string"
+                  }
+                },
+                "Set-Cookie": {
+                  "description": "lccp_session=<opaque>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=86400 (success only).",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
             "400": {
               "content": {
                 "application/json": {
@@ -4356,16 +4640,13 @@
                     ],
                     "properties": {
                       "code": {
-                        "enum": [
-                          "invalid_json",
-                          "invalid_request"
-                        ]
+                        "const": "invalid_json"
                       }
                     }
                   }
                 }
               },
-              "description": "Body was not valid JSON or application/x-www-form-urlencoded."
+              "description": "Body was not valid JSON (application/json caller only)."
             },
             "401": {
               "content": {
@@ -4460,7 +4741,16 @@
                   }
                 }
               },
-              "description": "Rate limited (per-IP verify 30/900s)."
+              "description": "Rate limited (per-IP verify 30/900s). JSON caller only (application/json); the form-encoded caller's own rate limit redirects to /?auth_error=rate_limited instead, with no header a top-level navigation could read. Answers with a retry-after header giving the exact seconds left in the fixed window.",
+              "headers": {
+                "retry-after": {
+                  "description": "Seconds until portalRateLimit's current fixed window resets. The UI reads this to show \"Try again in {n} minutes.\"",
+                  "schema": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                }
+              }
             },
             "503": {
               "content": {
@@ -4511,6 +4801,9 @@
                           },
                           "has_password": {
                             "type": "boolean"
+                          },
+                          "recovery_available": {
+                            "type": "boolean"
                           }
                         },
                         "type": "object"
@@ -4520,7 +4813,7 @@
                   }
                 }
               },
-              "description": "Email login identifier, has_password, can_reset, and email_verified flags; no hash."
+              "description": "Email login identifier, has_password, can_reset, email_verified, and recovery_available flags; no hash. recovery_available reports only this account's own eligibility for the emailed reset (the same check that endpoint applies to decide whether to send one); it says nothing about whether email delivery is configured -- see the `email` field from GET /portal/v1/auth/providers for that."
             },
             "401": {
               "content": {
@@ -4947,7 +5240,16 @@
                   }
                 }
               },
-              "description": "Per-IP or login-identifier limit reached."
+              "description": "Per-IP or login-identifier limit reached. Answers with a retry-after header giving the exact seconds left in the fixed window.",
+              "headers": {
+                "retry-after": {
+                  "description": "Seconds until portalRateLimit's current fixed window resets. The UI reads this to show \"Try again in {n} minutes.\"",
+                  "schema": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                }
+              }
             },
             "503": {
               "content": {
@@ -4978,7 +5280,7 @@
       },
       "/portal/v1/auth/password/login": {
         "post": {
-          "description": "Requires exact Origin. Wrong password, unknown login and disabled customer return the same denial. Per-IP 30/900s and per-email 10/900s. Session creation atomically checks the verified password hash is still current.",
+          "description": "Requires exact Origin. Wrong password and unknown login return the same denial. The password is verified before the account status is read, so only the correct password on a suspended (disabled) customer returns account_suspended, without a session. Per-IP 30/900s and per-email 10/900s. Session creation atomically checks the verified password hash is still current.",
           "operationId": "authLoginPassword",
           "requestBody": {
             "content": {
@@ -5062,13 +5364,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "cross_site_forbidden"
+                        "enum": [
+                          "cross_site_forbidden",
+                          "account_suspended"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Origin mismatch."
+              "description": "Origin mismatch, or the correct password for a suspended customer."
             },
             "404": {
               "content": {
@@ -5125,7 +5430,16 @@
                   }
                 }
               },
-              "description": "Per-IP or login-identifier limit reached."
+              "description": "Per-IP or login-identifier limit reached. Answers with a retry-after header giving the exact seconds left in the fixed window.",
+              "headers": {
+                "retry-after": {
+                  "description": "Seconds until portalRateLimit's current fixed window resets. The UI reads this to show \"Try again in {n} minutes.\"",
+                  "schema": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                }
+              }
             },
             "503": {
               "content": {
@@ -5298,7 +5612,16 @@
                   }
                 }
               },
-              "description": "Per-IP or login-identifier limit reached."
+              "description": "Per-IP or login-identifier limit reached. Answers with a retry-after header giving the exact seconds left in the fixed window.",
+              "headers": {
+                "retry-after": {
+                  "description": "Seconds until portalRateLimit's current fixed window resets. The UI reads this to show \"Try again in {n} minutes.\"",
+                  "schema": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                }
+              }
             },
             "503": {
               "content": {
@@ -5474,7 +5797,16 @@
                   }
                 }
               },
-              "description": "Per-IP or login-identifier limit reached."
+              "description": "Per-IP or login-identifier limit reached. Answers with a retry-after header giving the exact seconds left in the fixed window.",
+              "headers": {
+                "retry-after": {
+                  "description": "Seconds until portalRateLimit's current fixed window resets. The UI reads this to show \"Try again in {n} minutes.\"",
+                  "schema": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                }
+              }
             },
             "503": {
               "content": {
@@ -5528,13 +5860,21 @@
                           },
                           "password": {
                             "type": "boolean"
+                          },
+                          "support": {
+                            "description": "PORTAL_SUPPORT_CONTACT when it is a credential-free https: URL or a single mailto: address; otherwise null.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
                           "google",
                           "github",
                           "email",
-                          "password"
+                          "password",
+                          "support"
                         ],
                         "type": "object"
                       }
@@ -5543,7 +5883,7 @@
                   }
                 }
               },
-              "description": "Provider availability."
+              "description": "Provider availability and the operator's support contact."
             }
           },
           "security": [],
@@ -5671,7 +6011,16 @@
                   }
                 }
               },
-              "description": "Rate limited (per-email 5/900s + per-IP 30/900s, fail-closed)."
+              "description": "Rate limited (per-email 5/900s + per-IP 30/900s, fail-closed). Answers with a retry-after header giving the exact seconds left in the fixed window.",
+              "headers": {
+                "retry-after": {
+                  "description": "Seconds until portalRateLimit's current fixed window resets. The UI reads this to show \"Try again in {n} minutes.\"",
+                  "schema": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                }
+              }
             },
             "503": {
               "content": {
@@ -5861,7 +6210,16 @@
                   }
                 }
               },
-              "description": "Rate limited (per-IP verify 30/900s)."
+              "description": "Rate limited (per-IP verify 30/900s). Answers with a retry-after header giving the exact seconds left in the fixed window.",
+              "headers": {
+                "retry-after": {
+                  "description": "Seconds until portalRateLimit's current fixed window resets. The UI reads this to show \"Try again in {n} minutes.\"",
+                  "schema": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                }
+              }
             },
             "503": {
               "content": {
@@ -5915,7 +6273,7 @@
       }
     ]
   },
-  "openApiOperationCount": 33,
+  "openApiOperationCount": 34,
   "PORTAL_ROUTE_KEYS": [
     "GET /openapi.json",
     "GET /docs",
@@ -5932,6 +6290,7 @@
     "GET /portal/v1/auth/google/callback",
     "GET /portal/v1/auth/github/callback",
     "GET /portal/v1/auth/identities",
+    "POST /portal/v1/auth/identities/unlink",
     "POST /portal/v1/auth/password/register",
     "POST /portal/v1/auth/password/reset",
     "POST /portal/v1/auth/password/complete",
@@ -5953,7 +6312,7 @@
     "POST /api/portal/device-authorizations/deny",
     "GET /api/portal/device-bindings"
   ],
-  "routeCount": 35,
-  "routeKeyCount": 35,
+  "routeCount": 36,
+  "routeKeyCount": 36,
   "service": "cloudflare-customer-portal"
 }

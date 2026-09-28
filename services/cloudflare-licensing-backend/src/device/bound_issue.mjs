@@ -1,4 +1,5 @@
 import { encodeBase64url, deviceOperationBody, deviceOperationDigestInput } from "@licensecc/licensing-domain/lease/device_protocol";
+import { boundOccupiedSql } from "@licensecc/cloudflare-runtime/device/bound_capacity";
 import { deviceLeaseWindow } from "@licensecc/licensing-domain/lease/device_policy";
 import { BoundRequestError, validateBoundRequest } from "./bound_request.mjs";
 import { boundRandomId, boundSecretHash } from "./bound_enrollment.mjs";
@@ -6,7 +7,7 @@ import { sha256Hex, verifyBoundDeviceProof, signBoundDeviceLease } from "./bound
 import { commitBoundDeviceLease } from "./bound_store.mjs";
 import { recoverBoundDeviceLease } from "./bound_recovery.mjs";
 import { limitBoundVerified } from "./bound_rate.mjs";
-import { boundTrialState } from "./bound_trial.mjs";
+import { boundTrialState } from "@licensecc/cloudflare-runtime/device/bound_trial";
 
 /** @returns {never} */
 function deny(code, status) { throw new BoundRequestError(code, status); }
@@ -72,14 +73,25 @@ async function authority(db, purpose, request, verified, operation) {
   if ((operation || purpose === "renew") && (!binding || !device)) deny("binding_unavailable", 404);
   if (purpose === "renew" && binding.generation !== request.generation) deny("revision_conflict", 409);
   if (!binding) {
-    const capacity = await db.prepare(`SELECT count(*) AS occupied FROM device_bound_bindings WHERE project=? AND feature=?
-      AND license_fingerprint=? AND (state='active' OR (state='retiring' AND hold_until>unixepoch()))`)
+    const capacity = await db.prepare(`SELECT count(*) AS occupied FROM device_bound_bindings b WHERE b.project=? AND b.feature=?
+      AND b.license_fingerprint=? AND ${boundOccupiedSql("b", "unixepoch()")}`)
       .bind(subject.project, subject.feature, subject.license_fingerprint).first();
     if (capacity.occupied >= entitlement.max_active_devices) {
       const created = await db.prepare(`SELECT b.id FROM device_bound_bindings b JOIN device_bound_devices d ON d.id=b.device_id
         WHERE d.key_id=? AND b.project=? AND b.feature=? AND b.license_fingerprint=? AND b.state='active'`)
         .bind(subject.key_id, subject.project, subject.feature, subject.license_fingerprint).first();
       if (created) deny("temporarily_unavailable", 503);
+      // Best-effort audit so the admin console can list this refusal among recent denied
+      // connections: a telemetry failure must never change this refusal. Deduped for 15 minutes so
+      // a retrying client cannot flood the audit trail with one ongoing refusal.
+      try {
+        await db.prepare(`INSERT INTO usage_events (project,feature,license_fingerprint,event_type,device_key_id,reason,ts)
+          SELECT ?,?,?,'denied',?,'device_limit_reached',unixepoch()
+          WHERE NOT EXISTS (SELECT 1 FROM usage_events WHERE project=? AND feature=? AND license_fingerprint=?
+            AND device_key_id=? AND reason='device_limit_reached' AND ts>unixepoch()-900)`)
+          .bind(subject.project, subject.feature, subject.license_fingerprint, subject.key_id,
+            subject.project, subject.feature, subject.license_fingerprint, subject.key_id).run();
+      } catch { /* best-effort analytics */ }
       deny("device_limit_reached", 409);
     }
   }

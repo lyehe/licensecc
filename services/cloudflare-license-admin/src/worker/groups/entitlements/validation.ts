@@ -1,4 +1,5 @@
-import type { EntitlementInput, EntitlementPatch, EntitlementStatus } from "../../../shared/api";
+import type { AdminEntitlementPatch, EntitlementInput, EntitlementStatus } from "../../../shared/api";
+import { MAX_DEVICE_LIMIT } from "../../../shared/api.js";
 import { safeString } from "@licensecc/cloudflare-runtime/http/kit";
 
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
@@ -50,6 +51,11 @@ export function boundedInt(value: unknown, min: number, max: number): number | u
     return undefined;
   }
   return value;
+}
+
+/** A device limit an operator sets: a whole number of devices from 1 to MAX_DEVICE_LIMIT. */
+export function deviceLimit(value: unknown): number | undefined {
+  return boundedInt(value, 1, MAX_DEVICE_LIMIT);
 }
 
 export function nullableEpoch(value: unknown): number | null | undefined {
@@ -111,12 +117,19 @@ export function validateEntitlementInput(value: unknown): EntitlementInput | nul
   };
 }
 
-export function validateEntitlementPatch(value: unknown): EntitlementPatch | null {
+export function validateEntitlementPatch(value: unknown): AdminEntitlementPatch | null {
   if (typeof value !== "object" || value === null || Array.isArray(value) || Object.hasOwn(value, "enforcement_mode")) {
     return null;
   }
   const input = value as Record<string, unknown>;
-  const patch: EntitlementPatch = {};
+  const patch: AdminEntitlementPatch = {};
+  if (input.max_active_devices !== undefined) {
+    const limit = deviceLimit(input.max_active_devices);
+    if (limit === undefined) {
+      return null;
+    }
+    patch.max_active_devices = limit;
+  }
   if (input.device_hash !== undefined) {
     if (input.device_hash === "") {
       patch.device_hash = "";

@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { AdminNavigationProvider, useAdminNavigation } from "./navigation";
+import type { DraftPolicy, PolicyDraftRequest } from "./types";
 import { EnvironmentBadge } from "./EnvironmentBadge";
 import { Sidebar } from "./Sidebar";
 import { descriptions, tabs } from "./shellContent";
@@ -17,6 +18,7 @@ import { Search } from "../features/search/Search";
 import { Webhooks } from "../features/webhooks/Webhooks";
 import { OperatorControlsProvider, useOperatorControls } from "../shared/controls";
 import { CoreRefreshProvider } from "../shared/coreRefresh";
+import { FeedbackText } from "../shared/FeedbackText";
 import { UsageTimeseriesProvider } from "../shared/usageTimeseries";
 import { focusWorkspaceTarget } from "../shared/workspaceFocus";
 import "../styles.css";
@@ -44,6 +46,22 @@ function ConsoleShell(): React.ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { setMenuOpen(false); }, [modalActive, navigationVersion]);
+  // "Create policy…": an entitlement draft asks Policies for a policy of its project, and gets
+  // the new one back. Returning to the draft by any route ends the request.
+  const [policyRequest, setPolicyRequest] = useState<PolicyDraftRequest | null>(null);
+  const [draftPolicy, setDraftPolicy] = useState<DraftPolicy | null>(null);
+  useEffect(() => { if (activeTab === "entitlements") setPolicyRequest(null); }, [activeTab]);
+  const requestPolicy = useCallback((project: string): boolean => {
+    setPolicyRequest({ project });
+    if (navigateTab("policies")) return true;
+    setPolicyRequest(null);
+    return false;
+  }, [navigateTab]);
+  const returnToDraft = useCallback((created: DraftPolicy | null): void => {
+    setDraftPolicy(created);
+    navigateTab("entitlements");
+  }, [navigateTab]);
+  const clearDraftPolicy = useCallback((): void => setDraftPolicy(null), []);
 
   return (
     <main className={`consoleShell${operationLocked ? " hasOperationNotice" : ""}`}>
@@ -62,16 +80,16 @@ function ConsoleShell(): React.ReactElement {
           <Search onNavigate={navigate} onOpen={() => setMenuOpen(false)} closeSignal={navigationVersion} hiddenByMenu={menuOpen} />
         </header>
         <div id="workspace-content" className="workspaceContent" tabIndex={-1}>
-          <div className="pageHeading"><div><h2 data-workspace-heading tabIndex={-1}>{label}</h2><p>{descriptions[activeTab]}</p></div></div>
+          <div className="pageHeading"><div><h1 data-workspace-heading tabIndex={-1}>{label}</h1><p>{descriptions[activeTab]}</p></div></div>
           {navigationNotice !== null && <p className="activityMessage" data-tone="info" role="status">{navigationNotice}</p>}
-          {feedback.message && <div className="activityMessage" data-tone={feedback.tone} role={feedback.tone === "error" ? "alert" : "status"}>{feedback.message}</div>}
+          {feedback.message && <div className="activityMessage" data-tone={feedback.tone} role={feedback.tone === "error" ? "alert" : "status"}><FeedbackText feedback={feedback} /></div>}
           {activeTab === "overview" && <div className="quickActions"><button className="primary" onClick={() => navigateTab("entitlements")}>Manage access <span aria-hidden="true">→</span></button><button onClick={() => navigateTab("reports")}>View usage</button></div>}
           <Overview active={activeTab === "overview"} />
-          <Entitlements active={activeTab === "entitlements"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
-          <Policies active={activeTab === "policies"} />
+          <Entitlements active={activeTab === "entitlements"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} onCreatePolicy={requestPolicy} draftPolicy={draftPolicy} onDraftPolicyUsed={clearDraftPolicy} />
+          <Policies active={activeTab === "policies"} draftRequest={policyRequest} onReturnToDraft={returnToDraft} />
           <Catalog active={activeTab === "plans"} />
           <Webhooks active={activeTab === "webhooks"} />
-          <Events active={activeTab === "events"} />
+          <Events active={activeTab === "events"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
           <Customers active={activeTab === "customers"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
           <Licenses active={activeTab === "licenses"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
           <Fulfillment active={activeTab === "fulfillment"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />

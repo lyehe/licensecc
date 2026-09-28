@@ -1,7 +1,7 @@
 import React from "react";
 
 import type { CatalogImportEffect, CatalogImportPreviewResponse, CatalogPlanFeature, PlanProjectionItem } from "../../../shared/api";
-import { formatEpoch } from "../../shared/format";
+import { formatEpoch, formatUtcDate } from "../../shared/format";
 import { catalogImportEffectValueLabel, catalogImportTargetFields, catalogImportTargetKey } from "./workflow";
 
 export function ProjectionRows({ title, items }: { title: string; items: PlanProjectionItem[] }): React.ReactElement | null {
@@ -14,7 +14,7 @@ export function ProjectionRows({ title, items }: { title: string; items: PlanPro
         <tbody>{items.map((item) => (
           <tr key={`${title}:${item.feature}`}>
             <td>{item.feature}</td><td>{item.license_mode}</td><td>{item.policy_id ?? "-"}</td>
-            <td>{item.valid_until === null ? "open" : formatEpoch(item.valid_until)}</td>
+            <td>{item.valid_until === null ? "open" : formatUtcDate(item.valid_until)}</td>
             <td>{item.pool_size > 0 ? `pool ${item.pool_size}` : `devices ${item.max_active_devices}`}</td>
             <td>{item.addon_key ?? item.source}{item.reason ? ` / ${item.reason}` : ""}</td>
           </tr>

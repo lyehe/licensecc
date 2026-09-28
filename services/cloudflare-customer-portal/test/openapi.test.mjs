@@ -119,7 +119,7 @@ test("operation identifiers and route-class auth declarations stay exact", () =>
   assertUniqueOperationIds(openApiDocument.paths);
   for (const route of PUBLIC_ROUTES) {
     if (route.path === "/portal/v1/auth/password") continue;
-    if (route.path.endsWith("/start") || route.path === "/portal/v1/auth/identities") continue;
+    if (route.path.endsWith("/start") || route.path.startsWith("/portal/v1/auth/identities")) continue;
     if (route.path === "/portal/v1/auth/logout" || route.path === "/portal/v1/admin/bootstrap-otp") continue;
     const operation = openApiDocument.paths[route.path]?.[route.method.toLowerCase()];
     if (!operation) continue;
@@ -156,6 +156,76 @@ test("password settings GET and POST each document only the codes their own hand
   assert.deepEqual(documentedErrorCodes(path, 413, "post"), ["body_too_large"]);
   assert.deepEqual(documentedErrorCodes(path, 429, "post"), ["rate_limited"]);
   assert.deepEqual(documentedErrorCodes(path, 503, "post"), ["config_error"]);
+});
+
+test("password login documents the suspended-account denial separately from invalid credentials", () => {
+  const path = "/portal/v1/auth/password/login";
+  assert.deepEqual(documentedErrorCodes(path, 401), ["invalid_credentials"]);
+  assert.deepEqual([...documentedErrorCodes(path, 403)].sort(), ["account_suspended", "cross_site_forbidden"]);
+});
+
+// The handler runs isCrossSite -> authSession -> readJson -> the provider check -> the existence
+// read -> one conditional DELETE batch, so these are exactly the statuses it can answer with.
+test("provider unlink requires a session and documents every status its handler can emit", () => {
+  const path = "/portal/v1/auth/identities/unlink";
+  const post = openApiDocument.paths[path]?.post;
+  assert.ok(post, `${path} must be documented`);
+  assert.deepEqual(post.security, [{ sessionCookie: [] }]);
+  assert.deepEqual(post.requestBody.content["application/json"].schema.properties.provider.enum, ["google", "github"]);
+  assert.deepEqual(Object.keys(post.responses).sort(), ["200", "400", "401", "403", "404", "409", "413", "503"]);
+  assert.equal(post.responses["200"].content["application/json"].schema.properties.code.const, "identity_unlinked");
+  assert.deepEqual([...documentedErrorCodes(path, 400)].sort(), ["invalid_json", "invalid_request"]);
+  assert.deepEqual(documentedErrorCodes(path, 401), ["unauthorized"]);
+  assert.deepEqual(documentedErrorCodes(path, 403), ["cross_site_forbidden"]);
+  assert.deepEqual(documentedErrorCodes(path, 404), ["not_found"]);
+  assert.deepEqual(documentedErrorCodes(path, 409), ["last_sign_in_method"]);
+  assert.deepEqual(documentedErrorCodes(path, 413), ["body_too_large"]);
+  assert.deepEqual(documentedErrorCodes(path, 503), ["config_error"]);
+});
+
+// The seven auth entry points that now send a real `retry-after` header must document it; the
+// password-change 429 (not one of the auth entry points the UI drives its countdown from) and the
+// operator break-glass bootstrap route were both deliberately left out of the rollout.
+test("the auth 429s that now carry retry-after document it; the untouched 429s do not", () => {
+  const withHeader = [
+    ["/portal/v1/auth/request", "post"],
+    ["/portal/v1/auth/verify", "post"],
+    ["/portal/v1/auth/magic-redeem", "post"],
+    ["/portal/v1/auth/password/login", "post"],
+    ["/portal/v1/auth/password/register", "post"],
+    ["/portal/v1/auth/password/reset", "post"],
+    ["/portal/v1/auth/password/complete", "post"],
+  ];
+  for (const [path, method] of withHeader) {
+    const response = openApiDocument.paths[path]?.[method]?.responses?.["429"];
+    assert.ok(response, `${method.toUpperCase()} ${path} must document 429`);
+    assert.ok(response.headers?.["retry-after"], `${method.toUpperCase()} ${path} 429 must document the retry-after header`);
+    assert.match(response.description, /retry-after/i, `${method.toUpperCase()} ${path} 429 description must mention retry-after`);
+  }
+  const settingsChange = openApiDocument.paths["/portal/v1/auth/password"]?.post?.responses?.["429"];
+  assert.ok(settingsChange, "password settings POST must still document 429");
+  assert.equal(settingsChange.headers, undefined, "the password-change 429 was left out of the retry-after rollout");
+  const bootstrap = openApiDocument.paths["/portal/v1/admin/bootstrap-otp"]?.post?.responses?.["429"];
+  assert.ok(bootstrap, "bootstrap-otp must still document 429");
+  assert.equal(bootstrap.headers, undefined, "the operator break-glass route stays outside the customer-facing retry-after rollout");
+});
+
+test("the providers envelope documents its nullable support contact", () => {
+  const data = openApiDocument.paths["/portal/v1/auth/providers"].get.responses["200"].content["application/json"].schema.properties.data;
+  assert.deepEqual(data.properties.support.type, ["string", "null"]);
+  assert.ok(data.required.includes("support"), "the Worker always sends support, as a string or null");
+});
+
+test("the entitlements envelope documents each row's nullable trial end and its activation flag", () => {
+  const data = openApiDocument.paths["/api/portal/entitlements"].get.responses["200"].content["application/json"].schema.properties.data;
+  const row = data.properties.items.items;
+  assert.deepEqual(row.properties.trial_ends_at?.type, ["integer", "null"]);
+  const description = row.properties.trial_ends_at.description;
+  assert.match(description, /rule that enforces/, "the end follows each row's own rule, not the protected rule for every row");
+  assert.match(description, /valid_until/, "the end never outlives the license");
+  assert.match(description, /not started/, "the description says why an activation trial can have no end yet");
+  assert.equal(row.properties.trial_starts_on_activation?.type, "boolean");
+  assert.match(row.properties.trial_starts_on_activation.description, /at least 2 seconds/, "the flag says which durations the enforcing rule accepts");
 });
 
 test("spec is OpenAPI 3.1.0 with the shared envelope/server conventions", () => {

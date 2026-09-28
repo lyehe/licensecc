@@ -13,12 +13,15 @@ const RUNTIME_SUBPATHS = [
   "@licensecc/cloudflare-runtime/d1/contract",
   "@licensecc/cloudflare-runtime/d1/entitlement_mutation",
   "@licensecc/cloudflare-runtime/d1/idempotency_store",
+  "@licensecc/cloudflare-runtime/device/bound_capacity",
+  "@licensecc/cloudflare-runtime/device/bound_trial",
   "@licensecc/cloudflare-runtime/entitlements/policy_store",
   "@licensecc/cloudflare-runtime/http/kit",
   "@licensecc/cloudflare-runtime/lease/metering",
   "@licensecc/cloudflare-runtime/lease/seat_reclaim",
   "@licensecc/cloudflare-runtime/lease/trial_store",
   "@licensecc/cloudflare-runtime/webhooks/webhook",
+  "@licensecc/cloudflare-runtime/webhooks/event_types",
 ];
 
 test("every explicit runtime export resolves without a service import", async () => {

@@ -18,9 +18,18 @@ function resolveRelativeSource(sourceRoot, fromRelativePath, specifier) {
 }
 
 export async function loadWorkflowModule(relativePath) {
+  const [module] = await loadWorkflowModules([relativePath]);
+  return module;
+}
+
+/**
+ * Load several UI modules from one compiled graph, so they share module
+ * instances (and module-level values such as symbols) the way the app does.
+ */
+export async function loadWorkflowModules(relativePaths) {
   const serviceRoot = fileURLToPath(new URL("../../", import.meta.url));
   const sourceRoot = join(serviceRoot, "src");
-  const rootRelativePath = join("ui", relativePath);
+  const rootRelativePaths = relativePaths.map((relativePath) => join("ui", relativePath));
   const dir = mkdtempSync(join(serviceRoot, ".admin-ui-workflow-"));
   const compiled = new Set();
 
@@ -56,9 +65,9 @@ export async function loadWorkflowModule(relativePath) {
     writeFileSync(outputPath, rewritten, "utf8");
   }
 
-  compileModule(rootRelativePath);
   try {
-    return await import(pathToFileURL(join(dir, outputRelativePath(rootRelativePath))).href);
+    rootRelativePaths.forEach(compileModule);
+    return await Promise.all(rootRelativePaths.map((rootRelativePath) => import(pathToFileURL(join(dir, outputRelativePath(rootRelativePath))).href)));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

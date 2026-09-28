@@ -1,5 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { errorResponse } from "../components.js";
+import { ERR_BODY_TOO_LARGE, ERR_CROSS_SITE, errorResponse } from "../components.js";
 
 const redirectResponse = {
   description: "No-store redirect to the provider or fixed portal origin. Callback errors use an allowlisted auth_error; credentials never appear in the final URL.",
@@ -14,7 +14,7 @@ const start = (provider: string): Record<string, unknown> => ({ post: {
 } });
 const callback = (provider: string): Record<string, unknown> => ({ get: {
   tags: ["auth"], operationId: `authCallback${provider}`, summary: `Complete ${provider} sign-in.`, security: [],
-  description: "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking. Provider tokens are not persisted.",
+  description: "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking (auth_error=account_link_required). An identity whose customer is suspended redirects with auth_error=account_suspended and no session. Provider tokens are not persisted.",
   parameters: [
     { name: "state", in: "query", required: true, schema: { type: "string" } },
     { name: "code", in: "query", required: false, schema: { type: "string" } },
@@ -29,9 +29,12 @@ const jsonData = (description: string, data: Record<string, unknown>): Record<st
 export const oauthPaths: LabeledPathFragment = { label: "oauth", entries: [
   ["/portal/v1/auth/providers", { get: {
     tags: ["auth"], operationId: "authProviders", summary: "List configured sign-in methods without exposing credentials.", security: [],
-    responses: { "200": jsonData("Provider availability.", {
-      type: "object", required: ["google", "github", "email", "password"],
-      properties: { password: { type: "boolean" }, google: { type: "boolean" }, github: { type: "boolean" }, email: { type: "boolean" } },
+    responses: { "200": jsonData("Provider availability and the operator's support contact.", {
+      type: "object", required: ["google", "github", "email", "password", "support"],
+      properties: {
+        password: { type: "boolean" }, google: { type: "boolean" }, github: { type: "boolean" }, email: { type: "boolean" },
+        support: { type: ["string", "null"], description: "PORTAL_SUPPORT_CONTACT when it is a credential-free https: URL or a single mailto: address; otherwise null." },
+      },
     }) },
   } }],
   ["/portal/v1/auth/google/start", start("Google")],
@@ -48,6 +51,27 @@ export const oauthPaths: LabeledPathFragment = { label: "oauth", entries: [
       }),
       "401": errorResponse("Session required.", "unauthorized"),
       "503": errorResponse("Session configuration unavailable.", "config_error"),
+    },
+  } }],
+  ["/portal/v1/auth/identities/unlink", { post: {
+    tags: ["auth"], operationId: "authUnlinkIdentity", summary: "Disconnect one of this customer's linked providers.", security: [{ sessionCookie: [] }],
+    description: "Requires a session and a same-site request. Allowed only while another sign-in method is usable now: a password while password sign-in is enabled (PORTAL_PASSWORD_ENABLED=1), the other provider's identity while that provider is configured, or a non-empty contact email while email codes can be sent, which needs email delivery configured and PORTAL_OTP_PEPPERS set (stricter than the providers envelope's `email`, which reports delivery only). Configuration is judged per request. The rule, a still-live session and the delete are one conditional statement, so concurrent requests cannot remove the last method, and a session revoked by a concurrent unlink cannot finish its own. The same transaction revokes the customer's other OAuth sessions; the current session and sessions from other sign-in methods are kept.",
+    requestBody: { required: true, content: { "application/json": { schema: {
+      type: "object", required: ["provider"], properties: { provider: { type: "string", enum: ["google", "github"] } },
+    } } } },
+    responses: {
+      "200": { description: "The provider was disconnected and no longer appears in GET /portal/v1/auth/identities.", headers: { "Cache-Control": { description: "no-store", schema: { type: "string" } } },
+        content: { "application/json": { schema: {
+          allOf: [{ $ref: "#/components/schemas/Envelope" }],
+          properties: { code: { const: "identity_unlinked" }, data: { type: "object", required: ["provider"], properties: { provider: { type: "string", enum: ["google", "github"] } } } },
+        } } } },
+      "400": errorResponse("Body was not a JSON object, or provider is not google or github.", ["invalid_json", "invalid_request"]),
+      "401": errorResponse("Missing, invalid or expired session, including one a concurrent unlink revoked before this delete ran.", "unauthorized"),
+      "403": ERR_CROSS_SITE,
+      "404": errorResponse("This customer has no identity for that provider (absent and foreign identities look the same), including one a concurrent unlink removed first.", "not_found"),
+      "409": errorResponse("No other sign-in method is usable now; nothing was changed.", "last_sign_in_method"),
+      "413": ERR_BODY_TOO_LARGE,
+      "503": errorResponse("Session or database configuration unavailable.", "config_error"),
     },
   } }],
 ] };

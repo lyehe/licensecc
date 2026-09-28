@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useState } from "react";
 
 import { ReadNotice } from "../../shared/ReadNotice";
-import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
-import { ConfirmRefreshFailure, EXACT_READ_PROOF, type ExactReadProof, useOperatorControls } from "../../shared/controls";
+import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
+import { ConfirmRefreshFailure, EXACT_READ_PROOF, type ExactReadProof } from "../../shared/controls";
+import { apiFailureFeedback } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { useCoreRefresh } from "../../shared/coreRefresh";
 import { hasOverviewData } from "../../shared/mutationGuards";
 import { useRequestFence } from "../../shared/requestFence";
@@ -18,9 +20,8 @@ interface Summary {
 
 export function Overview({ active }: { active: boolean }): React.ReactElement | null {
   const [summarySnapshot, setSummary] = useState<Summary | null>(null);
-  const [readError, setReadError] = useState<string | null>(null);
+  const [readError, setReadError] = useState<OperatorFeedback | null>(null);
   const [loading, setLoading] = useState(true);
-  const { setMessage } = useOperatorControls();
   const { registerCoreRefresh } = useCoreRefresh();
   const summaryFence = useRequestFence(active ? "summary:active" : "summary:inactive");
 
@@ -38,15 +39,14 @@ export function Overview({ active }: { active: boolean }): React.ReactElement | 
         return EXACT_READ_PROOF;
       }
     } else if (strict) {
-      setReadError(apiFailureMessage(response));
+      setReadError(apiFailureFeedback(response));
       const failure = apiFailureDetails(response);
       throw new ConfirmRefreshFailure(failure.code, failure.requestId);
     } else {
-      setReadError(apiFailureMessage(response));
-      setMessage(apiFailureMessage(response));
+      setReadError(apiFailureFeedback(response));
     }
     return null;
-  }, [setMessage, summaryFence]);
+  }, [summaryFence]);
 
   useEffect(() => {
     return registerCoreRefresh(refresh);
@@ -67,7 +67,7 @@ export function Overview({ active }: { active: boolean }): React.ReactElement | 
       <div className="grid metrics">
       <div><span>Total entitlements</span><strong>{summary?.entitlements.total ?? "—"}</strong></div>
       <div><span>Active</span><strong>{summary?.entitlements.active ?? "—"}</strong><p>Enabled · validity dates still apply</p></div>
-      <div><span>Disabled</span><strong>{summary?.entitlements.disabled ?? "—"}</strong></div>
+      <div><span>Suspended</span><strong>{summary?.entitlements.disabled ?? "—"}</strong></div>
       <div><span>Revoked</span><strong>{summary?.entitlements.revoked ?? "—"}</strong></div>
       </div>
     </section>

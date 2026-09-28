@@ -4,6 +4,9 @@
   --canvas: #0f0f0f; --surface: #161616; --ink: #e8e8e8; --muted: #a8a8a8;
   --border: #2a2a2a; --accent: #b8b8b8; --accent-soft: #242424;
   --danger: #db9292; --radius: 6px;
+  --status-ok-bg: #203020; --status-ok-ink: #9bc49b;
+  --status-warn-bg: #302a20; --status-warn-ink: #d6b783;
+  --status-danger-bg: #302020; --status-danger-ink: #db9292;
   --font-ui: "IBM Plex Sans", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --text-small: 12px; --text-body: 14px; --text-section: 16px; --text-display: 24px;
   --weight-normal: 400; --weight-strong: 600;
@@ -23,38 +26,50 @@ p { color: var(--muted); }
 a { color: var(--accent); text-underline-offset: 3px; }
 button, input, select, textarea { font: inherit; }
 button, .button { min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--ink); cursor: pointer; }
-button:hover:not(:disabled), .button:hover { border-color: #3a3a3a; background: #262626; color: #e8e8e8; }
+button:hover:not(:disabled), .button:hover { border-color: #3a3a3a; background: #262626; color: var(--ink); }
 button:disabled { background: #1e1e1e; color: #858585; cursor: not-allowed; }
-button.primary, .editorLayout button[type="submit"] { background: var(--accent); color: #161616; border-color: var(--accent); font-weight: var(--weight-strong); }
-button.primary:hover, .editorLayout button[type="submit"]:hover { background: #d0d0d0; color: #161616; }
-:is(button, input, select, textarea, summary, a, [tabindex]):focus-visible { outline: 2px solid #b8b8b8; outline-offset: 3px; }
+button.primary, .editorLayout button[type="submit"] { background: var(--accent); color: var(--surface); border-color: var(--accent); font-weight: var(--weight-strong); }
+button.primary:hover, .editorLayout button[type="submit"]:hover { background: #d0d0d0; color: var(--surface); }
+:is(button, input, select, textarea, summary, a, [tabindex]):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 input, select, textarea { width: 100%; min-width: 0; min-height: 44px; border: 1px solid #3a3a3a; border-radius: 4px; background: #1a1a1a; color: var(--ink); padding: 8px 10px; }
 input::placeholder { color: var(--muted); }
-input[type="checkbox"] { width: 18px; min-height: 18px; }
+input[type="radio"] { width: 18px; min-height: 18px; }
+/* A native checkbox's own box is what a pointer or a screen-reader hit-tests, so it -- not its
+   label or table cell -- must meet the 24px touch-target minimum. */
+input[type="checkbox"] { width: 24px; height: 24px; min-width: 24px; min-height: 24px; }
+/* Every disclosure toggle meets the 44px touch-target minimum. This keeps the default
+   `display: list-item` -- switching a summary to flex/grid drops the browser's own open/closed
+   triangle, which nothing here replaces -- so centering comes from `padding-block`, not from
+   flex `align-items`, and never from `line-height` (which would space out a summary that wraps
+   onto more than one line). A more specific summary rule (below) may still set its own padding,
+   font size, or layout without losing the 44px floor. */
+summary { min-height: 44px; padding-block: 12px; cursor: pointer; }
 textarea { min-height: 88px; resize: vertical; }
 label { display: grid; gap: 6px; color: var(--ink); font-size: var(--text-body); }
 label small, .fieldHint { color: var(--muted); font-size: var(--text-small); }
+/* Add-user mode choice: a radio and its text sit on one line, not the stacked label/input layout
+   the rules above assume for text fields. */
+.modeChoice label { display: flex; align-items: center; gap: 8px; }
 form, fieldset { display: grid; gap: 16px; min-width: 0; }
 fieldset { margin: 0; padding: 0; border: 0; }
 fieldset:disabled { opacity: .75; }
 .consoleShell { display: grid; grid-template-columns: 208px minmax(0, 1fr); }
-.sidebar { position: sticky; top: 0; height: 100dvh; overflow-y: auto; background: #161616; border-right: 1px solid var(--border); padding: 24px 14px; }
+.sidebar { position: sticky; top: 0; height: 100dvh; overflow-y: auto; background: var(--surface); border-right: 1px solid var(--border); padding: 24px 14px; }
 .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; }
 .brandMark { display: grid; place-items: center; flex: 0 0 32px; height: 36px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); font-size: var(--text-section); font-weight: var(--weight-strong); }
-.brand h1 { font-size: var(--text-section); line-height: 1.3; }
-.brand p { font-size: var(--text-small); margin-top: 4px; }
+.brand .brandName { margin: 0; font-size: var(--text-section); font-weight: var(--weight-strong); line-height: 1.3; color: var(--ink); }
 .sidebar nav { display: grid; gap: 24px; }
 .navGroup { display: grid; gap: 4px; }
 .navLabel { color: var(--ink); font-size: var(--text-body); font-weight: var(--weight-strong); padding: 0 12px 4px; }
 .sidebar nav :is(button, a) { display: block; text-align: left; text-decoration: none; border: 1px solid transparent; border-radius: 4px; background: transparent; padding: 9px 12px; color: var(--muted); }
 .sidebar nav :is(button, a):hover { background: #262626; }
-.sidebar nav .active, .sidebar nav [aria-current="page"] { background: #242424; color: #e8e8e8; font-weight: var(--weight-strong); }
+.sidebar nav .active, .sidebar nav [aria-current="page"] { background: var(--accent-soft); color: var(--ink); font-weight: var(--weight-strong); }
 .sidebarNote, .eyebrow, .workspaceLabel { display: none; }
 .consoleBody { min-width: 0; }
 .topbar { min-height: 64px; padding: 12px 32px; display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
 .workspaceContent { max-width: 1440px; margin: 0 auto; padding: 16px 32px 48px; }
 .pageHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
-.pageHeading h2 { width: fit-content; font-size: var(--text-display); font-weight: var(--weight-strong); line-height: 1.2; letter-spacing: normal; margin-bottom: 8px; }
+.pageHeading h1 { width: fit-content; font-size: var(--text-display); font-weight: var(--weight-strong); line-height: 1.2; letter-spacing: normal; margin-bottom: 8px; }
 .pageHeading p { max-width: 70ch; }
 .environmentBadge { border: 1px solid var(--border); border-radius: 999px; padding: 3px 9px; font-size: var(--text-small); color: var(--muted); white-space: nowrap; }
 .mobileMenuTrigger, .mobileMenuClose, .sidebarBackdrop { display: none; }
@@ -85,8 +100,8 @@ fieldset:disabled { opacity: .75; }
 .searchResult { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; padding: 10px; text-decoration: none; border-radius: 4px; }
 .searchResult:hover { background: var(--accent-soft); }
 .searchResultMeta { flex-shrink: 1; overflow-wrap: anywhere; }
-.activityMessage[data-tone="error"] { background: #302020; color: #db9292; border-color: #714848; }
-.activityMessage[data-tone="success"] { background: #242424; color: #9bc49b; }
+.activityMessage[data-tone="error"] { background: var(--status-danger-bg); color: var(--status-danger-ink); border-color: #714848; }
+.activityMessage[data-tone="success"] { background: var(--accent-soft); color: var(--status-ok-ink); }
 .listPage, .recordDetail, .workspace { display: grid; gap: 24px; min-width: 0; }
 .workspace { grid-template-columns: minmax(0, 1fr); padding: 0; }
 .listStatusHeader { display: none; }
@@ -114,7 +129,7 @@ aside, .tablePane, .editorLayout { min-width: 0; padding: 20px; border: 1px soli
 .sectionTabs :is(a, button):hover { background: transparent; color: var(--accent); border-bottom-color: var(--border); }
 .sectionTabs [aria-current="page"], .sectionTabs .active { background: transparent; color: var(--accent); border-bottom-color: var(--accent); font-weight: var(--weight-strong); }
 table { border-collapse: collapse; font-size: var(--text-body); min-width: 0; width: 100%; }
-th, td { padding: 14px 12px; text-align: left; vertical-align: middle; border-bottom: 1px solid #2a2a2a; overflow-wrap: normal; }
+th, td { padding: 14px 12px; text-align: left; vertical-align: middle; border-bottom: 1px solid var(--border); overflow-wrap: normal; }
 th { white-space: nowrap; font-size: var(--text-small); color: var(--muted); font-weight: var(--weight-strong); background: #1e1e1e; }
 tbody tr:hover > td { background: #1e1e1e; }
 td.actions { display: table-cell; min-width: 180px; }
@@ -130,6 +145,13 @@ td button { min-width: max-content; white-space: nowrap; }
 .recordMeta dt { color: var(--muted); font-size: var(--text-small); }
 .recordMeta dd { margin: 4px 0 0; }
 .recordCards { display: none; }
+/* Entitlements renders exactly one of table or cards via useMediaQuery(max-width: 1023px), so once
+   that choice puts .recordCards in the DOM here it must show regardless of the narrower global
+   phone breakpoint below, which still gates every other list's CSS-toggled dual layout. Matching
+   that same breakpoint here keeps the CSS from claiming a wider range than the JS ever renders it. */
+@media (max-width: 1023px) {
+  .tablePane[data-focus-section="entitlements"] .recordCards { display: grid; gap: 12px; }
+}
 .summaryCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 16px; }
 .summaryCards > details { grid-column: 1 / -1; }
 pre { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -142,9 +164,9 @@ pre, pre code { font-family: ui-monospace, Consolas, monospace; font-size: var(-
 .recordCard h3 { font-size: var(--text-body); }
 .muted { color: var(--muted); }
 .status { white-space: nowrap; border-radius: 999px; display: inline-block; padding: 3px 9px; font-size: var(--text-small); text-align: center; text-transform: capitalize; }
-.status.active { background: #203020; color: #9bc49b; }
-.status.disabled { background: #302a20; color: #d6b783; }
-.status.revoked { background: #302020; color: #db9292; }
+.status.active { background: var(--status-ok-bg); color: var(--status-ok-ink); }
+.status.disabled { background: var(--status-warn-bg); color: var(--status-warn-ink); }
+.status.revoked { background: var(--status-danger-bg); color: var(--status-danger-ink); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .statusActions { display: inline-flex; vertical-align: middle; }
 .statusActions[data-status="active"] [data-focus-action="reenable"], .statusActions[data-status="disabled"] .danger { display: none; }
@@ -160,10 +182,12 @@ pre, pre code { font-family: ui-monospace, Consolas, monospace; font-size: var(-
 .activitySummary > summary { cursor: pointer; padding: 12px 0; font-weight: var(--weight-strong); }
 .activitySummary .fulfillmentSpark, .chartPanels { margin: 16px 0 0; padding: 0; }
 .trialPanel { grid-column: 1 / -1; }
-.selectedRow td { background: #242424; }
-.staleRow td { background: #302020; }
-.staleFlag { color: #db9292; background: #302020; padding: 3px 8px; border-radius: 999px; font-size: var(--text-small); }
+.selectedRow td { background: var(--accent-soft); }
+.staleRow td { background: var(--status-danger-bg); }
+.staleFlag { color: var(--status-danger-ink); background: var(--status-danger-bg); padding: 3px 8px; border-radius: 999px; font-size: var(--text-small); }
 .reason { margin-top: 16px; max-width: 480px; }
+.typedConfirmation { margin-top: 16px; max-width: 480px; }
+.reasonPresets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .wide { grid-column: 1 / -1; }
 .editRow td { padding: 20px; background: #1e1e1e; }
 .editForm { display: grid; gap: 16px; }
@@ -175,13 +199,38 @@ pre, pre code { font-family: ui-monospace, Consolas, monospace; font-size: var(-
 .metrics strong { display: block; font-size: var(--text-display); font-weight: var(--weight-strong); margin-top: 8px; }
 .metrics p { font-size: var(--text-small); margin-top: 8px; }
 .metrics.reportCards { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); padding: 0; }
-.activityMessage, .readState { padding: 12px 16px; border: 1px solid var(--border); border-radius: 6px; background: #1e1e1e; color: #a8a8a8; margin-bottom: 16px; overflow-wrap: anywhere; }
-.activityMessage.success { background: #242424; color: #9bc49b; }
-.activityMessage.error, .readState.error { background: #302020; color: #db9292; border-color: #714848; }
+.activityMessage, .readState { padding: 12px 16px; border: 1px solid var(--border); border-radius: 6px; background: #1e1e1e; color: var(--muted); margin-bottom: 16px; overflow-wrap: anywhere; }
+.activityMessage.success { background: var(--accent-soft); color: var(--status-ok-ink); }
+.activityMessage.error, .readState.error { background: var(--status-danger-bg); color: var(--status-danger-ink); border-color: #714848; }
 .readState { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.singleRecordBanner { padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 12px; }
 .emptyState { padding: 32px 16px; text-align: center; color: var(--muted); }
 .skipLink { position: fixed; top: -100px; left: 16px; background: var(--surface); padding: 12px; z-index: 100; }
 .skipLink:focus { top: 12px; }
+.chartAxes { display: flex; flex-wrap: wrap; gap: 2px 16px; font-size: var(--text-small); }
+.chartAxes p { margin: 0; }
+.searchLimitNote { margin: 0 0 8px; }
+.inspectorRow td { padding: 0; }
+.inspectorRow .inspectorPanel, .inspectorCard { padding: 16px; border-top: 1px solid var(--border); background: #1a1a1a; }
+.inspectorCard { border-radius: 6px; margin-top: -4px; }
+/* Compact density: below this width the roomier spacing elsewhere in the app stays; at and above
+   it, a taller viewport can show more of a list's rows without scrolling the page, so row padding,
+   the "Technical details" disclosure line and the list's own header spacing all tighten. Nothing
+   about content or controls changes, only their vertical rhythm. */
+@media (min-width: 1280px) {
+  .desktopRecords th, .desktopRecords td { padding: 3px 12px; line-height: 1.15; }
+  .desktopRecords details > summary { font-size: var(--text-small); line-height: 1.15; }
+  /* The project/feature cell's name and its "Technical details" toggle sit on one line -- the
+     toggle's own 44px touch target sets the row height, not an added stack of lines -- so a 44px
+     summary does not cost this dense table a whole extra row of height. An open row's technical
+     detail list still claims the full cell width on its own line. */
+  .desktopRecords .entitlementIdentity { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 2px; }
+  .desktopRecords .entitlementIdentity details[open] { flex-basis: 100%; }
+  .tablePane { padding: 8px 20px; }
+  .tablePane > .listHeader { margin-bottom: 8px; }
+  .filters, .filterBar { margin-bottom: 8px; }
+  .pageHeading { margin-bottom: 8px; }
+}
 @media (max-width: 1023px) {
   .consoleShell { display: block; }
   .sidebar { display: none; position: static; height: auto; max-height: calc(100dvh - 56px); }
@@ -201,7 +250,7 @@ pre, pre code { font-family: ui-monospace, Consolas, monospace; font-size: var(-
   .topbar { padding: 8px 16px; }
   button, input, select, .button { min-height: 44px; }
   .pageHeading { gap: 12px; margin-bottom: 20px; }
-  .pageHeading h2 { width: fit-content; font-size: var(--text-display); }
+  .pageHeading h1 { width: fit-content; font-size: var(--text-display); }
   aside, .tablePane, .editorLayout { padding: 16px; }
   .filters, .filterBar { gap: 12px; }
   .filters > *, .filterBar > * { flex-basis: 100%; }
@@ -217,3 +266,12 @@ pre, pre code { font-family: ui-monospace, Consolas, monospace; font-size: var(-
 
 .consoleShell.hasOperationNotice { padding-bottom: 272px; }
 .operatorNotice { top: auto; bottom: 16px; max-height: min(240px, 40%); overflow-y: auto; z-index: 40; }
+/* Operator feedback: the sentence first, its result code and request id under Technical details. */
+.feedbackText { overflow-wrap: anywhere; }
+.feedbackDetails { margin-top: 4px; font-size: var(--text-small); color: var(--muted); }
+.feedbackDetails summary { cursor: pointer; width: fit-content; }
+.feedbackDetails code { overflow-wrap: anywhere; }
+.operatorNotice .noticeMessage { flex: 1 1 260px; overflow-wrap: anywhere; }
+.fieldError { display: block; color: var(--danger); font-size: var(--text-small); }
+.formStatus { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: #1e1e1e; color: var(--muted); margin: 8px 0; }
+.formStatus[data-tone="error"] { background: var(--status-danger-bg); color: var(--danger); border-color: #714848; }

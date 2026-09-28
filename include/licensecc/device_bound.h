@@ -62,6 +62,20 @@ typedef enum LCC_BOUND_CHECKPOINT_RESULT {
 	LCC_BOUND_CHECKPOINT_LOADED = 11
 } LCC_BOUND_CHECKPOINT_RESULT;
 
+/** Why an operation was refused, when the library can tell. A detail never grants
+ * access and never replaces the primary result: handle the result first. Treat a
+ * value this header does not name as NONE.
+ */
+typedef enum LCC_BOUND_DETAIL {
+	LCC_BOUND_DETAIL_NONE = 0,
+	/** With LCC_BOUND_CONFLICT from activation: every device slot of the license is in
+	 * use and the server issued nothing. After a device is disconnected in the customer
+	 * portal, call activate again; an approval that has expired meanwhile reports
+	 * ENROLLMENT_REQUIRED and needs a new enrollment.
+	 */
+	LCC_BOUND_DETAIL_DEVICE_LIMIT = 1
+} LCC_BOUND_DETAIL;
+
 /** Canonical DER RSA-3072 public signing key; no private key or token-selected key. */
 typedef struct LccDeviceBoundTrustKey {
 	uint32_t spki_size; /**< Number of DER bytes, at most SPKI_MAX. */
@@ -113,7 +127,7 @@ typedef struct LccDeviceBoundOutcome {
 	uint32_t provider_result; /**< LCC_DEVICE_RESULT. */
 	uint32_t checkpoint_result; /**< LCC_BOUND_CHECKPOINT_RESULT. */
 	uint32_t renewal_due; /**< Scheduling hint, not permission. */
-	uint32_t reserved;
+	uint32_t denial_detail; /**< LCC_BOUND_DETAIL */
 	uint64_t effective_time; /**< Only authorize reports an effective lease time. */
 } LccDeviceBoundOutcome;
 

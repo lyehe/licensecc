@@ -1,7 +1,10 @@
 import { useAdminNavigation } from "../../app/navigation";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { api, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
-import { formatEpoch } from "../../shared/format";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api, parseExactApiSuccess } from "../../shared/api";
+import { FeedbackText } from "../../shared/FeedbackText";
+import { apiFailureFeedback } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
+import { formatEpoch, formatUtcDate } from "../../shared/format";
 import { Entitlements } from "../entitlements/Entitlements";
 import type { EntitlementFilter } from "../entitlements/workflow";
 import { hasEntitlementRecordData } from "../../shared/mutationGuards";
@@ -17,7 +20,7 @@ function PagedRecords({ url, code, customerId, kind, render }: {
   const [cursor, setCursor] = useState<string | null>(null);
   const [time, setTime] = useState(0);
   const [busy, setBusy] = useState(true);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<OperatorFeedback | null>(null);
   const generation = useRef(0);
   const consumed = useRef(new Set<string>());
   const failedCursor = useRef<string | null>(null);
@@ -25,7 +28,7 @@ function PagedRecords({ url, code, customerId, kind, render }: {
   const load = useCallback(async (next: string | null): Promise<void> => {
     const ticket = ++generation.current;
     failedCursor.current = next;
-    setBusy(true); setError("");
+    setBusy(true); setError(null);
     try {
       const path = new URL(url, window.location.origin);
       if (next !== null) path.searchParams.set("cursor", next);
@@ -45,7 +48,7 @@ function PagedRecords({ url, code, customerId, kind, render }: {
             : typeof item.seat_id === "string" && typeof item.mode === "string" && typeof item.heartbeat_deadline === "number");
         });
       });
-      if (!parsed) throw new Error(apiFailureMessage(response));
+      if (!parsed) { setError(apiFailureFeedback(response)); return; }
       if (parsed.data.next_cursor !== null && (parsed.data.next_cursor === next || (next !== null && consumed.current.has(parsed.data.next_cursor)))) throw new Error("Pagination changed. Refresh this view.");
       const keys = parsed.data.items.map(item => JSON.stringify([item.project, item.feature, item.license_fingerprint, item.device_key_id, item.seat_id]));
       if (new Set(keys).size !== keys.length || (next !== null && keys.some(key => loadedKeys.current.has(key)))) throw new Error("Records changed between pages. Refresh this view.");
@@ -53,12 +56,12 @@ function PagedRecords({ url, code, customerId, kind, render }: {
       if (next === null) consumed.current.clear(); else consumed.current.add(next);
       setRows(previous => next === null ? parsed.data.items : [...previous, ...parsed.data.items]);
       setCursor(parsed.data.next_cursor); setTime(parsed.data.server_time ?? 0);
-    } catch (failure) { if (ticket === generation.current) setError(failure instanceof Error ? failure.message : "Unable to load records."); }
+    } catch (failure) { if (ticket === generation.current) setError({ tone: "error", message: failure instanceof Error ? failure.message : "Unable to load records." }); }
     finally { if (ticket === generation.current) setBusy(false); }
   }, [url, code, customerId, kind]);
   useEffect(() => { void load(null); return () => { generation.current++; }; }, [load]);
   return <section aria-busy={busy}>
-    {error && <p role="alert">{error} <button disabled={busy} onClick={() => void load(failedCursor.current)}>Retry</button></p>}
+    {error && <div role="alert"><FeedbackText feedback={error} /> <button disabled={busy} onClick={() => void load(failedCursor.current)}>Retry</button></div>}
     {busy && <p role="status">Loading…</p>}
     {!busy && !error && rows.length === 0 && <p>No records found.</p>}
     {rows.length > 0 && render(rows, time)}
@@ -66,26 +69,44 @@ function PagedRecords({ url, code, customerId, kind, render }: {
   </section>;
 }
 
+/** An app is a project the customer holds grants in; a deep link to one with none left resolves to all apps. */
+function useAppPresence(root: string, project: string | null, onMissing: (app: string) => void): void {
+  useEffect(() => {
+    if (project === null) return;
+    let current = true;
+    void (async () => {
+      // One record answers "any grants left?" without repeating the grants list read.
+      const response = await api<Page>(`${root}/access?${new URLSearchParams({ project, limit: "1" })}`);
+      const parsed = parseExactApiSuccess<Page>(response, "entitlements_listed", (data) => isRow(data) && Array.isArray(data.items) && (data.next_cursor === null || typeof data.next_cursor === "string"));
+      // A failed read proves nothing; only a successful empty first page means the app is gone.
+      if (current && parsed !== null && parsed.data.items.length === 0 && parsed.data.next_cursor === null) onMissing(project);
+    })();
+    return () => { current = false; };
+  }, [root, project]);
+}
+
 export function CustomerAccess({ customerId }: { customerId: string }): React.ReactElement {
-  const { navigate } = useAdminNavigation();
-  const [project, setProject] = useState<string | null>(null);
-  const [view, setView] = useState<"grants" | "nodes" | "sessions">("grants");
-  const [managed, setManaged] = useState<EntitlementFilter | null>(null);
+  // The app, record view, and Manage access are history entries; only the grant stays out of the address.
+  const { navigate, customerAccess, managedGrant, setCustomerAccess, openManagedGrant, closeManagedGrant, resolveMissingDrillDown } = useAdminNavigation();
+  const project = customerAccess?.app ?? null;
+  const view = customerAccess?.view ?? "grants";
+  const managed = useMemo<EntitlementFilter | null>(() => managedGrant !== null && managedGrant.customer_id === customerId ? { ...managedGrant, status: "" } : null, [managedGrant, customerId]);
   const root = `/api/admin/customers/${encodeURIComponent(customerId)}`;
+  useAppPresence(root, project, (app) => resolveMissingDrillDown({ kind: "app", customerId, app }));
   const url = project === null ? `${root}/apps` : `${root}/${view === "grants" ? "access" : "resources"}?${new URLSearchParams({ project, ...(view === "grants" ? {} : { kind: view }) })}`;
-  if (managed) return <Entitlements key={managed.id} active navigationIntent={null} onNavigationHandled={() => undefined} scopedGrant={managed} onExit={() => setManaged(null)} />;
+  if (managed) return <Entitlements key={managed.id} active navigationIntent={null} onNavigationHandled={() => undefined} scopedGrant={managed} onExit={closeManagedGrant} />;
   return <section>
     <div className="actions"><h3>Apps &amp; access</h3><button onClick={() => navigate({ tab: "entitlements", filter: { customer_id: customerId, ...(project ? { project } : {}) } })}>View assigned licenses</button></div>
-    {project !== null && <><div className="actions"><button onClick={() => setProject(null)}>All apps</button><strong>{project}</strong></div>
-      <nav className="sectionTabs" aria-label="App records">{(["grants", "nodes", "sessions"] as const).map(kind => <button key={kind} aria-current={view === kind ? "page" : undefined} onClick={() => setView(kind)}>{kind === "grants" ? "Access grants" : kind === "nodes" ? "Registered nodes" : "Floating sessions"}</button>)}</nav></>}
+    {project !== null && <><div className="actions"><button onClick={() => setCustomerAccess(null)}>All apps</button><strong>{project}</strong></div>
+      <nav className="sectionTabs" aria-label="App records">{(["grants", "nodes", "sessions"] as const).map(kind => <button key={kind} aria-current={view === kind ? "page" : undefined} onClick={() => setCustomerAccess({ app: project, view: kind })}>{kind === "grants" ? "Access grants" : kind === "nodes" ? "Activated devices" : "Floating seats"}</button>)}</nav></>}
     <PagedRecords key={url} url={url} customerId={customerId} kind={project === null ? "apps" : view} code={project === null ? "customer_apps" : view === "grants" ? "entitlements_listed" : "customer_resources"} render={(rows, now) => <div className="customerAccessRecords">
       {rows.map(row => <article className="recordCard" key={JSON.stringify([row.project, row.feature, row.license_fingerprint, row.device_key_id, row.seat_id])}>
-        {project === null ? <><h4>{String(row.project)}</h4><p>{Number(row.grant_count)} grants · {Number(row.in_date_count)} enabled and within grant dates</p>
-          <p>{row.earliest_expiry === row.latest_expiry && Number(row.no_expiry_count) === 0 ? `Valid until ${formatEpoch(Number(row.earliest_expiry))}` : "Mixed or non-expiring validity — view grants"}</p>
-          <button onClick={() => { setProject(String(row.project)); setView("grants"); }}>View app</button></> : view === "grants" ? <><h4>{String(row.feature)}</h4><p>{String(row.status)} · Valid until {row.valid_until === null ? "No expiry" : formatEpoch(Number(row.valid_until))}</p>
-          <button onClick={() => setManaged({ project, feature: String(row.feature), status: "", id: String(row.id), customer_id: customerId })}>Manage access</button></> : view === "nodes" ? <><h4>{String(row.feature)}</h4><p>{String(row.device_key_id)}</p><p>{String(row.status)} · Last seen {formatEpoch(row.last_seen_at as number | null)}</p></> : <><h4>{String(row.feature)} · {String(row.mode)}</h4><p>{String(row.seat_id)}</p><p>{Number(row.heartbeat_deadline) > now ? "Current" : "Expired"} · Deadline {formatEpoch(Number(row.heartbeat_deadline))}</p></>}
+        {project === null ? <><h4>{String(row.project)}</h4><p>{Number(row.grant_count)} grants · {Number(row.in_date_count)} active and within grant dates</p>
+          <p>{row.earliest_expiry === row.latest_expiry && Number(row.no_expiry_count) === 0 ? `Valid until ${formatUtcDate(Number(row.earliest_expiry))}` : "Mixed or non-expiring validity — view grants"}</p>
+          <button onClick={() => setCustomerAccess({ app: String(row.project), view: "grants" })}>View app</button></> : view === "grants" ? <><h4>{String(row.feature)}</h4><p>{row.status === "disabled" ? "suspended" : String(row.status)} · Valid until {row.valid_until === null ? "No expiry" : formatUtcDate(Number(row.valid_until))}</p>
+          <button onClick={() => openManagedGrant({ project, feature: String(row.feature), id: String(row.id), customer_id: customerId })}>Manage access</button></> : view === "nodes" ? <><h4>{String(row.feature)}</h4><p>{String(row.device_key_id)}</p><p>{row.status === "disabled" ? "suspended" : String(row.status)} · Last seen {formatEpoch(row.last_seen_at as number | null)}</p></> : <><h4>{String(row.feature)} · {String(row.mode)}</h4><p>{String(row.seat_id)}</p><p>{Number(row.heartbeat_deadline) > now ? "Current" : "Expired"} · Deadline {formatUtcDate(Number(row.heartbeat_deadline))}</p></>}
       </article>)}
     </div>} />
-    <p className="muted">Grant dates do not override customer suspension or runtime checks. Registered nodes and floating sessions are separate records.</p>
+    <p className="muted">Grant dates do not override customer suspension or runtime checks. Activated devices and floating seats are separate records.</p>
   </section>;
 }

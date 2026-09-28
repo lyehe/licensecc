@@ -39,7 +39,14 @@ export const selfServicePaths: LabeledPathFragment = {
                   allOf: [{ $ref: "#/components/schemas/Envelope" }],
                   properties: {
                     code: { const: "me" },
-                    data: { type: "object", required: ["customer_id"], properties: { customer_id: { type: "string" } } },
+                    data: {
+                      type: "object",
+                      required: ["customer_id", "email"],
+                      properties: {
+                        customer_id: { type: "string" },
+                        email: { type: ["string", "null"], description: "customers.email, else portal_passwords.email_lower, else the earliest portal_identities.email, else null." },
+                      },
+                    },
                   },
                 },
               },
@@ -82,6 +89,14 @@ export const selfServicePaths: LabeledPathFragment = {
                               status: { type: "string" },
                               valid_from: { type: ["integer", "null"] },
                               valid_until: { type: ["integer", "null"] },
+                              trial_ends_at: {
+                                type: ["integer", "null"],
+                                description: "When the trial ends (epoch seconds), by the rule that enforces the row: the protected-device trial rule for a protected row, the legacy lease trial rule otherwise; never after valid_until. null for a license that is not a trial, for a trial whose clock starts at its first activation and has not started yet (trial_starts_on_activation), and for a trial with no end of its own.",
+                              },
+                              trial_starts_on_activation: {
+                                type: "boolean",
+                                description: "True for a trial whose clock starts at its first activation and has not started yet, with a duration the enforcing rule accepts: at least 2 seconds for a protected row, more than 0 for a legacy row. Otherwise false.",
+                              },
                             },
                           },
                         },

@@ -12,6 +12,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "../dist-worker/worker/openapi/assemble.js";
 import { openApiDocument } from "../dist-worker/worker/openapi/document.js";
 import "./worker/transition-contracts.test.mjs";
@@ -23,6 +24,7 @@ import {
   ENTITLEMENT_BATCH_TOO_LARGE_CODE,
   ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE,
 } from "../dist-worker/shared/api.js";
+import * as sharedApi from "../dist-worker/shared/api.js";
 import { POLICY_TYPES } from "@licensecc/licensing-domain/entitlements/policy";
 import { MAX_SUPPORT_UNTIL_EPOCH_SECONDS } from "@licensecc/licensing-domain/catalog/plan_projection";
 
@@ -179,6 +181,83 @@ test("entitlement batch documents the Free-tier-safe pre-query cap and recovery 
       },
     },
   );
+});
+
+test("customer license creation documents its required key, customer failures, and created record", () => {
+  const operation = openApiDocument.paths["/api/admin/customers/{id}/licenses"]?.post;
+  assert.ok(operation, "POST /api/admin/customers/{id}/licenses must be documented");
+  assert.equal(operation.operationId, "createCustomerLicense");
+  assert.equal(operation.parameters.find((parameter) => parameter.name === "idempotency-key").required, true);
+  assert.deepEqual(Object.keys(operation.responses["404"].content["application/json"].examples), ["not_found"]);
+  assert.deepEqual(Object.keys(operation.responses["409"].content["application/json"].examples), ["customer_inactive"]);
+  const input = openApiDocument.components.schemas.LicenseCreateInput;
+  assert.deepEqual(input.required, ["project"]);
+  assert.equal(input.properties.project.pattern, "^[A-Za-z0-9_.:-]{1,127}$");
+  assert.equal(input.properties.label.maxLength, 128);
+  assert.match(input.properties.label.description, /Trimmed; C0 control characters and DEL are rejected\./);
+  assert.deepEqual(openApiDocument.components.schemas.LicenseCreatedData.required, ["id", "customer_id", "project", "label", "created_at"]);
+});
+
+test("a protected creation conflict documents data.reason from the single runtime reason list", () => {
+  const conflict = openApiDocument.paths["/api/admin/entitlements"].post.responses["409"].content["application/json"];
+  assert.deepEqual(conflict.schema.oneOf, [
+    {
+      allOf: [
+        { $ref: "#/components/schemas/ErrorEnvelope" },
+        {
+          type: "object",
+          required: ["code"],
+          properties: { code: { enum: ["revoked_entitlement_is_terminal", "stale_transition", "enforcement_mode_conflict", "idempotency_request_conflict"] } },
+        },
+      ],
+    },
+    { $ref: "#/components/schemas/ProtectedCreationConflictError" },
+  ]);
+  assert.ok(Array.isArray(sharedApi.PROTECTED_CREATE_REASONS));
+  assert.deepEqual(openApiDocument.components.schemas.ProtectedCreationConflictData, {
+    type: "object",
+    additionalProperties: false,
+    required: ["reason"],
+    properties: { reason: { enum: [...sharedApi.PROTECTED_CREATE_REASONS] } },
+  });
+  assert.deepEqual(conflict.examples.protected_creation_conflict.value, { ok: false, code: "protected_creation_conflict", request_id: "1a2b3c-1", data: { reason: "customer_inactive" } });
+});
+
+test("the device limit is documented on create and PATCH, with the capacity conflict's device count", () => {
+  const schemas = openApiDocument.components.schemas;
+  const inRange = (schema) => schema?.type === "integer" && schema.minimum === 1 && schema.maximum === sharedApi.MAX_DEVICE_LIMIT;
+  assert.equal(sharedApi.MAX_DEVICE_LIMIT, 1_000_000);
+  const create = schemas.EntitlementCreateInput.allOf;
+  assert.ok(inRange(create[1].properties.max_active_devices), "create documents the device limit range");
+  // A selected policy owns the device limit, so a create cannot send both.
+  assert.ok(create.some((part) => isDeepStrictEqual(part, {
+    if: { required: ["policy_id"], properties: { policy_id: { type: "string", minLength: 1 } } },
+    then: { not: { required: ["max_active_devices"] } },
+  })), "create documents that a policy excludes max_active_devices");
+  const patch = schemas.EntitlementPatch;
+  assert.ok(inRange(patch.properties.max_active_devices), "PATCH documents the device limit range");
+  // Exactly what the Worker enforces: no other PATCH field beside the limit. Like every PATCH, keys
+  // the Worker does not patch are ignored, so the schema does not forbid them.
+  const otherFields = Object.keys(patch.properties).filter((field) => field !== "max_active_devices");
+  assert.ok(otherFields.length >= 7);
+  assert.deepEqual(patch.dependentSchemas.max_active_devices, { not: { anyOf: otherFields.map((field) => ({ required: [field] })) } });
+  assert.equal(schemas.EntitlementRecord.properties.max_active_devices.type, "integer");
+
+  const conflict = openApiDocument.paths["/api/admin/entitlements/{id}"].patch.responses["409"].content["application/json"];
+  assert.deepEqual(conflict.schema.oneOf, [
+    {
+      allOf: [
+        { $ref: "#/components/schemas/ErrorEnvelope" },
+        { type: "object", required: ["code"], properties: { code: { enum: ["revoked_entitlement_is_terminal", "stale_transition"] } } },
+      ],
+    },
+    { $ref: "#/components/schemas/CapacityInUseError" },
+  ]);
+  assert.deepEqual(schemas.CapacityInUseData.required, ["devices_in_use"]);
+  assert.equal(schemas.CapacityInUseData.additionalProperties, false);
+  assert.equal(schemas.CapacityInUseData.properties.devices_in_use.type, "integer");
+  assert.deepEqual(schemas.CapacityInUseError.allOf[1].properties.code, { const: "capacity_in_use" });
+  assert.deepEqual(conflict.examples.capacity_in_use.value, { ok: false, code: "capacity_in_use", request_id: "1a2b3c-1", data: { devices_in_use: 3 } });
 });
 
 test("catalog import documents its server-bound Preview/Apply protocol", () => {
@@ -378,4 +457,24 @@ test("pagination option matrix matches the route inventory and OpenAPI parameter
     }
   }
   assert.deepEqual(documented, expected, "every runtime bounded route option must be documented exactly once");
+});
+
+test("the webhook test send documents a status-class-only result, the rate limit and the missing capability", () => {
+  const operation = openApiDocument.paths["/api/admin/webhooks/{id}/test"]?.post;
+  assert.ok(operation, "POST /api/admin/webhooks/{id}/test must be documented");
+  assert.equal(operation.operationId, "sendWebhookTest");
+  const success = operation.responses["200"].content["application/json"].schema.allOf[1];
+  assert.equal(success.properties.code.const, "webhook_test_sent");
+  assert.deepEqual(success.properties.data, {
+    type: "object",
+    additionalProperties: false,
+    required: ["status_class"],
+    properties: { status_class: { type: "string", enum: ["2xx", "3xx", "4xx", "5xx", "network_error"], description: success.properties.data.properties.status_class.description } },
+  });
+  assert.deepEqual(Object.keys(operation.responses["429"].content["application/json"].examples), ["rate_limited"]);
+  assert.ok(operation.responses["429"].headers["retry-after"], "a rate limit documents retry-after");
+  assert.deepEqual(Object.keys(operation.responses["503"].content["application/json"].examples).sort(),
+    ["temporarily_unavailable", "webhook_operator_not_configured", "webhook_signing_unconfigured"]);
+  assert.deepEqual(Object.keys(operation.responses["404"].content["application/json"].examples), ["not_found"]);
+  assert.ok(operation.responses["403"], "reader RBAC is documented");
 });

@@ -1,0 +1,46 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  MAX_WEBHOOK_URL_SIZE,
+  safeWebhookUrl,
+  WEBHOOK_TEST_STATUS_CLASSES,
+} from "../src/webhooks/webhook_endpoint.mjs";
+import { WEBHOOK_DELIVER_TIMEOUT_MS, webhookSigningConfig } from "../src/webhooks/webhook.mjs";
+
+test("safeWebhookUrl accepts an absolute https URL and returns its normalized href", () => {
+  assert.equal(safeWebhookUrl("https://hooks.example.com/lcc"), "https://hooks.example.com/lcc");
+  assert.equal(safeWebhookUrl("https://HOOKS.example.com"), "https://hooks.example.com/");
+});
+
+test("safeWebhookUrl rejects every non-https scheme", () => {
+  for (const url of ["http://hooks.example.com/lcc", "ftp://hooks.example.com/", "file:///etc/passwd", "data:text/plain,x", "javascript:alert(1)"]) {
+    assert.equal(safeWebhookUrl(url), null, url);
+  }
+});
+
+test("safeWebhookUrl rejects non-strings, blanks, whitespace, control characters and oversize values", () => {
+  for (const value of [undefined, null, 42, {}, "", "not a url", "https://hooks.example.com/a b", "https://hooks.example.com/\n", "https://hooks.example.com/\0"]) {
+    assert.equal(safeWebhookUrl(value), null, JSON.stringify(value));
+  }
+  const prefix = "https://hooks.example.com/";
+  assert.equal(safeWebhookUrl(prefix + "a".repeat(MAX_WEBHOOK_URL_SIZE - prefix.length)), prefix + "a".repeat(MAX_WEBHOOK_URL_SIZE - prefix.length));
+  assert.equal(safeWebhookUrl(prefix + "a".repeat(MAX_WEBHOOK_URL_SIZE - prefix.length + 1)), null);
+});
+
+test("a test send can only ever report one of five status classes", () => {
+  assert.deepEqual([...WEBHOOK_TEST_STATUS_CLASSES], ["2xx", "3xx", "4xx", "5xx", "network_error"]);
+  assert.ok(Object.isFrozen(WEBHOOK_TEST_STATUS_CLASSES));
+});
+
+test("webhookSigningConfig is the one fail-closed signing selector real and test deliveries share", () => {
+  const secret = Buffer.alloc(32, 7).toString("base64");
+  const configured = webhookSigningConfig({ WEBHOOK_SIGNING_SECRETS: JSON.stringify({ k1: secret }), WEBHOOK_SIGNING_KEY_ID: "k1" });
+  assert.equal(configured.keyId, "k1");
+  assert.ok(configured.secretsMap !== null && typeof configured.secretsMap === "object");
+  assert.equal(webhookSigningConfig({}).error, "webhook.signing_unconfigured");
+  assert.equal(webhookSigningConfig(undefined).error, "webhook.signing_unconfigured");
+  assert.equal(webhookSigningConfig({ WEBHOOK_SIGNING_SECRETS: JSON.stringify({ k1: secret }) }).error, "webhook.signing_key_missing");
+  assert.equal(webhookSigningConfig({ WEBHOOK_SIGNING_SECRETS: JSON.stringify({ k1: secret }), WEBHOOK_SIGNING_KEY_ID: "k2" }).error, "webhook.signing_key_missing");
+  assert.equal(WEBHOOK_DELIVER_TIMEOUT_MS, 5000);
+});

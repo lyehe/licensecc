@@ -286,3 +286,31 @@ test("the attempt cap is enforced (5 live attempts max)", async () => {
   const r = await redeemOtp(e, { secret: req.secret, clientIp: "1.1.1.1", now: NOW });
   assert.equal(r.ok, false, "a row at the attempt cap is denied even with the right secret");
 });
+
+// The UI's rate-limit sentence needs the exact seconds left in the window, so requestOtp/
+// redeemOtp must forward portalRateLimit's retryAfter on their rate_limited outcome.
+test("requestOtp reports retryAfter when the per-email cap trips", async () => {
+  const db = freshDb();
+  seedCustomer(db, "A", "a@x.com");
+  const e = env(db);
+  for (let i = 0; i < 5; i += 1) await requestOtp(e, { email: "a@x.com", clientIp: `ip-${i}`, now: NOW });
+  const limited = await requestOtp(e, { email: "a@x.com", clientIp: "ip-final", now: NOW });
+  assert.equal(limited.ok, false);
+  assert.equal(limited.code, "rate_limited");
+  const period = 900;
+  const windowStart = Math.floor(NOW / period) * period;
+  assert.equal(limited.retryAfter, windowStart + period - NOW);
+});
+
+test("redeemOtp reports retryAfter when the per-IP verify cap trips", async () => {
+  const db = freshDb();
+  seedCustomer(db, "A", "a@x.com");
+  const e = env(db);
+  for (let i = 0; i < 30; i += 1) await redeemOtp(e, { email: "a@x.com", code: "00000000", clientIp: "1.1.1.1", now: NOW });
+  const limited = await redeemOtp(e, { email: "a@x.com", code: "00000000", clientIp: "1.1.1.1", now: NOW });
+  assert.equal(limited.ok, false);
+  assert.equal(limited.code, "rate_limited");
+  const period = 900;
+  const windowStart = Math.floor(NOW / period) * period;
+  assert.equal(limited.retryAfter, windowStart + period - NOW);
+});

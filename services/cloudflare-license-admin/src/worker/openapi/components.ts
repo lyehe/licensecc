@@ -1,4 +1,4 @@
-import { entitlementRecordSchema, entitlementCreateSchema } from "./entitlement-schema.js";
+import { entitlementRecordSchema, entitlementCreateSchema, entitlementPatchSchema } from "./entitlement-schema.js";
 import { customerRowSchema } from "./customer-schema.js";
 import type { LabeledComponentFragment } from "./assemble.js";
 import {
@@ -38,7 +38,7 @@ export interface TransitionDataContract {
   readonly expectedStatus?: string;
 }
 
-function successResponse(
+export function successResponse(
   description: string,
   dataSchema: Record<string, unknown>,
   codes: ReadonlyArray<string>,
@@ -358,20 +358,7 @@ export const openApiComponents: LabeledComponentFragment = {
           },
         },
       }],
-      ["EntitlementPatch", {
-        type: "object",
-        not: { required: ["enforcement_mode"] },
-        description: "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable.",
-        properties: {
-          device_hash: { type: "string", description: "64-char hex, or empty string." },
-          assertion_ttl_seconds: { type: "integer", minimum: 1, maximum: 3600 },
-          valid_from: { type: ["integer", "null"], minimum: 0 },
-          valid_until: { type: ["integer", "null"], minimum: 0 },
-          notes: { type: "string", maxLength: 1000 },
-          customer_id: { type: ["string", "null"], maxLength: 128 },
-          license_id: { type: ["string", "null"], maxLength: 128 },
-        },
-      }],
+      ["EntitlementPatch", entitlementPatchSchema],
       ["EntitlementSyncInput", {
         not: { required: ["enforcement_mode"] },
         allOf: [
@@ -843,7 +830,7 @@ export const openApiComponents: LabeledComponentFragment = {
         description: "Create body. `url` is required and MUST be https. event_types / description / scope_* take the column default ('').",
         properties: {
           url: { type: "string", maxLength: 2048, description: "https URL. A non-https or unparseable URL returns 400 invalid_url." },
-          event_types: { type: "string", maxLength: 1024, default: "", description: "CSV event-type filter; '' = all." },
+          event_types: { type: "string", maxLength: 1024, default: "", description: "CSV event-type filter; '' = all. Each token must be one of the entitlement/customer/order event types the dispatcher actually emits (else 400 invalid_event_types with data.allowed)." },
           description: { type: "string", maxLength: 500, default: "" },
           scope_project: { type: "string", maxLength: 128, default: "", description: "Per-tenant scope (audit R2.2). '' = global. Set one dimension, not both." },
           scope_customer_id: { type: "string", maxLength: 128, default: "", description: "Per-tenant scope (audit R2.2). '' = global. Set one dimension, not both." },
@@ -854,7 +841,7 @@ export const openApiComponents: LabeledComponentFragment = {
         description: "All fields optional; only provided fields are updated. status / id are NOT patchable (status flips only via disable/reenable).",
         properties: {
           url: { type: "string", maxLength: 2048, description: "https URL. A non-https URL returns 400 invalid_url." },
-          event_types: { type: "string", maxLength: 1024 },
+          event_types: { type: "string", maxLength: 1024, description: "CSV event-type filter; '' = all. Each token must be one of the entitlement/customer/order event types the dispatcher actually emits (else 400 invalid_event_types with data.allowed)." },
           description: { type: "string", maxLength: 500 },
           scope_project: { type: "string", maxLength: 128, description: "Per-tenant scope (audit R2.2). '' clears it (global)." },
           scope_customer_id: { type: "string", maxLength: 128, description: "Per-tenant scope (audit R2.2). '' clears it (global)." },
@@ -1083,10 +1070,11 @@ export const openApiComponents: LabeledComponentFragment = {
               properties: {
                 id: { type: "integer" }, project: { type: "string" }, feature: { type: "string" }, license_fingerprint: { type: "string" },
                 event_type: { type: "string" }, status: { type: "string" }, revocation_seq: { type: "integer" }, actor: { type: "string" }, actor_type: { type: "string" },
-                source: { type: "string" }, request_id: { type: "string" }, reason: { type: ["string", "null"] }, created_at: { type: "integer" },
+                source: { type: "string" }, request_id: { type: "string" }, reason: { type: ["string", "null"] }, detail: { type: "string" }, created_at: { type: "integer" },
               },
             },
           },
+          next_cursor: { type: ["string", "null"], description: "Opaque keyset page token; pass back as `cursor` for the next page. null on the last page." },
         },
       }],
       ["BatchTransitionInput", {
@@ -1214,13 +1202,15 @@ export const openApiComponents: LabeledComponentFragment = {
             type: "array",
             items: {
               type: "object",
-              required: ["project", "feature", "license_fingerprint", "valid_until", "days_left"],
+              required: ["id", "project", "feature", "license_fingerprint", "valid_until", "days_left"],
               properties: {
+                id: { type: "string", description: "The entitlement's canonical id (project+feature+license_fingerprint), for deep-linking the exact record." },
                 project: { type: "string" },
                 feature: { type: "string" },
                 license_fingerprint: { type: "string" },
                 customer_id: { type: ["string", "null"] },
-                valid_until: { type: "integer", description: "Epoch seconds the entitlement expires at." },
+                customer_name: { type: ["string", "null"] },
+                valid_until: { type: "integer", description: "Epoch seconds the entitlement expires at (an activated activation-basis trial reports its trial deadline here instead)." },
                 days_left: { type: "integer", description: "ceil((valid_until - now)/86400); >=1 for a still-future expiry." },
               },
             },

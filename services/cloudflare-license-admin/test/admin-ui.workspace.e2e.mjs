@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, makeEnvelope } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 const enterpriseCustomerId = "cus_enterprise_northwind_global_licensing_operations_0001";
 const enterpriseCustomerName = "Northwind Global Infrastructure and Licensing Operations for Distributed Manufacturing";
@@ -38,6 +38,7 @@ test("admin adds a portal user and reconciles a lost creation response without d
   await page.goto("/#/customers");
   await page.getByRole("button", { name: "Add user", exact: true }).click();
   const form = page.getByRole("form", { name: "Add portal user" });
+  await form.getByRole("radio", { name: "Set an initial password", exact: true }).check();
   await form.getByLabel("Name", { exact: true }).fill("New portal user");
   await form.getByLabel("Login email", { exact: true }).fill("new-portal@example.test");
   await form.getByLabel("Initial password", { exact: true }).fill("A long initial passphrase 123!");
@@ -45,12 +46,49 @@ test("admin adds a portal user and reconciles a lost creation response without d
   await page.getByRole("button", { name: "Reconcile status", exact: true }).click();
   await expect(page.getByRole("heading", { name: "User added", exact: true })).toBeVisible();
   expect(attempts).toHaveLength(2); expect(attempts[1]).toEqual(attempts[0]);
+  expect(attempts[0].input.password).toBe("A long initial passphrase 123!");
+  await expect(page.getByText("Share the initial password securely. The user can change it in their portal account.", { exact: true })).toBeVisible();
   await expect(page.locator('input[type="password"]')).toHaveCount(0);
   await page.getByRole("button", { name: "Open user", exact: true }).click();
   await expect(page.getByRole("heading", { name: "New portal user", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByText("Login email: new-portal@example.test", { exact: true })).toBeVisible();
   expect(page.url()).not.toContain("example.test");
+});
+
+test("add user defaults to inviting the customer, hides the password field, and switching modes clears any typed password", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  let input;
+  await page.route("**/api/admin/customers", async route => {
+    if (route.request().method() !== "POST") return route.fallback();
+    input = route.request().postDataJSON();
+    const row = api.seed.customer({ id: "cust_invited_from_admin", name: input.name, email: "", login_email: input.email, status: "active" });
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(makeEnvelope("customer_created", row)) });
+  });
+  await page.goto("/#/customers");
+  await page.getByRole("button", { name: "Add user", exact: true }).click();
+  const form = page.getByRole("form", { name: "Add portal user" });
+  await expect(form.getByRole("radio", { name: "Invite", exact: true })).toBeChecked();
+  await expect(form.locator('input[type="password"]')).toHaveCount(0);
+  await form.getByRole("radio", { name: "Set an initial password", exact: true }).check();
+  await expect(form.getByLabel("Initial password", { exact: true })).toBeVisible();
+  await form.getByLabel("Initial password", { exact: true }).fill("A temporary passphrase 123!");
+  await form.getByRole("radio", { name: "Invite", exact: true }).check();
+  await expect(form.locator('input[type="password"]')).toHaveCount(0);
+  await form.getByRole("radio", { name: "Set an initial password", exact: true }).check();
+  await expect(form.getByLabel("Initial password", { exact: true })).toHaveValue("");
+  await form.getByRole("radio", { name: "Invite", exact: true }).check();
+  await form.getByLabel("Name", { exact: true }).fill("Invited user");
+  await form.getByLabel("Login email", { exact: true }).fill("invited@example.test");
+  await form.getByRole("button", { name: "Add user", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "User added", exact: true })).toBeVisible();
+  // The wire body must carry no `password` key at all in Invite mode -- toEqual fails closed if one
+  // leaked in, since it requires an exact key set, not just a subset match.
+  expect(input).toEqual({ name: "Invited user", email: "invited@example.test" });
+  await expect(page.getByText("Ask invited@example.test to open the customer portal and choose 'Forgot your password?' to set a password.", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Share the initial password securely/)).toHaveCount(0);
+  await expect(page.getByText("No licenses have been assigned.")).toBeVisible();
 });
 
 test("customer app pages recover failed refreshes and manage only the selected owner's grant", async ({ page }) => {
@@ -70,14 +108,14 @@ test("customer app pages recover failed refreshes and manage only the selected o
   await page.goto(`/#/customers/${customer.id}?section=access`);
   await expect(page.getByRole("heading", { name: "CAD", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("unavailable");
+  await expect(page.getByRole("alert")).toContainText("Something went wrong. Reference retry-test.");
   await page.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveCount(0);
   await page.getByRole("button", { name: "View app", exact: true }).click();
   await expect(page.getByRole("button", { name: "Manage access", exact: true })).toHaveCount(1);
-  await page.getByRole("button", { name: "Registered nodes", exact: true }).click();
+  await page.getByRole("button", { name: "Activated devices", exact: true }).click();
   await expect(page.getByText("No records found.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Floating sessions", exact: true }).click();
+  await page.getByRole("button", { name: "Floating seats", exact: true }).click();
   await expect(page.getByText("No records found.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Access grants", exact: true }).click();
   await page.getByRole("button", { name: "Manage access", exact: true }).click();
@@ -92,7 +130,7 @@ test("customer app pages recover failed refreshes and manage only the selected o
   await confirmation.getByLabel("Reason (required)").fill("customer requested pause");
   await confirmation.getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(confirmation).toHaveCount(0);
-  await expect(grantRow.locator(".status")).toHaveText("disabled");
+  await expect(grantRow.locator(".status")).toHaveText("suspended");
   expect(api.requests.transitions.at(-1).body).toMatchObject({ expected_customer_id: customer.id, expected_revocation_seq: 1 });
   await page.getByRole("button", { name: "Back to app", exact: true }).click();
   await expect(page.getByRole("button", { name: "Manage access", exact: true })).toHaveCount(1);
@@ -100,6 +138,35 @@ test("customer app pages recover failed refreshes and manage only the selected o
   await page.getByRole("button", { name: "Browse apps", exact: true }).click();
   await page.getByRole("region", { name: "App inventory" }).getByRole("button", { name: "CAD", exact: true }).click();
   await expect(page.getByLabel("Plan project", { exact: true })).toHaveValue("CAD");
+});
+
+test("Manage access offers no Show all and never lists another customer's grant", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const customer = api.seed.customer();
+  api.seed.entitlements([
+    { customer_id: customer.id, project: "CAD", feature: "render" },
+    { customer_id: "another-customer", project: "CAD", feature: "render" },
+  ]);
+  await page.route("**/api/admin/**", api.route);
+  // Every list read made inside Manage access, by the customer it names.
+  const listReadCustomers = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname === "/api/admin/entitlements") listReadCustomers.push(url.searchParams.get("customer_id"));
+  });
+  await page.goto(`/#/customers/${customer.id}?section=access`);
+  await page.getByRole("button", { name: "View app", exact: true }).click();
+  await page.getByRole("button", { name: "Manage access", exact: true }).click();
+  await expect(page.getByText(/License access for customer/)).toContainText(customer.id);
+  const rows = page.locator(".desktopRecords tbody tr");
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText(customer.id);
+  // The scoped view's only exit is "Back to app": nothing in it may widen the list to all customers.
+  await expect(page.getByRole("button", { name: "Show all", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Showing 1 entitlement")).toHaveCount(0);
+  await expect(page.locator(".desktopRecords")).not.toContainText("another-customer");
+  expect(listReadCustomers.length).toBeGreaterThan(0);
+  expect(listReadCustomers.every((id) => id === customer.id)).toBe(true);
 });
 
 test("workspace shell has no document overflow at supported viewports", async ({ page }, testInfo) => {
@@ -154,10 +221,51 @@ test("workspace navigation uses the mobile menu and desktop links", async ({ pag
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/");
   const desktopNavigation = page.getByRole("navigation", { name: "Main navigation" });
-  await expect(desktopNavigation.getByRole("button", { name: "Activity", exact: true })).toHaveAttribute("aria-expanded", "false");
+  // Nav groups start expanded; the click below is a no-op unless something upstream collapsed it.
+  await expect(desktopNavigation.getByRole("button", { name: "Activity", exact: true })).toHaveAttribute("aria-expanded", "true");
   if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
   await desktopNavigation.getByRole("link", { name: "Reports", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Reports", exact: true })).toBeVisible();
+});
+
+test("entitlements keep at least ten rows fully visible at 1440x900", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlements(12);
+  await page.route("**/api/admin/**", api.route);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/#/entitlements");
+
+  const rows = page.locator(".desktopRecords tbody tr[data-focus-row]");
+  await expect(rows).toHaveCount(12);
+  const fullyVisibleRows = await page.evaluate(() => {
+    const viewportHeight = window.innerHeight;
+    return Array.from(document.querySelectorAll(".desktopRecords tbody tr[data-focus-row]")).filter((row) => {
+      const rect = row.getBoundingClientRect();
+      return rect.top >= 0 && rect.bottom <= viewportHeight;
+    }).length;
+  });
+  expect(fullyVisibleRows).toBeGreaterThanOrEqual(10);
+});
+
+test("global search shows a per-type limit note only when a type reaches ten results", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.customers(Array.from({ length: 10 }, (_unused, index) => ({ name: `Widget Customer ${index + 1}` })));
+  api.seed.customer({ name: "Solo customer" });
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: /search/i }).click();
+  const searchInput = page.getByRole("searchbox", { name: "Global search" });
+  const searchSurface = page.getByRole("region", { name: "Search workspace" });
+
+  await searchInput.fill("Widget");
+  await page.getByRole("button", { name: "Search records", exact: true }).click();
+  await expect(searchSurface).toContainText("Showing first 10 per type");
+
+  await searchInput.fill("Solo");
+  await page.getByRole("button", { name: "Search records", exact: true }).click();
+  await expect(searchSurface).toContainText("Solo customer");
+  await expect(searchSurface.getByText("Showing first 10 per type", { exact: true })).toHaveCount(0);
 });
 
 test("global search opens, submits records, escapes, and keeps private queries out of the URL", async ({ page }) => {
@@ -233,7 +341,7 @@ test("customer records retain desktop tables, mobile cards, and fluid detail sec
   await page.goto("/#/customers");
   const customerCard = page.locator(".recordCard").filter({ hasText: enterpriseCustomerName });
   await expect(customerCard).toBeVisible();
-  await expect(customerCard.getByText("disabled", { exact: true })).toBeVisible();
+  await expect(customerCard.getByText("suspended", { exact: true })).toBeVisible();
   await expect(customerCard.getByRole("button", { name: "Open details", exact: true })).toBeVisible();
 });
 
@@ -291,4 +399,131 @@ test("customer assignment replaces an untouched editor with customer and app con
   await page.getByLabel("Project", { exact: true }).fill("OTHER_APP");
   await expect(page.getByLabel("License ID", { exact: true })).toHaveValue("");
   await expect(page.getByLabel("Customer ID", { exact: true })).toHaveValue(enterpriseCustomerId);
+});
+
+// The workspace's own page title is the document's one h1; the sidebar brand and every in-page
+// section title (a customer's name, a plan's name, "Technical details", …) stay at h2 or lower.
+async function boundingBoxesAtLeast(locator, minSize) {
+  const count = await locator.count();
+  for (let index = 0; index < count; index += 1) {
+    const box = await locator.nth(index).boundingBox();
+    expect(box, `visible element ${index} must report a bounding box`).not.toBeNull();
+    expect(box.width).toBeGreaterThanOrEqual(minSize);
+    expect(box.height).toBeGreaterThanOrEqual(minSize);
+  }
+}
+
+test("the workspace heading is the only h1 on mobile Overview with the menu closed", async ({ page }) => {
+  await installRealisticFixture(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/overview");
+  await expect(page.locator(".sidebar")).not.toHaveClass(/isOpen/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Overview");
+});
+
+test("the sidebar brand stays plain text, not a second heading, whether the mobile menu is open or closed", async ({ page }) => {
+  await installRealisticFixture(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/overview");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+
+  await page.getByRole("button", { name: /menu/i }).click();
+  await expect(page.locator(".sidebar")).toHaveClass(/isOpen/);
+  await expect(page.getByText("Licensecc admin", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Licensecc admin" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+});
+
+test("the workspace heading stays the only h1 across desktop drill-downs", async ({ page }) => {
+  const api = await installRealisticFixture(page);
+  const plan = api.seed.catalogPlan();
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  await page.goto("/#/entitlements");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("License access");
+
+  await page.goto(`/#/customers/${enterpriseCustomerId}`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: enterpriseCustomerName, exact: true })).toBeVisible();
+
+  await page.goto(`/#/plans?plan=${plan.id}`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "Plan confirm", exact: true })).toBeVisible();
+});
+
+test("checkboxes and disclosure summaries meet the minimum touch target on Overview and Entitlements", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlements(3);
+  await page.route("**/api/admin/**", api.route);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  await page.goto("/#/overview");
+  await boundingBoxesAtLeast(page.locator('input[type="checkbox"]:visible'), 24);
+  await boundingBoxesAtLeast(page.locator("summary:visible"), 24);
+
+  await page.goto("/#/entitlements");
+  const checkboxes = page.locator('input[type="checkbox"]:visible');
+  expect(await checkboxes.count()).toBeGreaterThan(0);
+  await boundingBoxesAtLeast(checkboxes, 24);
+  const summaries = page.locator("summary:visible");
+  expect(await summaries.count()).toBeGreaterThan(0);
+  await boundingBoxesAtLeast(summaries, 24);
+  const summaryCount = await summaries.count();
+  for (let index = 0; index < summaryCount; index += 1) {
+    const box = await summaries.nth(index).boundingBox();
+    expect(box.height, `summary ${index} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
+  }
+});
+
+// A disclosure's open/closed state must stay visible: either the native marker (the browser's own
+// triangle, which requires the default `display: list-item`) or an explicit indicator element such
+// as "More actions"' own `.actionChevron`. Losing both leaves a control that looks unclickable.
+async function summariesShowIndicatorAndSize(page) {
+  const summaries = page.locator("summary:visible");
+  const count = await summaries.count();
+  expect(count, "at least one visible summary is expected here").toBeGreaterThan(0);
+  for (let index = 0; index < count; index += 1) {
+    const summary = summaries.nth(index);
+    const box = await summary.boundingBox();
+    expect(box, `visible summary ${index} must report a bounding box`).not.toBeNull();
+    expect(box.width, `summary ${index} must be at least 24px wide`).toBeGreaterThanOrEqual(24);
+    expect(box.height, `summary ${index} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
+    const hasNativeMarker = await summary.evaluate((element) => {
+      const style = window.getComputedStyle(element);
+      return style.display === "list-item" && style.listStyleType !== "none";
+    });
+    const hasExplicitIndicator = (await summary.locator(".actionChevron, [data-disclosure-indicator]").count()) > 0;
+    const label = await summary.textContent();
+    expect(hasNativeMarker || hasExplicitIndicator, `summary "${label}" (index ${index}) must show an open/closed indicator`).toBe(true);
+  }
+}
+
+test("disclosure summaries show their open/closed state on Overview, Entitlements, and Webhooks", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlements(3);
+  const webhook = api.seed.webhook();
+  api.behavior.webhookTestResponses.push({ status: 200, body: { ok: true, code: "webhook_test_sent", request_id: "ui-e2e-indicator-check", data: { status_class: "2xx" } } });
+  await page.route("**/api/admin/**", api.route);
+  await page.route("**/api/admin/summary", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ ok: false, code: "summary_unavailable", request_id: "ui-e2e-overview-tech-details" }) });
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  await page.goto("/#/overview");
+  await expect(page.getByRole("alert")).toContainText("Could not load");
+  await summariesShowIndicatorAndSize(page);
+
+  await page.goto("/#/entitlements");
+  await expect(page.locator("[data-focus-row]").first()).toBeVisible();
+  await summariesShowIndicatorAndSize(page);
+
+  await page.goto("/#/webhooks");
+  const testEventButton = page.getByRole("row").filter({ hasText: webhook.url }).getByRole("button", { name: "Send test event", exact: true });
+  await expect(testEventButton).toBeVisible();
+  await testEventButton.click();
+  await expect(page.getByRole("status").filter({ hasText: `Test event to ${webhook.url}` })).toBeVisible();
+  await summariesShowIndicatorAndSize(page);
 });

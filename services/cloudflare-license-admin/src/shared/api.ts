@@ -2,7 +2,8 @@
 // shared mutation core's .d.ts so the admin Worker and the licensing backend
 // share ONE shape. Re-exported here so existing `../shared/api` import sites are
 // unchanged.
-import type { EntitlementStatus, EntitlementInput, EntitlementEventType } from "@licensecc/licensing-domain/entitlements/contracts";
+import type { EntitlementStatus, EntitlementInput, EntitlementEventType, EntitlementCreateInput, EntitlementPatch } from "@licensecc/licensing-domain/entitlements/contracts";
+import type { WebhookTestStatusClass } from "@licensecc/cloudflare-runtime/webhooks/webhook_endpoint";
 
 export type {
   EntitlementStatus,
@@ -262,6 +263,51 @@ export interface BatchResultData {
   results: BatchRowResult[];
 }
 
+// ── Protected onboarding ─────────────────────────────────────────────────────
+// Why a protected entitlement create was refused: 409 protected_creation_conflict carries
+// `data.reason`. The Worker derives it from the same named checks its create batch enforces;
+// the UI maps each reason to a sentence, and OpenAPI documents this exact list.
+export const PROTECTED_CREATE_REASONS = [
+  "customer_inactive",
+  "license_missing",
+  "license_customer_mismatch",
+  "fingerprint_in_use",
+  "plan_assignment_conflict",
+  "lease_history_exists",
+  "policy_mismatch",
+  "invalid_trial",
+  "devices_connected",
+  "invalid_capacity",
+  "unknown",
+] as const;
+export type ProtectedCreateReason = typeof PROTECTED_CREATE_REASONS[number];
+
+// ── Device limit ─────────────────────────────────────────────────────────────
+// The most devices one license (entitlement) may have connected at once. An operator sets it from 1
+// to MAX_DEVICE_LIMIT: on a create that selects no policy (a policy stamps its own), or alone in a
+// PATCH. A protected grant refuses a limit below its connected devices (409 capacity_in_use).
+export const MAX_DEVICE_LIMIT = 1_000_000;
+
+/** Admin create body: the shared create input plus its own device limit, accepted only without a policy. */
+export type AdminEntitlementCreateInput = EntitlementCreateInput & { max_active_devices?: number };
+
+/** Admin PATCH body: the shared patch fields, or the device limit alone. */
+export type AdminEntitlementPatch = EntitlementPatch & { max_active_devices?: number };
+
+/** 409 capacity_in_use: how many devices hold a slot on the grant (active, or retiring until the hold ends). */
+export interface CapacityInUseData {
+  devices_in_use: number;
+}
+
+// POST /api/admin/customers/{id}/licenses returns the license record it created.
+export interface CreatedLicense {
+  id: string;
+  customer_id: string;
+  project: string;
+  label: string;
+  created_at: number;
+}
+
 // GET /api/admin/search returns mixed-type rows; `type` + the type-specific identity fields drive
 // the UI deep-link (see navigationForResult in operatorWorkflow.ts).
 export type SearchResultType = "customer" | "license" | "entitlement" | "order";
@@ -345,6 +391,12 @@ export interface WebhookDelivery {
   delivered_at: number | null;
 }
 
+// POST /api/admin/webhooks/{id}/test data: the backend sends the signed test event and only the
+// receiver's status class ever comes back.
+export interface WebhookTestResult {
+  status_class: WebhookTestStatusClass;
+}
+
 // Optional frozen-trial + provenance columns surfaced on an entitlement record that
 // was stamped from a policy. Read by dedicated SELECTs (not part of ENTITLEMENT_COLUMNS).
 export interface EntitlementTrialFields {
@@ -383,13 +435,19 @@ export interface TimeseriesData {
   buckets: TimeseriesBucket[];
 }
 
-// GET /api/admin/report/expiring — active entitlements whose valid_until falls in (now, now+within].
-// days_left is the ceil of (valid_until - now) / 86400 so "0 days left" never appears for a future row.
+// GET /api/admin/report/expiring — active entitlements expiring in (now, now+within]. For most
+// grants that window is against the stamped valid_until; an activated activation-basis trial
+// (trial_started_at set) reports trial_started_at + trial_duration_sec instead, since that is its
+// real deadline even when valid_until was never stamped. days_left is the ceil of
+// (valid_until - now) / 86400 so "0 days left" never appears for a future row. id is the entitlement's
+// canonical id (project+feature+license_fingerprint), for deep-linking the exact record.
 export interface ExpiringEntitlement {
+  id: string;
   project: string;
   feature: string;
   license_fingerprint: string;
   customer_id: string | null;
+  customer_name: string | null;
   valid_until: number;
   days_left: number;
 }

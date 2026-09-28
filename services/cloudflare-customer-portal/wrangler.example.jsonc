@@ -47,7 +47,12 @@
     // Set PORTAL_EMAIL_API_KEY as a Worker SECRET, never in this file.
     "PORTAL_EMAIL_FROM": "",
     // This optional Resend-compatible destination has the same strict HTTPS-origin policy.
-    "PORTAL_EMAIL_API_BASE": "https://api.resend.com"
+    "PORTAL_EMAIL_API_BASE": "https://api.resend.com",
+    // Optional customer-facing support contact: an https: URL (no user:password@) or one
+    // mailto: address, e.g. "mailto:support@example.com". The portal links it wherever a
+    // customer is told to get help, such as a suspended account. Any other value, or "",
+    // leaves it unset, and the portal says "Contact your administrator" instead.
+    "PORTAL_SUPPORT_CONTACT": ""
     // Secrets (wrangler secret put):
     //   PORTAL_GOOGLE_CLIENT_SECRET  Google web OAuth client secret
     //   PORTAL_GITHUB_CLIENT_SECRET  GitHub OAuth app client secret

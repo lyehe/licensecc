@@ -90,6 +90,13 @@ not replace an earlier unresolved storage failure. A renewal conflict preserves
 the request; an explicit `AbandonPending()` returning `OnlineRequired` permits
 starting a new renewal. See the [renewal recovery contract](../../doc/api/device_enrollment.rst).
 
+When activation is refused because every device slot of the license is in use,
+`Code` is `Conflict` and `Outcome.Detail` is `DeviceBoundDenialDetail.DeviceLimit`:
+ask the user to disconnect a device in the customer portal (Devices), then try
+again. A detail never grants access. A value this SDK does not name keeps its
+number; treat it as `None`. Earlier SDK releases reject any non-zero detail as an
+invalid outcome, so upgrade this package together with the bridge DLL.
+
 Dispose clients deterministically. Competing calls return `Busy`; `Dispose()`
 waits for an admitted call and closes once. Disposing the library prevents new
 opens but existing clients retain a native-library pin. Finalization is fallback

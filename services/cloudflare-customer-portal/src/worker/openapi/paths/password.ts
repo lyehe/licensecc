@@ -1,5 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { errorResponse } from "../components.js";
+import { errorResponse, RETRY_AFTER_HEADER } from "../components.js";
 
 const body = (register: boolean) => ({ required: true, content: { "application/json": { schema: {
   type: "object", required: register ? ["email", "password"] : ["password"],
@@ -10,11 +10,16 @@ const body = (register: boolean) => ({ required: true, content: { "application/j
 // check/the batch write. Each verb gets its own map below so neither can claim a code its own
 // handler path cannot emit.
 const signedInResponse = { description: "Signed in with a rotated opaque HttpOnly session cookie. No password/hash is returned." };
+// login, register, reset and complete all answer their 429 with a real retry-after header
+// (portalRateLimit's own fixed-window seconds left). The signed-in password-change action (the POST
+// verb of settings, below) was deliberately left out of that rollout -- it is not one of the auth
+// entry points the UI drives a countdown from -- so it keeps the plain, headerless 429.
+const RATE_LIMITED_NO_HEADER = errorResponse("Per-IP or login-identifier limit reached.", "rate_limited");
 const common = {
   "403": errorResponse("Origin mismatch.", "cross_site_forbidden"),
   "404": errorResponse("Password sign-in disabled.", "not_found"),
   "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
-  "429": errorResponse("Per-IP or login-identifier limit reached.", "rate_limited"),
+  "429": { ...errorResponse("Per-IP or login-identifier limit reached. Answers with a retry-after header giving the exact seconds left in the fixed window.", "rate_limited"), headers: RETRY_AFTER_HEADER },
   "503": errorResponse("Session/database configuration unavailable.", "config_error"),
 };
 const settingsSharedResponses = {
@@ -24,7 +29,7 @@ const settingsSharedResponses = {
 };
 const settingsGetResponses = {
   ...settingsSharedResponses,
-  "200": { description: "Email login identifier, has_password, can_reset, and email_verified flags; no hash.", content: { "application/json": { schema: { type: "object", properties: { data: { type: "object", properties: { email: { type: "string" }, has_password: { type: "boolean" }, can_reset: { type: "boolean" }, email_verified: { type: "boolean" } } } } } } } },
+  "200": { description: "Email login identifier, has_password, can_reset, email_verified, and recovery_available flags; no hash. recovery_available reports only this account's own eligibility for the emailed reset (the same check that endpoint applies to decide whether to send one); it says nothing about whether email delivery is configured -- see the `email` field from GET /portal/v1/auth/providers for that.", content: { "application/json": { schema: { type: "object", properties: { data: { type: "object", properties: { email: { type: "string" }, has_password: { type: "boolean" }, can_reset: { type: "boolean" }, email_verified: { type: "boolean" }, recovery_available: { type: "boolean" } } } } } } } },
   "401": errorResponse("Missing, invalid or expired session.", "unauthorized"),
 };
 const settingsPostResponses = {
@@ -35,7 +40,7 @@ const settingsPostResponses = {
   "403": errorResponse("Origin mismatch or fresh verified sign-in required.", ["cross_site_forbidden", "verified_sign_in_required"]),
   "409": errorResponse("Settings changed concurrently.", "password_change_conflict"),
   "413": common["413"],
-  "429": common["429"],
+  "429": RATE_LIMITED_NO_HEADER,
 };
 const accepted = { description: "Generic verification_requested envelope, including ineligible addresses and delivery failures. No session or account is created.",
   content: { "application/json": { schema: { type: "object", required: ["ok", "code"], properties: { ok: { type: "boolean", const: true }, code: { type: "string", const: "verification_requested" } } } } } };
@@ -54,8 +59,9 @@ export const passwordPaths: LabeledPathFragment = { label: "password", entries: 
   } }],
   ["/portal/v1/auth/password/login", { post: {
     tags: ["auth"], operationId: "authLoginPassword", summary: "Sign in using an email/password credential.", security: [], requestBody: body(true),
-    responses: { "200": signedInResponse, "400": errorResponse("Invalid JSON.", "invalid_json"), "401": errorResponse("Invalid credentials.", "invalid_credentials"), ...common },
-    description: "Requires exact Origin. Wrong password, unknown login and disabled customer return the same denial. Per-IP 30/900s and per-email 10/900s. Session creation atomically checks the verified password hash is still current.",
+    responses: { "200": signedInResponse, "400": errorResponse("Invalid JSON.", "invalid_json"), "401": errorResponse("Invalid credentials.", "invalid_credentials"), ...common,
+      "403": errorResponse("Origin mismatch, or the correct password for a suspended customer.", ["cross_site_forbidden", "account_suspended"]) },
+    description: "Requires exact Origin. Wrong password and unknown login return the same denial. The password is verified before the account status is read, so only the correct password on a suspended (disabled) customer returns account_suspended, without a session. Per-IP 30/900s and per-email 10/900s. Session creation atomically checks the verified password hash is still current.",
   } }],
   ["/portal/v1/auth/password", {
     get: { tags: ["auth"], operationId: "authPasswordSettings", summary: "Read this customer's password settings.", security: [{ sessionCookie: [] }], responses: settingsGetResponses },

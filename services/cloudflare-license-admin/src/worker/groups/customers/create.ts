@@ -6,6 +6,14 @@ import { idempotentReplay, INVALID_IDEMPOTENCY_KEY, readIdempotencyKey } from ".
 import { parseJsonBody } from "../../request.js";
 import { envelope, json } from "../../responses.js";
 
+// Invite mode (the `password` key is absent): hash a fresh, random, never-disclosed secret so the
+// credential row exists and is well-formed but unusable. The customer sets their own password later
+// via the portal's "Forgot your password?" (password-email.ts's reset branch adopts the empty
+// contact email once redeemed). Nothing here is ever returned, logged, or cached.
+function randomInviteSecret(): string {
+  return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 export async function createPortalUser(request: Request, env: Env, actor: Actor, rid: string): Promise<Response> {
   const denied = requireAdmin(actor, rid);
   if (denied) return denied;
@@ -17,14 +25,21 @@ export async function createPortalUser(request: Request, env: Env, actor: Actor,
   const body = input as Record<string, unknown>;
   const email = loginEmail(body.email);
   const name = typeof body.name === "string" ? body.name.trim() : "";
-  if (!email || !name || name.length > 128 || Array.from(name).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) || !validPassword(body.password)) return envelope(rid, "invalid_request", undefined, 400);
-  const scope = `POST:/api/admin/customers:${actor.subject}`;
+  // `password` is optional: absent means Invite. When present it must still pass validPassword --
+  // that includes null, "", and non-strings -- so a present-but-invalid value is always a 400, never
+  // silently treated as an invite.
+  const passwordProvided = body.password !== undefined;
+  if (!email || !name || name.length > 128 || Array.from(name).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) || (passwordProvided && !validPassword(body.password))) return envelope(rid, "invalid_request", undefined, 400);
+  // Invite and Set-password are partitioned into separate idempotency scopes: reusing a key across
+  // modes must never replay the OTHER mode's cached success. It runs as a brand-new request instead,
+  // and correctly reports email_in_use if the first attempt already claimed that email.
+  const scope = `POST:/api/admin/customers:${actor.subject}${passwordProvided ? "" : ":invite"}`;
   const replay = await idempotentReplay(env, scope, key);
   if (replay) return replay;
   const existingEmail = () => env.DB.prepare("SELECT id FROM customers WHERE lower(email) = ? UNION ALL SELECT customer_id AS id FROM portal_passwords WHERE email_lower = ? LIMIT 1").bind(email, email).first();
   if (await existingEmail()) return envelope(rid, "email_in_use", undefined, 409);
   if (!env.DB.batch) return envelope(rid, "mutation_failed", undefined, 500);
-  const passwordHash = await hashPassword(body.password);
+  const passwordHash = await hashPassword(passwordProvided ? (body.password as string) : randomInviteSecret());
   const now = Math.floor(Date.now() / 1000);
   const id = `cust_${crypto.randomUUID()}`;
   const data = { id, name, email: "", login_email: email, status: "active", external_ref: "", created_at: now, updated_at: now };

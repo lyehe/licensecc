@@ -114,10 +114,12 @@ public sealed unsafe class DeviceBoundClient : IDisposable
     internal static Result DecodeCode(int code) => Enum.IsDefined(typeof(Result),code) ? (Result)code : throw new InvalidDataException("Unknown native result.");
     internal static Outcome Decode(int code,Abi.Outcome raw)
     {
-        if(raw.Size!=sizeof(Abi.Outcome) || raw.Version!=1 || raw.Reserved!=0 || raw.RenewalDue>1 ||
+        if(raw.Size!=sizeof(Abi.Outcome) || raw.Version!=1 || raw.RenewalDue>1 ||
             !Enum.IsDefined(typeof(ProviderResult),(int)raw.ProviderResult) || !Enum.IsDefined(typeof(CheckpointResult),(int)raw.CheckpointResult))
             throw new InvalidDataException("Invalid native outcome.");
-        return new Outcome(DecodeCode(code),(ProviderResult)raw.ProviderResult,(CheckpointResult)raw.CheckpointResult,raw.RenewalDue==1,raw.EffectiveTime);
+        // A detail never grants access, so a value newer than this SDK is kept rather than rejected.
+        return new Outcome(DecodeCode(code),(ProviderResult)raw.ProviderResult,(CheckpointResult)raw.CheckpointResult,raw.RenewalDue==1,raw.EffectiveTime)
+            { Detail=(DeviceBoundDenialDetail)raw.DenialDetail };
     }
     /// <summary>Waits for an admitted call, then closes once. Does not save, retire or delete the native identity.</summary>
     public void Dispose() { lock(gate) { if(disposed)return; disposed=true; handle.Dispose(); } }

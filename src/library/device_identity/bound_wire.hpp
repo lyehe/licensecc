@@ -15,12 +15,15 @@ enum class BoundWireKind {
 	authorization_unavailable,
 	registration
 };
+// Why a classified refusal happened; it never changes the kind or grants authority.
+enum class BoundWireDetail { none, device_limit };
 struct BoundAuthorizationInput {
 	std::string client_id, project, public_key_spki, device_label, redirect_uri, state, code_challenge;
 	std::string requested_feature;
 };
 struct BoundWireResponse {
 	BoundWireKind kind = BoundWireKind::request_rejected;
+	BoundWireDetail detail = BoundWireDetail::none;
 	std::string code, request_id, lease;
 	BoundChallenge challenge;
 	std::string attempt_handle, authorization_url, comparison_code;

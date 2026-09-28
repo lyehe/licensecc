@@ -19,6 +19,7 @@ type AssertNoIncompatibleGeneratedBindings<Bindings extends never> = Bindings;
 type WranglerBindings = Pick<Cloudflare.Env,
   | "DB"
   | "DEVICE_OPERATOR"
+  | "WEBHOOK_OPERATOR"
   | "ASSETS"
   | "ENVIRONMENT"
   | "ADMIN_DEV_BEARER_ENABLED"
@@ -34,6 +35,7 @@ type WranglerBindings = Pick<Cloudflare.Env,
 interface RuntimeEnv {
   DB: D1DatabaseLike & { withSession?(mode: "first-primary"): D1DatabaseLike };
   DEVICE_OPERATOR?: Cloudflare.Env["DEVICE_OPERATOR"];
+  WEBHOOK_OPERATOR?: Cloudflare.Env["WEBHOOK_OPERATOR"];
   ASSETS?: { fetch(request: Request): Promise<Response> };
   ENVIRONMENT?: string;
   ADMIN_DEV_BEARER_ENABLED?: string;

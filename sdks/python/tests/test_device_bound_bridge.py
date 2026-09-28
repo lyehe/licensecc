@@ -38,6 +38,7 @@ class FakeApi:
         self.operation_code = Result.OK
         self.provider = ProviderResult.OK
         self.checkpoint = CheckpointResult.NOT_ATTEMPTED
+        self.detail = 0
         self.entered = threading.Event()
         self.release = threading.Event()
         self.block = False
@@ -73,6 +74,7 @@ class FakeApi:
             assert self.release.wait(5), "test did not release native call"
         raw = pointed(outcome, abi.Outcome)
         raw.provider_result, raw.checkpoint_result = self.provider, self.checkpoint
+        raw.denial_detail = self.detail
         return self.operation_code
 
     device_bound_activate = device_bound_authorize
@@ -217,7 +219,7 @@ def test_finalizer_owns_state_not_client_and_is_disabled_at_exit():
     assert api.closed == [123]
 
 
-@pytest.mark.parametrize("field,value", [("version", 2), ("renewal_due", 2), ("reserved", 1),
+@pytest.mark.parametrize("field,value", [("version", 2), ("renewal_due", 2),
                                           ("provider_result", 99), ("checkpoint_result", 99)])
 def test_unknown_native_outcomes_fail_closed(field, value):
     from licensecc.device_bound import _outcome
@@ -227,6 +229,40 @@ def test_unknown_native_outcomes_fail_closed(field, value):
         _outcome(0, raw)
     with pytest.raises(ValueError):
         _outcome(99, abi.Outcome(size=ct.sizeof(abi.Outcome), version=1))
+
+
+def test_denial_detail_reuses_the_former_reserved_slot():
+    # Old and new native libraries share one outcome layout; only the member's meaning changed.
+    assert ct.sizeof(abi.Outcome) == 32
+    assert abi.Outcome.denial_detail.offset == 20
+    assert abi.Outcome.effective_time.offset == 24
+
+
+@pytest.mark.parametrize("value,name", [(0, "NONE"), (1, "DEVICE_LIMIT"), (7, "UNKNOWN_7")])
+def test_denial_detail_is_read_and_unknown_values_never_raise(value, name):
+    from licensecc.device_bound import DenialDetail, _outcome
+    raw = abi.Outcome(size=ct.sizeof(abi.Outcome), version=1, denial_detail=value)
+    outcome = _outcome(Result.CONFLICT, raw)
+    assert outcome.code is Result.CONFLICT
+    assert isinstance(outcome.detail, DenialDetail)
+    assert outcome.detail == value and outcome.detail.name == name
+    assert DenialDetail.NONE == 0 and DenialDetail.DEVICE_LIMIT == 1
+    assert Outcome(Result.BUSY).detail is DenialDetail.NONE
+
+
+def test_client_exposes_a_full_license_as_conflict_with_device_limit():
+    from licensecc.device_bound import DenialDetail
+    api = FakeApi()
+    client, opened = library(api).open_enrollment(config())
+    with client:
+        assert opened.detail is DenialDetail.NONE
+        api.operation_code, api.detail = Result.CONFLICT, 1
+        refused = client.activate()
+        assert refused.code is Result.CONFLICT and refused.detail is DenialDetail.DEVICE_LIMIT
+        api.detail = 7
+        assert client.activate().detail == 7
+        api.operation_code, api.detail = Result.OK, 0
+        assert client.authorize().detail is DenialDetail.NONE
 
 
 @pytest.mark.parametrize("index", range(len(abi.expected_layout())))

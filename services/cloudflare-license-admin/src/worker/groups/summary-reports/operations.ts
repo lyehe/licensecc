@@ -2,6 +2,9 @@ import { accessCounts } from "./access-counts.js";
 import { envelope, json } from "../../responses.js";
 import type { TimeseriesBucket, ExpiringEntitlement } from "../../../shared/api";
 import { verifyAuditChain } from "@licensecc/cloudflare-runtime/d1/audit_digest";
+import { boundTrialDeadlineSql } from "@licensecc/cloudflare-runtime/device/bound_trial";
+import { legacyTrialDeadlineSql } from "@licensecc/cloudflare-runtime/lease/trial_store";
+import { entitlementId } from "@licensecc/licensing-domain/entitlements/contracts";
 import type { Env } from "../../env.js";
 import { envFlag } from "../../support.js";
 import { boundedCursor } from "../../query.js";
@@ -161,6 +164,23 @@ export async function auditVerify(env: Env, requestIdValue: string): Promise<Res
   }
 }
 
+// A grant's effective deadline is normally its stamped valid_until. A trial's clock can end earlier
+// (or, for an activation-basis trial with no valid_until at all, be the ONLY deadline it has); its
+// enforcing rule's own SQL twin computes that clock exactly as the lease/consent path enforces it,
+// clamped to valid_until with the same min(coalesce(valid_until, MAX), trial deadline) discipline the
+// portal's self-service entitlement list uses (never a hand-rolled copy of that clamp). An unstarted
+// activation-basis trial has no trial deadline yet (its rule yields NULL), so that side falls back to
+// the same MAX sentinel: SQLite's min() is NULL if any argument is, and an unknown clock must never
+// hide a stamped valid_until, which the consent page and lease issuer enforce regardless of it. With
+// neither date the result is MAX, which the report's window excludes just as a non-expiring grant.
+const EFFECTIVE_UNTIL_EXPRESSION = `CASE WHEN e.is_trial <> 1 THEN e.valid_until ELSE min(coalesce(e.valid_until, 9007199254740991),
+             coalesce(CASE WHEN e.enforcement_mode = 'device_bound_v1' THEN ${boundTrialDeadlineSql("e", "NULL")} ELSE ${legacyTrialDeadlineSql("e")} END, 9007199254740991)) END`;
+
+// The SELECT list shared by both branches below (kept identical so the UNION ALL output shape and
+// the effective-deadline computation cannot drift between them).
+const EXPIRING_COLUMNS = `e.project AS project, e.feature AS feature, e.license_fingerprint AS license_fingerprint,
+                e.customer_id AS customer_id, c.name AS customer_name, ${EFFECTIVE_UNTIL_EXPRESSION} AS effective_until`;
+
 export async function reportExpiring(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
   const now = Math.floor(Date.now() / 1000);
@@ -174,20 +194,41 @@ export async function reportExpiring(request: Request, env: Env, requestIdValue:
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
   const { limit, cursor } = pagination;
+  // Two branches instead of one full scan of every active row: (a) is the common case and keeps the
+  // pre-existing range seek on idx_entitlements_valid_until (forced with INDEXED BY so an unanalyzed
+  // planner cannot fall back to scanning every active row); it covers every non-trial grant, plus any
+  // trial whose own valid_until (not its trial clock) already lands in the window. (b) is the rare
+  // case: an active trial whose CLOCK lands in the window despite valid_until being NULL or outside
+  // it (an activation-basis trial commonly has no valid_until at all). The two WHERE clauses are
+  // mutually exclusive by construction, so UNION ALL cannot duplicate a row.
   const rows = await env.DB.prepare(
-    `SELECT project, feature, license_fingerprint, customer_id, valid_until
-       FROM entitlements
-      WHERE status = 'active' AND valid_until IS NOT NULL AND valid_until > ? AND valid_until <= ?
-      ORDER BY valid_until ASC, project, feature, license_fingerprint
+    `SELECT project, feature, license_fingerprint, customer_id, customer_name, effective_until
+       FROM (
+         SELECT ${EXPIRING_COLUMNS}
+           FROM entitlements e INDEXED BY idx_entitlements_valid_until
+           LEFT JOIN customers c ON c.id = e.customer_id
+          WHERE e.status = 'active' AND e.valid_until IS NOT NULL AND e.valid_until > ? AND e.valid_until <= ?
+         UNION ALL
+         SELECT ${EXPIRING_COLUMNS}
+           FROM entitlements e
+           LEFT JOIN customers c ON c.id = e.customer_id
+          WHERE e.status = 'active' AND e.is_trial = 1
+            AND (e.valid_until IS NULL OR e.valid_until <= ? OR e.valid_until > ?)
+       )
+      WHERE effective_until IS NOT NULL AND effective_until > ? AND effective_until <= ?
+      ORDER BY effective_until ASC, project, feature, license_fingerprint
       LIMIT ? OFFSET ?`,
-  ).bind(now, horizon, limit + 1, cursor).all<Omit<ExpiringEntitlement, "days_left">>();
+  ).bind(now, horizon, now, horizon, now, horizon, limit + 1, cursor)
+    .all<{ project: string; feature: string; license_fingerprint: string; customer_id: string | null; customer_name: string | null; effective_until: number }>();
   const items: ExpiringEntitlement[] = rows.results.slice(0, limit).map((row) => ({
+    id: entitlementId(row.project, row.feature, row.license_fingerprint),
     project: row.project,
     feature: row.feature,
     license_fingerprint: row.license_fingerprint,
     customer_id: row.customer_id ?? null,
-    valid_until: row.valid_until,
-    days_left: Math.max(1, Math.ceil((row.valid_until - now) / SECONDS_PER_DAY)),
+    customer_name: row.customer_name ?? null,
+    valid_until: row.effective_until,
+    days_left: Math.max(1, Math.ceil((row.effective_until - now) / SECONDS_PER_DAY)),
   }));
   return envelope(requestIdValue, "report_expiring", {
     items,

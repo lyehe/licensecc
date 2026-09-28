@@ -1,10 +1,12 @@
 import type {
+  AdminEntitlementCreateInput,
   EntitlementCreateInput,
   EntitlementPatch,
   EntitlementRecord,
   EntitlementStatus,
+  Policy,
 } from "../../../shared/api";
-import { ENTITLEMENT_BATCH_MAX_IDS } from "../../../shared/api";
+import { MAX_DEVICE_LIMIT } from "../../../shared/api";
 import { dateInputToEpoch, epochToDateInput } from "../../shared/dates";
 import { shortHash } from "../../shared/format";
 
@@ -13,6 +15,7 @@ export type EntitlementAction = "disable" | "reenable" | "revoke";
 export interface EntitlementFilter {
   id?: string;
   customer_id?: string;
+  license_id?: string;
   project: string;
   feature: string;
   status: string;
@@ -31,6 +34,12 @@ export interface EntitlementFormState {
   notes: string;
   customer_id: string;
   license_id: string;
+  /**
+   * Sent only when the operator sets it, and only without a policy (a policy stamps its own). Blank
+   * sends nothing, so a new grant gets 1 and an existing one keeps its stored limit: an upsert never
+   * overwrites a capacity the operator did not set.
+   */
+  max_active_devices: number | "";
 }
 
 export interface EntitlementEditState {
@@ -56,6 +65,7 @@ export const emptyEntitlementForm: EntitlementFormState = {
   notes: "",
   customer_id: "",
   license_id: "",
+  max_active_devices: "",
 };
 
 export const emptyEntitlementEditForm: EntitlementEditState = {
@@ -72,6 +82,7 @@ export function entitlementsPath(filter: EntitlementFilter): string {
   const params = new URLSearchParams();
   if (filter.id) params.set("id", filter.id);
   if (filter.customer_id) params.set("customer_id", filter.customer_id);
+  if (filter.license_id) params.set("license_id", filter.license_id);
   if (filter.project !== "") params.set("project", filter.project);
   if (filter.feature !== "") params.set("feature", filter.feature);
   if (filter.status !== "") params.set("status", filter.status);
@@ -83,7 +94,19 @@ export function entitlementDetailPath(id: string): string {
   return `/api/admin/entitlements/${encodeURIComponent(id)}`;
 }
 
-export function normalizeEntitlementForm(form: EntitlementFormState): EntitlementCreateInput {
+/** A deep link naming the exact entitlement id (from search, or the "Expiring soon" report)
+ * guarantees exactly one row; only then does the list show the "Showing 1 entitlement" banner. */
+export function isSingleEntitlementFilter(filter: Pick<EntitlementFilter, "id">): boolean {
+  return typeof filter.id === "string" && filter.id !== "";
+}
+
+/** "Show all" drops the deep link's identity filters (id, customer_id, license_id) and keeps only
+ * the plain browsing filters. */
+export function filterAfterShowAll(filter: EntitlementFilter): EntitlementFilter {
+  return { project: filter.project, feature: filter.feature, status: filter.status };
+}
+
+export function normalizeEntitlementForm(form: EntitlementFormState): AdminEntitlementCreateInput {
   return {
     enforcement_mode: form.enforcement_mode,
     project: form.project,
@@ -96,7 +119,33 @@ export function normalizeEntitlementForm(form: EntitlementFormState): Entitlemen
     notes: parseNotes(form.notes),
     customer_id: parseNullableIdentifier(form.customer_id, "customer_id"),
     license_id: parseNullableIdentifier(form.license_id, "license_id"),
+    // An upsert never writes capacity unless asked: blank keeps an existing grant's stored limit.
+    ...(form.max_active_devices === "" ? {} : { max_active_devices: parseBoundedInteger(form.max_active_devices, "max_active_devices", 1, MAX_DEVICE_LIMIT) }),
   };
+}
+
+/** Whether a device limit is a whole number of devices from 1 to MAX_DEVICE_LIMIT. */
+export function isDeviceLimit(value: number): boolean {
+  return Number.isInteger(value) && value >= 1 && value <= MAX_DEVICE_LIMIT;
+}
+
+export const DEVICE_LIMIT_RULE = "Enter a whole number of devices from 1 to 1,000,000.";
+
+/** What a policy grants: a floating policy a seat pool, any other a device limit. */
+export function policyGrant(policy: Pick<Policy, "pool_size" | "max_active_devices">): { label: "Seats" | "Device limit"; count: number } {
+  return policy.pool_size > 0 ? { label: "Seats", count: policy.pool_size } : { label: "Device limit", count: policy.max_active_devices };
+}
+
+/** "{name} · {n} devices · {project}", or "{n} seats" for a floating policy. */
+export function policyOptionLabel(policy: Pick<Policy, "name" | "project" | "pool_size" | "max_active_devices">): string {
+  const grant = policyGrant(policy);
+  const unit = grant.label === "Seats" ? "seat" : "device";
+  return `${policy.name} · ${grant.count} ${unit}${grant.count === 1 ? "" : "s"} · ${policy.project}`;
+}
+
+/** A grant can only be stamped from a policy of its own project, so only those are offered. */
+export function policiesForProject<T extends Pick<Policy, "project">>(policies: readonly T[], project: string): T[] {
+  return policies.filter((policy) => policy.project === project);
 }
 
 export function normalizeCreateFromPolicy(form: EntitlementFormState): EntitlementCreateInput & { policy_id: string } {
@@ -215,17 +264,16 @@ export function disableEntitlementConfirm(item: { project: string; feature: stri
   return `Disable the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). Verification and downloads stop until it is re-enabled.`;
 }
 
-export function batchPath(): string {
-  return "/api/admin/entitlements/batch";
+/** Common reasons an operator disables a license; presets fill the reason field and leave it editable. */
+export const ENTITLEMENT_DISABLE_REASON_PRESETS: readonly string[] = ["Payment failed", "Customer request", "Fraud review"];
+
+/** The exact phrase an operator must type to confirm revoking `count` entitlement(s). */
+export function revokeTypedConfirmation(count: number): string {
+  return `REVOKE ${count}`;
 }
 
-export const entitlementBatchSelectionNotice = `Select up to ${ENTITLEMENT_BATCH_MAX_IDS} entitlements per batch.`;
-
-// Keep the page-level selectors and the server contract aligned. This helper
-// preserves order so the visible first loaded rows are the rows selected by
-// the header checkbox; it is intentionally not a silent request truncator.
-export function boundedBatchSelection(ids: ReadonlyArray<string>): string[] {
-  return [...new Set(ids)].slice(0, ENTITLEMENT_BATCH_MAX_IDS);
+export function batchPath(): string {
+  return "/api/admin/entitlements/batch";
 }
 
 export interface BatchRowResult {
@@ -258,6 +306,33 @@ export function summarizeBatchResults(results: ReadonlyArray<BatchRowResult>): s
   return parts.join(", ");
 }
 
+const ACTION_NAMES: Readonly<Record<EntitlementAction, string>> = { disable: "Disable", reenable: "Reenable", revoke: "Revoke" };
+
+/** Why a row of a finished batch was not changed, in words; any other code reads as "not changed". */
+function batchOutcomeWords(code: string): string {
+  if (code === "revoked_entitlement_is_terminal") return "already revoked";
+  if (code === "invalid_entitlement_id") return "with an invalid ID";
+  if (code === "not_found") return "not found";
+  if (code === "mutation_failed") return "failed";
+  if (code === "stale_transition") return "changed meanwhile";
+  return "not changed";
+}
+
+/** The operator's sentence for a finished batch: how many rows changed and why the others did not. */
+export function batchResultSentence(action: EntitlementAction, results: ReadonlyArray<BatchRowResult>): string {
+  const counts = new Map<string, number>();
+  for (const row of results) {
+    if (!row.ok) counts.set(batchOutcomeWords(row.code), (counts.get(batchOutcomeWords(row.code)) ?? 0) + 1);
+  }
+  const parts = [`${results.filter((row) => row.ok).length} done`, ...[...counts].map(([words, count]) => `${count} ${words}`)];
+  return `${ACTION_NAMES[action]} finished: ${parts.join(", ")}.`;
+}
+
+/** A stale save of the entitlement editor: the entitlement was refreshed and the draft kept. */
+export const ENTITLEMENT_RELOADED_AFTER_STALE = "This license (entitlement) changed after you opened it; its current values were refreshed. Check your changes and save again.";
+/** A stale save whose refresh then failed: nothing was refreshed, so the draft still meets old values. */
+export const ENTITLEMENT_NOT_RELOADED_AFTER_STALE = "This license (entitlement) changed after you opened it, and its current values could not be refreshed. Use Retry to refresh the list before you save again.";
+
 export function releaseSeatsPath(id: string): string {
   return `/api/admin/entitlements/${encodeURIComponent(id)}/release-seats`;
 }
@@ -268,6 +343,8 @@ export function entitlementFormErrors(form: EntitlementEditState | EntitlementFo
     if (form.project.trim() === "" || form.project.length > 127 || /[=\n\r\0]/.test(form.project)) errors.project = "Enter a project of 1–127 characters, without line breaks or =.";
     if (form.feature.trim() === "" || form.feature.length > 15 || /[=\n\r\0]/.test(form.feature)) errors.feature = "Enter a feature of 1–15 characters, without line breaks or =.";
     if (!/^[0-9a-fA-F]{64}$/.test(form.license_fingerprint)) errors.license_fingerprint = "Enter the full 64-character hexadecimal license fingerprint.";
+    // A selected policy stamps its own device limit (the field is read-only then); blank sends none.
+    if (form.policy_id === "" && form.max_active_devices !== "" && !isDeviceLimit(form.max_active_devices)) errors.max_active_devices = DEVICE_LIMIT_RULE;
   }
   if (form.device_hash !== "" && !/^[0-9a-fA-F]{64}$/.test(form.device_hash)) errors.device_hash = "Enter 64 hexadecimal characters or leave this blank.";
   if (!Number.isInteger(form.assertion_ttl_seconds) || form.assertion_ttl_seconds < 1 || form.assertion_ttl_seconds > 3600) errors.assertion_ttl_seconds = "Enter a whole number from 1 to 3600 seconds.";

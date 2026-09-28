@@ -5,7 +5,7 @@ type UnknownRecord = Record<string, unknown>;
 
 export type MutationParseResult<T> =
   | { kind: "success"; code: string; requestId: string; data: T }
-  | { kind: "failure"; code: string; requestId: string }
+  | { kind: "failure"; code: string; requestId: string; data?: unknown }
   | { kind: "invalid" };
 
 /**
@@ -33,7 +33,7 @@ const mutationAuthFailures: readonly MutationFailureRule[] = [
 const malformedBodyFailure: readonly MutationFailureRule[] = [{ status: 413, codes: ["body_too_large"] }];
 const noDefinitiveFailure: MutationFailurePolicy = { initial: [], replay: [] };
 
-function documentedMutationPolicy(...initial: readonly MutationFailureRule[]): MutationFailurePolicy {
+export function documentedMutationPolicy(...initial: readonly MutationFailureRule[]): MutationFailurePolicy {
   return {
     // These failures are only conclusive for the original request. A replay
     // happens after an unknown write may already have committed, so even a
@@ -62,7 +62,7 @@ export const mutationFailurePolicies = {
   entitlementPatch: documentedMutationPolicy(
     { status: 400, codes: ["invalid_entitlement_id", ...invalidRequest] },
     { status: 404, codes: ["not_found"] },
-    { status: 409, codes: ["revoked_entitlement_is_terminal"] },
+    { status: 409, codes: ["revoked_entitlement_is_terminal", "capacity_in_use", "stale_transition"] },
   ),
   entitlementTransition: {
     disable: documentedMutationPolicy(
@@ -145,10 +145,10 @@ export const mutationFailurePolicies = {
     ),
   },
   webhookCreate: documentedMutationPolicy(
-    { status: 400, codes: [...invalidRequest, "invalid_url"] },
+    { status: 400, codes: [...invalidRequest, "invalid_url", "invalid_event_types"] },
   ),
   webhookPatch: documentedMutationPolicy(
-    { status: 400, codes: [...invalidRequest, "invalid_url"] },
+    { status: 400, codes: [...invalidRequest, "invalid_url", "invalid_event_types"] },
     { status: 404, codes: ["not_found"] },
   ),
   webhookTransition: {
@@ -334,7 +334,7 @@ export function parseMutationResponse<T>(
     typeof envelope.__httpStatus === "number" &&
     policy[phase].some((rule) => rule.status === envelope.__httpStatus && rule.codes.includes(typeof envelope.code === "string" ? envelope.code : ""));
   if (envelope !== null && envelope.ok === false && documentedFailure && nonEmptyString(envelope.code) && nonEmptyString(envelope.request_id)) {
-    return { kind: "failure", code: envelope.code, requestId: envelope.request_id };
+    return { kind: "failure", code: envelope.code, requestId: envelope.request_id, ...(envelope.data === undefined ? {} : { data: envelope.data }) };
   }
   return { kind: "invalid" };
 }
@@ -754,7 +754,7 @@ export function hasPlanProjectionApplyData(value: unknown): boolean {
 
 export function hasEventListData(value: unknown): boolean {
   const data = record(value);
-  return data !== null && Array.isArray(data.items) && data.items.every((item) => {
+  return data !== null && cursorField(data) && Array.isArray(data.items) && data.items.every((item) => {
     const row = record(item);
     return row !== null && nonNegativeIntegerField(row, "id") && enumField(row, "event_type", ["create", "update", "disable", "reenable", "revoke", "revoked-override", "upsert"] as const) && stringField(row, "project") && stringField(row, "feature") && stringField(row, "license_fingerprint") && enumField(row, "status", ENTITLEMENT_STATUSES) && nonNegativeIntegerField(row, "revocation_seq") && stringField(row, "actor") && stringField(row, "actor_type") && stringField(row, "source") && stringField(row, "request_id") && typeof row.reason === "string" && typeof row.detail === "string" && nonNegativeIntegerField(row, "created_at");
   });
@@ -823,8 +823,8 @@ export function hasExpiringListData(value: unknown): boolean {
   const data = record(value);
   return data !== null && cursorField(data) && Array.isArray(data.items) && data.items.every((item) => {
     const row = record(item);
-    return row !== null && stringField(row, "project") && stringField(row, "feature") && stringField(row, "license_fingerprint") &&
-      nullableStringField(row, "customer_id") && nonNegativeIntegerField(row, "valid_until") && integerInRangeField(row, "days_left", 1, 365_250);
+    return row !== null && stringField(row, "id") && stringField(row, "project") && stringField(row, "feature") && stringField(row, "license_fingerprint") &&
+      nullableStringField(row, "customer_id") && nullableStringField(row, "customer_name") && nonNegativeIntegerField(row, "valid_until") && integerInRangeField(row, "days_left", 1, 365_250);
   });
 }
 

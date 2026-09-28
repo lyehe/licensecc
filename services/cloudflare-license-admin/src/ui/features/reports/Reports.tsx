@@ -3,10 +3,12 @@ import React, { useEffect, useState } from "react";
 import type { NavigationTarget } from "../../app/types";
 import type { ExpiringEntitlement } from "../../../shared/api";
 import { ReadNotice } from "../../shared/ReadNotice";
-import { api, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
+import { api, parseExactApiSuccess } from "../../shared/api";
+import { apiFailureFeedback, codeFeedback } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { DenialRateChart, LineAreaChart } from "../../shared/charts";
 import { useOperatorControls } from "../../shared/controls";
-import { formatEpoch, shortHash } from "../../shared/format";
+import { formatUtcDate, shortHash } from "../../shared/format";
 import { hasExpiringListData, hasReportData } from "../../shared/mutationGuards";
 import { isRetryableAppendFailure, pageAppendError, withCursor } from "../../shared/pagination";
 import { useRequestFence } from "../../shared/requestFence";
@@ -31,14 +33,14 @@ interface ExpiringData {
 
 export function Reports({ active, onNavigate }: { active: boolean; onNavigate: (target: NavigationTarget) => void }): React.ReactElement | null {
   const [retryRevision, setRetryRevision] = useState(0);
-  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<OperatorFeedback | null>(null);
   const [reportLoading, setReportLoading] = useState(true);
-  const [expiringRead, setExpiringRead] = useState<{ days: number; loading: boolean; error: string | null }>({ days: 30, loading: true, error: null });
+  const [expiringRead, setExpiringRead] = useState<{ days: number; loading: boolean; error: OperatorFeedback | null }>({ days: 30, loading: true, error: null });
   const [reportSnapshot, setReport] = useState<Report | null>(null);
   const [expiringWithinDays, setExpiringWithinDays] = useState(30);
   const [expiringSnapshot, setExpiring] = useState<ExpiringEntitlement[]>([]);
   const [expiringCursorSnapshot, setExpiringCursor] = useState<string | null>(null);
-  const { busy: requestBusy, operationLocked, setMessage } = useOperatorControls();
+  const { busy: requestBusy, operationLocked, setFeedback } = useOperatorControls();
   const busy = requestBusy || operationLocked;
   const { timeseries, timeseriesRange, setTimeseriesRange, timeseriesLoading, timeseriesError, retryTimeseries } = useUsageTimeseries(active);
   const reportFence = useRequestFence(active ? "report:active" : "report:inactive");
@@ -56,9 +58,9 @@ export function Reports({ active, onNavigate }: { active: boolean; onNavigate: (
       if (parsed !== null) {
         if (reportFence.settle(ticket)) setReport(parsed.data);
       }
-      else { setReportError(apiFailureMessage(response)); setMessage(apiFailureMessage(response)); }
+      else setReportError(apiFailureFeedback(response));
     })();
-  }, [active, reportFence, retryRevision, setMessage]);
+  }, [active, reportFence, retryRevision]);
 
   async function refreshExpiring(): Promise<void> {
     const ticket = expiringFence.begin();
@@ -73,8 +75,7 @@ export function Reports({ active, onNavigate }: { active: boolean; onNavigate: (
         setExpiringCursor(parsed.data.next_cursor ?? null);
       }
     } else {
-      setExpiringRead({ days: expiringWithinDays, loading: false, error: apiFailureMessage(response) });
-      setMessage(apiFailureMessage(response));
+      setExpiringRead({ days: expiringWithinDays, loading: false, error: apiFailureFeedback(response) });
     }
   }
 
@@ -96,11 +97,11 @@ export function Reports({ active, onNavigate }: { active: boolean; onNavigate: (
         const nextCursor = parsed.data.next_cursor ?? null;
         const appendError = pageAppendError(expiringSnapshot, parsed.data.items, (item) => `${item.project}\u0000${item.feature}\u0000${item.license_fingerprint}`);
         if (appendError !== null) {
-          setMessage(`invalid_api_response (${appendError})`);
+          setFeedback(codeFeedback(appendError));
           setExpiringCursor((previous) => expiringFence.isLoadMoreCurrent(ticket) && previous === cursor ? null : previous);
           expiringFence.retireLoadMore(ticket);
         } else if (!expiringFence.acceptsNextCursor(ticket, nextCursor)) {
-          setMessage("invalid_api_response (repeated_cursor)");
+          setFeedback(codeFeedback("repeated_cursor"));
           setExpiringCursor((previous) => expiringFence.isLoadMoreCurrent(ticket) && previous === cursor ? null : previous);
           expiringFence.retireLoadMore(ticket);
         } else {
@@ -110,7 +111,7 @@ export function Reports({ active, onNavigate }: { active: boolean; onNavigate: (
           expiringFence.finishLoadMore(ticket, true, nextCursor);
         }
       } else {
-        setMessage(apiFailureMessage(response));
+        setFeedback(apiFailureFeedback(response));
         if (!isRetryableAppendFailure(response)) {
           setExpiringCursor((previous) => expiringFence.isLoadMoreCurrent(ticket) && previous === cursor ? null : previous);
           expiringFence.retireLoadMore(ticket);
@@ -130,21 +131,21 @@ export function Reports({ active, onNavigate }: { active: boolean; onNavigate: (
     <section className="reportsTab">
       <ReadNotice label="reports" loading={reportLoading} error={reportError} hasData={report !== null} onRetry={() => setRetryRevision((value) => value + 1)} />
       <section className="grid metrics reportCards">
-        <div><span>Customers total</span><strong>{report?.customers.total ?? "—"}</strong></div><div><span>Customers active</span><strong>{report?.customers.active ?? "—"}</strong></div><div><span>Customers disabled</span><strong>{report?.customers.disabled ?? "—"}</strong></div><div><span>Active account tokens</span><strong>{report?.account_tokens.active ?? "—"}</strong></div>
+        <div><span>Customers total</span><strong>{report?.customers.total ?? "—"}</strong></div><div><span>Customers active</span><strong>{report?.customers.active ?? "—"}</strong></div><div><span>Customers suspended</span><strong>{report?.customers.disabled ?? "—"}</strong></div><div><span>Active account tokens</span><strong>{report?.account_tokens.active ?? "—"}</strong></div>
         <div><span>Licenses total</span><strong>{report?.licenses.total ?? "—"}</strong></div><div><span>Fulfillment processed</span><strong>{report?.fulfillment.processed ?? "—"}</strong></div><div><span>Fulfillment stale accepted</span><strong>{report?.fulfillment.stale_accepted ?? "—"}</strong></div><div><span>Order events 24h</span><strong>{report?.fulfillment.events_24h ?? "—"}</strong></div><div><span>Order events 7d</span><strong>{report?.fulfillment.events_7d ?? "—"}</strong></div><div><span>Customer suspensions 7d</span><strong>{report?.customer_suspensions_7d ?? "—"}</strong></div>
       </section>
       <section className="chartPanels"><ReadNotice label="usage trends" loading={timeseriesLoading} error={timeseriesError} hasData={timeseries !== null} onRetry={retryTimeseries} />
-        <div className="rangeSelector" role="group" aria-label="Time-series range"><span className="muted">Window</span>{TIMESERIES_RANGE_DAYS.map((days) => <button key={days} type="button" className={timeseriesRange === days ? "active" : ""} onClick={() => setTimeseriesRange(days)}>last {days}d</button>)}</div>
+        <div className="rangeSelector" role="group" aria-label="Time-series range"><span className="muted">Window</span>{TIMESERIES_RANGE_DAYS.map((days) => <button key={days} type="button" aria-pressed={timeseriesRange === days} className={timeseriesRange === days ? "active" : ""} onClick={() => setTimeseriesRange(days)}>last {days}d</button>)}</div>
         <div className="chartGrid">
-          <div className="chartCard"><h3>Checkouts vs denials</h3><LineAreaChart checkouts={(timeseries?.buckets ?? []).map((bucket) => bucket.checkouts)} denials={(timeseries?.buckets ?? []).map((bucket) => bucket.denials)} label={`Checkouts (filled) versus denials over the last ${timeseriesRange} days`} /><div className="chartLegend"><span className="legend checkoutsLegend">checkouts</span><span className="legend denialsLegend">denials</span></div></div>
-          <div className="chartCard"><h3>Denial-rate trend</h3><DenialRateChart rates={(timeseries?.buckets ?? []).map((bucket) => bucket.denial_rate)} label={`Denial rate (denials over checkout attempts) over the last ${timeseriesRange} days`} /><p className="muted chartHint">Review denied checkouts to identify capacity or access problems.</p></div>
+          <div className="chartCard"><h3>Checkouts vs denials</h3><LineAreaChart checkouts={(timeseries?.buckets ?? []).map((bucket) => bucket.checkouts)} denials={(timeseries?.buckets ?? []).map((bucket) => bucket.denials)} bucketStarts={(timeseries?.buckets ?? []).map((bucket) => bucket.start)} unit="checkouts / denials per day" label={`Checkouts (filled) versus denials over the last ${timeseriesRange} days`} /><div className="chartLegend"><span className="legend checkoutsLegend">checkouts</span><span className="legend denialsLegend">denials</span></div></div>
+          <div className="chartCard"><h3>Denial-rate trend</h3><DenialRateChart rates={(timeseries?.buckets ?? []).map((bucket) => bucket.denial_rate)} bucketStarts={(timeseries?.buckets ?? []).map((bucket) => bucket.start)} label={`Denial rate (denials over checkout attempts) over the last ${timeseriesRange} days`} /><p className="muted chartHint">Review denied checkouts to identify capacity or access problems.</p></div>
         </div>
       </section>
       <section className="tablePane full expiringPanel">
-        <div className="expiringHead"><h2>Expiring soon</h2><div className="rangeSelector" role="group" aria-label="Expiring horizon">{[7, 30, 90].map((days) => <button key={days} type="button" className={expiringWithinDays === days ? "active" : ""} onClick={() => setExpiringWithinDays(days)}>{days}d</button>)}</div></div>
+        <div className="expiringHead"><h2>Expiring soon</h2><div className="rangeSelector" role="group" aria-label="Expiring horizon">{[7, 30, 90].map((days) => <button key={days} type="button" aria-pressed={expiringWithinDays === days} className={expiringWithinDays === days ? "active" : ""} onClick={() => setExpiringWithinDays(days)}>{days}d</button>)}</div></div>
         <ReadNotice label="expiring access" loading={expiringRead.days !== expiringWithinDays || expiringRead.loading} error={expiringRead.days === expiringWithinDays ? expiringRead.error : null} hasData={expiringFence.isSettled()} onRetry={() => void refreshExpiring()} />
         {!expiringFence.isSettled() ? null : expiring.length === 0 ? <p className="muted">No active entitlements expire within {expiringWithinDays} days.</p> : (
-          <div className="tableScroll" role="region" aria-label="Expiring access records" tabIndex={0}><table><thead><tr><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Customer</th><th>Expires</th><th>Days left</th><th></th></tr></thead><tbody>{expiring.map((row) => <tr key={`${row.project}/${row.feature}/${row.license_fingerprint}`} className={row.days_left <= 7 ? "expiringSoonRow" : ""}><td>{row.project}</td><td>{row.feature}</td><td><code>{shortHash(row.license_fingerprint)}</code></td><td>{row.customer_id ?? "-"}</td><td>{formatEpoch(row.valid_until)}</td><td><span className={`daysLeft ${row.days_left <= 7 ? "urgent" : ""}`}>{row.days_left}</span></td><td className="actions"><button type="button" disabled={busy || operationLocked} onClick={() => onNavigate({ tab: "entitlements", filter: { project: row.project, feature: row.feature, status: "" } })}>View</button></td></tr>)}</tbody></table></div>
+          <div className="tableScroll" role="region" aria-label="Expiring access records" tabIndex={0}><table><thead><tr><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Customer</th><th>Expires</th><th>Days left</th><th></th></tr></thead><tbody>{expiring.map((row) => <tr key={row.id} className={row.days_left <= 7 ? "expiringSoonRow" : ""}><td>{row.project}</td><td>{row.feature}</td><td><code>{shortHash(row.license_fingerprint)}</code></td><td>{row.customer_name ?? row.customer_id ?? "-"}</td><td>{formatUtcDate(row.valid_until)}</td><td><span className={`daysLeft ${row.days_left <= 7 ? "urgent" : ""}`}>{row.days_left}</span></td><td className="actions"><button type="button" disabled={busy || operationLocked} onClick={() => onNavigate({ tab: "entitlements", filter: { id: row.id, customer_id: row.customer_id ?? "", project: "", feature: "", status: "" } })}>View</button></td></tr>)}</tbody></table></div>
         )}
         <div className="tableFooter"><span className="muted">{expiringFence.isSettled() ? `${expiring.length} shown` : ""}</span>{expiringCursor !== null && <button type="button" disabled={busy || operationLocked} onClick={() => void loadMoreExpiring()}>Load more</button>}</div>
       </section>

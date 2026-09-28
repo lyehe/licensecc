@@ -91,11 +91,16 @@ are documented in the [enrollment contract](../../doc/api/device_enrollment.rst)
 These APIs and local Worker integration tests do not establish production
 readiness; see the maintained [release conditions](../../doc/operations/production-readiness.md).
 
-Administrators can provision password accounts from the admin console's
-**Customers → Add user** action when both services share D1. Customers sign in
-with their login email and initial password, then change the password in
-Account. Provisioning sends no email, grants no licenses, and leaves the email
-unverified. Password login must be enabled in the portal configuration.
+Administrators can provision portal accounts from the admin console's
+**Customers → Add user** action when both services share D1. Add user invites
+by default, and an invited account has no usable password: the customer sets
+one by using "Forgot your password?" in the portal, which requires portal
+email delivery and verifies the address in the process. When the portal
+cannot send email, the admin instead chooses "Set an initial password" and
+shares it with the customer through a private channel; the customer signs in
+with it and changes it in Account. Provisioning itself sends no email and
+grants no licenses. Password login must be enabled in the portal
+configuration.
 
 ## Customer interface
 
@@ -138,8 +143,10 @@ From the repository root after `npm ci`, create the ignored
 live configuration exists. Set the intended account/Worker name, environment,
 shared D1 database ID, exact `PORTAL_PUBLIC_ORIGIN`, matching `BACKEND_ORIGIN`,
 and `DEVICE_CONSENT` service target. Configure session peppers and the chosen
-sign-in method as described below; the example is not a complete live setup.
-Keep actual configuration and secrets out of version control.
+sign-in method as described below, and optionally a
+[support contact](#suspended-accounts-and-the-support-contact); the example is
+not a complete live setup. Keep actual configuration and secrets out of version
+control.
 
 From the repository root in PowerShell, build the production UI and Worker:
 
@@ -271,8 +278,32 @@ existing customer's email matches an unlinked provider, the user must first
 sign in by the existing method and connect the provider from Account. During
 migration, retain working email delivery or use the existing protected
 operator bootstrap runbook for an authorized recovery; do not enable a public
-bootstrap bypass. Provider unlinking is deliberately unavailable in this
-slice, avoiding accidental removal of the last sign-in method.
+bootstrap bypass.
+
+Customers can disconnect a provider from Account
+(`POST /portal/v1/auth/identities/unlink`). It is allowed only while another
+sign-in method is usable now: a password while `PORTAL_PASSWORD_ENABLED="1"`,
+the other provider's identity while that provider is configured, or a contact
+email while email codes can be sent. Email codes need both email delivery
+(`PORTAL_EMAIL_API_KEY`, `PORTAL_EMAIL_FROM`, and an HTTPS
+`PORTAL_EMAIL_API_BASE` if you set one) and `PORTAL_OTP_PEPPERS`. The
+providers endpoint's `email` flag reports delivery only, so it can be true
+while email codes are not usable. A method switched off in configuration does
+not count. Otherwise the answer is `409 last_sign_in_method`, and the portal
+asks the customer to set up another way to sign in first. The rule, a
+still-live session and the delete are one conditional statement, so two tabs
+cannot disconnect the last two methods at once. A tab that loses such a race
+gets `409` (no other method remains), `404` (the provider was already
+disconnected) or `401` (the other tab's unlink signed it out). Disconnecting signs out the customer's other browser
+sessions that signed in with Google or GitHub (sessions do not record which of
+the two); the current session and password or email-code sessions stay signed
+in.
+
+Unlink judges only the configuration at the moment of each request. Turning a
+method off later can strand customers who kept only that method: for example
+setting `PORTAL_PASSWORD_ENABLED="0"`, removing a provider's client ID or
+secret, or removing email delivery or `PORTAL_OTP_PEPPERS`. Before you turn a
+method off, make sure the customers who rely on it have another way in.
 
 Provider setup references: [Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect)
 and [GitHub OAuth web flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps).
@@ -316,11 +347,14 @@ and no licenses are granted. Existing accounts are never claimed or merged by
 registration. Existing OAuth customers can set a password from Account after a
 recent verified sign-in.
 
-Forgot password sends a link only for an active password account whose login
-email matches its verified contact address. Legacy/admin-created credentials
-with an unverified login email retain their existing login but cannot use email
-recovery; connect a provider or use the protected operator recovery procedure.
-This migration deliberately does not mark historical emails as verified.
+Forgot password sends a link for an active password account whose login
+email matches its verified contact address, or whose contact email is still
+empty -- a legacy or admin-created credential -- as long as no other customer
+has already verified that address; redeeming the link also sets it as the
+account's verified contact. This migration deliberately does not mark
+historical emails as verified. An address another customer already verified
+is refused with the same generic response; connect a provider or use the
+protected operator recovery procedure instead.
 
 Links expire after 15 minutes and are single-use. The random token is hashed in
 D1, placed in the link fragment (not query string), and immediately removed
@@ -347,3 +381,36 @@ Before deployment, apply the migration, verify the billing/CPU configuration,
 and test registration, sign-out/login, password changes, and provider recovery
 on staging. The local browser tests mock API responses; Worker integration
 tests separately exercise hashing, database ownership, and session rotation.
+
+## Suspended accounts and the support contact
+
+Disabling a customer in the admin console (status `disabled`) suspends their
+portal account. The customer is not notified; the portal says so only after
+they prove who they are:
+
+- Password sign-in verifies the password first, with the same work for every
+  login. A wrong password gets the usual `401 invalid_credentials`, suspended
+  or not. Only the correct password on a suspended account gets
+  `403 account_suspended`, and no session is issued.
+- Google or GitHub sign-in through an identity already linked to a suspended
+  customer returns to the portal with `auth_error=account_suspended` and no
+  session.
+- Email-code requests stay silent: a suspended address gets the same response
+  as an unknown one, and no code is sent.
+
+The portal then shows "This account is suspended." followed by a support
+contact. Set the optional `PORTAL_SUPPORT_CONTACT` variable to an `https:` URL
+or one `mailto:` address, for example `mailto:support@example.com`. The
+providers endpoint publishes it as `support`, and the portal links it as
+"Contact support" wherever its sign-in and app-connection messages tell a
+customer to contact someone. The seat message "All seats are in use — release
+one or ask your administrator." stays unlinked on purpose. A URL containing a
+user name or password, a `mailto:` with several addresses or a `?` query, any
+other scheme (`http:`, `javascript:` and so on), a relative path, or an empty
+value counts as unset, and the portal says "Contact your administrator"
+instead. The value is public configuration, not a secret.
+
+Disabling is also the first step of deleting an account. The portal has no
+delete action; follow the operator runbook
+[Delete a customer account](../../doc/operations/customer-account-deletion.md),
+which clears the customer's personal data and keeps the audit rows.

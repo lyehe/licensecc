@@ -1,6 +1,8 @@
 import type { Dispatch, SetStateAction } from "react";
 
-import { api, apiFailureMessage, parseExactApiSuccess, type ExactUiApiSuccess, type UiApiEnvelope } from "./api";
+import { api, parseExactApiSuccess, type ExactUiApiSuccess, type UiApiEnvelope } from "./api";
+import { apiFailureFeedback, codeFeedback } from "./messages";
+import type { OperatorFeedback } from "./operatorFeedback";
 import type { RequestFence } from "./requestFence";
 import { csvExportPath, withCursor } from "./urls";
 
@@ -42,7 +44,7 @@ export async function loadMore<T>(
   currentItems: readonly T[],
   setItems: Dispatch<SetStateAction<T[]>>,
   setCursor: Dispatch<SetStateAction<string | null>>,
-  setMessage: Dispatch<SetStateAction<string>>,
+  setFeedback: (feedback: OperatorFeedback) => void,
   dataGuard: (value: unknown) => boolean,
   expectedCode: string,
   fence: RequestFence,
@@ -66,11 +68,11 @@ export async function loadMore<T>(
       const nextCursor = parsed.data.next_cursor ?? null;
       const appendError = pageAppendError(currentItems, parsed.data.items, identity);
       if (appendError !== null) {
-        setMessage("invalid_api_response (duplicate_page_item)");
+        setFeedback(codeFeedback("duplicate_page_item"));
         setCursor((previous) => fence.isLoadMoreCurrent(ticket) && previous === cursor ? null : previous);
         fence.retireLoadMore(ticket);
       } else if (!fence.acceptsNextCursor(ticket, nextCursor)) {
-        setMessage("invalid_api_response (repeated_cursor)");
+        setFeedback(codeFeedback("repeated_cursor"));
         setCursor((previous) => fence.isLoadMoreCurrent(ticket) && previous === cursor ? null : previous);
         fence.retireLoadMore(ticket);
       } else {
@@ -80,7 +82,7 @@ export async function loadMore<T>(
         fence.finishLoadMore(ticket, true, nextCursor);
       }
     } else {
-      setMessage(apiFailureMessage(response));
+      setFeedback(apiFailureFeedback(response));
       if (!isRetryableAppendFailure(response)) {
         setCursor((previous) => fence.isLoadMoreCurrent(ticket) && previous === cursor ? null : previous);
         fence.retireLoadMore(ticket);
@@ -94,7 +96,7 @@ export async function loadMore<T>(
 export type ExactPagedRead<T> =
   | { kind: "success"; items: T[] }
   | { kind: "stale" }
-  | { kind: "failure"; message: string };
+  | { kind: "failure"; feedback: OperatorFeedback };
 
 /**
  * Selector controls must not silently expose only the first server page.  Read
@@ -123,19 +125,19 @@ export async function loadAllExactPages<T>(
     }
     const parsed: ExactUiApiSuccess<{ items: T[]; next_cursor: string | null }> | null = parseExactApiSuccess<{ items: T[]; next_cursor: string | null }>(response, expectedCode, dataGuard);
     if (parsed === null) {
-      return { kind: "failure", message: apiFailureMessage(response) };
+      return { kind: "failure", feedback: apiFailureFeedback(response) };
     }
     for (const item of parsed.data.items) {
       const id = identity(item);
       if (id === "" || identities.has(id)) {
-        return { kind: "failure", message: "invalid_api_response (duplicate_page_item)" };
+        return { kind: "failure", feedback: codeFeedback("duplicate_page_item") };
       }
       identities.add(id);
       items.push(item);
     }
     cursor = parsed.data.next_cursor ?? null;
     if (cursor !== null && (cursors.has(cursor) || !cursors.add(cursor))) {
-      return { kind: "failure", message: "invalid_api_response (repeated_cursor)" };
+      return { kind: "failure", feedback: codeFeedback("repeated_cursor") };
     }
   } while (cursor !== null);
   // Selector loads never expose a page cursor, but they still mark their
@@ -146,17 +148,53 @@ export async function loadAllExactPages<T>(
   return { kind: "success", items };
 }
 
+export type ExactFirstPageRead<T> =
+  | { kind: "success"; items: T[]; more: boolean }
+  | { kind: "stale" }
+  | { kind: "failure"; feedback: OperatorFeedback };
+
+/**
+ * A typeahead reads one bounded page per search and says whether more matched, rather than
+ * walking every page; the operator narrows the search instead. The same fence and duplicate
+ * rules as a full selector read apply, so an older search can never replace a newer one.
+ */
+export async function loadExactFirstPage<T>(
+  url: string,
+  expectedCode: string,
+  dataGuard: (value: unknown) => boolean,
+  fence: RequestFence,
+  identity: (item: T) => string,
+  isCurrent: () => boolean = () => true,
+): Promise<ExactFirstPageRead<T>> {
+  const ticket = fence.begin();
+  const response = await api<{ items: T[]; next_cursor: string | null }>(url);
+  if (!isCurrent() || !fence.isCurrent(ticket)) {
+    return { kind: "stale" };
+  }
+  const parsed = parseExactApiSuccess<{ items: T[]; next_cursor: string | null }>(response, expectedCode, dataGuard);
+  if (parsed === null) {
+    return { kind: "failure", feedback: apiFailureFeedback(response) };
+  }
+  if (pageAppendError([], parsed.data.items, identity) !== null) {
+    return { kind: "failure", feedback: codeFeedback("duplicate_page_item") };
+  }
+  if (!fence.settle(ticket)) {
+    return { kind: "stale" };
+  }
+  return { kind: "success", items: parsed.data.items, more: (parsed.data.next_cursor ?? null) !== null };
+}
+
 export async function downloadCsv(
   listUrl: string,
   filename: string,
   runMutation: <T>(work: () => Promise<T>) => Promise<T | undefined>,
-  setMessage: Dispatch<SetStateAction<string>>,
+  setFeedback: (feedback: OperatorFeedback) => void,
 ): Promise<void> {
   await runMutation(async () => {
     try {
       const response = await fetch(csvExportPath(listUrl));
       if (!response.ok) {
-        setMessage(`csv_export_failed (${response.status})`);
+        setFeedback({ ...codeFeedback("csv_export_failed"), detail: { code: "csv_export_failed", requestId: null, httpStatus: response.status } });
         return;
       }
       const blob = await response.blob();
@@ -168,9 +206,9 @@ export async function downloadCsv(
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(objectUrl);
-      setMessage(`exported ${filename}`);
+      setFeedback({ tone: "success", message: `Exported ${filename}.` });
     } catch {
-      setMessage("csv_export_failed");
+      setFeedback(codeFeedback("csv_export_failed"));
     }
   });
 }

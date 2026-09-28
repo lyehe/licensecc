@@ -2,7 +2,7 @@
 // original response timestamp or audit event is created/extended here.
 // Callers must verify fresh device proof and reconstruct this internal candidate
 // from primary DB reads. Never pass an HTTP request body directly to this helper.
-import { boundTrialSql } from "./bound_trial.mjs";
+import { boundTrialSql } from "@licensecc/cloudflare-runtime/device/bound_trial";
 const fields=["keyId","purpose","operationId","requestDigest","customerId","customerRevision",
   "project","feature","fingerprint","entitlementRevision","deviceId","deviceRevision","publicKeySpki",
   "bindingId","generation","challengeId","challengeExpiresAt","nonceHash","subjectId",
