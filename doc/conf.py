@@ -25,6 +25,7 @@ extensions = [
     "myst_parser",
     "sphinx_sitemap",
     "licensecc_openapi",
+    "licensecc_github_anchors",
 ]
 
 source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
