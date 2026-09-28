@@ -21,7 +21,7 @@ export function deviceLimitRequestBody(item: Pick<EntitlementRecord, "customer_i
  */
 export function deviceLimitFailureMessage(failure: { code: string; requestId: string; data?: unknown }, requested: number): string | null {
   if (failure.code === "stale_transition") {
-    return "This license (entitlement) changed after you opened it; its current values were reloaded. Check the device limit and save again.";
+    return "This license (entitlement) changed after you opened it; its current values were refreshed. Check the device limit and save again.";
   }
   if (failure.code === "revoked_entitlement_is_terminal") return "Revocation is permanent; this license (entitlement) can no longer change.";
   if (failure.code !== "capacity_in_use") return null;

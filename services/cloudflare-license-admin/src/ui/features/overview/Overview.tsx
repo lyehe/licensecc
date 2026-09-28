@@ -67,7 +67,7 @@ export function Overview({ active }: { active: boolean }): React.ReactElement | 
       <div className="grid metrics">
       <div><span>Total entitlements</span><strong>{summary?.entitlements.total ?? "—"}</strong></div>
       <div><span>Active</span><strong>{summary?.entitlements.active ?? "—"}</strong><p>Enabled · validity dates still apply</p></div>
-      <div><span>Disabled</span><strong>{summary?.entitlements.disabled ?? "—"}</strong></div>
+      <div><span>Suspended</span><strong>{summary?.entitlements.disabled ?? "—"}</strong></div>
       <div><span>Revoked</span><strong>{summary?.entitlements.revoked ?? "—"}</strong></div>
       </div>
     </section>

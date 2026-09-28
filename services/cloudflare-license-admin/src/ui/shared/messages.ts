@@ -18,12 +18,14 @@ export interface CodeCopy {
 const failed = (text: string): CodeCopy => ({ text, tone: "error" });
 const done = (text: string): CodeCopy => ({ text, tone: "success" });
 
+// "Refresh" re-reads the data on screen; "Reload the page" is kept for the few codes where the page
+// itself built a request the server could not accept (its key, body or origin).
 const REFRESH_AND_RETRY = "Refresh and try again.";
 
 /** A write whose outcome is unknown: it is retained, and only reconciling it may settle it. */
 export const OUTCOME_UNKNOWN_TEXT = "The outcome of this change is unknown. Don't repeat it; reconcile its status first.";
 /** A write known to have applied whose status read then failed. */
-export const STATUS_NOT_REFRESHED_TEXT = "The change was saved, but its status could not be refreshed.";
+export const STATUS_NOT_REFRESHED_TEXT = "The change was applied, but its status could not be refreshed.";
 const RELOAD_AND_RETRY = "Reload the page and try again.";
 
 export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
@@ -61,7 +63,7 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   entitlement_batch_too_large: failed("Too many entitlements for one request. Select fewer and try again."),
   batch_done: done("Batch finished."),
   // Emitted for an entitlement and for an activated device, so it names neither.
-  stale_transition: failed("This record changed after you loaded it. Reload it and try again."),
+  stale_transition: failed(`This record changed after you loaded it. ${REFRESH_AND_RETRY}`),
   revoked_entitlement_is_terminal: failed("Revocation is permanent; this license (entitlement) can no longer change."),
   invalid_entitlement_id: failed("That entitlement ID is not valid."),
   enforcement_mode_conflict: failed("A license (entitlement) for this project, feature and fingerprint already uses a different protection."),

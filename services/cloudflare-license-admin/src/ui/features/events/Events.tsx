@@ -121,8 +121,8 @@ export function Events({ active, navigationIntent, onNavigationHandled }: {
             filter bar as short as the other lists' (project/feature/status), not roughly double it. */}
         <details className="advancedSettings"><summary>More filters</summary><div className="filters filterBar">
           <label>Actor<input aria-label="Filter events by actor" value={filter.actor} onChange={(event) => setFilter({ ...filter, actor: event.target.value })} /></label>
-          <label>Since<input aria-label="Filter events since" type="date" min="1970-01-01" value={filter.since} onChange={(event) => setFilter({ ...filter, since: event.target.value })} /></label>
-          <label>Until<input aria-label="Filter events until" type="date" min="1970-01-01" value={filter.until} onChange={(event) => setFilter({ ...filter, until: event.target.value })} /></label>
+          <label>Since (UTC)<input aria-label="Filter events since (UTC)" type="date" min="1970-01-01" value={filter.since} onChange={(event) => setFilter({ ...filter, since: event.target.value })} /></label>
+          <label>Until (UTC)<input aria-label="Filter events until (UTC)" type="date" min="1970-01-01" value={filter.until} onChange={(event) => setFilter({ ...filter, until: event.target.value })} /></label>
         </div></details>
         <button type="button" disabled={!filtered} onClick={() => setFilter(emptyEventFilter)}>Clear filters</button>
         <button type="button" disabled={busy || operationLocked} onClick={() => void downloadCsv(eventsPath(filter), "events.csv", runMutation, setFeedback)}>Export CSV</button>
