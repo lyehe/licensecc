@@ -138,8 +138,42 @@ test("a differing shared value is reported as a mismatch", () => {
   assert.deepEqual(mismatches, [{ name: "--status-ok-bg", a: "#203020", b: "#203026" }]);
 });
 
-test("a missing :root block is reported, not treated as zero tokens", () => {
-  assert.equal(parseRootTokens(".no-root { color: red; }"), null);
+test("a missing :root block throws instead of yielding an empty token map", () => {
+  assert.throws(() => parseRootTokens(".no-root { color: red; }"), /no top-level :root/u);
+});
+
+test("a :root nested inside @media before the real one is ignored", () => {
+  const css = `
+    @media (prefers-color-scheme: dark) {
+      :root { --accent: #000000; }
+    }
+    :root {
+      --accent: #b8b8b8;
+      --border: #2a2a2a;
+    }
+  `;
+  const tokens = parseRootTokens(css);
+  assert.deepEqual([...tokens.entries()], [
+    ["--accent", "#b8b8b8"],
+    ["--border", "#2a2a2a"],
+  ]);
+});
+
+test("two top-level :root blocks fail closed instead of silently picking one", () => {
+  const css = `
+    :root { --accent: #b8b8b8; }
+    :root { --accent: #ffffff; }
+  `;
+  assert.throws(() => parseRootTokens(css), /exactly one top-level :root/u);
+});
+
+test("a :root that exists only nested inside @media is not a top-level block", () => {
+  const css = `
+    @media (prefers-color-scheme: dark) {
+      :root { --accent: #000000; }
+    }
+  `;
+  assert.throws(() => parseRootTokens(css), /no top-level :root/u);
 });
 
 test("admin and portal define the same value for every required shared token", () => {
