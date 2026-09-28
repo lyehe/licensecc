@@ -176,7 +176,12 @@ accepts one test per endpoint per minute. Receivers see
 answers 503 `webhook_operator_not_configured`. Profile materialization pins the
 binding to the same profile's backend, as it does for `DEVICE_OPERATOR`. Deploy
 the backend version that exports `WebhookOperator` before an admin
-configuration that binds it.
+configuration that binds it. Each test send the backend attempted also leaves
+a `test_send` row in `webhook_events` with the operator, the request id and
+the status class; a refused send leaves none. Apply backend migration
+`0043_allow_webhook_test_send_event.sql` before deploying this Worker.
+Otherwise the audit write fails and is logged as
+`webhook.test_send_audit_failed`, while test sends still work.
 
 Create a Cloudflare Access application and allow policy for the admin hostname
 before exposing it. Protect every enabled hostname, including `workers.dev`

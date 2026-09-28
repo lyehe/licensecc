@@ -692,6 +692,18 @@ gets one test per 60 seconds, tracked in `rate_limit_counters` under the
 part of the receiver's response. Bind only the authenticated admin Worker to
 this capability.
 
+Because a test send goes to a real receiver, the admin Worker records each one
+the backend attempted in `webhook_events` as a `test_send` row: the operator,
+the actor type, the request id, the endpoint's unchanged status and the
+receiver's status class (including `network_error`) as the reason. A send the
+backend refused writes no row. Migration
+`0043_allow_webhook_test_send_event.sql` rebuilds `webhook_events` to allow
+that event type, keeping its rows, ids, index and endpoint cascade. Apply it
+before deploying the admin Worker. Until it is applied, each test-send audit
+row fails and the admin Worker logs `webhook.test_send_audit_failed` with the
+request and endpoint ids, but test sends still work and report the real
+outcome.
+
 Monitor scheduled protected-device cleanup using structured events:
 
 - `device.cleanup_completed` reports `source`, `target`, `affected_rows` and

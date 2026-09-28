@@ -2,7 +2,8 @@
 // WebhookOperator entrypoint over a service binding, and the backend's outbound fetch is routed to
 // a receiver Worker that records what arrived in D1. Proves the named entrypoint is exported, the
 // RPC result crosses the binding as only a status class, the signature verifies, workerd does not
-// follow the redirect, and the second send within 60 s is refused.
+// follow the redirect, the second send within 60 s is refused, and only the sends that reached the
+// receiver leave a webhook_events audit row.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
@@ -99,4 +100,12 @@ test("the admin Worker sends a signed test event through the backend WebhookOper
   assert.equal(disabled.status, 404);
   assert.equal(disabled.body.code, "not_found");
   assert.equal((await captured()).length, 2);
+
+  // Each send that reached the receiver left one audit row in the shared D1; the rate-limited and
+  // refused sends left none.
+  const audit = (await db.prepare("SELECT endpoint_id, event_type, prev_status, next_status, actor, actor_type, source, reason, request_id FROM webhook_events ORDER BY id").all()).results;
+  assert.deepEqual(audit, [
+    { endpoint_id: "ok", event_type: "test_send", prev_status: "active", next_status: "active", actor: "dev.local", actor_type: "dev", source: "admin", reason: "2xx", request_id: sent.body.request_id },
+    { endpoint_id: "moved", event_type: "test_send", prev_status: "active", next_status: "active", actor: "dev.local", actor_type: "dev", source: "admin", reason: "3xx", request_id: moved.body.request_id },
+  ]);
 });

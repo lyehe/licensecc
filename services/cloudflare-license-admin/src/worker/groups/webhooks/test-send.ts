@@ -1,7 +1,8 @@
 // POST /api/admin/webhooks/{id}/test: ask the backend's WebhookOperator capability to send one
 // signed test event. Only the backend holds WEBHOOK_SIGNING_SECRETS, so this Worker forwards the
 // endpoint id and relays nothing but the receiver's status class. The backend result is checked
-// field by field and rebuilt, never passed through: anything unexpected becomes 503.
+// field by field and rebuilt, never passed through: anything unexpected becomes 503. A send the
+// backend attempted also leaves a webhook_events audit row; a refused send leaves none.
 import type { Actor } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import { WEBHOOK_TEST_STATUS_CLASSES, type WebhookTestStatusClass } from "@licensecc/cloudflare-runtime/webhooks/webhook_endpoint";
 import { requireAdmin } from "../../auth.js";
@@ -33,13 +34,22 @@ function isStatusClass(value: unknown): value is WebhookTestStatusClass {
   return typeof value === "string" && (WEBHOOK_TEST_STATUS_CLASSES as readonly string[]).includes(value);
 }
 
-function relay(result: unknown, requestId: string): Response {
-  if (!isRecord(result)) return respond(requestId, "temporarily_unavailable", 503);
+// The receiver's status class when the backend reports an attempted send, else null.
+function sentStatusClass(result: unknown): WebhookTestStatusClass | null {
+  if (!isRecord(result)) return null;
   const { ok, status, code, data } = result;
   if (ok === true && status === 200 && code === "webhook_test_sent" && isRecord(data)
     && Object.keys(data).length === 1 && isStatusClass(data.status_class)) {
-    return respond(requestId, "webhook_test_sent", 200, { status_class: data.status_class });
+    return data.status_class;
   }
+  return null;
+}
+
+function relay(result: unknown, requestId: string): Response {
+  const statusClass = sentStatusClass(result);
+  if (statusClass !== null) return respond(requestId, "webhook_test_sent", 200, { status_class: statusClass });
+  if (!isRecord(result)) return respond(requestId, "temporarily_unavailable", 503);
+  const { ok, status, code, data } = result;
   if (ok === false && status === 429 && code === "rate_limited" && isRecord(data)) {
     const retryAfter = data.retry_after;
     if (typeof retryAfter === "number" && Number.isInteger(retryAfter) && retryAfter >= 1 && retryAfter <= MAX_RETRY_AFTER_SECONDS) {
@@ -76,5 +86,25 @@ export async function sendWebhookTest(request: Request, env: Env, actor: Actor, 
   } catch {
     return respond(requestId, "temporarily_unavailable", 503);
   }
+  const statusClass = sentStatusClass(result);
+  if (statusClass !== null) await auditTestSend(env, endpointId, statusClass, actor, requestId);
   return relay(result, requestId);
+}
+
+// An attempted test send went to a real receiver URL (whatever its status class, network_error
+// included), so it is audited in webhook_events like disable/reenable: the actor, the request id
+// and the status class as the reason. A test send changes nothing, so the endpoint's current
+// status is both prev and next and no guard is needed. The audit is best-effort: the receiver
+// call already happened, so a failed audit is logged and the operator still sees the real outcome.
+async function auditTestSend(env: Env, endpointId: string, statusClass: WebhookTestStatusClass, actor: Actor, requestId: string): Promise<void> {
+  try {
+    const endpoint = await env.DB.prepare("SELECT status FROM webhook_endpoints WHERE id = ?").bind(endpointId).first<{ status: string }>();
+    if (endpoint === null) throw new Error("webhook endpoint not found");
+    await env.DB.prepare(
+      `INSERT INTO webhook_events (endpoint_id, event_type, prev_status, next_status, actor, actor_type, source, reason, request_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'admin', ?, ?, ?)`,
+    ).bind(endpointId, "test_send", endpoint.status, endpoint.status, actor.email || actor.subject, actor.actorType, statusClass, requestId, Math.floor(Date.now() / 1000)).run();
+  } catch {
+    console.error(JSON.stringify({ event: "webhook.test_send_audit_failed", request_id: requestId, endpoint_id: endpointId }));
+  }
 }

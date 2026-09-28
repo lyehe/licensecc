@@ -90,6 +90,13 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   credential the customer replaces through the portal's password recovery —
   instead of requiring the operator to set and share an initial password
   (remediation).
+- Admin: each webhook test send the backend attempted leaves a
+  `webhook_events` audit row (`event_type` `test_send`) with the operator, the
+  request id and the receiver's status class as the reason; a refused send
+  leaves none. Migration `0043_allow_webhook_test_send_event.sql` rebuilds
+  `webhook_events` to allow the new type and must be applied before the admin
+  Worker is deployed; until then the audit write fails and is logged as
+  `webhook.test_send_audit_failed`, and test sends still work.
 
 ### Changed
 - Advanced the unpublished platform candidate from `0.1.0-rc.1` to `0.1.0-rc.2`.

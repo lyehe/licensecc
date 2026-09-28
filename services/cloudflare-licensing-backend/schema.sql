@@ -679,10 +679,10 @@ CREATE TABLE IF NOT EXISTS webhook_endpoints (
   updated_at  INTEGER NOT NULL
 , scope_project TEXT, scope_customer_id TEXT);
 
-CREATE TABLE IF NOT EXISTS webhook_events (
+CREATE TABLE IF NOT EXISTS "webhook_events" (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   endpoint_id TEXT NOT NULL,
-  event_type  TEXT NOT NULL CHECK (event_type IN ('disable', 'reenable')),
+  event_type  TEXT NOT NULL CHECK (event_type IN ('disable', 'reenable', 'test_send')),
   prev_status TEXT NOT NULL,
   next_status TEXT NOT NULL,
   actor       TEXT NOT NULL DEFAULT '',

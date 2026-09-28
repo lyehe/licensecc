@@ -599,11 +599,12 @@ CREATE TABLE IF NOT EXISTS webhook_cursor (
   updated_at   BIGINT NOT NULL
 );
 
--- Append-only audit for the webhook-endpoint kill-switch (migration 0027; mirrors customer_events).
+-- Append-only audit for the webhook-endpoint kill-switch (migration 0027; mirrors customer_events)
+-- and for operator test sends (migration 0043 rebuild adds 'test_send').
 CREATE TABLE IF NOT EXISTS webhook_events (
   id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   endpoint_id TEXT   NOT NULL,
-  event_type  TEXT   NOT NULL CHECK (event_type IN ('disable', 'reenable')),
+  event_type  TEXT   NOT NULL CHECK (event_type IN ('disable', 'reenable', 'test_send')),  -- migration 0043
   prev_status TEXT   NOT NULL,
   next_status TEXT   NOT NULL,
   actor       TEXT   NOT NULL DEFAULT '',
