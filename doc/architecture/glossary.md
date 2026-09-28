@@ -116,6 +116,6 @@ misdescribe a seat count.
   (`services/cloudflare-customer-portal/test/portal-glossary-copy.test.mjs`,
   `services/cloudflare-license-admin/test/admin-ui-workflow/glossary-copy.test.mjs`)
   fails if a retired term (`Binding:`, `Retire connection`, `Registered
-  nodes`, a quoted `"enabled"` status, `Floating sessions`) resurfaces in
-  `src/ui/**`. Extend that list rather than reintroducing a retired word
+  nodes`, a quoted `"enabled"` status, `Floating sessions`; the portal's
+  guard also retires `Registered machines`) resurfaces in `src/ui/**`. Extend that list rather than reintroducing a retired word
   under a new name.
