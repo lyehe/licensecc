@@ -52,6 +52,9 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   onDraftPolicyUsed?: () => void;
 }): React.ReactElement | null {
   const [entitlements, setEntitlements] = useState<EntitlementRecord[]>([]);
+  // The list on screen now, for callbacks that settle after the render that created them.
+  const entitlementsRef = useRef(entitlements);
+  entitlementsRef.current = entitlements;
   const [entitlementsCursor, setEntitlementsCursor] = useState<string | null>(null);
   const [filter, setFilter] = useState<EntitlementFilter>(scopedGrant ?? { project: "", feature: "", status: "" });
   const [form, setForm] = useState<EntitlementFormState>(emptyEntitlementForm);
@@ -239,7 +242,9 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
         if (!isFormGenerationCurrent(capturedFormGeneration)) return;
         setCreateOpen(false);
         setForm(emptyEntitlementForm);
-        setReveal({ id: parsed.data.id, context: filterContextKey, shown: entitlements });
+        // The list on screen when the save settled, not when it was submitted: a read that landed in
+        // between may predate the create, so the reveal waits for the read that follows it.
+        setReveal({ id: parsed.data.id, context: filterContextKey, shown: entitlementsRef.current });
       },
       refresh: async () => await refreshCore(true),
       onUnapplied: (parsed) => {

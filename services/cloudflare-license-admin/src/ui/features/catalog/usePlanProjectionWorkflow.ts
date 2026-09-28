@@ -97,11 +97,12 @@ export function usePlanProjectionWorkflow({
   const pendingApplyRef = useRef<ConfirmedApply | null>(null);
   const modalWasActiveRef = useRef(false);
   useEffect(() => {
-    // Between the dialog releasing the operation gate (this render) and this effect claiming it
-    // (the next task), the console is briefly unlocked. If a catalog mutation elsewhere invalidates
-    // or replaces the confirmed preview in that gap, `planProjectionBindingIsUsable` below catches
-    // it: the confirmed apply is dropped with a message, never duplicated and never sent against a
-    // preview the operator no longer sees on screen.
+    // The dialog releases the operation gate in the same commit whose passive effect runs here, and
+    // React flushes a discrete event's passive effects before it handles the next discrete event, so
+    // no other click can start a catalog mutation or replace the confirmed preview in between. The
+    // `planProjectionBindingIsUsable` check below is an invariant kept as a defence, not a race
+    // handler: were the confirmed preview ever no longer the one on screen, the apply would be
+    // dropped with a message, never duplicated and never sent against it.
     if (modalWasActiveRef.current && !modalActive && pendingApplyRef.current !== null) {
       const confirmed = pendingApplyRef.current;
       pendingApplyRef.current = null;
