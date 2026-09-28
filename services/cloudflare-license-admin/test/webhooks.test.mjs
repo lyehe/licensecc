@@ -50,6 +50,10 @@ test("validateWebhookInput reports a non-https url as invalid_url", () => {
   assert.equal(validateWebhookInput({ url: "ftp://example.com/hook" }), "invalid_url");
 });
 
+test("validateWebhookInput reports an IP-literal url as invalid_url", () => {
+  assert.equal(validateWebhookInput({ url: "https://127.0.0.1/" }), "invalid_url");
+});
+
 test("validateWebhookInput returns invalid_url for an unparseable url", () => {
   assert.equal(validateWebhookInput({ url: "not a url" }), "invalid_url");
 });

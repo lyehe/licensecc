@@ -3,11 +3,23 @@
 
 export const MAX_WEBHOOK_URL_SIZE = 2048;
 
+const INTERNAL_HOST_SUFFIXES = [".localhost", ".local", ".internal", ".home.arpa"];
+
+/** True for a hostname a webhook may be sent to: not an IP literal, not single-label, and not
+ * localhost or a suffix reserved for internal networks. */
+function publicHostname(host) {
+  if (host.startsWith("[") || /^\d{1,3}(\.\d{1,3}){3}$/u.test(host)) return false; // IPv6 / IPv4 literal
+  if (!host.includes(".") || host === "localhost") return false;
+  return !INTERNAL_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix));
+}
+
 /**
  * The only destination a webhook may be sent to: an absolute https:// URL within the size bound,
- * free of whitespace and control characters. The admin Worker applies it when an endpoint is
- * created or edited; the backend applies it again before an operator test send, so a row that
- * reached D1 some other way is never sent to plaintext http or another scheme.
+ * free of whitespace and control characters, carrying no userinfo, and resolving to a public-looking
+ * hostname (no IP literal, single-label name, or internal suffix). The admin Worker applies it when
+ * an endpoint is created or edited; the backend applies it again before an operator test send AND
+ * before every scheduled delivery, so a row that reached D1 some other way, or that was safe when
+ * stored but points at an internal host now, is never fetched.
  *
  * @param {unknown} value
  * @returns {string | null} the normalized href, or null when the value is not a safe webhook URL
@@ -21,7 +33,8 @@ export function safeWebhookUrl(value) {
   } catch {
     return null;
   }
-  return parsed.protocol === "https:" ? parsed.href : null;
+  if (parsed.protocol !== "https:" || parsed.username !== "" || parsed.password !== "") return null;
+  return publicHostname(parsed.hostname) ? parsed.href : null;
 }
 
 /**

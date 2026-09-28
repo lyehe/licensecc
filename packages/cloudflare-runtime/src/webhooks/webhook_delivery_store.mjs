@@ -58,3 +58,11 @@ export async function persistWebhookDeliveryOutcome(db, outcome) {
   const row = await statement.first();
   return row !== null && row !== undefined;
 }
+
+/** Record a delivery whose stored URL no longer passes safeWebhookUrl as failed, without fetching. */
+export async function refuseUnsafeWebhookDelivery(db, delivery, now, claimUntil) {
+  return persistWebhookDeliveryOutcome(db, {
+    deliveryId: Number(delivery.id), claimUntil, now, ok: false, statusCode: 0,
+    errorText: "invalid_url", attempts: Number(delivery.attempts) + 1, terminal: true, retryAt: null,
+  });
+}

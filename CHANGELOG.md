@@ -162,6 +162,14 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   of reaching the zone's origin server directly; the deploy-config materializer
   refuses a backend config that omits the flag. Operators must update the
   base64 backend config secret before the next deploy.
+- Webhook endpoint URLs may no longer carry a username or password, an
+  IP-literal host (IPv4 or IPv6), a single-label host, or a host that is or
+  ends in `localhost`, `.local`, `.internal`, or `.home.arpa`; the admin
+  Worker rejects such a URL on create and edit with `400 invalid_url`. The
+  backend also re-applies this check immediately before every scheduled
+  delivery attempt, so a stored endpoint whose URL no longer passes it fails
+  every delivery terminally with `invalid_url` until an operator edits the
+  endpoint to a safe URL.
 
 ### Upgrade notes
 - Existing Linux build trees that cached `LCC_ENABLE_LINUX_DESKTOP=ON` without

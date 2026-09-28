@@ -29,8 +29,9 @@ import { loadSecretMap, lookupSecret } from "../auth/secret_map.mjs";
 import { safeErrorType } from "../http/kit.mjs";
 import {
   WEBHOOK_CLAIM_TTL_SECONDS, claimPendingWebhookDelivery, nextBackoff,
-  persistWebhookDeliveryOutcome, readWebhookClock,
+  persistWebhookDeliveryOutcome, readWebhookClock, refuseUnsafeWebhookDelivery,
 } from "./webhook_delivery_store.mjs";
+import { safeWebhookUrl } from "./webhook_endpoint.mjs";
 
 export { WEBHOOK_CLAIM_TTL_SECONDS, nextBackoff };
 
@@ -537,6 +538,7 @@ export async function deliverWebhooks(env, now, logEvent, clock = () => now) {
 
 /** Deliver one row; failures are recorded as retry/terminal outcomes and never rethrown. */
 async function deliverOne(env, delivery, secretsMap, keyId, now, claimUntil, logEvent, clock) {
+  if (safeWebhookUrl(delivery.url) === null) { await refuseUnsafeWebhookDelivery(env.DB, delivery, now, claimUntil); return; }
   const body = delivery.payload_json;
 
   let signatureHeader;
