@@ -105,6 +105,21 @@ const resourceId = /^(?:[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[8
 const accountId = /^[a-f0-9]{32}$/u;
 const accessAudience = /^[A-Za-z0-9._-]{16,128}$/u;
 const emailAddress = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+// Mirrors the portal Worker's own supportContact() shape (src/worker/support.ts): one address only,
+// no query, no list separator, no controls.
+// eslint-disable-next-line no-control-regex -- control characters are rejected deliberately
+const supportMailto = /^mailto:[^\s@?,;%\u0000-\u001f\u007f]+@[^\s@?,;%\u0000-\u001f\u007f]+$/iu;
+
+function supportContactShape(value) {
+  if (supportMailto.test(value)) return true;
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === "https:" && url.username === "" && url.password === "";
+}
 
 function fail(target, detail) {
   throw new Error(`${target.env} ${detail}`);
@@ -382,7 +397,7 @@ function validateAccess(vars, target) {
 
 function validateAdmin(config, target, profile, profileName) {
   // WEBHOOK_OPERATOR is optional: without it the admin answers "Send test event" with 503.
-  validateDeviceService(config,target,profile,"DEVICE_OPERATOR","DeviceOperator",{WEBHOOK_OPERATOR:"WebhookOperator"});
+  validateServiceBindings(config,target,profile,"DEVICE_OPERATOR","DeviceOperator",{WEBHOOK_OPERATOR:"WebhookOperator"});
   const vars = objectValue(config.vars, target, "vars");
   exactString(vars.ENVIRONMENT, profile.environment, target, "vars.ENVIRONMENT");
   exactString(vars.ADMIN_DEV_BEARER_ENABLED, "0", target, "vars.ADMIN_DEV_BEARER_ENABLED");
@@ -396,16 +411,17 @@ function validateAdmin(config, target, profile, profileName) {
 }
 
 // Every service binding targets this profile's backend under its one reviewed entrypoint. The
-// required binding appears exactly once; each optional one at most once; nothing else is allowed.
-function validateDeviceService(config,target,profile,binding,entrypoint,optional={}) {
+// required binding appears exactly once; each optional one at most once; an unknown binding name is
+// rejected by its own name instead of being blamed on the capability it is not.
+function validateServiceBindings(config,target,profile,binding,entrypoint,optional={}) {
   if(config.env!==undefined)fail(target,`must not define environment overrides for ${binding}`);
-  const allowed={...optional,[binding]:entrypoint};
+  const allowed={[binding]:entrypoint,...optional};
   if(!Array.isArray(config.services)||config.services.length<1)fail(target,`must define exactly one ${binding} service binding`);
   const seen=new Set();
   config.services.forEach((entry,index)=>{
     const service=objectValue(entry,target,`services[${index}]`);
-    // An unknown binding is reported against the required capability it could be mistaken for.
-    const name=typeof service.binding==="string"&&Object.hasOwn(allowed,service.binding)?service.binding:binding;
+    const name=typeof service.binding==="string"?service.binding:undefined;
+    if(name===undefined||!Object.hasOwn(allowed,name))fail(target,`unknown service binding ${String(service.binding)}; allowed: ${Object.keys(allowed).join(", ")}`);
     if(seen.has(name))fail(target,`must define exactly one ${name} service binding`);
     seen.add(name);
     if(Object.keys(service).length!==3||["binding","service","entrypoint"].some(key=>!Object.hasOwn(service,key)))fail(target,`${name} must contain only binding, service and entrypoint`);
@@ -417,7 +433,7 @@ function validateDeviceService(config,target,profile,binding,entrypoint,optional
 }
 
 function validatePortal(config, target, profile, profileName) {
-  validateDeviceService(config,target,profile,"DEVICE_CONSENT","DeviceConsent");
+  validateServiceBindings(config,target,profile,"DEVICE_CONSENT","DeviceConsent");
   const vars = objectValue(config.vars, target, "vars");
   exactString(vars.ENVIRONMENT, profile.environment, target, "vars.ENVIRONMENT");
   exactString(vars.PORTAL_BOOTSTRAP_REQUIRE_ACCESS, "1", target, "vars.PORTAL_BOOTSTRAP_REQUIRE_ACCESS");
@@ -425,6 +441,9 @@ function validatePortal(config, target, profile, profileName) {
   const backendOrigin = canonicalHttpsOrigin(vars.BACKEND_ORIGIN, target, "vars.BACKEND_ORIGIN");
   if (vars.PORTAL_EMAIL_API_BASE !== undefined) canonicalHttpsOrigin(vars.PORTAL_EMAIL_API_BASE, target, "vars.PORTAL_EMAIL_API_BASE");
   if (vars.PORTAL_EMAIL_FROM !== undefined && vars.PORTAL_EMAIL_FROM !== "" && !emailAddress.test(vars.PORTAL_EMAIL_FROM)) fail(target, "must set vars.PORTAL_EMAIL_FROM to a valid address when enabled");
+  if (vars.PORTAL_SUPPORT_CONTACT !== undefined && vars.PORTAL_SUPPORT_CONTACT !== "" && !supportContactShape(vars.PORTAL_SUPPORT_CONTACT)) {
+    fail(target, "must set vars.PORTAL_SUPPORT_CONTACT to a credential-free https: URL or a single mailto: address when set");
+  }
   validateAssets(config, target);
   return {
     backendOrigin,
