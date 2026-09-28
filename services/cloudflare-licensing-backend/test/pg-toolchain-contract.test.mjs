@@ -15,6 +15,14 @@ test("PostgreSQL parity uses one checked uv and Python dependency contract", () 
     "uv run --directory scripts/pg-parity --locked python ../check-pg-parity.py",
   );
 
+  assert.equal(
+    backend.scripts["schema:parity:pg:test"],
+    'uv run --directory scripts/pg-parity --locked python -m unittest discover -s ../../test/schema -p "test_*.py"',
+  );
+
+  const rootPackage = JSON.parse(read("package.json"));
+  assert.match(rootPackage.scripts["check:schema-parity"], /npm run schema:parity:pg:test --workspace @licensecc\/cloudflare-licensing-backend$/u);
+
   const project = read("services/cloudflare-licensing-backend/scripts/pg-parity/pyproject.toml");
   assert.match(project, /^requires-python = ">=3\.12,<3\.13"$/m);
   assert.match(project, /^\s*"sqlglot==30\.19\.0",$/m);

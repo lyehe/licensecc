@@ -39,7 +39,7 @@
     "test:admin": "npm run test --workspace @licensecc/cloudflare-license-admin && npm run test:sql --workspace @licensecc/cloudflare-license-admin && npm run test:ui --workspace @licensecc/cloudflare-license-admin",
     "test:portal": "npm run test --workspace @licensecc/cloudflare-customer-portal && npm run test:ui --workspace @licensecc/cloudflare-customer-portal",
     "test:backup": "npm run test --workspace @licensecc/cloudflare-d1-backup",
-    "check:schema-parity": "npm run schema:parity --workspace @licensecc/cloudflare-licensing-backend && npm run schema:parity:pg --workspace @licensecc/cloudflare-licensing-backend",
+    "check:schema-parity": "npm run schema:parity --workspace @licensecc/cloudflare-licensing-backend && npm run schema:parity:pg --workspace @licensecc/cloudflare-licensing-backend && npm run schema:parity:pg:test --workspace @licensecc/cloudflare-licensing-backend",
     "test:services": "npm run test --workspace @licensecc/licensing-domain && npm run test --workspace @licensecc/cloudflare-runtime && npm run test:backend && npm run test:admin && npm run test:portal && npm run test:backup && npm run check:schema-parity",
     "test:java-sdk": "node scripts/test-java-sdk.mjs",
     "test:sdks": "uv run --directory sdks/python --locked pytest && dotnet test sdks/dotnet/Licensecc.Client.sln && npm run test:java-sdk",

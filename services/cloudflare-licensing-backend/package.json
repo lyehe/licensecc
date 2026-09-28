@@ -30,6 +30,7 @@
     "schema:parity": "uv run --no-project python scripts/check-schema-parity.py",
     "schema:write": "uv run --no-project python scripts/check-schema-parity.py --write",
     "schema:parity:pg": "uv run --directory scripts/pg-parity --locked python ../check-pg-parity.py",
+    "schema:parity:pg:test": "uv run --directory scripts/pg-parity --locked python -m unittest discover -s ../../test/schema -p \"test_*.py\"",
     "dry-run": "npx wrangler deploy src/index.ts --dry-run --config wrangler.example.toml",
     "migrate:local": "npx wrangler d1 migrations apply DB --local --config wrangler.example.toml",
     "migrate:remote": "npx wrangler d1 migrations apply DB --remote --config wrangler.toml",
