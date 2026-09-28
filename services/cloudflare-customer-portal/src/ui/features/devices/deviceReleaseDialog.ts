@@ -4,12 +4,11 @@ import { api, resultMessage } from "../../shared/api";
 import { useNativeDialogFocus } from "./nativeDialog";
 import type { DeviceRow, StatusMessage } from "../../types";
 
-// D4: the legacy-release confirmation, replacing `window.confirm`. Extracted the same way D3 fix
-// round 1 extracted the floating-seat release confirmation into seatReleaseDialog.ts, but this flow
-// stays simple on purpose -- there is no busy/outcome-unknown retry state inside the dialog itself: the
-// dialog's only job is the yes/no decision, exactly like the window.confirm() it replaces. Once
-// confirmed, it closes immediately and the actual request's result shows in this row's own
-// role="status" line (DeviceRegistrations.tsx), same as before.
+// The activated-device release confirmation, replacing `window.confirm`. It stays simple on purpose --
+// there is no busy/outcome-unknown retry state inside the dialog itself: the dialog's only job is the
+// yes/no decision, exactly like the window.confirm() it replaces. Once confirmed, it closes immediately
+// and the request's result shows in the Activated devices section (DeviceRegistrations.tsx): in the
+// device's row when the release fails, under the list when it succeeds and the row goes away.
 interface DeviceReleaseDialogOptions {
   // Fix round 2 (Important), carried here from releaseDevice()'s own prior guard: the generation when
   // this action started, compared against the generation when its response arrives, so a response

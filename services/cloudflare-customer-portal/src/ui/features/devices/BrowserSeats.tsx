@@ -1,7 +1,8 @@
 import React from "react";
-import { formatTimestamp, licenseDisplayStatus } from "../../portalWorkflow";
+import { formatTimestamp, licenseDisplayStatus, licenseStatusLead } from "../../portalWorkflow";
 import { ActionResult } from "../../shared/ActionResult";
 import { useLicenseClock } from "../../shared/useLicenseClock";
+import { LicenseNextStep } from "../entitlements/EntitlementsFeature";
 import { matchesDeviceSearch } from "./deviceSearch";
 import type { DevicesController } from "./DevicesFeature";
 
@@ -34,10 +35,11 @@ export function BrowserSeats({ controller, query, project }: {
         <div className="emptyState"><h3>No matching seats</h3><p>Try another name, seat ID or app.</p></div>
       ) : visibleEntitlements.map((item, index) => {
         const session = controller.seatSessions[item.id];
-        // Carried from C5 (Minor 3b): the wire `status` alone is not enough to offer Start/Renew --
-        // an expired or not-yet-valid floating license must not, even while status still says
-        // "active" (it only flips once the backend enforces it on the next action).
-        const licenseUsable = licenseDisplayStatus(item, now) === "active";
+        // The wire `status` alone is not enough to offer Start/Renew -- an expired or not-yet-valid
+        // floating license must not, even while status still says "active" (it only flips once the
+        // backend enforces it on the next action). When the dates rule them out, the card says why.
+        const state = licenseDisplayStatus(item, now);
+        const licenseUsable = state === "active";
         return (
         <div
           className="seatCard"
@@ -49,14 +51,15 @@ export function BrowserSeats({ controller, query, project }: {
             <strong>{item.project}</strong>
             <span className="muted"> / {item.feature}</span>
           </div>
-          {/* D2: seat state visible -- what starting a seat means while none is held, and when the
-              held one stops working once one is. D5 carried (decision 8): its own class, not
-              `.muted` -- this is live state, not secondary copy. */}
-          {session === undefined ? (
+          {/* Seat state, visible: why Start/Renew are unavailable when the license dates rule them
+              out; otherwise what starting a seat means while none is held; and when a held seat stops
+              working. Its own class, not `.muted` -- this is live state, not secondary copy. */}
+          {!licenseUsable ? (
+            <p className="seatState">{licenseStatusLead(item, now)}<LicenseNextStep state={state} /></p>
+          ) : session === undefined ? (
             <p className="seatState">Uses 1 of {item.pool_size} shared seats until released or it expires.</p>
-          ) : session.expires_at > 0 ? (
-            <p className="seatState">Active until {formatTimestamp(session.expires_at)}.</p>
           ) : null}
+          {session !== undefined && session.expires_at > 0 && <p className="seatState">Active until {formatTimestamp(session.expires_at)}.</p>}
           <div className="actions">
             <button
               ref={(element) => { controller.seatStartButtonRefs.current[item.id] = element; }}

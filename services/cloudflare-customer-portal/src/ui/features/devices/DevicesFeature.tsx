@@ -369,7 +369,9 @@ export function DevicesFeature({
         </section>
       ) : (
         <>
-          {controller.devices.length > 0 && <DeviceRegistrations controller={controller} query={query} project={project} />}
+          {/* Kept while one of its results is showing, so releasing the last device still shows
+              "Device released." and keeps focus on the section heading. */}
+          {(controller.devices.length > 0 || Object.values(controller.deviceMessages).some((message) => message !== null)) && <DeviceRegistrations controller={controller} query={query} project={project} />}
           <BrowserSeats controller={controller} query={query} project={project} />
         </>
       )}

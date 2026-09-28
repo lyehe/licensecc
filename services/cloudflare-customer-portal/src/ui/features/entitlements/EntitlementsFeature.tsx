@@ -33,6 +33,13 @@ const NEXT_STEP: Partial<Record<LicenseDisplayStatus, React.ReactNode>> = {
   unknown: <><SupportContact />.</>,
 };
 
+// The next step that finishes a status lead, with its leading space, or nothing. Shared with the seat
+// cards on Devices so the same license reads the same on both pages.
+export function LicenseNextStep({ state }: { state: LicenseDisplayStatus }): React.ReactElement | null {
+  const nextStep = NEXT_STEP[state];
+  return nextStep === undefined ? null : <> {nextStep}</>;
+}
+
 // Only an active license offers something to do here. An inactive one (expired, suspended, revoked,
 // not yet valid) offers no download or other action: its status already says what happens next.
 function LicenseAction({ item, state, downloads, busy }: { item: EntitlementRow; state: LicenseDisplayStatus; downloads: LicenseDownloads; busy: boolean }): React.ReactElement | null {
@@ -52,13 +59,12 @@ export function EntitlementsFeature({ entitlements, downloads, busy }: { entitle
         <tbody>
           {entitlements.map((item) => {
             const state = licenseDisplayStatus(item, now);
-            const nextStep = NEXT_STEP[state];
             return (
               <tr key={item.id}>
                 <td data-label="Feature"><div>{item.feature}<details className="referenceDetails"><summary>License details</summary><code>{item.license_fingerprint || item.id}</code></details><span className="licenseReference">{shortHash(item.license_fingerprint || item.id)}</span></div></td>
                 <td data-label="Mode"><DatedText text={licenseModeLabel(item, now)} /></td>
                 <td data-label="Capacity">{item.license_mode === "floating" ? `${item.pool_size} seats` : `${item.max_active_devices} ${item.max_active_devices === 1 ? "device" : "devices"}`}</td>
-                <td data-label="Status"><span className="licenseStatus"><span className={`status ${state}`}><DatedText text={licenseStatusLead(item, now)} /></span>{nextStep !== undefined && <> {nextStep}</>}</span></td>
+                <td data-label="Status"><span className="licenseStatus"><span className={`status ${state}`}><DatedText text={licenseStatusLead(item, now)} /></span><LicenseNextStep state={state} /></span></td>
                 <td data-label="Valid"><DatedText text={formatWindow(item.valid_from, item.valid_until)} /></td>
                 <td data-label="Action" className="licenseAction"><LicenseAction item={item} state={state} downloads={downloads} busy={busy} /></td>
               </tr>
