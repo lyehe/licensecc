@@ -193,9 +193,9 @@ test("a missing or incorrect device-limit side-write rolls back the preceding up
   }
 });
 
-// Ruling R26: the console's untouched create form sends no device limit, so re-creating an existing
-// key keeps its stored limit, as every upsert did before B2. The body is built by the console's
-// own normalizer, so a console that starts sending a default again fails here.
+// The console's untouched create form sends no device limit, so re-creating an existing key keeps
+// its stored limit, as every upsert did before the console could set one. The body is built by the
+// console's own normalizer, so a console that starts sending a default again fails here.
 test("a console re-create of an existing key keeps its stored device limit", async t => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
   const consoleBody = (grant) => workflow.normalizeEntitlementForm({

@@ -48,7 +48,7 @@ export function Events({ active, navigationIntent, onNavigationHandled }: {
   const { registerCoreRefresh } = useCoreRefresh();
   const filterUrl = useMemo(() => eventsPath(filter), [filter]);
   const eventsFence = useRequestFence(filterUrl);
-  // Same generation-debounce discipline as the other lists (Workstream E1): the debounced
+  // Same generation-debounce discipline as the other lists: the debounced
   // GENERATION, not the filter string, so an A -> B -> A filter change inside one debounce window
   // still reloads. A page change (Next) is a deliberate click, not typing, so it reloads at once.
   const { generation: rawFilterGeneration, isCurrent: isRawFilterGenerationCurrent } = useContextGeneration(filterUrl);

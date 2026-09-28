@@ -248,8 +248,8 @@ const REASON_CASES = [
   { reason: "invalid_trial", setup: "UPDATE entitlement_policies SET type='trial',trial_expiration_basis='from_first_activation',trial_duration_sec=1",
     body: { policy_id: "policy" }, fix: "UPDATE entitlement_policies SET trial_duration_sec=600" },
   { reason: "invalid_capacity", setup: "UPDATE entitlement_policies SET max_active_devices=0", body: { policy_id: "policy" }, fix: "UPDATE entitlement_policies SET max_active_devices=1" },
-  // B2 fix round 1 (ruling R27): the owner-change trigger also aborts with capacity_in_use. A move to
-  // another customer while a device is connected is its own rule; a higher device limit cannot fix it.
+  // The owner-change trigger also aborts with capacity_in_use. A move to another customer while a
+  // device is connected is its own rule; a higher device limit cannot fix it.
   { reason: "devices_connected", name: "a move to another customer while a device is connected",
     setup: `INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,enforcement_mode,max_active_devices,created_at,updated_at)
         VALUES('APP','PRO','${fp}','active','owner','license','device_bound_v1',5,1,1);

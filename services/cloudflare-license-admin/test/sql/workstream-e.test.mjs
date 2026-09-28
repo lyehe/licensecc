@@ -1,4 +1,4 @@
-// Workstream E, task E3 — GET /api/admin/events filters, cursor, and CSV export (real SQLite,
+// GET /api/admin/events filters, cursor, and CSV export (real SQLite,
 // end-to-end through worker.fetch). Mirrors workstream-c.test.mjs / workstream-f.test.mjs: the
 // REAL compiled worker is driven over an in-memory SQLite built from the shared migrations/*.sql
 // wrapped in a D1-like adapter -- nothing about the events SQL is mocked.

@@ -119,7 +119,7 @@ export function makeAdminApiFixture() {
     entitlementDetailReads: [],
     customerReads: [],
     customerCursors: [],
-    // Workstream E1 -- a filter-driven list reload must never fan out to the cross-feature
+    // A filter-driven list reload must never fan out to the cross-feature
     // summary/events core refresh; these count every GET regardless of which feature triggers it.
     summaryReads: [],
     eventsReads: [],

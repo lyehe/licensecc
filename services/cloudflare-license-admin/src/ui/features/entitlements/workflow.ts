@@ -36,7 +36,8 @@ export interface EntitlementFormState {
   license_id: string;
   /**
    * Sent only when the operator sets it, and only without a policy (a policy stamps its own). Blank
-   * sends nothing, so a new grant gets 1 and an existing one keeps its limit (ruling R26).
+   * sends nothing, so a new grant gets 1 and an existing one keeps its stored limit: an upsert never
+   * overwrites a capacity the operator did not set.
    */
   max_active_devices: number | "";
 }

@@ -11,8 +11,8 @@ const refusal = (code, requestId, data) => Object.defineProperties(
   { __httpOk: { value: false }, __httpStatus: { value: 409 } },
 );
 
-// Ruling R26: the console sends a device limit only when the operator sets one. An upsert of an
-// existing key then keeps its stored limit, as it did before B2.
+// The console sends a device limit only when the operator sets one. An upsert of an existing key
+// then keeps its stored limit, as every upsert did before the console could set a limit at all.
 test("an untouched device limit is not sent; a typed one is; a policy create leaves it to the policy", async () => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
   const { MAX_DEVICE_LIMIT } = await loadWorkflowModule("../shared/api.ts");
@@ -114,8 +114,8 @@ test("a create refused for connected devices says which rule: the device limit, 
   const onboarding = await loadWorkflowModule("features/entitlements/protectedCreate.ts");
   const say = (reason) => onboarding.protectedCreateFailureMessage({ code: "protected_creation_conflict", requestId: "req-5", data: { reason } });
   assert.match(say("invalid_capacity"), /^The device limit must be 1 to 1,000,000 and can't drop below the devices already connected; raise the limit, choose another policy, or disconnect devices first\.$/);
-  // Ruling R27: moving a grant with connected devices to another customer is a different rule; a
-  // higher limit does not help there.
+  // Moving a grant with connected devices to another customer is a different rule from the device
+  // limit, so its sentence must not suggest raising the limit.
   const moved = say("devices_connected");
   assert.equal(moved, "This license (entitlement) still has connected devices; disconnect them before moving it to another customer.");
   assert.doesNotMatch(moved, /raise the limit/);

@@ -179,7 +179,7 @@ test("a create without a policy sends its device limit, and a chosen policy show
   const policy = form.getByLabel("Policy (optional)", { exact: true });
   // Only this project's policies are offered, each with what it grants.
   await expect(policy.locator("option")).toHaveText(["No policy · use fields below", "Pro · 3 devices · APP", "Team · 5 seats · APP"]);
-  // Blank sends nothing (ruling R26): a new grant gets 1, and an existing one keeps its limit.
+  // Blank sends nothing, so a new grant gets 1 and an existing one keeps the limit it already has.
   const own = form.getByLabel("Device limit", { exact: true });
   await expect(own).toHaveValue("");
   await expect(own).toHaveAttribute("placeholder", "1");

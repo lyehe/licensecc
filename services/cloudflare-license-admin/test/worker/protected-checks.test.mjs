@@ -91,9 +91,8 @@ test("a create's own device limit is modelled in the would-be row and required o
   assert.deepEqual(protectedCreateChecks(input, policy).find((check) => check.reason === "unknown").binds, ["owner", "license"]);
 });
 
-// B2 fix round 1 (ruling R27): capacity_in_use during a create comes from one of two schema
-// triggers. The owner-change rule is a named check in the same list, and it alone tells the two
-// apart against the would-be row.
+// capacity_in_use during a create comes from one of two schema triggers. The owner-change rule is a
+// named check in the same list, and it alone tells the two apart against the would-be row.
 test("a capacity refusal is named by the list's owner-change rule: a move to another customer, or the device limit", async () => {
   const { protectedCapacityReason, protectedCreateChecks, protectedWouldBeRowQuery } = await checksModule();
   const owner = protectedCreateChecks(input).find((check) => check.reason === "devices_connected");
