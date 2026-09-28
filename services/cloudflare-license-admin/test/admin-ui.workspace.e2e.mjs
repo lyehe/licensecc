@@ -488,10 +488,13 @@ test("disclosure summaries show their open/closed state on Overview, Entitlement
   await summariesShowIndicatorAndSize(page);
 
   await page.goto("/#/entitlements");
+  await expect(page.locator("[data-focus-row]").first()).toBeVisible();
   await summariesShowIndicatorAndSize(page);
 
   await page.goto("/#/webhooks");
-  await page.getByRole("row").filter({ hasText: webhook.url }).getByRole("button", { name: "Send test event", exact: true }).click();
+  const testEventButton = page.getByRole("row").filter({ hasText: webhook.url }).getByRole("button", { name: "Send test event", exact: true });
+  await expect(testEventButton).toBeVisible();
+  await testEventButton.click();
   await expect(page.getByRole("status").filter({ hasText: `Test event to ${webhook.url}` })).toBeVisible();
   await summariesShowIndicatorAndSize(page);
 });

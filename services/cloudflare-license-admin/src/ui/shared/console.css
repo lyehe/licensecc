@@ -37,10 +37,13 @@ input[type="radio"] { width: 18px; min-height: 18px; }
 /* A native checkbox's own box is what a pointer or a screen-reader hit-tests, so it -- not its
    label or table cell -- must meet the 24px touch-target minimum. */
 input[type="checkbox"] { width: 24px; height: 24px; min-width: 24px; min-height: 24px; }
-/* Every disclosure toggle meets the 44px touch-target minimum and centers its label inside that
-   height; a more specific summary rule (below) may still set its own padding, font size, or
-   layout without losing this floor. */
-summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; }
+/* Every disclosure toggle meets the 44px touch-target minimum. This keeps the default
+   `display: list-item` -- switching a summary to flex/grid drops the browser's own open/closed
+   triangle, which nothing here replaces -- so centering comes from `padding-block`, not from
+   flex `align-items`, and never from `line-height` (which would space out a summary that wraps
+   onto more than one line). A more specific summary rule (below) may still set its own padding,
+   font size, or layout without losing the 44px floor. */
+summary { min-height: 44px; padding-block: 12px; cursor: pointer; }
 textarea { min-height: 88px; resize: vertical; }
 label { display: grid; gap: 6px; color: var(--ink); font-size: var(--text-body); }
 label small, .fieldHint { color: var(--muted); font-size: var(--text-small); }
@@ -55,7 +58,6 @@ fieldset:disabled { opacity: .75; }
 .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; }
 .brandMark { display: grid; place-items: center; flex: 0 0 32px; height: 36px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); font-size: var(--text-section); font-weight: var(--weight-strong); }
 .brand .brandName { margin: 0; font-size: var(--text-section); font-weight: var(--weight-strong); line-height: 1.3; color: var(--ink); }
-.brand p { font-size: var(--text-small); margin-top: 4px; }
 .sidebar nav { display: grid; gap: 24px; }
 .navGroup { display: grid; gap: 4px; }
 .navLabel { color: var(--ink); font-size: var(--text-body); font-weight: var(--weight-strong); padding: 0 12px 4px; }
