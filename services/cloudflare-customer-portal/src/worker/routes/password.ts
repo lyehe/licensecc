@@ -34,8 +34,9 @@ async function settings(request: Request, env: Env, reqId: string, now: number):
   const db = primary(env);
   // recovery_available reuses the reset endpoint's own eligibility predicate (RESET_ELIGIBLE_SQL),
   // correlated to this customer's own credential, so the settings UI never promises a recovery the
-  // server would refuse. A customer with no credential at all is trivially ineligible (the EXISTS has
-  // no row to match).
+  // reset endpoint's eligibility check would refuse (email delivery is reported separately by the
+  // providers envelope). A customer with no credential at all is trivially ineligible (the EXISTS
+  // has no row to match).
   const row = await db.prepare(`SELECT c.email, s.auth_method, s.created_at,
       EXISTS (SELECT 1 FROM portal_passwords p WHERE p.customer_id = c.id AND ${RESET_ELIGIBLE_SQL}) AS recovery_eligible
     FROM portal_sessions s JOIN customers c ON c.id = s.customer_id WHERE s.id = ? AND s.status = 'active' AND s.expires_at > ? AND c.status = 'active'`)

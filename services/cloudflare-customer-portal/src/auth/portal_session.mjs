@@ -140,8 +140,10 @@ export async function resolveSession(env, raw, now = Math.floor(Date.now() / 100
 
 /**
  * revokeSession(env, sessionId, customerId) — logout. Sets status='revoked' for THIS session (bound
- * to its customer_id so a forged session id cannot revoke a foreign row). The worker ALSO bumps
- * account_token_revocations.revocation_seq (invariant 9) to kill any in-flight 120s account token.
+ * to its customer_id so a forged session id cannot revoke a foreign row). The worker ALSO bumps the
+ * per-customer revocation floor (account_token_revocations.revocation_seq, invariant 9), which the
+ * backend uses to reject reads from a stale replica; in-flight 120s proxy tokens expire on their own
+ * TTL.
  */
 /** @param {PortalEnv} env @param {string} sessionId @param {string} customerId */
 export async function revokeSession(env, sessionId, customerId) {

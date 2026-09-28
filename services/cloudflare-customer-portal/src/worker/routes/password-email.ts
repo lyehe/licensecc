@@ -41,8 +41,9 @@ async function issueLink(env: Env, email: string, now: number, purpose: Action["
   };
   try {
     const db = primary(env);
-    // Verified contact addresses recover credentials. Accounts created before email
-    // verification (empty contact) may recover once, if no other customer owns it.
+    // Verified contact addresses recover credentials. Accounts with an empty contact address --
+    // registered before verification existed, or created by the admin console -- may recover while
+    // no other customer has verified the address; the first redeemed link records it as the contact.
     const credential = await db.prepare(`SELECT p.customer_id, p.password_hash FROM portal_passwords p JOIN customers c ON c.id = p.customer_id
       WHERE p.email_lower = ? AND c.status = 'active'
         AND ${RESET_ELIGIBLE_SQL}`)

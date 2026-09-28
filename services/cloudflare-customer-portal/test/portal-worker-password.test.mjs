@@ -158,7 +158,8 @@ test("first password and recovery require recent verified sign-in", async () => 
 });
 
 // `recovery_available` must use the EXACT predicate the emailed reset endpoint uses
-// (password-email.ts), so the settings UI never promises a recovery the server would refuse.
+// (password-email.ts), so the settings UI never promises a recovery the reset endpoint's
+// eligibility check would refuse.
 test("password settings report no recovery path before any credential exists", async () => {
   const { env } = fixture();
   const result = await call(env, "GET", PATH, { cookie: await verifiedCookie(env, "A") });
@@ -176,7 +177,7 @@ test("password settings mark a credential eligible when it matches the customer'
   assert.equal(result.body.data.recovery_available, true);
 });
 
-test("password settings mark a legacy/set-password-shaped account eligible for one recovery when its address is unclaimed", async () => {
+test("password settings mark a legacy/set-password-shaped account eligible for recovery when its address is unclaimed", async () => {
   // register() seeds a KNOWN password (the set-password/legacy shape, empty contact email but a
   // usable credential) -- not the random-secret Invite shape, which portal-worker-password-email.test.mjs
   // covers separately.

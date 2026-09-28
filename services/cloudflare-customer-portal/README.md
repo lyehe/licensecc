@@ -293,8 +293,8 @@ not count. Otherwise the answer is `409 last_sign_in_method`, and the portal
 asks the customer to set up another way to sign in first. The rule, a
 still-live session and the delete are one conditional statement, so two tabs
 cannot disconnect the last two methods at once. A tab that loses such a race
-gets `404` (the provider was already disconnected) or `401` (the other tab's
-unlink signed it out). Disconnecting signs out the customer's other browser
+gets `409` (no other method remains), `404` (the provider was already
+disconnected) or `401` (the other tab's unlink signed it out). Disconnecting signs out the customer's other browser
 sessions that signed in with Google or GitHub (sessions do not record which of
 the two); the current session and password or email-code sessions stay signed
 in.

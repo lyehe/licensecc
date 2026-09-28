@@ -229,8 +229,9 @@ export const authPaths: LabeledPathFragment = {
         summary: "Revoke the session and clear the cookie (idempotent).",
         description:
           "No auth required (the session is optional — logout is idempotent). Marks the session row " +
-          "revoked and bumps account_token_revocations.revocation_seq to kill any in-flight 120s " +
-          "account token (invariant 9). Always clears the cookie (Max-Age=0).",
+          "revoked and bumps the per-customer revocation floor (account_token_revocations.revocation_seq, " +
+          "invariant 9), which the backend uses to reject reads from a stale replica; in-flight 120s " +
+          "proxy tokens expire on their own TTL. Always clears the cookie (Max-Age=0).",
         security: [{ sessionCookie: [] }, {}],
         responses: {
           "200": {
