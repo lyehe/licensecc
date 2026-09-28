@@ -169,10 +169,12 @@ export async function auditVerify(env: Env, requestIdValue: string): Promise<Res
 // enforcing rule's own SQL twin computes that clock exactly as the lease/consent path enforces it,
 // clamped to valid_until with the same min(coalesce(valid_until, MAX), trial deadline) discipline the
 // portal's self-service entitlement list uses (never a hand-rolled copy of that clamp). An unstarted
-// activation-basis trial has no known deadline yet (NULL, since coalesce/min both stay NULL) and is
-// excluded, same as a non-expiring grant.
+// activation-basis trial has no trial deadline yet (its rule yields NULL), so that side falls back to
+// the same MAX sentinel: SQLite's min() is NULL if any argument is, and an unknown clock must never
+// hide a stamped valid_until, which the consent page and lease issuer enforce regardless of it. With
+// neither date the result is MAX, which the report's window excludes just as a non-expiring grant.
 const EFFECTIVE_UNTIL_EXPRESSION = `CASE WHEN e.is_trial <> 1 THEN e.valid_until ELSE min(coalesce(e.valid_until, 9007199254740991),
-             CASE WHEN e.enforcement_mode = 'device_bound_v1' THEN ${boundTrialDeadlineSql("e", "NULL")} ELSE ${legacyTrialDeadlineSql("e")} END) END`;
+             coalesce(CASE WHEN e.enforcement_mode = 'device_bound_v1' THEN ${boundTrialDeadlineSql("e", "NULL")} ELSE ${legacyTrialDeadlineSql("e")} END, 9007199254740991)) END`;
 
 // The SELECT list shared by both branches below (kept identical so the UNION ALL output shape and
 // the effective-deadline computation cannot drift between them).
