@@ -23,8 +23,9 @@ production require authority for the named environment.
 
 This service is intentionally separate from the public verifier Worker. The
 admin Worker does not bind or use the online assertion signing secret. It owns
-ordinary control-plane D1 operations and delegates protected retirement to the
-backend's named `DeviceOperator` capability.
+ordinary control-plane D1 operations, delegates protected retirement to the
+backend's named `DeviceOperator` capability, and delegates webhook test sends to
+its named `WebhookOperator` capability.
 
 ## Add a customer portal user
 
@@ -173,7 +174,9 @@ accepts one test per endpoint per minute. Receivers see
 `Licensecc-Event-Source: test` and a body of
 `{"type":"test","endpoint_id":...,"sent_at":...}`. Without the binding the route
 answers 503 `webhook_operator_not_configured`. Profile materialization pins the
-binding to the same profile's backend, as it does for `DEVICE_OPERATOR`.
+binding to the same profile's backend, as it does for `DEVICE_OPERATOR`. Deploy
+the backend version that exports `WebhookOperator` before an admin
+configuration that binds it.
 
 Create a Cloudflare Access application and allow policy for the admin hostname
 before exposing it. Protect every enabled hostname, including `workers.dev`
