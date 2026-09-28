@@ -376,9 +376,20 @@ def parse_schema(sql: str, dialect: str) -> ParsedSchema:
         elif isinstance(statement, exp.Drop):
             kind = str(statement.args.get("kind") or "").upper()
             if kind == "INDEX":
-                indexes.pop(statement.this.name.lower(), None)
+                for name in _dropped_names(statement):
+                    indexes.pop(name, None)
 
     return ParsedSchema(tables=tables, indexes=indexes)
+
+
+def _dropped_names(statement: exp.Drop) -> list[str]:
+    # sqlglot 30.19 moved DROP targets from `this` into a `tables` list
+    # (so one statement can name several); older releases set `this`.
+    targets = statement.args.get("tables") or [statement.this]
+    names = [target.name.lower() for target in targets if target is not None]
+    if not names:
+        raise ValueError("DROP INDEX without an index name")
+    return names
 
 
 def _effective_not_null(table: TableContract, column_name: str) -> bool:
