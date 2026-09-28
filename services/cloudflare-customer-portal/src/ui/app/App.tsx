@@ -48,8 +48,11 @@ function PortalShell(): React.ReactElement {
   const [signingOut, setSigningOut] = useState(false);
 
   const location = usePortalLocation();
+  // The signed-in shell (header, navigation and page content) is what renders: not sign-in, consent or
+  // setting a password.
+  const shellVisible = auth.phase === "authed" && enrollment === null && passwordAction === null;
   const { entitlements, devices, usage, usageAvailable, readState, stale, refreshData, clear: clearPortalData } = usePortalData({
-    active: auth.phase === "authed" && enrollment === null && passwordAction === null,
+    active: shellVisible,
     setMessage,
   });
 
@@ -146,9 +149,12 @@ function PortalShell(): React.ReactElement {
   const refreshFocusRef = useRef<HTMLElement | null>(null);
   const activeTabButtonRef = useRef<HTMLAnchorElement | null>(null);
 
+  // Focus moves to the page content on every page change, and when the signed-in shell first appears
+  // (after sign-in, consent's "Go to portal" or setting a password) -- otherwise the screen that had
+  // focus unmounts and focus drops to <body>.
   useLayoutEffect(() => {
     document.getElementById("content")?.focus();
-  }, [location.page, location.project]);
+  }, [shellVisible, location.page, location.project]);
 
   // Fix round 1 (Important): DevicesFeature/LicenseDownloadAction only render while location.page is
   // "nodes"/"apps", but seatMessages/deviceMessages/downloads.messages live one level up, in the
@@ -303,7 +309,7 @@ function PortalShell(): React.ReactElement {
           {(["apps", "nodes", "account"] as const).map((page) => <a key={page} ref={location.page === page ? activeTabButtonRef : undefined} href={`#/${page}`} aria-current={location.page === page ? "page" : undefined}>{page === "nodes" ? "Devices" : page[0].toUpperCase() + page.slice(1)}</a>)}
         </nav>
         {auth.email !== null && <p className="signedInAs">Signed in as {auth.email}</p>}
-        <div className="signOutControl"><button disabled={controlsBusy} onClick={() => void logout()}>{signingOut ? "Signing out…" : "Sign out"}</button>{location.page==="account" && <p>Your apps and devices stay connected.</p>}</div>
+        <div className="signOutControl"><button disabled={controlsBusy} onClick={() => void logout()}>{signingOut ? "Signing out…" : "Sign out"}</button>{location.page==="account" && <p>{Object.keys(deviceController.seatSessions).length > 0 ? "Your apps and connected devices stay connected. Browser seats started here are released." : "Your apps and devices stay connected."}</p>}</div>
         </div>
       </header>
       <div id="content" className="workspaceContent" tabIndex={-1}>

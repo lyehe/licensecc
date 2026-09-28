@@ -30,7 +30,7 @@ export function BrowserSeats({ controller, query, project }: {
   ));
   const seatGridContent = (
     <div className="seatGrid">
-      <div className="seatHeading"><p>These controls manage seats created in this browser. They do not list or control native app sessions on other machines.</p></div>
+      <div className="seatHeading"><p>These controls manage seats created in this browser. They do not list or control native app sessions on other devices.</p></div>
       {visibleEntitlements.length === 0 ? (
         <div className="emptyState"><h3>No matching seats</h3><p>Try another name, seat ID or app.</p></div>
       ) : visibleEntitlements.map((item, index) => {
@@ -57,7 +57,7 @@ export function BrowserSeats({ controller, query, project }: {
           {!licenseUsable ? (
             <p className="seatState">{licenseStatusLead(item, now)}<LicenseNextStep state={state} /></p>
           ) : session === undefined ? (
-            <p className="seatState">Uses 1 of {item.pool_size} shared seats until released or it expires.</p>
+            <p className="seatState">{item.pool_size === 1 ? "Uses this license's only seat until released or it expires." : `Uses 1 of ${item.pool_size} shared seats until released or it expires.`}</p>
           ) : null}
           {session !== undefined && session.expires_at > 0 && <p className="seatState">Active until {formatTimestamp(session.expires_at)}.</p>}
           <div className="actions">
@@ -83,11 +83,11 @@ export function BrowserSeats({ controller, query, project }: {
     <div>
       {hasBrowserSession ? (
         <section className="browserSessions" aria-labelledby="browser-sessions-heading">
-          <h3
+          <h2
             id="browser-sessions-heading"
             ref={(element) => { controller.panelHeadingRef.current = element; }}
             tabIndex={-1}
-          >Browser seats</h3>
+          >Browser seats</h2>
           {seatGridContent}
         </section>
       ) : (

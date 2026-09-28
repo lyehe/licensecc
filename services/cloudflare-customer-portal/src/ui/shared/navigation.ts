@@ -18,7 +18,10 @@ function readLocation(): PortalLocation {
 }
 
 export function appLocation(project: string): string { return `#/apps/${encodeURIComponent(project)}`; }
-export function devicesLocation(project: string): string { return `#/nodes/${encodeURIComponent(project)}`; }
+// The devices page, filtered to one app, or unfiltered when no app is given.
+export function devicesLocation(project?: string): string {
+  return project === undefined ? "#/nodes" : `#/nodes/${encodeURIComponent(project)}`;
+}
 
 export function usePortalLocation(): PortalLocation {
   const [location, setLocation] = useState(readLocation);

@@ -41,7 +41,7 @@ export function PasswordAction({ token, onDone }: { token: string; onDone(): Pro
   }
   return <main className="authPane"><section className="authCard">
     <h1 ref={heading} tabIndex={-1}>Choose your password</h1>
-    <p>15–128 characters. Use a password you don’t use elsewhere.</p>
+    <p>15–128 characters. Use a password you don't use elsewhere.</p>
     {message && <p role="alert" className={messageIsError ? "statusline error" : "statusline"}>{message}</p>}
     {token && !finished && <form onSubmit={event => void submit(event)}>
       <label>New password<input type="password" autoComplete="new-password" required minLength={15} maxLength={128} value={password} onChange={event => setPassword(event.target.value)} /></label>

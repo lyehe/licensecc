@@ -253,9 +253,17 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
   // single recurring interval (registered once per deadline) forces the periodic re-renders needed to
   // count down after that; it keeps ticking under its own steam regardless of how promptly React gets
   // to render each intermediate frame, and the value is recomputed fresh from Date.now() every time.
+  // Once the deadline passes, the deadline resets to 0, which re-renders with the button enabled and
+  // lets this effect's cleanup stop the timer instead of ticking on until the next code is sent.
   useEffect(() => {
     if (resendDeadline === 0) return undefined;
-    const id = setInterval(() => forceResendTick((tick) => tick + 1), 250);
+    const id = setInterval(() => {
+      if (Date.now() >= resendDeadline) {
+        setResendDeadline(0);
+        return;
+      }
+      forceResendTick((tick) => tick + 1);
+    }, 250);
     return () => clearInterval(id);
   }, [resendDeadline]);
   const resendCountdown = resendDeadline === 0 ? 0 : Math.max(0, Math.ceil((resendDeadline - Date.now()) / 1000));

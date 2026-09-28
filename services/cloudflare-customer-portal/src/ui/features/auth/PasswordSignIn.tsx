@@ -9,7 +9,7 @@ const MODE_COPY: Record<Exclude<PasswordMode, "login">, string> = {
   register: "Verify your email, then choose a password. Your administrator can assign licenses after registration.",
   // Reworded (dropped "verified"): an admin-created account with an unverified login email also
   // recovers, and verifies that address, through this same reset -- see PasswordSettings.tsx.
-  reset: "We’ll email a reset link to your login address. You can also recover through a connected Google or GitHub account.",
+  reset: "We'll email a reset link to your login address. You can also recover through a connected Google or GitHub account.",
 };
 const SUBMIT_LABEL: Record<PasswordMode, string> = {
   login: "Sign in",
@@ -38,7 +38,7 @@ export function PasswordSignIn({ onSignedIn, mode, onModeChange, emailLinks }: {
       });
       setPassword("");
       if (result.ok && mode === "login") await onSignedIn();
-      else if (result.ok) setMessage("Check your email. If this address is eligible, you’ll receive a link valid for 15 minutes. Check spam too. You can resend after one minute.");
+      else if (result.ok) setMessage("Check your email. If this address is eligible, you'll receive a link valid for 15 minutes. Check spam too. You can resend after one minute.");
       else { setMessage(passwordMessage(result.code, result.retryAfter)); setMessageIsError(true); }
     } catch {
       setPassword("");

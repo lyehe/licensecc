@@ -25,6 +25,9 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
   const heading=useRef<HTMLHeadingElement>(null);
   const approveButton=useRef<HTMLButtonElement>(null);
   const [recheckArmed,setRecheckArmed]=useState(false);
+  // The operation running under the shared busy flag, so a busy label names only its own operation:
+  // paging, signing out or checking again never reads as connecting.
+  const [inFlight,setInFlight]=useState<"approve"|"deny"|"check"|null>(null);
 
   function expire():void {
     clearEnrollment();record.current=null;setCallback(null);setDeadline(null);setPhase("expired");setMessage("");
@@ -39,7 +42,7 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
     if (["access_denied","revision_conflict","idempotency_conflict"].includes(code)) {
       setPhase("blocked");setMessage(code==="access_denied"?"This account cannot approve this request.":"This request changed. Return to your app to check its connection.");return;
     }
-    setMessage(code==="rate_limited"?"Too many attempts. Wait a minute before trying again.":record.current?.mutation?"We couldn’t confirm the result. Retry to check the same request safely.":"We couldn’t load this request. Please try again.");
+    setMessage(code==="rate_limited"?"Too many attempts. Wait a minute before trying again.":record.current?.mutation?"We couldn't confirm the result. Retry to check the same request safely.":"We couldn't load this request. Please try again.");
   }
 
   async function inspect(cursor?:string,history:Array<string|undefined>=[]):Promise<void> {
@@ -50,7 +53,7 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
     const result=await consentApi<ConsentInspection>("inspect",{attempt_handle:current.handle,...(cursor===undefined?{}:{page_cursor:cursor})},customerId);
     if(!mounted.current || record.current!==current)return;
     if(!result.ok){setPhase("ready");failure(result.code,result.retryAfter);return;}
-    if(result.data.next_page_cursor!==null && (result.data.next_page_cursor===cursor || history.includes(result.data.next_page_cursor))){setPhase("ready");setMessage("We couldn’t load the next page safely. Go back and refresh the list.");return;}
+    if(result.data.next_page_cursor!==null && (result.data.next_page_cursor===cursor || history.includes(result.data.next_page_cursor))){setPhase("ready");setMessage("We couldn't load the next page safely. Go back and refresh the list.");return;}
     if((details && details.comparison_code!==result.data.comparison_code) || (current.mutation?.operation==="approve" && current.mutation.comparisonCode!==result.data.comparison_code)){
       clearEnrollment();setPhase("blocked");setMessage("This connection request changed. Restart from your app.");return;
     }
@@ -70,7 +73,12 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
 
   async function checkAgain():Promise<void> {
     setRecheckArmed(true);
-    await runOnce(()=>inspect(pageCursor,previousCursors));
+    await runOnce(()=>track("check",()=>inspect(pageCursor,previousCursors)));
+  }
+
+  async function track(operation:"approve"|"deny"|"check",work:()=>Promise<void>):Promise<void> {
+    setInFlight(operation);
+    try{await work();}finally{setInFlight(null);}
   }
 
   useEffect(()=>{
@@ -92,7 +100,7 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
   },[deadline,retryAt]);
 
   async function act(operation:"approve"|"deny"):Promise<void> {
-    await runOnce(async()=>{
+    await runOnce(()=>track(record.current?.mutation?.operation??operation,async()=>{
       const current=record.current;if(!current || !details)return;
       if(deadline!==null && Date.now()>=deadline){expire();return;}
       if(!current.mutation && operation==="approve" && (!comparisonConfirmed || !selected))return;
@@ -111,7 +119,7 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
       // Keep only the immutable retry intent in sessionStorage until consumed or expired.
       // The short-lived callback code stays in memory and is sent only to loopback.
       window.location.assign(result.data.callback_url);
-    });
+    }));
   }
 
   const mutation=record.current?.mutation;
@@ -123,7 +131,6 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
   // holds an active binding for this exact license is admitted there without using another slot, so
   // a full license must not block its approval here either.
   const full=!mutation && !!chosenEntitlement && chosenEntitlement.devices_in_use>=chosenEntitlement.device_limit && !chosenEntitlement.device_connected;
-  const checkingAgain=recheckArmed && busy;
 
   useEffect(()=>{
     if(!recheckArmed || busy)return;
@@ -149,7 +156,7 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
               :`All ${chosenEntitlement.device_limit} device slots are in use. Disconnect a device under Devices, then check again.`}</p>
             {chosenEntitlement.slot_free_at!==null && <p>A recently disconnected slot frees at {formatTimestamp(chosenEntitlement.slot_free_at)}.</p>}
             {chosenEntitlement.slot_free_at!==null && chosenEntitlement.slot_free_at>=details.expires_at && <p>This request expires before then. Start connecting again from your app after that time.</p>}
-            <button disabled={busy||waiting} onClick={()=>void checkAgain()}>{checkingAgain?"Checking…":"Check again"}</button>
+            <button disabled={busy||waiting} onClick={()=>void checkAgain()}>{inFlight==="check"?"Checking…":"Check again"}</button>
           </div>}
           {(previousCursors.length>0 || details.has_more) && <nav className="consentPages" aria-label="License pages">
             <button disabled={busy||waiting||previousCursors.length===0} onClick={()=>void runOnce(()=>inspect(previousCursors.at(-1),previousCursors.slice(0,-1)))}>Previous</button>
@@ -164,8 +171,8 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
         {phase==="connected" && <p>You can close this page and continue in your app.</p>}
         {phase==="approved" && callback && <><p>Return to your app to finish. If nothing happens, try again below.</p><a className="button" href={callback}>Open app</a></>}
         {terminal?<button onClick={onDone}>Go to portal</button>:phase==="ready"?<div className="actions consentActions">
-          {!details?<button disabled={busy||waiting} onClick={()=>void runOnce(inspect)}>Retry</button>:mutation?<button className="primary" disabled={busy||waiting} onClick={()=>void act(mutation.operation)}>{busy?"Checking…":mutation.operation==="approve"?"Retry approval":"Retry cancellation"}</button>:<>
-            <button disabled={busy||waiting} onClick={()=>void act("deny")}>Cancel</button><button ref={approveButton} className="primary" disabled={busy||waiting||!selected||!comparisonConfirmed||full} onClick={()=>void act("approve")}>{busy && !checkingAgain?"Connecting…":"Approve"}</button>
+          {!details?<button disabled={busy||waiting} onClick={()=>void runOnce(inspect)}>Retry</button>:mutation?<button className="primary" disabled={busy||waiting} onClick={()=>void act(mutation.operation)}>{inFlight==="approve"?"Connecting…":inFlight==="deny"?"Cancelling…":busy?"Checking…":mutation.operation==="approve"?"Retry approval":"Retry cancellation"}</button>:<>
+            <button disabled={busy||waiting} onClick={()=>void act("deny")}>{inFlight==="deny"?"Cancelling…":"Cancel"}</button><button ref={approveButton} className="primary" disabled={busy||waiting||!selected||!comparisonConfirmed||full} onClick={()=>void act("approve")}>{inFlight==="approve"?"Connecting…":"Approve"}</button>
           </>}
         </div>:null}
       </>}
