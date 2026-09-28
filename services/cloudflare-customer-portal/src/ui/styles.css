@@ -223,7 +223,7 @@ nav a:hover {
 }
 
 .statusline {
-  color:#9bc49b;
+  color:var(--status-ok-ink);
   overflow-wrap:anywhere
 }
 
@@ -669,7 +669,7 @@ code {
 .retirementDialog .dialogActions, .confirmDialog .dialogActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-top: 24px; }
 /* D4: the legacy-release and floating-seat-release confirms share this dialog styling with
    ProtectedNodes' own retirement confirm -- one visual treatment for the one native <dialog> pattern. */
-.confirmDialog button.danger { color: #db9292; }
+.confirmDialog button.danger { color: var(--status-danger-ink); }
 
 .referenceDetails { margin-top:8px; color:var(--muted); font-size:var(--text-body); }
 .referenceDetails summary { cursor:pointer; width:fit-content; padding:4px 0; }

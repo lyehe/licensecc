@@ -37,23 +37,48 @@ function stripComments(css) {
   return css.replace(/\/\*[\s\S]*?\*\//gu, "");
 }
 
-// Finds the body of the first `:root { ... }` block, honoring brace nesting so a
-// stray `{`/`}` inside a later rule cannot shift where the block is thought to
-// end. Returns null when no `:root` block is present, so callers can fail closed
-// instead of silently treating "no block" as "zero tokens".
-function findRootBody(css) {
+// Scans a whole stylesheet for `:root { ... }` blocks that sit at the top
+// level -- not nested inside an `@media`, `@supports`, or any other rule --
+// and returns each one's body. A `:root` nested inside another rule is walked
+// over, so brace depth stays correct for whatever follows it, but it is never
+// returned: it does not describe the page's actual custom properties the way
+// a top-level `:root` does, and must not be mistaken for one.
+function findAllTopLevelRootBodies(css) {
   const source = stripComments(css);
-  const opener = /:root\s*\{/u.exec(source);
-  if (!opener) return null;
-  const start = opener.index + opener[0].length;
-  let depth = 1;
-  let index = start;
-  for (; index < source.length && depth > 0; index += 1) {
-    if (source[index] === "{") depth += 1;
-    else if (source[index] === "}") depth -= 1;
+  const bodies = [];
+  let depth = 0;
+  let preludeStart = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") {
+      const prelude = source.slice(preludeStart, index).trim();
+      if (depth === 0 && prelude === ":root") {
+        let innerDepth = 1;
+        let cursor = index + 1;
+        for (; cursor < source.length && innerDepth > 0; cursor += 1) {
+          if (source[cursor] === "{") innerDepth += 1;
+          else if (source[cursor] === "}") innerDepth -= 1;
+        }
+        if (innerDepth !== 0) throw new Error("unterminated :root block");
+        bodies.push(source.slice(index + 1, cursor - 1));
+        index = cursor - 1;
+        preludeStart = cursor;
+        continue;
+      }
+      depth += 1;
+      preludeStart = index + 1;
+      continue;
+    }
+    if (char === "}") {
+      depth = Math.max(0, depth - 1);
+      preludeStart = index + 1;
+      continue;
+    }
+    if (char === ";" && depth === 0) {
+      preludeStart = index + 1;
+    }
   }
-  if (depth !== 0) return null;
-  return source.slice(start, index - 1);
+  return bodies;
 }
 
 // Parses only named custom properties (`--name: value;`) out of a `:root` body.
@@ -75,12 +100,21 @@ function parseCustomProperties(rootBody) {
   return tokens;
 }
 
-// Parses the named custom properties defined in a stylesheet's `:root` block.
-// Returns null when the stylesheet has no `:root` block at all.
+// Parses the named custom properties defined in a stylesheet's single
+// top-level `:root` block. Throws a descriptive error when there is not
+// exactly one, so "no block" and "an ambiguous second block" each fail
+// closed with a clear message instead of being mistaken for zero tokens.
 function parseRootTokens(css) {
-  const body = findRootBody(css);
-  if (body === null) return null;
-  return parseCustomProperties(body);
+  const bodies = findAllTopLevelRootBodies(css);
+  if (bodies.length === 0) {
+    throw new Error(
+      "no top-level :root block found (a :root nested inside another rule, such as @media, does not count)",
+    );
+  }
+  if (bodies.length > 1) {
+    throw new Error(`expected exactly one top-level :root block, found ${bodies.length}`);
+  }
+  return parseCustomProperties(bodies[0]);
 }
 
 // Returns the shared names whose values differ, after whitespace normalisation
@@ -179,8 +213,6 @@ test("a :root that exists only nested inside @media is not a top-level block", (
 test("admin and portal define the same value for every required shared token", () => {
   const adminTokens = parseRootTokens(readFileSync(adminTokensPath, "utf8"));
   const portalTokens = parseRootTokens(readFileSync(portalTokensPath, "utf8"));
-  assert.notEqual(adminTokens, null, `${adminTokensPath} has no :root block`);
-  assert.notEqual(portalTokens, null, `${portalTokensPath} has no :root block`);
 
   const problems = [];
   for (const name of REQUIRED_SHARED_TOKENS) {
@@ -198,8 +230,6 @@ test("admin and portal define the same value for every required shared token", (
 test("no other shared token has drifted between admin and portal", () => {
   const adminTokens = parseRootTokens(readFileSync(adminTokensPath, "utf8"));
   const portalTokens = parseRootTokens(readFileSync(portalTokensPath, "utf8"));
-  assert.notEqual(adminTokens, null, `${adminTokensPath} has no :root block`);
-  assert.notEqual(portalTokens, null, `${portalTokensPath} has no :root block`);
   const mismatches = diffSharedTokens(adminTokens, portalTokens);
   assert.deepEqual(mismatches, [], `drifted shared tokens: ${JSON.stringify(mismatches)}`);
 });

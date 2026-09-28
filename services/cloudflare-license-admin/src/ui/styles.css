@@ -1,6 +1,6 @@
 /* Trial sub-panel inside the policy editor (only shown when type === 'trial'). */
 .trialPanel {
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--border);
   border-radius: 4px;
   display: grid;
   gap: 10px;
@@ -44,7 +44,7 @@ button.danger {
 button.danger:hover:not(:disabled) {
   background: var(--status-danger-ink);
   border-color: var(--status-danger-ink);
-  color: #0f0f0f;
+  color: var(--canvas);
 }
 
 /* Typed-confirm modal for irreversible / broad-blast actions. */
@@ -61,7 +61,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .modal {
-  background: #161616;
+  background: var(--surface);
   border-radius: 6px;
   border: 0;
   box-sizing: border-box;
@@ -314,8 +314,8 @@ button.danger:hover:not(:disabled) {
 }
 
 .chartCard {
-  background: #161616;
-  border: 1px solid #2a2a2a;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 6px;
   display: grid;
   gap: 10px;
@@ -337,7 +337,7 @@ button.danger:hover:not(:disabled) {
    stretch to the container. A subtle inner backdrop separates it from the card. */
 .chart {
   background: #1e1e1e;
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--border);
   border-radius: 4px;
   display: block;
   height: 120px;
