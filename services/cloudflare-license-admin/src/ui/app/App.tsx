@@ -80,7 +80,7 @@ function ConsoleShell(): React.ReactElement {
           <Search onNavigate={navigate} onOpen={() => setMenuOpen(false)} closeSignal={navigationVersion} hiddenByMenu={menuOpen} />
         </header>
         <div id="workspace-content" className="workspaceContent" tabIndex={-1}>
-          <div className="pageHeading"><div><h2 data-workspace-heading tabIndex={-1}>{label}</h2><p>{descriptions[activeTab]}</p></div></div>
+          <div className="pageHeading"><div><h1 data-workspace-heading tabIndex={-1}>{label}</h1><p>{descriptions[activeTab]}</p></div></div>
           {navigationNotice !== null && <p className="activityMessage" data-tone="info" role="status">{navigationNotice}</p>}
           {feedback.message && <div className="activityMessage" data-tone={feedback.tone} role={feedback.tone === "error" ? "alert" : "status"}><FeedbackText feedback={feedback} /></div>}
           {activeTab === "overview" && <div className="quickActions"><button className="primary" onClick={() => navigateTab("entitlements")}>Manage access <span aria-hidden="true">→</span></button><button onClick={() => navigateTab("reports")}>View usage</button></div>}

@@ -71,7 +71,7 @@ export function Sidebar({ open, onClose, menuRef }: { open: boolean; onClose: ()
       // close it when focus moves to the workspace so content stays visible.
       if (open && event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget) && event.relatedTarget !== menuRef.current) onClose();
     }}>
-      <div className="brand"><span className="brandMark" aria-hidden="true">L</span><div><h1>Licensecc admin</h1></div></div>
+      <div className="brand"><span className="brandMark" aria-hidden="true">L</span><div><p className="brandName">Licensecc admin</p></div></div>
       <button type="button" className="mobileMenuClose" onClick={dismiss}>Close menu</button>
       <nav aria-label="Main navigation">
         {groups.map((group) => <div className="navGroup" key={group.label}>
