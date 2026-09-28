@@ -8,9 +8,9 @@ had drifted onto different words for the same concept (for example
 `Binding:`, `Retire connection`, and `Registered nodes` in the admin console
 next to `Device ID`, `Disconnect`, and `Legacy device registrations` in the
 portal). This page is the single source of truth for the word each app uses.
-It is task F1 of the UI/UX workflow remediation plan recorded under
-`docs/superpowers/plans/2026-09-23-ui-ux-workflow-remediation.md`, and it
-lands first so every later task writes new copy in these terms.
+It was written first, ahead of the other copy changes in this consistency
+pass, so that later work could reuse these terms instead of inventing new
+ones.
 
 **API codes, JSON field names, route paths, CSS class names, and TypeScript
 identifiers are unchanged by this glossary.** It governs rendered text only:
@@ -84,15 +84,15 @@ words. Two notes:
   separate concept; the admin console's operator-facing views (the customer
   detail badge, its status filter, and the account-token list) display it as
   **suspended** too, as of this task. The portal applies the term to a
-  customer's own account at sign-in (task A3): the correct password, or a
+  customer's own account at sign-in: the correct password, or a
   linked Google or GitHub identity, on a suspended account gets "This account
-  is suspended." Task C5 applies it to a customer's per-license status
+  is suspended." The same word applies to a customer's per-license status
   text: a license wire-coded `disabled` reads "Suspended." followed by the
   support contact.
 - "Expired" and "not started" for a portal license are computed from its
   validity window and, for a trial, the date its trial ends; neither is
   stored as a status code. The portal words them "Expired on {date}" and
-  "Starts {date}" (task C5). "Not started" is an additional, allowed nuance
+  "Starts {date}". "Not started" is an additional, allowed nuance
   beyond the four canonical words, not a replacement for any of them.
 
 **Capacity.** The maximum concurrent devices an entitlement or policy

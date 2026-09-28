@@ -249,7 +249,7 @@ test("HTTP concurrent activation cannot oversubscribe the last device slot",asyn
   assert.equal((await f.call("/v2/device-authorizations/exchange",await signed(f,loser,"exchange"))).body.code,"device_limit_reached");
 });
 
-// B5: the admin console must be able to show operators recent refused connections. Every
+// The admin console must be able to show operators recent refused connections. Every
 // device_limit_reached refusal records a best-effort usage_events row, deduped for 15 minutes so a
 // retrying client cannot flood the audit trail with one ongoing refusal.
 test("HTTP capacity refusal records a best-effort denial with a 15-minute dedupe",async t=>{

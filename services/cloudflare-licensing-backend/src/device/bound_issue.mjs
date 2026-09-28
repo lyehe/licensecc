@@ -81,9 +81,9 @@ async function authority(db, purpose, request, verified, operation) {
         WHERE d.key_id=? AND b.project=? AND b.feature=? AND b.license_fingerprint=? AND b.state='active'`)
         .bind(subject.key_id, subject.project, subject.feature, subject.license_fingerprint).first();
       if (created) deny("temporarily_unavailable", 503);
-      // Best-effort audit for the admin console (B5): a telemetry failure must never change this
-      // refusal. Deduped for 15 minutes so a retrying client cannot flood the audit trail with one
-      // ongoing refusal.
+      // Best-effort audit so the admin console can list this refusal among recent denied
+      // connections: a telemetry failure must never change this refusal. Deduped for 15 minutes so
+      // a retrying client cannot flood the audit trail with one ongoing refusal.
       try {
         await db.prepare(`INSERT INTO usage_events (project,feature,license_fingerprint,event_type,device_key_id,reason,ts)
           SELECT ?,?,?,'denied',?,'device_limit_reached',unixepoch()
