@@ -305,6 +305,21 @@ test("fetch errors retain timeout/retry behavior", async () => {
   assert.match(state.last_error, /network down|aborted/);
 });
 
+test("a stored endpoint URL that is no longer safe is never fetched and fails terminally", async () => {
+  let fetched = 0;
+  const state = await deliverWithFetcher(
+    async () => {
+      fetched += 1;
+      return new Response(null, { status: 204 });
+    },
+    { delivery: { url: "https://127.0.0.1/hook" } },
+  );
+
+  assert.equal(fetched, 0);
+  assert.equal(state.status, "failed");
+  assert.equal(state.last_error, "invalid_url");
+});
+
 test("successful responses cancel an endless body before committing delivery", async () => {
   const response = streamedResponse([], { status: 204, keepOpen: true });
   const calls = [];

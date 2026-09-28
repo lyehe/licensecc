@@ -28,6 +28,18 @@ test("safeWebhookUrl rejects non-strings, blanks, whitespace, control characters
   assert.equal(safeWebhookUrl(prefix + "a".repeat(MAX_WEBHOOK_URL_SIZE - prefix.length + 1)), null);
 });
 
+test("safeWebhookUrl refuses credentials, IP literals and internal hostnames", () => {
+  for (const url of [
+    "https://user:pass@hooks.example.com/", "https://user@hooks.example.com/",
+    "https://127.0.0.1/", "https://10.0.0.5/hook", "https://[::1]/", "https://[fd00::1]/",
+    "https://localhost/", "https://api.localhost/", "https://intranet/", "https://printer.local/",
+    "https://db.internal/", "https://nas.home.arpa/",
+  ]) {
+    assert.equal(safeWebhookUrl(url), null, url);
+  }
+  assert.equal(safeWebhookUrl("https://hooks.example.com:8443/lcc"), "https://hooks.example.com:8443/lcc");
+});
+
 test("a test send can only ever report one of five status classes", () => {
   assert.deepEqual([...WEBHOOK_TEST_STATUS_CLASSES], ["2xx", "3xx", "4xx", "5xx", "network_error"]);
   assert.ok(Object.isFrozen(WEBHOOK_TEST_STATUS_CLASSES));
