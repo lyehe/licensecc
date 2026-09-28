@@ -5,7 +5,7 @@
 **Goal:** Make protected (`device_bound_v1`) licensing the only online mode, keep offline `.lic` (v201 only) and `lcccfg1` config tokens, delete all PostgreSQL support, and remove every backward-compatibility shim, alias and compatibility-only document, starting from one D1 schema baseline.
 
 **Architecture:**
-- **Schema first.** PostgreSQL goes first, so no second schema has to move in lockstep. Migrations 0001–0043 then collapse into `migrations/0001_baseline.sql`, byte-equivalent to today's `schema.sql`. Every later schema change edits that baseline in place and regenerates `schema.sql`; there is never a second migration.
+- **Schema first.** PostgreSQL goes first, so no second schema has to move in lockstep. Migrations 0001–0043 then collapse into `migrations/0001_baseline.sql`, whose DDL is identical to today's `schema.sql`, plus the one seed row that the DDL-only `schema.sql` dump does not carry. `schema.sql` stays DDL-only. Every later schema change edits that baseline in place and regenerates `schema.sql`; there is never a second migration.
 - **Order of removal.**
   1. Clients: native and SDKs.
   2. Writers: after this, nothing can create a legacy row.
@@ -23,8 +23,9 @@
 - Python 3.12 + uv 0.12.5 for `check-schema-parity.py`.
 
 **Spec:**
-- Design brief (file:line evidence, phases P0–P7, schema changes, risks R1–R14, staged items S1–S17, latent defects): `C:/Users/HEQ/AppData/Local/Temp/claude/C--Users-HEQ-Projects-licensecc/a320d68a-3d35-4781-9d67-672e055c66a3/scratchpad/legacy-removal-design.md`
-- Compatibility inventory (categories A–E, controller rulings): `C:/Users/HEQ/AppData/Local/Temp/claude/C--Users-HEQ-Projects-licensecc/a320d68a-3d35-4781-9d67-672e055c66a3/scratchpad/compat-inventory.md`
+- Design brief (file:line evidence, phases P0–P7, schema changes, risks R1–R14, staged items S1–S17, latent defects): `.superpowers/sdd/2026-09-28-remove-legacy-mode-and-compat/legacy-removal-design.md`
+- Compatibility inventory (categories A–E, controller rulings): `.superpowers/sdd/2026-09-28-remove-legacy-mode-and-compat/compat-inventory.md`
+- Plan review applied to this revision (findings F1–F30): `.superpowers/sdd/2026-09-28-remove-legacy-mode-and-compat/plan-review.md`
 - Verified ref: `main` @ `3bd3f721`. Every file:line below was checked at that ref. Re-read the lines before editing, because earlier tasks shift them.
 
 **Owner decisions (binding; quoted so this plan is self-contained).** "This is a NEW project: anything old can be removed."
@@ -77,11 +78,11 @@
    - B4, B5, B7 and B9;
    - everything in "looks like compat but is live".
 
-   Re-evaluate `DEVICE_PROOF_MODE` (B2) after the legacy removal: remove it with evidence if nothing that needs it survives. It does not survive. Its only readers are `/v1/verify` (deleted in Task 30), leases and seats (Task 28), and the config checks that pin it to `off`. Task 30 deletes it with the grep evidence.
+   Re-evaluate `DEVICE_PROOF_MODE` (B2) after the legacy removal: remove it with evidence if nothing that needs it survives. It does not survive. Its only readers are `/v1/verify` (deleted in Task 32), leases and seats (Task 30), and the config checks that pin it to `off`. Task 33 deletes it with the grep evidence.
 
 ## Global Constraints
 
-- **PR gate.** Every task leaves `npm ci` then `npm run check:pr` green, using Python 3.12 and uv 0.12.5. The only tolerated failures are the 7 known Node-24 `services/cloudflare-licensing-backend/test/staging-lease-drill.test.mjs` failures, and only until Task 28 deletes that drill. CI's Node 22 must pass them.
+- **PR gate.** Every task leaves `npm ci` then `npm run check:pr` green, using Python 3.12 and uv 0.12.5. The only tolerated failures are the 7 known Node-24 `services/cloudflare-licensing-backend/test/staging-lease-drill.test.mjs` failures, and only until Task 31 deletes that drill. CI's Node 22 must pass them.
 - **Extra gates.** Each task names its own. The standard sets are:
   - **Core native:** `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug`, `ctest --preset dev-debug`, plus WSL Linux `ctest --preset ci-linux-debug` where relevant.
   - **SDK:** `npm run test:sdks`.
@@ -89,7 +90,7 @@
   - **Routes or contracts:** `npm run write:contract-baselines`, then `npm run test:contracts`.
   - **Docs:** `npm run test:docs-accuracy`, then `npm run check:docs`.
 - **Repo text.** Never cite plan task numbers, phase names (P0–P7) or ruling/inventory IDs (A4, B3, R8, S4…) in repo text: code, comments, docs, commit messages or test titles. State the reason in plain words.
-- **Commits.** Every commit ends with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- **Commits.** Every commit ends with the `Co-Authored-By` trailer that the executing session's attribution rule specifies.
 - **Contract baselines** under `test/contracts/*.json` change only via `npm run write:contract-baselines`, after reviewing the route or OpenAPI change.
 - **Hotspots.** Never raise a value in `scripts/hotspot-baseline.json`.
   - When a listed file is deleted, delete its entry in the same commit (`HOTSPOT_BASELINE_MISSING_FILE`).
@@ -102,14 +103,14 @@
   - run `npm run check:schema-parity`;
   - update the restore-drill schema signature and inventories in `services/cloudflare-d1-backup` in the same commit.
 
-  Never add a `0002_*.sql`.
+  Never add a `0002_*.sql`. Keep the catalog projection seed (`INSERT OR IGNORE INTO license_plan_projection_generations …`) as the baseline's last statement; `test/db/db-conformance.test.mjs` fails without it.
 - **`doc/architecture/system-map.md`** must stay accurate:
   - the canonical route counts (23/75/36 today);
   - the hotspot table rows;
   - the composition-root line counts;
-  - the production-source totals.
+  - the production-source totals of the four services.
 
-  `scripts/docs-accuracy.test.mjs:486-525` recomputes them.
+  `scripts/docs-accuracy.test.mjs:486-525` recomputes them, so every task that changes a service's `src/` line count updates the matching total in the same commit.
 - **Route inventories and counts move together.** The places are:
   - backend `src/routes.ts` and its dispatch in `src/app.ts`;
   - admin `ALL_ROUTES`;
@@ -119,17 +120,19 @@
   - route-owner tests.
 - **The capability registry** (`doc/capabilities/registry.json`, checked by `npm run check:capabilities` and `npm run test:capabilities`) is updated in the same commit as any file, test title or selector it cites is deleted or renamed.
 - **The script catalog** (`scripts/script-catalog.json`, checked by `npm run check:scripts`) loses an entry in the same commit as the script it names.
+- **Deploy drills.** A workflow step that exercises a route is deleted in the same task as the route, so no deploy runs a drill against a route that no longer exists. The drill script itself may go in the next task with its remaining consumers.
 - **Protected guards.** Keep every protected guard listed in "Protected guards that must survive" below.
 - **Handoffs.** Status reports follow `CONTRIBUTING.md` "Task Packets and Handoffs": the verified commit, the exact commands with their outcomes, and the surfaces not run, with reasons. Never a bare "all green".
-- **Protected plans.** Do not edit this plan file while executing it. Record evidence in `docs/implementation/2026-09-28-remove-legacy-mode-and-compat.md` (Task 42).
+- **Protected plans.** Do not edit this plan file while executing it. Record evidence in `docs/implementation/2026-09-28-remove-legacy-mode-and-compat.md` (Task 46).
 
 ### Protected guards that must survive
 
 - Every `tr_bound_*` trigger except the seven this plan deletes (`tr_bound_reject_legacy_device_insert`, `_device_update`, `_lease`, `_seat_insert`, `_seat_update`, `tr_bound_mode_no_downgrade`, `tr_bound_mode_requires_migration`). The survivors are:
-  - `tr_bound_capacity_decrease` and `tr_bound_entitlement_revision`, rewritten in Tasks 34–35 but kept;
+  - `tr_bound_capacity_decrease` and `tr_bound_entitlement_revision`, rewritten in Tasks 38 and 40 but kept;
   - the immutability, monotonic, tombstone and no-resurrection triggers;
-  - `tr_bound_owner_change`, `tr_bound_customer_revision`, `tr_bound_device_disable`, `tr_bound_requested_feature_*`.
-- The 18 `bump_license_plan_projection_generation_*` triggers.
+  - `tr_bound_owner_change`, `tr_bound_customer_revision`, `tr_bound_device_disable`, `tr_bound_requested_feature_immutable`;
+  - `tr_bound_requested_feature_insert` and `tr_bound_requested_feature_update`, kept and rewritten in Task 41.
+- The 18 `bump_license_plan_projection_generation_*` triggers, and the seeded `license_plan_projection_generations` row (`scope = 'catalog'`) they update.
 - The order-ingest monotonic floor and the HMAC replay store (`order_ingest_nonces`).
 - `rate_limit_counters` and the protected limiter in `src/device/bound_rate.mjs`, including the global fuse.
 - `entitlements.revocation_seq`, `authority_revision`, `lease_seconds`, `max_active_devices` and all `trial_*` columns except `trial_require_device_proof`.
@@ -156,51 +159,57 @@
   - the admin customer-detail bundle and `/api/sync/entitlements` (made protected-only, not removed);
   - deployment transition tooling;
   - the typecheck-coverage JS graphs.
+- The lease-client rollback rejection is subsumed by decision 1: `lease_client.hpp` served only `/v1/activate`/`/v1/renew` and goes with them (Task 5).
 
 ## Review Focus
 
 1. **A writer still creates a legacy-shaped row after the writers task.**
    - The risk: order ingest, plan apply, sync or the break-glass CLI keeps inserting `enforcement_mode='legacy'` or a non-zero `pool_size`. The protected issuer then refuses that grant (`bound_issue.mjs:56,60`), so a paid order or a plan apply yields an unusable licence.
    - Tests:
-     - Task 17: `plan apply keeps a protected grant issuable` asserts `pool_size = 0` and `enforcement_mode = 'device_bound_v1'` after applying a plan whose feature has `pool_size > 0`.
-     - Task 18: `an order creates a protected grant owned by its customer` and `an order without a customer is refused`.
-     - Task 16: `admin create without enforcement_mode is refused`.
+     - Task 18: `plan apply keeps a protected grant issuable` asserts `pool_size = 0` and `enforcement_mode = 'device_bound_v1'` after applying a plan whose feature has `pool_size > 0`.
+     - Task 19: `an order creates a protected grant owned by its customer` and `an order without a customer is refused`.
+     - Task 16: `admin create without enforcement_mode is refused`. Task 39 replaces it with `admin create with an enforcement_mode key is refused` when protected becomes the schema default.
 2. **A protected reader loses a legacy-named table, column or binding.**
    - The risk: the protected issuer writes denial rows to `usage_events` (`bound_issue.mjs:87-94`); the admin reads them (`customers/bindings.ts:75-83`); registration rides `VERIFY_RATE_LIMITER` (`bound_rate.mjs:88`); trials store the proven key in `trial_device_hash`. Deleting any of these with the legacy code silently removes a protected behaviour.
    - Tests:
-     - Task 30: `registration is edge-limited through BOUND_REGISTRATION_RATE_LIMITER`.
-     - Task 33: `a device-limit refusal writes one device_bound_denials row per 15 minutes and the admin lists it`.
-     - Task 35: `a protected trial locks to the proven key in trial_device_key_id`.
+     - Task 33: `registration is edge-limited through BOUND_REGISTRATION_RATE_LIMITER`.
+     - Task 36: `a device-limit refusal writes one device_bound_denials row per 15 minutes and the admin lists it`.
+     - Task 40: `a protected trial locks to the proven key in trial_device_key_id`.
 3. **The admin console rejects every entitlement read after the column drop.**
    - The risk: `hasEntitlementRecordData` in `services/cloudflare-license-admin/src/ui/shared/mutationGuards.ts:350-364` requires `heartbeat_grace_sec`, `allow_overdraft`, `rebind_window_sec` and the other legacy columns. The file is an 866-line hotspot at its baseline.
-   - Test (Task 34): `the entitlement record guard accepts the protected row shape` in `services/cloudflare-license-admin/test/admin-ui-workflow/entitlements.test.mjs`. It checks that `hasEntitlementRecordData` accepts the post-drop row shape and rejects a row missing `max_active_devices`; admin `test:e2e` must also pass `admin-ui.lifecycle.e2e.mjs`. `wc -l mutationGuards.ts` must be ≤ 866.
+   - Tests:
+     - Task 37 (guard first, while the columns still exist): `the entitlement record guard accepts the protected row shape` in `services/cloudflare-license-admin/test/admin-ui-workflow/entitlements.test.mjs`. It checks that `hasEntitlementRecordData` accepts the post-drop row shape and rejects a row missing `max_active_devices`.
+     - Task 38 (the drop): the same test still passes, and admin `test:e2e` passes `admin-ui.lifecycle.e2e.mjs` against the post-drop rows.
+     - In both tasks `wc -l mutationGuards.ts` must not exceed its `scripts/hotspot-baseline.json` entry (866 today, lowered by Task 27).
 4. **Deploys go unverified, or the three health readers disagree.**
    - The risk: the legacy drills (lease drill, public-verifier drill, portal seat/download mutation) are the only deployed licensing smoke tests. Backend `/health`, portal `/health` and `scripts/check-worker-rollback-health.mjs` all key on `account_token_mode`.
    - Tests:
-     - Task 20: `the staging portal drill completes a protected enrollment, exchange and renewal and retires the binding` in `services/cloudflare-customer-portal/test/staging-portal-drill.test.mjs`.
-     - Task 27: `rollback health accepts protected_device_ready and rejects account_token_mode` in `scripts/check-worker-rollback-health.test.mjs`, plus `portal health is healthy only when the backend reports protected readiness` in `services/cloudflare-customer-portal/test/portal-worker-public.test.mjs`, plus the production smoke test `test/protected-readiness-smoke.test.mjs`.
+     - Task 21: `the staging portal drill completes a protected enrollment, exchange and renewal and retires the binding` and `the drill skips the protected journey when the protected variables are absent` in `services/cloudflare-customer-portal/test/staging-portal-drill.test.mjs`.
+     - Task 29: `rollback health accepts protected_device_ready and rejects account_token_mode` in `scripts/check-worker-rollback-health.test.mjs`, plus `portal health is healthy only when the backend reports protected readiness` in `services/cloudflare-customer-portal/test/portal-worker-public.test.mjs`, plus the production smoke test `test/protected-readiness-smoke.test.mjs`.
 5. **A rewritten trigger stops guarding protected authority.**
    - The risk: dropping `enforcement_mode`, `pool_size`, `trial_require_device_proof` and renaming `trial_device_hash` rewrites `tr_bound_capacity_decrease` and `tr_bound_entitlement_revision`. A careless rewrite drops the retiring-slot `hold_until > unixepoch()` rule, or stops bumping `authority_revision` for `lease_seconds`, `revocation_seq` or a trial column.
-   - Test: `entitlement authority revision advances for every authority column` in `services/cloudflare-licensing-backend/test/sql/bound-device-store.test.mjs`. Task 34 creates it; Task 35 switches it to `trial_device_key_id`. It updates each of `status`, `customer_id`, `valid_from`, `valid_until`, `max_active_devices`, `lease_seconds`, `revocation_seq`, `is_trial`, `trial_started_at`, `trial_duration_sec`, `trial_expiration_basis`, `trial_one_per_device` and `trial_device_key_id` in turn, and asserts `authority_revision` increments once each. `test/sql/bound-capacity-predicate.test.mjs` must still pin the capacity rule against `boundOccupiedSql`.
+   - Test: `entitlement authority revision advances for every authority column` in `services/cloudflare-licensing-backend/test/sql/bound-device-store.test.mjs`. Task 38 creates it; Task 40 switches it to `trial_device_key_id`. It updates each of `status`, `customer_id`, `valid_from`, `valid_until`, `max_active_devices`, `lease_seconds`, `revocation_seq`, `is_trial`, `trial_started_at`, `trial_duration_sec`, `trial_expiration_basis`, `trial_one_per_device` and `trial_device_key_id` in turn, and asserts `authority_revision` increments once each. `test/sql/bound-capacity-predicate.test.mjs` must still pin the capacity rule against `boundOccupiedSql`.
 
 ## Phase map and dependencies
 
 | Phase | Tasks | Depends on | May run in parallel with |
 |---|---|---|---|
 | P0 PostgreSQL removal and schema baseline | 1–3 | — | — |
-| P1a Native client | 4–11 | P0 | P1b, P2 |
+| P1a Native client | 4–11 | P0. Task 5 after Task 4; Task 7 after Task 5. | P1b, P2 |
 | P1b SDK clients | 12–15 | P0 | P1a, P2 |
-| P2 Writers protected-only | 16–19 | P0 | P1a, P1b |
-| P3 Portal (protected staging drill first) | 20–22 | P2 | P4 |
-| P4 Admin | 23–26 | P2 | P3 |
-| P5a Backend runtime, routes, drills and CI | 27–31 | P1a, P1b, P3, P4. Strict order: 27 → 28 → 29 → 30 → 31. | — |
-| P5b Legacy-only tables | 32 | P5a | — |
-| P6 Schema columns, mode and baseline tidy-ups | 33–38 | P5b. Strict order. | — |
-| P7 Tooling, docs, final sweep | 39–42 | P6 (Task 39 may run any time after P0) | — |
+| P2 Writers protected-only | 16–20 | P0. Task 17 after Task 16. | P1a, P1b |
+| P3 Portal (protected staging drill first) | 21–23 | P2 | P4 |
+| P4 Admin | 24–28 | P2. Task 25 after Task 24. | P3 |
+| P5a Backend runtime, routes, drills and CI | 29–34 | P1a, P1b, P3, P4. Strict order: 29 → 30 → 31 → 32 → 33 → 34. | — |
+| P5b Legacy-only tables | 35 | P5a | — |
+| P6 Schema columns, mode and baseline tidy-ups | 36–43 | P5b. Strict order: 36 → 37 → 38 → 39 → 40 → 41 → 42 → 43. | — |
+| P7 Tooling, docs, final sweep | 44–46 | P6 (Task 44 may run any time after Task 1) | — |
 
 Execute tasks in number order unless the table allows parallel work. A parallel branch must rebase and re-run `check:pr` before merging.
 
-Scripts, drills, workflow steps, vectors and shared-package modules are deleted in the same task that deletes their last consumer route or test, not in a separate cleanup task. This keeps every task green and every deploy covered by a drill. P5b therefore holds only the baseline table drop.
+P3 and P4 may run in parallel because neither deletes anything the other still imports: the shared `legacyTrialDeadlineSql` helper is deleted only in Task 31, after the portal (Task 22) and the admin (Task 26) stop importing it, and the domain device-record types are deleted in Task 27, together with the admin UI that is their last consumer.
+
+Scripts, drills, workflow steps, vectors and shared-package modules are deleted in the same task that deletes their last consumer route or test, not in a separate cleanup task. Where a large deletion is split in two, the first task removes the route and every workflow step that calls it, and the second removes the scripts, modules and configuration that are then unused. This keeps every task green and every deploy covered by a drill. P5b therefore holds only the baseline table drop.
 
 ---
 
@@ -316,8 +325,9 @@ git grep -nIiE "postgres|supabase|pg-parity|schema\.pg|statements\.pg|check-pg-p
 
 **Files:**
 - Delete `services/cloudflare-licensing-backend/migrations/0001_create_entitlements.sql` through `0043_allow_webhook_test_send_event.sql`, all 43 files.
-- Create `services/cloudflare-licensing-backend/migrations/0001_baseline.sql`.
+- Create `services/cloudflare-licensing-backend/migrations/0001_baseline.sql`: the DDL of today's `schema.sql` plus the one data statement the migrations carry, the catalog projection seed from `0028_plan_projection_preview_protocol.sql:14-15`.
 - Modify `services/cloudflare-licensing-backend/scripts/check-schema-parity.py:12-15` (`GENERATED_HEADER` text only) and the regenerated `services/cloudflare-licensing-backend/schema.sql`.
+- Modify `services/cloudflare-licensing-backend/test/db/db-conformance.test.mjs`: add the seed-row test (Step 1).
 - Delete these upgrade-path tests:
   - `services/cloudflare-licensing-backend/test/sql/bound-migration-legacy-data.test.mjs`
   - `services/cloudflare-licensing-backend/test/sql/webhook-events-test-send-migration.test.mjs`
@@ -334,6 +344,10 @@ git grep -nIiE "postgres|supabase|pg-parity|schema\.pg|statements\.pg|check-pg-p
   - `services/cloudflare-license-admin/src/shared/api.ts:163,332`
   - `services/cloudflare-license-admin/src/worker/webhooks.ts:1,29,349`
   - `services/cloudflare-license-admin/test/sql/webhook-admin.test.mjs:4`
+  - `services/cloudflare-license-admin/test/sql/policy-admin.test.mjs:6` ("0018 entitlement_policies + 0019 policy_events")
+  - `services/cloudflare-customer-portal/src/auth/portal_otp.mjs:6,10` (the "(0015)" and "(0009)" migration numbers)
+  - `services/cloudflare-customer-portal/wrangler.example.jsonc:22` ("incl. 0016 portal_otp/portal_sessions")
+  - `services/cloudflare-license-admin/wrangler.example.jsonc:22-25` (the backend owns the single baseline migration)
 - Modify the docs that say "apply migration 00NN":
   - `services/cloudflare-licensing-backend/README.md`: :578, :584, :592, :624, :633, :700, :728, :857
   - `services/cloudflare-license-admin/README.md`: :122, :182
@@ -349,46 +363,54 @@ git grep -nIiE "postgres|supabase|pg-parity|schema\.pg|statements\.pg|check-pg-p
 - Produces:
   - `migrations/0001_baseline.sql` is the only migration. `canonicalMigrationNames()` returns `["0001_baseline.sql"]`.
   - `schema.sql` objects are identical to today's, so `EXPECTED_SCHEMA_SIGNATURE_SHA256` (`restore-drill.mjs:23`, `43f0c9b9…aaaaa`) is **unchanged**.
+  - `schema.sql` stays DDL-only: `scripts/check-schema-parity.py:74-86` dumps `sqlite_schema` rows, so the seed `INSERT` affects neither `check:schema-parity`, the restore-drill signature, nor the 178-row count.
+  - A database created from the baseline has the `license_plan_projection_generations` row `('catalog', 0, 0)`, which plan preview and apply (`packages/cloudflare-runtime/src/d1/plan_projection.mjs:221-230,294-302,450-455`) and the admin catalog import (`import-protocol.ts:323,492,588`) require.
   - The documented rule: edit `0001_baseline.sql` in place, run `npm run schema:write`, and recreate every D1 database.
 
-- [ ] **Step 1: Create the baseline from the snapshot.** In `services/cloudflare-licensing-backend`:
+- [ ] **Step 1: Write the seed-row test.** In `services/cloudflare-licensing-backend/test/db/db-conformance.test.mjs`, add `the baseline seeds the catalog projection generation row`: open a fresh file-backed database with `createLocalSqliteDb({ path, migrationsDir: resolve("migrations") })` (the same harness as `local SQLite adapter applies real migrations and persists a file-backed database`), then assert that `SELECT generation FROM license_plan_projection_generations WHERE scope = 'catalog'` returns `0`. Run `npm run test:sql --workspace @licensecc/cloudflare-licensing-backend`. Expected: PASS on the 43 migrations (0028 seeds the row); this test is the guard that fails if the baseline drops the seed.
+- [ ] **Step 2: Create the baseline from the snapshot.** In `services/cloudflare-licensing-backend`:
   - Confirm that `head -3 schema.sql` shows the two GENERATED lines followed by one blank line.
-  - Write `migrations/0001_baseline.sql` as these three comment lines plus a blank line, followed by `tail -n +4 schema.sql`:
+  - Write `migrations/0001_baseline.sql` as these three comment lines plus a blank line, followed by `tail -n +4 schema.sql`, followed by the seed statement:
     - `-- Licensecc D1 baseline schema. This is the only migration: edit it in place and`
     - ``-- run `npm run schema:write` to regenerate schema.sql. A database created from any``
     - `-- earlier migration history cannot be upgraded; recreate it from this baseline.`
+    - then, after the DDL: `INSERT OR IGNORE INTO license_plan_projection_generations (scope, generation, updated_at) VALUES ('catalog', 0, 0);`
   - Run `git rm` on the 43 old files, keeping the new `0001_baseline.sql`, then `git add migrations/0001_baseline.sql`.
-- [ ] **Step 2: Retarget the generator header.** Set `GENERATED_HEADER` to:
+  - Confirm the guard once: comment out the `INSERT`, run the Step 1 test (Expected: FAIL), then restore it.
+- [ ] **Step 3: Retarget the generator header.** Set `GENERATED_HEADER` to:
   - `-- GENERATED from migrations/0001_baseline.sql — edit the baseline and run npm run schema:write`
   - `-- Do not edit this file by hand; it is a canonicalized dump of the applied baseline.`
 
   Then run `npm run schema:write --workspace @licensecc/cloudflare-licensing-backend`.
-- [ ] **Step 3: Prove behaviour neutrality.**
+- [ ] **Step 4: Prove behaviour neutrality.**
   - `git diff -U0 services/cloudflare-licensing-backend/schema.sql` must show only the two header lines.
   - `npm run check:schema-parity` prints `schema parity ok`.
   - `node --test services/cloudflare-d1-backup/test/backup-restore-drill.test.mjs` passes with `EXPECTED_SCHEMA_SIGNATURE_SHA256` untouched, still 50 tables, 75 named indexes, 53 triggers and 178 rows.
-- [ ] **Step 4: Delete and rewrite the upgrade-path tests.** Make the deletions and edits listed under Files. Each `operator-tools` test keeps its `schema.sql` assertions and drops the `migrations/00NN_*.sql` read. The restore-drill inventory test asserts `assert.deepEqual(canonicalMigrationNames(), ["0001_baseline.sql"])`.
-- [ ] **Step 5: Rewrite the docs.**
+  - The Step 1 seed-row test passes against the baseline.
+- [ ] **Step 5: Delete and rewrite the upgrade-path tests.** Make the deletions and edits listed under Files. Each `operator-tools` test keeps its `schema.sql` assertions and drops the `migrations/00NN_*.sql` read. The restore-drill inventory test asserts `assert.deepEqual(canonicalMigrationNames(), ["0001_baseline.sql"])`.
+- [ ] **Step 6: Rewrite the docs and comments.**
   - Each "Migration 00NN adds …" paragraph states what the baseline contains, with no number.
   - Each "apply migration 00NN before deploying" becomes "apply the baseline (`npm run migrate:remote`) to a newly created database".
   - `cloudflare-setup.md` §10 states: "The schema is a single baseline that is edited in place until the first release. There is no upgrade path: after pulling a schema change, delete and recreate each D1 database (local `.wrangler` state, staging, production, restore scratch databases), apply the baseline, and take a fresh backup. Backups of an earlier database cannot be restored into the new schema."
   - Add the same operator notice under the backend README "Hosted setup" and as a `CHANGELOG.md` `Unreleased` → `Changed` bullet.
   - Delete the two CHANGELOG upgrade-note items that tell operators to apply migration 0043 (:96, :216).
   - Change-guide "D1 query or migration": replace "migrations" with "the single baseline migration `migrations/0001_baseline.sql`, edited in place"; keep the ownership sentences.
-- [ ] **Step 6: Grep that no lineage reference remains.**
+- [ ] **Step 7: Grep that no lineage reference remains.**
 
 ```bash
-git grep -nE "00(0[2-9]|[1-3][0-9]|4[0-3])_[a-z_]+\.sql|[Mm]igrations? 00(0[2-9]|[1-3][0-9]|4[0-3])\b|0001-0043|0001_create_entitlements" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'
+git grep -nE "00(0[2-9]|[1-3][0-9]|4[0-3])_[a-z_]+\.sql|[Mm]igrations? 00(0[2-9]|[1-3][0-9]|4[0-3])\b|\b00(0[2-9]|[1-3][0-9]|4[0-3]) [a-z]+_[a-z_]+|\(00(0[2-9]|[1-3][0-9]|4[0-3])\)|0001-0043|0001_create_entitlements" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'
 ```
 
+  The third alternative catches a migration number followed by a table name ("0016 portal_otp", "0018 entitlement_policies") without matching ADR numbers such as "ADR 0006 occupancy"; the fourth catches parenthesised numbers such as "(0015)".
+
   Expected: only the synthetic lineage names `0002_current.sql` in `services/cloudflare-d1-backup/test/backup-restore-drill.test.mjs`. Those unit-test the generic history check, not the real lineage.
-- [ ] **Step 7: Run the gates.**
-  - `npm run check:pr`
+- [ ] **Step 8: Run the gates.**
+  - `npm run check:pr` (includes `test:sql`, which runs the seed-row test)
   - `npm run test:e2e --workspace @licensecc/cloudflare-licensing-backend`
   - `npm run check:dry-run`
   - `npm run test:docs-accuracy`
   - `npm run check:docs`
-- [ ] **Step 8: Commit.** `refactor(db): replace the migration history with one baseline schema`. The body states that every D1 database must be recreated.
+- [ ] **Step 9: Commit.** `refactor(db): replace the migration history with one baseline schema`. The body states that every D1 database must be recreated.
 
 ### Task 3: Restore drill requires the exact baseline history
 
@@ -459,11 +481,63 @@ The offline core stays:
 - `LicenseReader`, `license_verifier.cpp`, `v201_canonical_payload.cpp`, `hw_identifier/` and `locate/`;
 - config tokens (`lcc_verify_config`, `LccConfigVerifyOptions`);
 - the protected API (`device_bound.h`, `feature_session.h` and the non-proof parts of `device_identity.h`);
-- the orphaned `lccareq1` activation codec (`src/library/activation/`). It is an offline feature, not a compatibility shim, and is recorded as a follow-up in Task 42.
+- the orphaned `lccareq1` activation codec (`src/library/activation/`). It is an offline feature, not a compatibility shim, and is recorded as a follow-up in Task 46.
 
-Change-guide rule: public ABI or licence-format changes need a compatibility note in the pull request **and** the API docs. Each task below that changes the ABI or the format puts a short "ABI change" paragraph in its PR description. Task 9 adds the single API-docs statement that the C ABI is unreleased and may renumber.
+Change-guide rule: public ABI or licence-format changes need a compatibility note in the pull request **and** the API docs. Each task below that changes the ABI or the format puts a short "ABI change" paragraph in its PR description. Task 10 adds the single API-docs statement that the C ABI is unreleased and may renumber.
 
-### Task 4: Remove the native online-verification layer and its decision and seat API
+### Task 4: Remove the online-verification consumers: examples, fuzz harness and the remote C++ drill
+
+The native online-verification layer is removed in two steps. This task removes everything outside the library that consumes it, while the API still exists, so every native preset keeps building:
+- the `online_callback` and `production_decision_host` examples, and the native test that compiles the example's transport helper (`test/library/online_callback_failover_test.cpp` includes `examples/online_callback/online_callback_common.hpp`);
+- the online-assertion fuzz harness and corpus. `fuzz/online_assertion_fuzzer.cpp` includes `online_verification/OnlineVerification.hpp`, and the `ci-linux-sanitizers` preset builds fuzzers (`LCC_BUILD_FUZZERS=TRUE`), so the harness must go before the header;
+- the backend's remote C++ verification drill, which runs `ctest -R test_online_verification$` (`remote-cpp-verify.mjs:199-228`) and sets the `LCC_REMOTE_ONLINE_*` environment.
+
+Task 5 then removes the API itself.
+
+**Files:**
+- Delete:
+  - `examples/online_callback/` (`CMakeLists.txt`, `main.cpp`, `main_winhttp.cpp`, `online_callback_common.hpp`, `README.md`)
+  - `examples/production_decision_host/` (`CMakeLists.txt`, `main.cpp`, `README.md`)
+  - `test/library/online_callback_failover_test.cpp`
+  - `fuzz/online_assertion_fuzzer.cpp` and `fuzz/corpus/online_assertion/` (`canonical-payload.txt`, `envelope-shaped.txt`, `malformed.txt`)
+  - `services/cloudflare-licensing-backend/scripts/remote-cpp-verify.mjs`
+- Modify `test/library/CMakeLists.txt`: the `test_online_callback_failover` target (:164-180, including its `examples/online_callback` include directory), its `ADD_TEST` (:242) and its label block (:313-316).
+- Modify `test/library/device_identity/CMakeLists.txt:60` (the comment that names both examples).
+- Modify `fuzz/CMakeLists.txt:12`, `fuzz/README.md:3-4` (one harness: the activation-request parser) and `.github/workflows/native-security.yml:70-75` (the online-assertion fuzz step).
+- Modify `scripts/native-security-contract.test.mjs`: :15 (`assertionHarness`), :90, :94, :101-103, :109 (the online-assertion harness and corpus), :149 (the corpus path), :152 (`maxLengths` becomes one entry), :154 (`fuzzBudgets.length === 1`), :157 (`processBudgets` becomes `[30]`).
+- Modify `services/cloudflare-licensing-backend/package.json` (script `validate:remote-cpp`) and `services/cloudflare-licensing-backend/README.md:171-182` (the remote C++ verification section).
+- Modify `examples/anti_tamper_host/README.md:21` and `examples/anti_tamper_host/main.cpp:5` (no pointer to the `online_callback` example).
+- Modify `doc/usage/examples.rst:30-43`: delete the `online_callback` and `production_decision_host` rows. `scripts/docs-accuracy.test.mjs:284-289` enforces that the catalogue matches `examples/*`.
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces:
+  - Nothing outside `src/library`, `include/licensecc` and the native online-verification tests consumes the online-verification API.
+  - The native-security gate fuzzes one harness, `fuzz_activation_request`.
+  - The backend has no `validate:remote-cpp` script.
+
+- [ ] **Step 1: Write the failing contract test.** In `scripts/native-security-contract.test.mjs`, rewrite the harness, corpus and workflow tests so they expect exactly one harness (`fuzz_activation_request`), one corpus root (`fuzz/corpus/activation_request`), `maxLengths` `[16384]`, one fuzz budget and `processBudgets` `[30]`; add `assert.doesNotMatch(fuzzCmake, /fuzz_online_assertion/)` and `assert.doesNotMatch(workflow, /corpus\/online_assertion/)`. Run `npm run test:native-security`. Expected: FAIL (the second harness still exists).
+- [ ] **Step 2: Delete the files listed under Delete** and remove the CMake target, test label, fuzz target, workflow step and package script.
+- [ ] **Step 3: Update the docs and comments** listed above (examples catalogue, `anti_tamper_host`, fuzz README, backend README, device-identity CMake comment).
+- [ ] **Step 4: Grep that no reference remains.** This must print nothing:
+
+```bash
+git grep -nE "examples/online_callback|online_callback_common|online_callback. example|production_decision_host|test_online_callback_failover|fuzz_online_assertion|online_assertion_fuzzer|corpus/online_assertion|remote-cpp-verify|validate:remote-cpp|LCC_REMOTE_ONLINE_" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis' ':!test/library/online_verification_test.cpp'
+```
+
+  `test/library/online_verification_test.cpp` still reads `LCC_REMOTE_ONLINE_*` for its opt-in remote case; Task 5 deletes it.
+- [ ] **Step 5: Run the gates.**
+  - `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug`
+  - `ctest --preset dev-debug --output-on-failure`
+  - WSL: `cmake --preset ci-linux-debug && cmake --build --preset ci-linux-debug && ctest --preset ci-linux-debug`
+  - WSL Clang: `cmake --preset ci-linux-sanitizers && cmake --build --preset ci-linux-sanitizers && ctest --preset ci-linux-sanitizers`, then the bounded corpus smoke for the remaining `fuzz_activation_request` target
+  - `npm run test:native-security`
+  - `npm run test:docs-accuracy`
+  - `npm run check:docs`
+  - `npm run check:pr`
+- [ ] **Step 6: Commit.** `chore(native): remove the online-callback examples, the online-assertion fuzz harness and the remote C++ drill`
+
+### Task 5: Remove the native online-verification layer and its decision and seat API
 
 This deletes the online `lccoa1` verification layered on `.lic` files. It also removes:
 - `lcc_acquire_license_decision`, `lcc_confirm_license`, `lcc_release_license` and the revocation floors;
@@ -472,15 +546,13 @@ This deletes the online `lccoa1` verification layered on `.lic` files. It also r
 - the `LicenseCheckOptions` v1/v2 prefix-size acceptance (its `offsetof(online_policy)` anchor disappears with the online fields);
 - the decision-options v1 acceptance.
 
+The documentation test that pins the online API, the capability-registry entries that cite it, and the system-map rows that count `licensecc.cpp` change in this task, because `check:pr` reads them against the headers and sources this task edits.
+
 **Files:**
 - Delete:
   - `src/library/online_verification/CMakeLists.txt`, `OnlineVerification.cpp`, `OnlineVerification.hpp`
   - `src/library/limits/lease_client.hpp`, `seat_client.hpp`, `clock_floor.hpp`
-  - `test/library/online_verification_test.cpp`, `online_callback_failover_test.cpp`, `clock_floor_test.cpp`, `lease_client_test.cpp`, `seat_client_test.cpp`
-  - `examples/online_callback/` (`CMakeLists.txt`, `main.cpp`, `main_winhttp.cpp`, `online_callback_common.hpp`, `README.md`)
-  - `examples/production_decision_host/` (`CMakeLists.txt`, `main.cpp`, `README.md`)
-  - `fuzz/online_assertion_fuzzer.cpp` and `fuzz/corpus/online_assertion/` (`canonical-payload.txt`, `envelope-shaped.txt`, `malformed.txt`)
-  - `services/cloudflare-licensing-backend/scripts/remote-cpp-verify.mjs`. It runs `ctest -R test_online_verification$` (:199-228).
+  - `test/library/online_verification_test.cpp`, `clock_floor_test.cpp`, `lease_client_test.cpp`, `seat_client_test.cpp`
 - Modify root `CMakeLists.txt`:
   - :12-17: rename `LCC_REQUIRED_ONLINE_V201_SOURCES` to `LCC_REQUIRED_CORE_SOURCES` and drop `src/library/online_verification/OnlineVerification.cpp`;
   - :44-47: delete the `LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS` and `LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS` cache variables.
@@ -518,36 +590,31 @@ This deletes the online `lccoa1` verification layered on `.lic` files. It also r
   - :17-27 (`kSupportedOnlineFlags`, `kOptionsVersionV1/V2`, `LCC_OPTIONS_FIELD_PRESENT`);
   - :114-172: accept exactly `sizeof(LicenseCheckOptions)` and `LCC_LICENSE_CHECK_OPTIONS_VERSION`;
   - :185-216 (online field validation).
-- Modify `test/library/CMakeLists.txt`: :149-180 (targets `test_online_verification`, `test_online_callback_failover`), :196-230 (`test_clock_floor`, `test_lease_client`, `test_seat_client`), :241-246 (`ADD_TEST`), :253-266 and :308-316 (labels).
+- Modify `test/library/CMakeLists.txt`: :149-162 (target `test_online_verification`), :196-230 (`test_clock_floor`, `test_lease_client`, `test_seat_client`), the `ADD_TEST` lines at :241 and :244-246, the labels at :253-266 and :308-311.
 - Modify tests:
   - `test/library/public_api_test.cpp`:
     - every case that calls a deleted function, sets an `online_*` field, or asserts `LICENSE_ONLINE_*`;
     - the numeric `LCC_EVENT_TYPE` pins at :262-285: delete :273-276 and renumber the config and custom-limit pins as listed under Interfaces.
   - `test/library/anti_tamper_test.cpp`: :282-331 (`v1_options_size_remains_accepted_and_ignores_online_tail`, `v2_options_size_remains_accepted_and_ignores_custom_limit_tail`) and the online-field cases.
-  - `test/library/device_identity/CMakeLists.txt:60` (comment).
-- Modify `fuzz/CMakeLists.txt:12`, `fuzz/README.md:3-4`, `.github/workflows/native-security.yml:70-75`.
-- Modify `scripts/native-security-contract.test.mjs`: :15, :90, :94, :101-103, :109, :149, :152 (`maxLengths` becomes one entry), :154 (`fuzzBudgets.length === 1`), :157.
-- Modify `scripts/docs-accuracy.test.mjs:382-403` (test "backend documentation tracks the accepted C++ online API").
-- Modify `services/cloudflare-licensing-backend/package.json` (script `validate:remote-cpp`) and its README :171-182 (remote C++ verification section).
-- Modify `examples/anti_tamper_host/README.md:21`, `examples/anti_tamper_host/main.cpp:5`, `doc/usage/examples.rst:30-43`.
+- Modify `scripts/docs-accuracy.test.mjs:382-403` (test "backend documentation tracks the accepted C++ online API"): it asserts that `licensecc.h`, `datatypes.h` and `licensecc.cpp` contain `lcc_acquire_license_decision` and `LCC_ONLINE_CHECK`, so it changes with them. Also delete the two backend README sentences it pins (Step 4).
 - Modify `doc/capabilities/registry.json`:
-  - delete entries `online-verification` (:62-78), `floating-seats` (:97-117) and `legacy-remote-license-type` (:118-131). The last must go with `floating-seats`, which is its only replacement (`check-capability-registry.mjs:385-386`).
+  - delete entries `online-verification` (:62-78), `floating-seats` (:97-117) and `legacy-remote-license-type` (:118-131). `online-verification` cites `lcc_acquire_license_decision(` and `online_verification_test.cpp`; `floating-seats` cites `LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT`; `legacy-remote-license-type` must go with `floating-seats`, which is its only replacement (`check-capability-registry.mjs:385-386`).
   - Update `doc/capabilities/index.rst:48-49,86-91`.
 - Modify `scripts/hotspot-baseline.json`: delete `src/library/online_verification/OnlineVerification.cpp`; lower `src/library/licensecc.cpp` and `src/library/os/signature_verifier.hpp` to their new counts.
-- Modify `doc/architecture/system-map.md`: :14-15 (area text naming "online decision/seat lifecycle" and "online verification"), :105 (`licensecc.cpp` row).
+- Modify `doc/architecture/system-map.md`: :14-15 (area text naming "online decision/seat lifecycle" and "online verification"), :105 (`licensecc.cpp` row; `scripts/docs-accuracy.test.mjs:512-525` recomputes it).
 
 **Interfaces:**
-- Consumes: nothing.
+- Consumes: Task 4 (no example, fuzz harness or backend script consumes the API).
 - Produces:
   - `acquire_license_ex(const CallerInformations*, const LicenseLocation*, LicenseInfo*, const LicenseCheckOptions*)` keeps tamper and custom-limit enforcement only.
   - `LicenseCheckOptions` holds only `size`, `version` (1), the tamper fields and `custom_limit_check`/`custom_limit_user_data`, plus the E1 reserved fields.
-  - `LCC_EVENT_TYPE` config and custom-limit codes move down by four (accepted renumbering): `LICENSE_CONFIG_TOKEN_INVALID` 15 → 11, `LICENSE_CONFIG_BINDING_MISMATCH` 16 → 12, `LICENSE_CONFIG_HASH_MISMATCH` 17 → 13, `LICENSE_CONFIG_EXPIRED` 18 → 14, `LICENSE_CONFIG_ROLLBACK` 19 → 15, `LICENSE_CUSTOM_LIMIT_DENIED` 20 → 16, `LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED` 21 → 17. Task 9 shifts everything after `LICENSE_FILE_NOT_FOUND` down by one more.
+  - `LCC_EVENT_TYPE` config and custom-limit codes move down by four (accepted renumbering): `LICENSE_CONFIG_TOKEN_INVALID` 15 → 11, `LICENSE_CONFIG_BINDING_MISMATCH` 16 → 12, `LICENSE_CONFIG_HASH_MISMATCH` 17 → 13, `LICENSE_CONFIG_EXPIRED` 18 → 14, `LICENSE_CONFIG_ROLLBACK` 19 → 15, `LICENSE_CUSTOM_LIMIT_DENIED` 20 → 16, `LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED` 21 → 17. Task 10 shifts everything after `LICENSE_FILE_NOT_FOUND` down by one more.
 
 - [ ] **Step 1: Delete the files listed under Delete.**
 - [ ] **Step 2: Remove the code.**
   - Remove the listed code from `licensecc.cpp`, `licensecc.h`, `datatypes.h`, `signature_verifier.hpp` and `AntiTamper.cpp`.
   - In `acquire_license_with_runtime_checks`, keep :906-921 (tamper and custom limits) and return after them.
-  - Remove the targets, labels, fuzz step and CMake variables listed.
+  - Remove the targets, labels and CMake variables listed.
 - [ ] **Step 3: Delete or rewrite the tests that pinned them.**
   - `public_api_test.cpp` keeps every offline, config and strict-source case.
   - `anti_tamper_test.cpp` gets one new case: `options_with_a_different_size_or_version_are_rejected`. `acquire_license_ex` with `size = sizeof(LicenseCheckOptions) - 1`, and separately with `version = 2`, returns `LICENSE_MALFORMED` (`licensecc.cpp:1035-1038` maps a failed `normalize_options` to it).
@@ -568,29 +635,31 @@ test("native public API documents offline licences and protected sessions only",
 ```
 
   Delete the backend README sentences "For production C++ hosts, use `lcc_acquire_license_decision()`…" and the "persisted revocation sequence" sentence.
-- [ ] **Step 5: Update the registry, hotspot baseline, system map, examples catalogue and fuzz README.**
-  - `doc/usage/examples.rst` lists only the examples that remain (`minimal`, `fail_closed_host`, `anti_tamper_host`, `device_bound`, `device_identity`). `docs-accuracy.test.mjs:284-289` enforces that the catalogue matches `examples/*`.
+- [ ] **Step 5: Update the registry, capability index, hotspot baseline and system map** as listed.
 - [ ] **Step 6: Grep that no reference remains.** Both must print nothing:
 
 ```bash
-git grep -nE "online_verification|OnlineVerification|lcc_acquire_license_decision|lcc_confirm_license|lcc_release_license|lcc_(set|get)_online_revocation_floor|LccOnlineRequest|LCC_ONLINE_(CHECK|POLICY|FLAG|CALLBACK|REQUEST|DEFAULT|MAX)|LICENSE_ONLINE_|LccLicenseDecision|LccRevocationFloorRecord|LCC_CLIENT_HARDENING|online_callback|production_decision_host|fuzz_online_assertion|online_assertion_fuzzer|lease_client|seat_client|clock_floor|remote-cpp-verify|validate:remote-cpp|LCC_ONLINE_ASSERTION_" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'
+git grep -nE "online_verification|OnlineVerification|lcc_acquire_license_decision|lcc_confirm_license|lcc_release_license|lcc_(set|get)_online_revocation_floor|LccOnlineRequest|LCC_ONLINE_(CHECK|POLICY|FLAG|CALLBACK|REQUEST|DEFAULT|MAX)|LICENSE_ONLINE_|LccLicenseDecision|LccRevocationFloorRecord|LCC_CLIENT_HARDENING|online_callback|lease_client|seat_client|clock_floor|LCC_ONLINE_ASSERTION_|LCC_REMOTE_ONLINE_|online_assertion_(public_key_ring|signature_policy)|append_online_assertion_retired_key_ids" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'
 git grep -nE "\b(confirm_license|release_license)\s*\(" -- include src test examples
 ```
 
-  `test/vectors/online_assertion/` stays: backend and SDK tests still read it until Task 30.
+  `test/vectors/online_assertion/` stays: backend tests still read it until Task 33. The bare word `online_assertion` is therefore not in the pattern.
 - [ ] **Step 7: Run the gates.**
   - `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug`
   - `ctest --preset dev-debug --output-on-failure`
   - WSL: `cmake --preset ci-linux-debug && cmake --build --preset ci-linux-debug && ctest --preset ci-linux-debug`
-  - WSL Clang: `cmake --preset ci-linux-sanitizers && cmake --build --preset ci-linux-sanitizers && ctest --preset ci-linux-sanitizers`, then the bounded corpus smoke for the remaining `fuzz_activation_request` target
+  - WSL Clang: `cmake --preset ci-linux-sanitizers && cmake --build --preset ci-linux-sanitizers && ctest --preset ci-linux-sanitizers`
   - `npm run test:native-security`
   - `npm run test:docs-quickstart`
+  - `npm run test:capabilities`
+  - `npm run check:capabilities`
+  - `npm run check:hotspots`
   - `npm run test:docs-accuracy`
   - `npm run check:docs`
   - `npm run check:pr`
 - [ ] **Step 8: Commit.** `refactor(core)!: remove online verification, the decision and seat API, and the revocation floors`. The PR description carries the ABI-change paragraph: removed functions and types, the `LCC_EVENT_TYPE` renumbering, and `LicenseCheckOptions` version 1.
 
-### Task 5: Move shared device-identity tests to the v2 proof and remove request proof v1
+### Task 6: Move shared device-identity tests to the v2 proof and remove request proof v1
 
 The v1 request proof (`lcc_device_identity_build_request_proof_v1`, audiences VERIFY/LEASE/SEAT) exists only for the legacy `/v1` routes. Protected clients sign with `license::device_identity::sign_bound_proof_v2` (`bound_protocol.hpp:82-85`, `bound_signing.cpp:48-57`). Several tests exercise shared signing, locking and P-256 strictness through the v1 path, so they move to v2 first.
 
@@ -614,10 +683,10 @@ The v1 request proof (`lcc_device_identity_build_request_proof_v1`, audiences VE
 - Modify `doc/capabilities/registry.json`, entry `tpm-request-proof-provider` (:291-309): retitle it "TPM device-key provider" and re-point any selector that names a deleted v1 test.
 
 **Interfaces:**
-- Consumes: Task 4.
+- Consumes: Task 5.
 - Produces:
   - `device_identity.h` keeps open/metadata/SPKI/delete/close and namespace derivation, with no request-proof API.
-  - `test/vectors/device_proof/v1/*` is no longer read by native tests. Backend and Python readers go in Tasks 12 and 30.
+  - `test/vectors/device_proof/v1/*` is no longer read by native tests. Backend and Python readers go in Tasks 12 and 33.
 
 - [ ] **Step 1: Migrate the four shared tests to v2** as listed. Each must still exercise the same property (mutex serialisation, P-256 strictness, output-size strictness, real TPM signing). Run `ctest --preset dev-debug -R device_identity` and confirm it passes **before** deleting any API.
 - [ ] **Step 2: Delete the v1 API and implementation** as listed.
@@ -640,43 +709,64 @@ git grep -nE "build_request_proof_v1|build_request_proof_payload_v1|LCC_DEVICE_P
   - `npm run check:pr`
 - [ ] **Step 6: Commit.** `refactor(device-identity)!: remove the v1 request proof after moving shared tests to the v2 signer`
 
-### Task 6: Delete the dead lease-ring CMake and describe the additional-key ring as project-key rotation
+### Task 7: Keep the project-key rotation ring under test, delete the dead lease-ring CMake, and make rejected licence sources fatal by default
 
-`cmake/LeaseRing.cmake` is dead:
+Two small native changes, each with one test.
+
+**Lease ring.** `cmake/LeaseRing.cmake` is dead:
 - its helper `scripts/build_lease_ring.py` does not exist;
 - `lcc_generate_test_lease_ring` is never called;
 - `LCC_BUILD_LEASE_RING_TEST` defaults OFF.
 
 The additional-key ring itself (`LCC_ADDITIONAL_PUBLIC_KEY_RECORDS`/`LCC_RETIRED_PUBLIC_KEY_IDS`) stays: it is the only way to rotate the offline project key.
 
+**Strict source-fatal.** Today a rejected licence candidate is only a warning when another candidate verifies, unless the host opts in. The controller ruling makes the strict behaviour the default. The flag's other reader, `lcc_release_license`, was deleted in Task 5.
+
 **Files:**
 - Delete `cmake/LeaseRing.cmake`, `test/functional/lease_ring_test.cpp`, `test/vectors/lease_ring/README.md`.
 - Modify root `CMakeLists.txt:56-58` (option `LCC_BUILD_LEASE_RING_TEST` and the `include`), `test/functional/CMakeLists.txt:96-115`.
 - Modify `src/library/CMakeLists.txt:148`: the comment becomes `# Project verification ring: the embedded project key plus additional keys used to rotate the offline project key.`
 - Modify `doc/architecture/system-map.md:81-84`: drop `${CMAKE_BINARY_DIR}/lease_test_ring` and `lease_ring_records.cmake`.
-- Create no file. Add one test to `test/functional/signature_verifier_test.cpp`: `additional_ring_key_verifies_and_retired_id_is_refused`. The ring that `LCC_ADDITIONAL_PUBLIC_KEY_RECORDS` builds (`signature_verifier.hpp:154-175`) reaches the verifier as `SignatureVerificationPolicy::public_keys` and `retired_key_ids`, so the test drives that policy directly:
+- Add one test to `test/functional/signature_verifier_test.cpp`: `additional_ring_key_verifies_and_retired_id_is_refused`. The ring that `LCC_ADDITIONAL_PUBLIC_KEY_RECORDS` builds (`signature_verifier.hpp:154-175`) reaches the verifier as `SignatureVerificationPolicy::public_keys` and `retired_key_ids`, so the test drives that policy directly:
   1. Start from `v201_golden_request("minimal", v201_minimal_fields())` (:219-236).
   2. Set `request.policy.allow_external_public_key_der = false` and clear `request.public_key_der`.
   3. Set `request.policy.public_keys = { SignaturePublicKey(<embedded project key id>, embedded_public_key_der(), embedded_public_key_bits()), SignaturePublicKey(kGoldenV201KeyId, <the golden DER the request used>, 3072) }`, modelling the embedded key plus one additional key, and keep `kGoldenV201KeyId` in `allowed_key_ids`.
   4. Assert `verify_signature(request) == FUNC_RET_OK`.
   5. Push `kGoldenV201KeyId` into `request.policy.retired_key_ids` and assert `FUNC_RET_ERROR`.
+- Modify `src/library/licensecc.cpp:42`: `static std::atomic_bool strict_source_fatal_enabled{true};`.
+- Modify `include/licensecc/licensecc.h:331-343`: the doc says the default is enabled, and that disabling it downgrades rejected candidates to warnings when another candidate verifies.
+- Modify tests:
+  - `test/library/public_api_test.cpp`: 376 (symbol check stays), 879, 897, 906, 925, 937, 954, 976, 1003;
+  - `test/library/anti_tamper_test.cpp:28,36` (`RuntimePolicyGuard` restores `true`, not `false`).
+- Modify `examples/fail_closed_host/main.cpp:74` and `examples/fail_closed_host/README.md:73`: remove the explicit enable call and say that it is the default.
 
 **Interfaces:**
-- Consumes: nothing.
-- Produces: no ABI change. `LCC_ADDITIONAL_PUBLIC_KEY_RECORDS`/`LCC_RETIRED_PUBLIC_KEY_IDS` stay documented in root `CMakeLists.txt:52-55`.
+- Consumes: Task 5 (the `lcc_release_license` reader of the strict flag is gone).
+- Produces:
+  - No ABI change for the ring. `LCC_ADDITIONAL_PUBLIC_KEY_RECORDS`/`LCC_RETIRED_PUBLIC_KEY_IDS` stay documented in root `CMakeLists.txt:52-55`.
+  - `acquire_license` reports a malformed, corrupted, expired, identifier-mismatched or unlicensed-product candidate as fatal, even when another candidate verifies, unless the host calls `lcc_set_strict_source_fatal_enabled(false)`.
 
 - [ ] **Step 1: Write the ring test** described above. Run it with `ctest --preset dev-debug -R signature_verifier`. Expected: PASS, because the ring already works. The test guards the kept behaviour, since the deleted lease-ring test was its only other coverage.
-- [ ] **Step 2: Delete the three files and the CMake wiring.**
-- [ ] **Step 3: Grep.** `git grep -nE "LeaseRing|lease_ring|LEASE_RING|build_lease_ring|lease_test_ring|hot lease" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'` must print nothing.
-- [ ] **Step 4: Run the gates.**
+- [ ] **Step 2: Delete the three lease-ring files and the CMake wiring.**
+- [ ] **Step 3: Write the failing strict-source test** in `public_api_test.cpp`: `rejected_candidate_is_fatal_by_default`. With no call to the setter, configure two sources, one valid and one corrupted, call `acquire_license`, and expect the corrupted candidate's fatal event (the same expectation the existing strict-enabled case uses). Run `ctest --preset dev-debug -R public_api`. Expected: FAIL.
+- [ ] **Step 4: Flip the default** and update the 12 other call sites so that each test states the mode it needs. Update the header doc and the `fail_closed_host` example.
+- [ ] **Step 5: Grep.** Both must print nothing:
+
+```bash
+git grep -nE "LeaseRing|lease_ring|LEASE_RING|build_lease_ring|lease_test_ring|hot lease" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'
+git grep -nE "default is disabled for\s+compatibility|for compatibility" -- include/licensecc src/library
+```
+
+- [ ] **Step 6: Run the gates.**
   - `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug`
   - `ctest --preset dev-debug`
   - WSL `ctest --preset ci-linux-debug`
+  - `npm run test:docs-quickstart`
   - `npm run test:docs-accuracy`
   - `npm run check:pr`
-- [ ] **Step 5: Commit.** `chore(cmake): delete the unused lease-ring generator and keep the project-key rotation ring`
+- [ ] **Step 7: Commit.** `feat(core)!: treat rejected licence sources as fatal by default and drop the unused lease-ring generator`
 
-### Task 7: lccgen issues only v201 licences
+### Task 8: lccgen issues only v201 licences
 
 **Files:**
 - Modify `extern/license-generator/src/base_lib/base.h:37-39`: `LICENSE_FILE_VERSION` becomes 201; delete the V200 constant.
@@ -703,11 +793,11 @@ The additional-key ring itself (`LCC_ADDITIONAL_PUBLIC_KEY_RECORDS`/`LCC_RETIRED
 - Modify `scripts/check-architecture.mjs:420-421` and `scripts/check-architecture.test.mjs:451-452,458`.
 
 **Interfaces:**
-- Consumes: Task 4 (`online_verification_test.cpp` no longer issues licences).
+- Consumes: Task 5 (`online_verification_test.cpp` no longer issues licences).
 - Produces:
   - `lccgen license issue` always writes `lic_ver = 201`.
   - `lccgen project init` refuses keys below 3072 bits.
-  - The runtime still reads v200 until Task 8.
+  - The runtime still reads v200 until Task 9.
 
 - [ ] **Step 1: Write the failing generator test** in `command-line_test.cpp`: `issue_writes_v201_by_default_and_rejects_license_version_option`. It issues with no version option, asserts `lic_ver = 201`, and asserts that `--license-version 200` is an unknown option (non-zero exit). Run `ctest --preset dev-debug -R license_generator`. Expected: FAIL (it writes 200).
 - [ ] **Step 2: Implement** the generator changes above, in order: default first, then option removal, then v200 branch deletion.
@@ -719,7 +809,7 @@ The additional-key ring itself (`LCC_ADDITIONAL_PUBLIC_KEY_RECORDS`/`LCC_RETIRED
 git grep -nE "legacy-rsa1024|allow-insecure-key-size|migrate-weak-key|target-license-format-max|license-version|LICENSE_FILE_VERSION_V200|lic_ver = 200" -- extern test scripts doc
 ```
 
-  Expected: no output outside explicit v200 reader fixtures under `test/`, which Task 8 deletes.
+  Expected: no output outside explicit v200 reader fixtures under `test/`, which Task 9 deletes.
 - [ ] **Step 6: Run the gates.**
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly`
   - `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug`
@@ -729,7 +819,7 @@ git grep -nE "legacy-rsa1024|allow-insecure-key-size|migrate-weak-key|target-lic
   - `npm run check:pr` (includes `test:architecture`)
 - [ ] **Step 7: Commit.** `feat(lccgen)!: issue only v201 licences and drop weak-key options`
 
-### Task 8: The runtime accepts only v201 licences
+### Task 9: The runtime accepts only v201 licences
 
 **Files:**
 - Modify `src/library/base/base.h:47-51`: `LCC_LICENSE_FORMAT_VERSION` becomes V201; delete V200.
@@ -755,7 +845,7 @@ git grep -nE "legacy-rsa1024|allow-insecure-key-size|migrate-weak-key|target-lic
 - Modify `doc/capabilities/registry.json:280,287` (`custom-execution-limits` wording "Legacy v200 licenses cannot carry it"/"reject v200").
 
 **Interfaces:**
-- Consumes: Task 7.
+- Consumes: Task 8.
 - Produces: a `lic_ver = 200` licence is refused. The reader's final `else` branch (`LicenseReader.cpp:358-360`) records `LICENSE_MALFORMED` "Invalid license format version", exactly as it already does for any other unknown version.
 
 - [ ] **Step 1: Write the failing test** in `test/library/LicenseReader_test.cpp`: `v200_license_is_refused`. It reads a minimal v200 licence written by the test into a temporary file, and asserts that no licence is accepted and that the registry holds `LICENSE_MALFORMED` "Invalid license format version". Run `ctest --preset dev-debug -R LicenseReader`. Expected: FAIL (v200 still accepted).
@@ -767,7 +857,12 @@ git grep -nE "legacy-rsa1024|allow-insecure-key-size|migrate-weak-key|target-lic
 git grep -nIiE "v200|lic_ver\s*=\s*200|LEGACY_V200|legacy_v200|LICENSE_FILE_VERSION_V200|FORMAT_MIN 200" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'
 ```
 
-  Expected: only the new `v200_license_is_refused` test.
+  Expected, and only these:
+  - the new `v200_license_is_refused` test;
+  - `extern/license-generator/PROVENANCE.md` (the removal note Task 8 adds);
+  - `CHANGELOG.md` (history, reset in Task 45).
+
+  `doc/capabilities/registry.json:280,287` must not appear: this task rewords them.
 - [ ] **Step 5: Run the gates.**
   - `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug`
   - `ctest --preset dev-debug`
@@ -778,7 +873,7 @@ git grep -nIiE "v200|lic_ver\s*=\s*200|LEGACY_V200|legacy_v200|LICENSE_FILE_VERS
   - `npm run check:pr`
 - [ ] **Step 6: Commit.** `feat(core)!: accept only v201 licence files`. The PR description notes the format change (change-guide rule).
 
-### Task 9: Remove upstream-only ABI values and the config-options v2 acceptance
+### Task 10: Remove upstream-only ABI values and the config-options v2 acceptance
 
 **Files:**
 - Modify `include/licensecc/datatypes.h`:
@@ -801,7 +896,7 @@ git grep -nIiE "v200|lic_ver\s*=\s*200|LEGACY_V200|legacy_v200|LICENSE_FILE_VERS
 - Modify `doc/api/public_api.rst`, the page that documents `LCC_EVENT_TYPE`: add one sentence, "The C ABI is unreleased; `LCC_EVENT_TYPE` values and struct layouts may change until the first C++ release."
 
 **Interfaces:**
-- Consumes: Task 4 (which already removed the `LICENSE_ONLINE_*` values and `legacy-remote-license-type`).
+- Consumes: Task 5 (which already removed the `LICENSE_ONLINE_*` values and `legacy-remote-license-type`).
 - Produces: `LCC_EVENT_TYPE` = `LICENSE_OK` 0, `LICENSE_FILE_NOT_FOUND` 1, `ENVIRONMENT_VARIABLE_NOT_DEFINED` 2, … `LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED` 16, `LICENSE_SPECIFIED` 100 … `SIGNATURE_VERIFIED` 103. `LCC_LICENSE_TYPE` = `{ LCC_LOCAL }`. No SDK mirrors these values (verified: no hits under `sdks/` or `packages/`).
 
 - [ ] **Step 1: Write the failing test** `config_verify_options_with_old_size_are_rejected`: pass `size = offsetof(LccConfigVerifyOptions, custom_limit_check)` and `version = 2`, and expect rejection. Run `ctest --preset dev-debug -R config_public_api`. Expected: FAIL (accepted today).
@@ -813,7 +908,7 @@ git grep -nIiE "v200|lic_ver\s*=\s*200|LEGACY_V200|legacy_v200|LICENSE_FILE_VERS
 git grep -nE "LICENSE_SERVER_NOT_FOUND|LCC_REMOTE\b|\"deprecated\"|hasReplacement" -- include src test scripts doc sdks
 ```
 
-  Expected: no output. `LCC_REMOTE_ONLINE_*` env names were deleted in Task 4.
+  Expected: no output. `LCC_REMOTE_ONLINE_*` env names were deleted in Tasks 4 and 5.
 - [ ] **Step 5: Run the gates.**
   - `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug`
   - `ctest --preset dev-debug`
@@ -826,7 +921,7 @@ git grep -nE "LICENSE_SERVER_NOT_FOUND|LCC_REMOTE\b|\"deprecated\"|hasReplacemen
   - `npm run check:pr`
 - [ ] **Step 6: Commit.** `refactor(core)!: drop upstream-only ABI values and old config-option sizes`
 
-### Task 10: Require OpenSSL 3.0 and ship the public-key metadata in the template
+### Task 11: Require OpenSSL 3.0 and ship the public-key metadata in the template
 
 **Files:**
 - Modify root `CMakeLists.txt`:
@@ -846,7 +941,7 @@ git grep -nE "LICENSE_SERVER_NOT_FOUND|LCC_REMOTE\b|\"deprecated\"|hasReplacemen
 - Modify `doc/development/Dependencies.md` and `doc/development/Build-the-library.md`: state OpenSSL ≥ 3.0 wherever an OpenSSL version is named.
 
 **Interfaces:**
-- Consumes: Tasks 4 and 7 (fewer OpenSSL call sites).
+- Consumes: Tasks 5 and 8 (fewer OpenSSL call sites).
 - Produces:
   - Configuring with OpenSSL < 3.0 fails with `licensecc requires OpenSSL >= 3.0`.
   - Every generated `public_key.h` defines `LCC_PUBLIC_KEY_ID` and the other four macros.
@@ -868,31 +963,6 @@ git grep -nE "VERSION_LESS_EQUAL 1\.0\.2|OPENSSL_VERSION_NUMBER\s*<\s*0x30000000
   - `npm run test:docs-quickstart`
   - `npm run check:pr`
 - [ ] **Step 5: Commit.** `build(core)!: require OpenSSL 3.0 and generate public-key metadata from the template`
-
-### Task 11: Strict source-fatal handling is on by default
-
-**Files:**
-- Modify `src/library/licensecc.cpp:42`: `static std::atomic_bool strict_source_fatal_enabled{true};`.
-- Modify `include/licensecc/licensecc.h:331-343`: the doc says the default is enabled, and that disabling it downgrades rejected candidates to warnings when another candidate verifies.
-- Modify tests:
-  - `test/library/public_api_test.cpp`: 376 (symbol check stays), 879, 897, 906, 925, 937, 954, 976, 1003;
-  - `test/library/anti_tamper_test.cpp:28,36` (`RuntimePolicyGuard` restores `true`, not `false`).
-- Modify `examples/fail_closed_host/main.cpp:74` and `examples/fail_closed_host/README.md:73`: remove the explicit enable call and say that it is the default.
-
-**Interfaces:**
-- Consumes: Task 4 (the `lcc_release_license` reader of the flag is gone).
-- Produces: `acquire_license` reports a malformed, corrupted, expired, identifier-mismatched or unlicensed-product candidate as fatal, even when another candidate verifies, unless the host calls `lcc_set_strict_source_fatal_enabled(false)`.
-
-- [ ] **Step 1: Write the failing test** in `public_api_test.cpp`: `rejected_candidate_is_fatal_by_default`. With no call to the setter, configure two sources, one valid and one corrupted, call `acquire_license`, and expect the corrupted candidate's fatal event (the same expectation the existing strict-enabled case uses). Run `ctest --preset dev-debug -R public_api`. Expected: FAIL.
-- [ ] **Step 2: Flip the default** and update the 12 other call sites so that each test states the mode it needs.
-- [ ] **Step 3: Grep.** `git grep -nE "default is disabled for\s+compatibility|for compatibility" -- include/licensecc src/library` must print nothing.
-- [ ] **Step 4: Run the gates.**
-  - `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug`
-  - `ctest --preset dev-debug`
-  - WSL `ctest --preset ci-linux-debug`
-  - `npm run test:docs-quickstart`
-  - `npm run check:pr`
-- [ ] **Step 5: Commit.** `feat(core)!: treat rejected licence sources as fatal by default`
 
 ---
 
@@ -1102,6 +1172,8 @@ After this phase, no production code path can create a legacy row. Legacy routes
 
 ### Task 16: Shared entitlement writes and admin create are protected-only
 
+The API, the shared writer and every test that creates grants through them change here. The admin UI changes only its form default, so a console user's default create is accepted; Task 17 removes the mode select and the floating-policy picker.
+
 **Files:**
 - Modify `packages/cloudflare-runtime/src/d1/entitlement_mutation.mjs:342-350` (`createEntitlement`):
   - always insert `enforcement_mode = 'device_bound_v1'` and guard the conflict update with `AND entitlements.enforcement_mode = 'device_bound_v1'`;
@@ -1115,27 +1187,23 @@ After this phase, no production code path can create a legacy row. Legacy routes
   - :58-67: `createReplayAdmission` always applies.
 - Modify `services/cloudflare-license-admin/src/worker/groups/entitlements/entitlement-schema.ts:7,38,41-54,76`: `enforcement_mode` `const: "device_bound_v1"`, required.
 - Modify `services/cloudflare-license-admin/src/worker/groups/entitlements/protected-checks.ts:38,63-70`: delete `HISTORY_TABLES` and the `lease_history_exists` rule. A protected denial row in `usage_events`, written by `bound_issue.mjs:88`, otherwise refuses a later re-create of the same key. Every create is now protected, so the defect would hit every create.
-- Modify `services/cloudflare-license-admin/src/shared/api.ts` (the `ProtectedCreateReason` union drops `lease_history_exists`).
-- Modify the admin UI:
-  - `services/cloudflare-license-admin/src/ui/features/entitlements/workflow.ts`: :25, :56 (default `enforcement_mode: "device_bound_v1"`), :366-367, and the policy picker :134-144 (`policyGrant`/`policyOptionLabel` exclude `type === "floating"`);
-  - `EntitlementEditor.tsx:36,79,95`: delete the mode select; the form always sends `device_bound_v1`;
-  - `services/cloudflare-license-admin/src/ui/shared/messages.ts:69` (`lease_history_exists` copy).
+- Modify `services/cloudflare-license-admin/src/shared/api.ts:276` (`PROTECTED_CREATE_REASONS`, and so the `ProtectedCreateReason` union, drops `lease_history_exists`).
+- Modify `services/cloudflare-license-admin/src/ui/features/entitlements/protectedCreate.ts:13`: delete the `lease_history_exists` sentence. `REASON_SENTENCES` is a `Record<ProtectedCreateReason, string>`, so admin `typecheck` fails if the key outlives the union member.
+- Modify `services/cloudflare-license-admin/src/ui/features/entitlements/workflow.ts:56`: the form default becomes `enforcement_mode: "device_bound_v1"`.
 - Modify admin test fixtures:
-  - `services/cloudflare-license-admin/test/worker/fixtures.mjs:134-156`: the default row is `device_bound_v1`, owned by a seeded active customer with a licence, `pool_size` 0;
-  - `test/admin-ui.fixture.mjs:583-621,1815-1848` (`seedEntitlement` and create default).
+  - `services/cloudflare-license-admin/test/worker/fixtures.mjs:134-156`: the default row is `device_bound_v1`, owned by a seeded active customer with a licence, `pool_size` 0; add `protectedCreateFixture()` (Step 1);
+  - `test/admin-ui.fixture.mjs:583-621,1815-1848` (`seedEntitlement` and the create default become `device_bound_v1`).
 - Modify admin tests:
   - `test/worker/entitlements.test.mjs:66-348` (creates now carry a customer, licence and `enforcement_mode`);
   - `test/sql/protected-create.test.mjs:55-78,149-171,197-224,241,261`;
   - `test/sql/audit-json-object.test.mjs:92`;
   - `test/sql/workstream-f.test.mjs:191`;
-  - `test/admin-ui.lifecycle.e2e.mjs:5-6,31,63,92`;
-  - `test/admin-ui.onboarding.e2e.mjs:112,130`;
-  - the UI workflow test `test/admin-ui-workflow/entitlements.test.mjs:59,63,130-158,200-215,311-316`.
+  - `test/admin-ui-workflow/entitlements.test.mjs:59,63` (the form body now carries `device_bound_v1` by default);
+  - `test/admin-ui.lifecycle.e2e.mjs:63` (a new form starts over as `device_bound_v1`, not `legacy`).
 - Modify backend tests that go through `createEntitlement`:
   - `services/cloudflare-licensing-backend/test/entitlement-mutation.test.mjs`: expectations become `device_bound_v1`.
   - `services/cloudflare-licensing-backend/test/e2e/admin-sync-flow.test.mjs`. Sync now yields protected rows, so the `/v1/verify` assertions at :209-222 fail. Sync the grant with `customer_id`/`license_id` for a seeded active customer and licence, and finish with a signed protected exchange, copying the flow at `test/e2e/protected-admin-enrollment.test.mjs:43-70`.
-- Tests of legacy-only admin routes (release-seats, devices, meter and resources in `test/sql/workstream-f.test.mjs:512-675`, `test/sql/admin-console.test.mjs:332-370`, `test/sql/device-limit.test.mjs:15,77-121,199-223`, `test/worker/transition-contracts.test.mjs:197-243`) must no longer create their grants through the admin API. They seed them with an explicit SQL insert of `enforcement_mode = 'legacy'` until Task 23 deletes those routes and tests. Triggers refuse seat and device rows on protected grants.
-- Modify `doc/capabilities/registry.json:190` (`admin-control-plane` cites the lifecycle e2e title that creates a legacy grant; update the selector to the renamed title).
+- Tests of legacy-only admin routes (release-seats, devices, meter and resources in `test/sql/workstream-f.test.mjs:512-675`, `test/sql/admin-console.test.mjs:332-370`, `test/sql/device-limit.test.mjs:15,77-121,199-223`, `test/worker/transition-contracts.test.mjs:197-243`) must no longer create their grants through the admin API. They seed them with an explicit SQL insert of `enforcement_mode = 'legacy'` until Task 24 deletes those routes and tests. Triggers refuse seat and device rows on protected grants.
 - Modify `services/cloudflare-license-admin/README.md:111-122` (mode default text).
 
 **Interfaces:**
@@ -1144,6 +1212,7 @@ After this phase, no production code path can create a legacy row. Legacy routes
   - `POST /api/admin/entitlements` requires `enforcement_mode: "device_bound_v1"`. An omitted or `"legacy"` mode returns 400 `invalid_request`.
   - `createEntitlement` never writes a legacy row.
   - `ProtectedCreateReason` no longer includes `lease_history_exists`.
+  - The admin form defaults to `device_bound_v1`; the mode select still renders until Task 17.
 
 - [ ] **Step 1: Write the failing tests** in `services/cloudflare-license-admin/test/worker/entitlements.test.mjs`:
 
@@ -1169,22 +1238,65 @@ test("admin create with enforcement_mode legacy is refused", async () => {
   In `test/sql/protected-create.test.mjs`, add `a protected denial does not block re-creating the same grant`. Insert a `usage_events` row (`event_type 'denied'`, `reason 'device_limit_reached'`, `device_key_id` = the key) for an existing protected grant's key, re-create the grant with the same fingerprint, and expect 200. This replaces the old `lease_history_exists` pin at :155/:241.
 
   Run `npm run test:admin`. Expected: FAIL on all three.
-- [ ] **Step 2: Implement** the runtime and admin changes above.
-- [ ] **Step 3: Migrate every admin fixture and test** that relied on the legacy default, as listed. A test whose purpose was the legacy create branch is deleted.
-- [ ] **Step 4: Run the UI changes.** Build and run `npm run test:ui --workspace @licensecc/cloudflare-license-admin` and `CI=1 npm run test:e2e --workspace @licensecc/cloudflare-license-admin`.
-  - Update `test/admin-ui-e2e-layout.test.mjs:36` (196 titles) only if a scenario is deleted or added, and state the new count in the commit.
-- [ ] **Step 5: Regenerate contracts.** `npm run write:contract-baselines`, review the admin diff (the `enforcement_mode` schema), then `npm run test:contracts`.
-- [ ] **Step 6: Grep.** `git grep -nE "enforcement_mode:\s*\"legacy\"|mode !== \"legacy\"|lease_history_exists|HISTORY_TABLES" -- services/cloudflare-license-admin packages/cloudflare-runtime/src` must print nothing.
-- [ ] **Step 7: Run the gates.**
+- [ ] **Step 2: Implement** the runtime and admin Worker changes above, the `ProtectedCreateReason` and `protectedCreate.ts` change, and the form default.
+- [ ] **Step 3: Migrate every admin and backend fixture and test** that relied on the legacy default, as listed. A test whose purpose was the legacy create branch is deleted.
+- [ ] **Step 4: Regenerate contracts.** `npm run write:contract-baselines`, review the admin diff (the `enforcement_mode` schema), then `npm run test:contracts`.
+- [ ] **Step 5: Grep.** Both must print nothing:
+
+```bash
+git grep -nE "mode !== \"legacy\"|lease_history_exists|HISTORY_TABLES" -- services/cloudflare-license-admin packages/cloudflare-runtime/src
+git grep -nE "enforcement_mode:\s*\"legacy\"|enforcement_mode \?\? \"legacy\"" -- services/cloudflare-license-admin/src/worker packages/cloudflare-runtime/src services/cloudflare-license-admin/test/worker/fixtures.mjs services/cloudflare-license-admin/test/admin-ui.fixture.mjs
+```
+
+  Tests that send `enforcement_mode: "legacy"` to prove it is refused (the new Step 1 test, `test/sql/protected-create.test.mjs`) and the SQL seeds for the legacy-only routes keep the word by design. The UI form type, the mode select and the e2e specs still name `legacy` until Task 17.
+- [ ] **Step 6: Run the gates.**
   - `npm run test:admin`
   - `npm run test --workspace @licensecc/cloudflare-runtime`
-  - `npm run test:e2e --workspace @licensecc/cloudflare-licensing-backend` (runs `e2e/protected-admin-enrollment.test.mjs`)
-  - admin `test:e2e`
+  - `npm run test:e2e --workspace @licensecc/cloudflare-licensing-backend` (runs `e2e/protected-admin-enrollment.test.mjs` and `e2e/admin-sync-flow.test.mjs`)
+  - `CI=1 npm run test:e2e --workspace @licensecc/cloudflare-license-admin`
   - `npm run check:dry-run`
   - `npm run check:pr`
-- [ ] **Step 8: Commit.** `feat(admin)!: create only protected grants and stop protected denials blocking re-creation`
+- [ ] **Step 7: Commit.** `feat(admin)!: create only protected grants and stop protected denials blocking re-creation`
 
-### Task 17: Plan apply, policy stamps and sync keep protected grants usable
+### Task 17: Admin UI — remove the protection-mode select and floating policies from the create form
+
+Task 16 made the API accept only protected creates and set the form default. This task removes the choice from the console: the form has no mode select, and the policy picker never offers a floating policy.
+
+**Files:**
+- Modify `services/cloudflare-license-admin/src/ui/features/entitlements/workflow.ts`:
+  - :25: `EntitlementFormState.enforcement_mode` becomes `"device_bound_v1"`;
+  - :366-367: the validation always applies the protected project, feature and fingerprint rules;
+  - the policy picker :134-144: `policyGrant`/`policyOptionLabel` and the picker's policy filter exclude `type === "floating"`, so no "seats" label remains.
+- Modify `services/cloudflare-license-admin/src/ui/features/entitlements/EntitlementEditor.tsx:36,79,95`: delete the "Protection" select; the create form always sends `device_bound_v1`, and the edit view shows "Protected devices" as read-only text.
+- Modify the e2e specs that drive the select:
+  - `test/admin-ui.lifecycle.e2e.mjs`: :5-6 and :31 (the two mode-response tests keep asserting that a create whose response lacks or changes the mode is not accepted, without selecting a mode), :18, :26-27, :43 (every `getByLabel("Protection", …)` call), :92 (the lifecycle test creates a protected grant with a customer and licence);
+  - `test/admin-ui.onboarding.e2e.mjs`: :47, :82, :97, :104, :268, :294 (every `getByLabel("Protection", …)` call), :112 and :129-130 (the legacy-grant branch is deleted).
+- Modify the UI workflow test cases in `test/admin-ui-workflow/entitlements.test.mjs` that pin `policyGrant`/`policyOptionLabel` for a floating policy (grep `policyOptionLabel|policyGrant`).
+- Modify `test/admin-ui-e2e-layout.test.mjs:36` (196 titles) only if a scenario is deleted or added, and state the new count in the commit.
+- Modify `doc/capabilities/registry.json:190` (`admin-control-plane` cites the lifecycle e2e title `admin UI completes entitlement lifecycle and blocks duplicate create submissions`); update the selector if Step 2 renames that test.
+
+**Interfaces:**
+- Consumes: Task 16.
+- Produces: the admin create form has no protection choice and never offers a floating policy. No route or contract changes.
+
+- [ ] **Step 1: Write the failing e2e assertion** in `test/admin-ui.lifecycle.e2e.mjs`: `the create form has no protection choice`. Open "New entitlement" and assert `form.getByLabel("Protection", { exact: true })` has count 0 and the form shows "Protected devices". Run `cd services/cloudflare-license-admin && CI=1 npx playwright test test/admin-ui.lifecycle.e2e.mjs`. Expected: FAIL.
+- [ ] **Step 2: Remove the select, narrow the form type and filter the picker.** Rewrite the listed e2e and workflow tests.
+- [ ] **Step 3: Grep.** This must print nothing:
+
+```bash
+git grep -nE "enforcement_mode:\s*\"legacy\"|\"legacy\" \| \"device_bound_v1\"|Legacy application|selectOption\(\"(legacy|device_bound_v1)\"\)|getByLabel\(\"Protection\"" -- services/cloudflare-license-admin/src/ui 'services/cloudflare-license-admin/test/admin-ui*'
+```
+
+  The one exception is the new negative assertion from Step 1, which names `getByLabel("Protection"` to prove its absence; list it in the PR.
+- [ ] **Step 4: Run the gates.**
+  - `npm run test:ui --workspace @licensecc/cloudflare-license-admin`
+  - `CI=1 npm run test:e2e --workspace @licensecc/cloudflare-license-admin`
+  - `npm run check:capabilities`
+  - `npm run test:docs-accuracy`
+  - `npm run check:pr`
+- [ ] **Step 5: Commit.** `refactor(admin-ui): drop the protection-mode choice and floating policies from the create form`
+
+### Task 18: Plan apply, policy stamps and sync keep protected grants usable
 
 This fixes two latent defects:
 - Plan apply's UPDATE writes `device_hash`, TTLs, `pool_size`, `max_borrow_sec` and `meter_*` onto any row, protected ones included (`packages/cloudflare-runtime/src/d1/plan_projection.mjs:585-626`). A non-zero `pool_size` then makes the grant unusable (`bound_issue.mjs:56`).
@@ -1245,7 +1357,7 @@ This fixes two latent defects:
   - `npm run check:pr`
 - [ ] **Step 7: Commit.** `fix(entitlements): keep plan-applied and synced grants protected and issuable`
 
-### Task 18: Order ingest creates protected grants and requires a customer
+### Task 19: Order ingest creates protected grants and requires a customer
 
 **Files:**
 - Modify `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs`:
@@ -1295,9 +1407,9 @@ This fixes two latent defects:
   - `npm run check:hotspots`
   - `npm run test:docs-accuracy`
   - `npm run check:pr`
-- [ ] **Step 7: Commit.** `feat(orders)!: materialise protected grants and require the customer on every order`
+- [ ] **Step 7: Commit.** `feat(orders)!: materialise protected grants and require the customer on every order`. The PR description states that revocation intents (`fraud.confirmed`, `chargeback`, `subscription.canceled_at_period_end`) also require `customer.id`: billing providers often send only a `subscription_id` for these, so the billing integration must be designed to send the customer id on every intent. The decision stands because the project has no live integrations.
 
-### Task 19: Operator tools create protected grants with an owner
+### Task 20: Operator tools create protected grants with an owner
 
 **Files:**
 - Modify `services/cloudflare-licensing-backend/scripts/entitlement.mjs`:
@@ -1333,27 +1445,36 @@ This fixes two latent defects:
 
 The protected staging drill lands first in this phase. Today every deployed licensing drill is legacy: the portal seat and download mutations, the backend lease drill and the public-verifier drill. Each of them is removed only in the same task as the route it exercises, so no deploy runs without a licensing smoke test.
 
-### Task 20: The staging portal drill proves a protected enrollment, exchange and renewal
+### Task 21: The staging portal drill proves a protected enrollment, exchange and renewal
 
 The backend proves key possession and does not verify attestation (ADR 0006:33-35), so the drill can use a software P-256 key, with no TPM.
 
 **Files:**
 - Modify `services/cloudflare-customer-portal/scripts/staging-portal-drill.mjs`:
-  - delete `runSeatCycle` (:364-406), `runDownload` (:408-433), the `/devices` and `/usage` reads (:456-457), the result fields (:486-489) and the env aliases (:12-16, :128-132);
-  - add `runProtectedDeviceJourney(options)` (Step 3).
-- Modify `services/cloudflare-customer-portal/test/staging-portal-drill.test.mjs`: :94-115, :131-186, and the new journey test.
+  - delete `runSeatCycle` (:364-406), `runDownload` (:408-433), the `/devices` and `/usage` reads (:456-457), the result fields (:486-489) and the seat and download env aliases (:12-16, :128-132);
+  - add the protected env aliases to `ENV_ALIASES`, following the existing `STAGING_*`/`LICENSECC_*` pairing:
+    - `protectedEntitlementId: ["STAGING_PORTAL_PROTECTED_ENTITLEMENT_ID", "LICENSECC_PORTAL_PROTECTED_ENTITLEMENT_ID"]`;
+    - `backendBaseUrl: ["STAGING_BACKEND_BASE_URL", "LICENSECC_BACKEND_URL"]`;
+    - `deviceClientId: ["STAGING_DEVICE_CLIENT_ID", "LICENSECC_DEVICE_CLIENT_ID"]`;
+    - `deviceProject: ["STAGING_DEVICE_PROJECT", "LICENSECC_DEVICE_PROJECT"]`;
+    - `deviceFeature: ["STAGING_DEVICE_FEATURE", "LICENSECC_DEVICE_FEATURE"]`;
+    - `deviceRedirectUri: ["STAGING_DEVICE_REDIRECT_URI", "LICENSECC_DEVICE_REDIRECT_URI"]`;
+    - `deviceAudience: ["STAGING_DEVICE_AUDIENCE", "LICENSECC_DEVICE_AUDIENCE"]`;
+    - `boundLeasePublicKey: ["STAGING_BOUND_LEASE_PUBLIC_KEY_SPKI_PEM", "LICENSECC_BOUND_LEASE_PUBLIC_KEY_SPKI_PEM"]`;
+  - add `runProtectedDeviceJourney(options)` (Step 3). The journey is opt-in: it runs only when **all eight** protected values are set, and otherwise the evidence is `protected_device: { enabled: false }` with no backend call. A partial set is a configuration error that names the missing variables. The production read-only drill (`.github/workflows/deploy-production.yml:143-155`, "Run remaining service post-deploy drills") sets none of them, so it never enrolls a device.
+- Modify `services/cloudflare-customer-portal/test/staging-portal-drill.test.mjs`: :94-115, :131-186, the new journey test and the new skip test.
 - Modify `.github/workflows/deploy-staging.yml`:
   - inputs :30-37: replace `portal_floating_entitlement_id` and `portal_download_entitlement_id` with `portal_protected_entitlement_id`;
   - "Run synthetic staging tenant drills" env :176-195: delete `STAGING_PORTAL_ALLOW_SEAT_MUTATION`, `STAGING_PORTAL_FLOATING_ENTITLEMENT_ID`, `STAGING_PORTAL_ALLOW_DOWNLOAD`, `STAGING_PORTAL_DOWNLOAD_ENTITLEMENT_ID`;
   - add `STAGING_BACKEND_BASE_URL: ${{ inputs.backend_url }}`, `STAGING_PORTAL_PROTECTED_ENTITLEMENT_ID: ${{ inputs.portal_protected_entitlement_id }}`, `STAGING_DEVICE_CLIENT_ID: ${{ vars.LICENSECC_STAGING_DEVICE_CLIENT_ID }}`, `STAGING_DEVICE_PROJECT: ${{ vars.LICENSECC_STAGING_DEVICE_PROJECT }}`, `STAGING_DEVICE_FEATURE: ${{ vars.LICENSECC_STAGING_DEVICE_FEATURE }}`, `STAGING_DEVICE_REDIRECT_URI: ${{ vars.LICENSECC_STAGING_DEVICE_REDIRECT_URI }}`, `STAGING_DEVICE_AUDIENCE: ${{ vars.LICENSECC_STAGING_DEVICE_AUDIENCE }}` (the `audience` of the staging `BOUND_DEVICE_CONFIG`), `STAGING_BOUND_LEASE_PUBLIC_KEY_SPKI_PEM: ${{ vars.LICENSECC_STAGING_BOUND_LEASE_PUBLIC_KEY_SPKI_PEM }}`.
-- Modify `scripts/workflow-action-pins.test.mjs:707-708` (the seat and download flags); pin the new env names instead.
+- Modify `scripts/workflow-action-pins.test.mjs:707-708` (the seat and download flags); pin the new staging env names instead, and add a production pin: the `deploy-production.yml` step "Run remaining service post-deploy drills" (`remainingProductionDrills`, :632-633) has no env key matching `STAGING_DEVICE_*`, `*_PROTECTED_ENTITLEMENT_ID`, `STAGING_BACKEND_BASE_URL` or `*_BOUND_LEASE_PUBLIC_KEY_SPKI_PEM`, and its text names none of the `LICENSECC_STAGING_DEVICE_*` variables.
 - Modify `services/cloudflare-customer-portal/README.md:188-199` (drill mutation flags).
 - Modify `doc/release-artifacts.md:225-226` and `doc/operations/production-readiness.md` PRD-03 (:146-193, the floating-seat portal drill wording).
 
 **Interfaces:**
 - Consumes: the backend `/v2/device-authorizations`, `/v2/device-challenges`, `/v2/device-authorizations/exchange`, `/v2/device-leases/renew`; the portal `/api/portal/device-authorizations/{inspect,approve}` and `/api/portal/device-bindings/retire`; `@licensecc/licensing-domain/lease/device_protocol` (`encodeBase64url`, `deviceOperationBody`, `deviceProofSigningInput`, `decodeDeviceLeaseEnvelope`, `deviceLeaseSigningInput`).
 - Produces:
-  - `runStagingPortalDrill` evidence gains `protected_device: { exchanged: true, renewed: true, retired: true, lease_key_id }`.
+  - `runStagingPortalDrill` evidence gains `protected_device: { enabled: true, exchanged: true, renewed: true, retired: true, lease_key_id }` when the eight protected values are set, and `protected_device: { enabled: false }` when none is set.
   - The synthetic staging entitlement must be protected, owned by the drill customer, with `max_active_devices` of at least 20. A retired binding holds its slot until `hold_until` (at most 24 h + 120 s), so each run consumes one slot for a day.
 
 - [ ] **Step 1: Write the failing test** in `staging-portal-drill.test.mjs`: `the staging portal drill completes a protected enrollment, exchange and renewal and retires the binding`.
@@ -1363,7 +1484,9 @@ The backend proves key possession and does not verify attestation (ADR 0006:33-3
     - the drill posts the four `/v2` calls and the three portal calls in order;
     - each proof verifies against the drill's reported SPKI;
     - the drill rejects a lease signed by a different key (a second run where the fake signs with another key must fail with a redacted error).
-  - Run `node --test services/cloudflare-customer-portal/test/staging-portal-drill.test.mjs`. Expected: FAIL, because the function does not exist.
+  - Add `the drill skips the protected journey when the protected variables are absent`: with only the portal URL and session cookie set (the production shape), the drill makes no `/v2` or consent call and reports `protected_device: { enabled: false }`; with only some of the eight set, it fails with an error naming the missing variables.
+  - In `scripts/workflow-action-pins.test.mjs`, add the production pin described under Files.
+  - Run `node --test services/cloudflare-customer-portal/test/staging-portal-drill.test.mjs` and `npm run test:workflow-pins`. Expected: FAIL, because the function and the staging env do not exist.
 - [ ] **Step 2: Remove the legacy steps** listed above.
 - [ ] **Step 3: Implement `runProtectedDeviceJourney`.**
   1. Generate an ECDSA P-256 key with `crypto.subtle.generateKey`. The SPKI is `encodeBase64url(exportKey("spki"))`, and the key id is `sha256:` + the hex SHA-256 of the SPKI DER.
@@ -1392,7 +1515,7 @@ The backend proves key possession and does not verify attestation (ADR 0006:33-3
   - create the protected synthetic entitlement;
   - register the drill's client id and loopback callback in the staging `BOUND_DEVICE_CONFIG`.
 
-### Task 21: Portal Worker — remove the legacy routes, token mint and legacy trial branch
+### Task 22: Portal Worker — remove the legacy routes, token mint and legacy trial branch
 
 **Files:**
 - Delete:
@@ -1427,11 +1550,11 @@ The backend proves key possession and does not verify attestation (ADR 0006:33-3
 - Modify `services/cloudflare-customer-portal/README.md`: :15, :35-36, :41, :110-114, :120-121, :224-225, :372, :406-407.
 
 **Interfaces:**
-- Consumes: Task 16 (protected rows only), Task 20 (the drill no longer calls deleted routes).
+- Consumes: Task 16 (protected rows only), Task 21 (the drill no longer calls deleted routes).
 - Produces:
   - The portal serves 29 routes. Session routes: `GET /api/portal/me`, `GET /api/portal/entitlements`, `GET /api/portal/device-bindings`, `POST /api/portal/device-bindings/retire`, `POST /api/portal/device-authorizations/{inspect,approve,deny}`.
   - The portal no longer mints account tokens or bumps `account_token_revocations`.
-  - Portal `/health` is unchanged until Task 27.
+  - Portal `/health` is unchanged until Task 29.
 
 - [ ] **Step 1: Write the failing test** in `portal-worker-route-owners.test.mjs`: `the portal serves exactly the protected self-service routes`. It asserts the session route key set equals the seven routes above and that `ALL_ROUTES.length === 29`. Run `npm run test:portal`. Expected: FAIL (36).
 - [ ] **Step 2: Delete the routes, files and facade** as listed.
@@ -1444,9 +1567,9 @@ git grep -nE "portal_token|portal_backend_error_manifest|backend-proxy-contract|
 ```
 
   Expected, and only these:
-  - `src/auth/portal_session.mjs:90` (the `account_token_id` column in the session `INSERT`; Task 32 drops the column);
-  - the health code in `src/worker/routes/meta.ts` and `src/worker/openapi/paths/ops.ts` (Task 27);
-  - `src/ui` (Task 22).
+  - `src/auth/portal_session.mjs:90` (the `account_token_id` column in the session `INSERT`; Task 35 drops the column);
+  - the health code in `src/worker/routes/meta.ts` and `src/worker/openapi/paths/ops.ts` (Task 29);
+  - `src/ui` (Task 23).
 
   List the `src/ui` hits in the PR.
 - [ ] **Step 6: Run the gates.**
@@ -1457,7 +1580,7 @@ git grep -nE "portal_token|portal_backend_error_manifest|backend-proxy-contract|
   - `npm run check:pr`
 - [ ] **Step 7: Commit.** `refactor(portal)!: remove seat, download, usage and legacy-device routes and the account-token mint`
 
-### Task 22: Portal UI — remove seats, legacy devices, downloads and usage
+### Task 23: Portal UI — remove seats, legacy devices, downloads and usage
 
 **Files:**
 - Delete under `services/cloudflare-customer-portal/src/ui/`:
@@ -1490,7 +1613,7 @@ git grep -nE "portal_token|portal_backend_error_manifest|backend-proxy-contract|
 - Modify `doc/architecture/system-map.md`: :110 (the `DevicesFeature.tsx` row; `scripts/docs-accuracy.test.mjs:519` lists it: update or drop the row if the file falls well below the other rows), :121 (portal UI `App.tsx` count), :123 (portal total).
 
 **Interfaces:**
-- Consumes: Task 21.
+- Consumes: Task 22.
 - Produces: the portal UI shows apps and entitlements, protected connected devices (Disconnect) and consent. No seat, download, usage or "older app versions" view remains.
 
 - [ ] **Step 1: Write the failing e2e assertion** in `test/portal-ui.nodes.e2e.mjs`: the Devices page shows "Connected devices" and does **not** show "Activated devices", "Browser seats" or "Download". Run `cd services/cloudflare-customer-portal && CI=1 npx playwright test test/portal-ui.nodes.e2e.mjs`. Expected: FAIL.
@@ -1502,7 +1625,7 @@ git grep -nE "portal_token|portal_backend_error_manifest|backend-proxy-contract|
 git grep -nE "BrowserSeats|DeviceRegistrations|ReleaseDialogs|seatStorage|discardLegacyStoredSeats|DownloadsFeature|UsageFeature|ActionResult|older Worker|older app versions|legacy" -- services/cloudflare-customer-portal/src services/cloudflare-customer-portal/test
 ```
 
-  Expected: only `src/auth/portal_otp.mjs:194` (empty-pepper-map behaviour, unrelated) and `src/auth/portal_session.mjs:18,79` (`authMethod "legacy"`, fixed in Task 37).
+  Expected: only `src/auth/portal_otp.mjs:194` (empty-pepper-map behaviour, unrelated) and `src/auth/portal_session.mjs:18,79` (`authMethod "legacy"`, fixed in Task 42).
 - [ ] **Step 5: Run the gates.**
   - `npm run test:portal`
   - `npm run test:ui --workspace @licensecc/cloudflare-customer-portal`
@@ -1516,14 +1639,14 @@ git grep -nE "BrowserSeats|DeviceRegistrations|ReleaseDialogs|seatStorage|discar
 
 ## P4 — Admin
 
-### Task 23: Admin Worker — remove the legacy-only routes and the account-token list
+### Task 24: Admin Worker — remove the legacy-only routes and the account-token list
+
+The admin Worker stops serving the seat, legacy-device, meter and resources routes and stops reading account tokens. The shared runtime helpers those routes called stay one more task (Task 25), unused; the domain device-record types stay until Task 27 deletes the admin UI that still imports them.
 
 **Files:**
 - Delete:
   - `services/cloudflare-license-admin/src/worker/groups/devices.ts`, `src/worker/groups/devices/operations.ts`, `src/worker/openapi/paths/devices.ts`;
-  - `test/worker/devices.test.mjs`;
-  - `packages/cloudflare-runtime/src/lease/seat_reclaim.mjs` and `seat_reclaim.d.ts`;
-  - `services/cloudflare-licensing-backend/test/sql/device-transition.test.mjs`.
+  - `test/worker/devices.test.mjs`.
 - Delete the admin test aggregator `services/cloudflare-license-admin/test/admin-worker.test.mjs`. It keeps "the historical test entrypoint stable". `package.json:12` `test` runs `test/worker/*.test.mjs` directly.
 - Modify routes (`src/worker/routes.ts`): :21 (#9 `GET /api/admin/customers/{id}/resources`), :75 (#63 `POST /api/admin/entitlements/{id}/release-seats`), :81-85 (#69 `GET …/devices`, #70 `GET …/meter`, #71-73 `POST …/devices/{deviceKeyId}/{revoke,disable,reenable}`).
 - Modify wiring:
@@ -1537,50 +1660,84 @@ git grep -nE "BrowserSeats|DeviceRegistrations|ReleaseDialogs|seatStorage|discar
   - `groups/summary-reports/operations.ts:48-50` (report `account_tokens`);
   - `components.ts:890`, `:939-948`;
   - `groups/catalog/import-operations.ts` (its `account_token` reference; delete it).
-- Delete the worker facades:
-  - `src/worker/response.ts`: `app.ts:6` imports `./responses.js`; update `scripts/architecture-boundaries.json:19`, `scripts/check-architecture.mjs:23` and `scripts/check-architecture.test.mjs:40`.
-  - `src/worker/request.ts:29-30`: `webhooks.ts:17` imports `boundedCursor` from `./query.js`.
-- Modify `packages/cloudflare-runtime/src/d1/entitlement_mutation.mjs`: delete `classifyDeviceTransitionGuardMiss` (:309-332), `listEntitlementDevices` (:470), `shortDeviceKeyId` (:479), `transitionEntitlementDevice` (:494-535). Also modify `.d.ts:138-139`, `packages/cloudflare-runtime/package.json:63-66` (the `seat_reclaim` export) and `packages/cloudflare-runtime/test/runtime-primitives.test.mjs:21`.
-- Modify `packages/licensing-domain/src/entitlements/contracts.d.ts:9,12-22` (`DeviceStatus`, `EntitlementDeviceRecord`).
 - Modify tests:
   - `test/worker/customers.test.mjs:7` (`assertRouteGroup("customers", 15)` becomes 14);
   - `test/worker/transition-contracts.test.mjs:15,197-243,291-306,501-535,557-584,631` ("73 JSON 2xx responses" becomes 66), :634-658;
   - `test/worker/structure.test.mjs:26,43,54`;
-  - `test/sql/workstream-f.test.mjs:28,205,512-675`;
+  - `test/sql/workstream-f.test.mjs:28` (the `forceReleaseLiveSeats` import), :205, :512-675;
   - `test/sql/admin-console.test.mjs:111-112,332-370,416-417,492-515,550-568,634`;
   - `test/sql/device-limit.test.mjs:15,77-121,199-223` (the `legacyGrant` cases become protected grants);
   - `test/openapi-crosscheck.test.mjs:425`.
-- Modify `scripts/canonical-contracts.mjs:16,429` (75 → 68) and `doc/architecture/system-map.md:68` (68), plus the admin source total at :123.
+- Modify `scripts/canonical-contracts.mjs:16,429` (75 → 68) and `doc/architecture/system-map.md:68` (68), plus the admin source total at :123 and the admin `components.ts` hotspot row.
 
 **Interfaces:**
 - Consumes: Task 16.
 - Produces:
   - The admin Worker serves 68 routes. `GET /api/admin/customers/{id}` no longer includes `account_tokens`, and `GET /api/admin/report` no longer includes an `account_tokens` count.
-  - `forceReleaseLiveSeats` and the legacy device helpers no longer exist.
+  - No admin Worker source imports `@licensecc/cloudflare-runtime/lease/seat_reclaim`, `listEntitlementDevices` or `transitionEntitlementDevice`.
 
 - [ ] **Step 1: Write the failing test** in `test/routes-table.test.mjs`: `the admin serves no seat, legacy-device, meter or resources route`. It asserts that `ALL_ROUTES.length === 68` and that no path matches `/release-seats|\/devices\b|\/meter\b|\/resources\b/`. Run `npm run test:admin`. Expected: FAIL.
-- [ ] **Step 2: Delete the routes, files, runtime helpers and facades** as listed.
+- [ ] **Step 2: Delete the routes, handlers, OpenAPI paths and the aggregator** as listed.
 - [ ] **Step 3: Rewrite the tests.**
 - [ ] **Step 4: Regenerate contracts** (`npm run write:contract-baselines`, review `test/contracts/admin.json` routeCount 68, then `npm run test:contracts`).
 - [ ] **Step 5: Grep.**
 
 ```bash
-git grep -nE "release-seats|releaseSeats|forceReleaseLiveSeats|seat_reclaim|handleDevice(List|Transition)|handleMeterStatus|listEntitlementDevices|transitionEntitlementDevice|EntitlementDeviceRecord|resources\?kind|account_tokens|admin-worker\.test|worker/response\.js" -- services/cloudflare-license-admin/src services/cloudflare-license-admin/test packages scripts
+git grep -nE "release-seats|releaseSeats|handleDevice(List|Transition)|handleMeterStatus|resources\?kind|account_tokens|admin-worker\.test" -- services/cloudflare-license-admin/src/worker services/cloudflare-license-admin/test scripts
 ```
 
-  Expected: no output outside `src/ui`, which Task 25 cleans.
+  Expected: no output outside the admin UI e2e specs and fixtures under `services/cloudflare-license-admin/test/admin-ui*`, which Task 27 cleans. List those hits in the PR.
 - [ ] **Step 6: Run the gates.**
   - `npm run test:admin`
-  - `npm run test --workspace @licensecc/cloudflare-runtime`
-  - `npm run test:backend`
-  - `npm run check:architecture`
-  - `npm run test:architecture`
   - `npm run test:contracts`
   - `npm run check:dry-run`
+  - `npm run test:docs-accuracy`
   - `npm run check:pr`
 - [ ] **Step 7: Commit.** `refactor(admin)!: remove seat, legacy-device, meter and resources routes and the token list`
 
-### Task 24: Admin Worker — remove legacy fields from grants, policies, catalog and reports
+### Task 25: Delete the shared seat and legacy-device helpers and the admin Worker facades
+
+After Task 24, the runtime seat-reclaim module and the legacy device helpers have no production caller. This task deletes them with their tests, and deletes two admin Worker re-export facades.
+
+**Files:**
+- Delete:
+  - `packages/cloudflare-runtime/src/lease/seat_reclaim.mjs` and `seat_reclaim.d.ts`;
+  - `services/cloudflare-licensing-backend/test/sql/device-transition.test.mjs` (it drives `transitionEntitlementDevice` and `listEntitlementDevices` directly).
+- Modify `packages/cloudflare-runtime/src/d1/entitlement_mutation.mjs`: delete `classifyDeviceTransitionGuardMiss` (:309-332), `listEntitlementDevices` (:470), `shortDeviceKeyId` (:479), `transitionEntitlementDevice` (:494-535). Also modify `entitlement_mutation.d.ts`: the two declarations at :138-145, and the `DeviceStatus`/`EntitlementDeviceRecord` import and re-export at :2, :4, :15, :17 (nothing imports them from the runtime; the domain types themselves stay until Task 27).
+- Modify `packages/cloudflare-runtime/package.json:63-66` (the `./lease/seat_reclaim` export) and `packages/cloudflare-runtime/test/runtime-primitives.test.mjs:21` (the `lease/seat_reclaim` entry in `RUNTIME_SUBPATHS`).
+- Delete the admin Worker facades:
+  - `services/cloudflare-license-admin/src/worker/response.ts`: `app.ts:6` imports `./responses.js`; update `scripts/architecture-boundaries.json:19`, `scripts/check-architecture.mjs:23` and `scripts/check-architecture.test.mjs:40`.
+  - `services/cloudflare-license-admin/src/worker/request.ts:29-30`: `webhooks.ts:17` imports `boundedCursor` from `./query.js`.
+- Modify `doc/architecture/system-map.md:123` (admin source total) and `scripts/hotspot-baseline.json` (lower the `packages/cloudflare-runtime/src/d1/entitlement_mutation.mjs` entry, 624 today, to its new count).
+
+`packages/licensing-domain/src/entitlements/contracts.d.ts` (`DeviceStatus`, `EntitlementDeviceRecord`) is not touched here: `services/cloudflare-license-admin/src/shared/api.ts:14-15` and the admin UI still import those types until Task 27.
+
+**Interfaces:**
+- Consumes: Task 24.
+- Produces:
+  - `forceReleaseLiveSeats`, `listEntitlementDevices`, `transitionEntitlementDevice` and the `@licensecc/cloudflare-runtime/lease/seat_reclaim` subpath no longer exist.
+  - The admin Worker has one response module (`responses.ts`) and one query module (`query.ts`).
+
+- [ ] **Step 1: Write the failing test** in `packages/cloudflare-runtime/test/runtime-primitives.test.mjs`: `the runtime exports no seat-reclaim or legacy device helper`. It asserts that importing `@licensecc/cloudflare-runtime/lease/seat_reclaim` rejects with `ERR_PACKAGE_PATH_NOT_EXPORTED`, and that `@licensecc/cloudflare-runtime/d1/entitlement_mutation` exports neither `listEntitlementDevices` nor `transitionEntitlementDevice`. Run `npm run test --workspace @licensecc/cloudflare-runtime`. Expected: FAIL.
+- [ ] **Step 2: Delete the module, the helpers, the export, the backend test and the two facades.**
+- [ ] **Step 3: Grep.** This must print nothing:
+
+```bash
+git grep -nE "lease/seat_reclaim|seat_reclaim\.(mjs|d\.ts)|forceReleaseLiveSeats|listEntitlementDevices|transitionEntitlementDevice|classifyDeviceTransitionGuardMiss|worker/response\.js|worker/request\.js" -- services packages scripts ':!**/*.md'
+```
+
+- [ ] **Step 4: Run the gates.**
+  - `npm run test --workspace @licensecc/cloudflare-runtime`
+  - `npm run test:backend`
+  - `npm run test:admin`
+  - `npm run check:architecture`
+  - `npm run test:architecture`
+  - `npm run check:hotspots`
+  - `npm run test:docs-accuracy`
+  - `npm run check:pr`
+- [ ] **Step 5: Commit.** `refactor(runtime): delete the seat-reclaim and legacy device helpers and the admin Worker facades`
+
+### Task 26: Admin Worker — remove legacy fields from grants, policies, catalog and reports
 
 **Files:**
 - Modify `packages/licensing-domain/src/entitlements/policy.mjs:21-45,97-103`: `POLICY_TYPES` drops `floating`; delete the pool, borrow and meter rules in `policyCapacityViolation`.
@@ -1594,14 +1751,13 @@ git grep -nE "release-seats|releaseSeats|forceReleaseLiveSeats|seat_reclaim|hand
   - `groups/catalog/plan-operations.ts`: :208-209, :229-230;
   - `groups/catalog/import-operations.ts:153-158`.
 - Modify `packages/licensing-domain/src/catalog/import_preview.mjs:42` and `import_preview.d.ts:28,69`, and `plan_projection.d.ts:51,100`.
-- Modify `src/worker/groups/entitlements/operations.ts:72,177-182,190,207-208`: list and PATCH no longer project or accept `device_hash`/`assertion_ttl_seconds`. The columns still exist until Task 34, but no admin path reads or writes them.
+- Modify `src/worker/groups/entitlements/operations.ts:72,177-182,190,207-208`: list and PATCH no longer project or accept `device_hash`/`assertion_ttl_seconds`. The columns still exist until Task 38, but no admin path reads or writes them.
 - Modify `src/worker/groups/entitlements/protected-checks.ts:24-26,32-33` (`POLICY_FIELDS`, `STAMP_COLUMN_DEFAULTS`).
 - Modify `src/worker/groups/summary-reports/operations.ts`:
-  - :110-116: timeseries drops the checkout and release series; denials keep only the protected `usage_events` rows;
-  - :176-177: expiring uses `boundTrialDeadlineSql` only; delete the `legacyTrialDeadlineSql` import at :6;
+  - :110-138: timeseries drops the checkout and release series and the checkout-derived `denial_rate`; denials keep only the protected `usage_events` rows;
+  - :176-177: expiring uses `boundTrialDeadlineSql` only; delete the `legacyTrialDeadlineSql` import at :6. The helper itself stays in `packages/cloudflare-runtime/src/lease/trial_store.mjs` until Task 31 deletes that module: the portal imports it until Task 22, and Tasks 21–23 may run in parallel with this task.
   - :239-242: stale comment.
-- Modify `packages/cloudflare-runtime/src/lease/trial_store.mjs:11` and `.d.ts:27` (delete `legacyTrialDeadlineSql`); delete `packages/cloudflare-runtime/test/legacy-trial-deadline.test.mjs`.
-- Modify `src/worker/openapi/components.ts`: :347, :363, :400, :572, :594, :752, :761, :771, :779, :788, :794, :799, :808 (policy, catalog, entitlement and report schemas).
+- Modify `src/worker/openapi/components.ts`: :347, :363, :400, :572, :594, :752, :761, :771, :779, :788, :794, :799, :808 (policy, catalog, entitlement and report schemas), and the timeseries schema and its description at :1161-1175, which describe the buckets in terms of `usage_events` checkouts, releases and denials. After this task the bucket schema has no `checkouts` or `releases` field and no `denial_rate` (it was computed from checkouts, `summary-reports/operations.ts:137-138`); the denial series counts protected refusals only. Also modify the route description at `src/worker/openapi/paths/summary-reports.ts:58` ("checkouts/releases/denials").
 - Modify tests:
   - `test/worker/policies.test.mjs`, `test/worker/catalog.test.mjs`, `test/worker/summary-reports.test.mjs`;
   - `test/sql/policy-admin.test.mjs`, `test/sql/plan-projection-admin.test.mjs`, `test/sql/catalog-import-preview-admin.test.mjs`, `test/sql/workstream-f.test.mjs:211-300,408-510`;
@@ -1610,12 +1766,12 @@ git grep -nE "release-seats|releaseSeats|forceReleaseLiveSeats|seat_reclaim|hand
 - Modify `services/cloudflare-license-admin/README.md`: :70-72, :79-80, :98, :103, :509-583 ("License mode setup").
 
 **Interfaces:**
-- Consumes: Tasks 17 and 23.
+- Consumes: Tasks 18 and 24.
 - Produces:
   - Policies are `trial`, `node_locked` or `subscription`.
   - Catalog plan features carry `max_active_devices`, `policy_id` and trial fields only.
-  - `GET /api/admin/report/timeseries` returns protected denials only.
-  - `legacyTrialDeadlineSql` no longer exists.
+  - `GET /api/admin/report/timeseries` returns protected denials only, and its OpenAPI schema says so.
+  - The admin no longer imports `legacyTrialDeadlineSql`.
 
 - [ ] **Step 1: Write the failing tests.**
   - `test/worker/policies.test.mjs`: `a floating policy is refused` (400 `invalid_request`).
@@ -1625,14 +1781,15 @@ git grep -nE "release-seats|releaseSeats|forceReleaseLiveSeats|seat_reclaim|hand
   Run `npm run test:admin`. Expected: FAIL.
 - [ ] **Step 2: Implement** the domain, runtime and admin changes.
 - [ ] **Step 3: Rewrite the tests.**
-- [ ] **Step 4: Regenerate contracts** (`npm run write:contract-baselines`, review `admin.json`, then `npm run test:contracts`).
+- [ ] **Step 4: Regenerate contracts** (`npm run write:contract-baselines`, review `admin.json`, including the timeseries schema, then `npm run test:contracts`).
 - [ ] **Step 5: Grep.**
 
 ```bash
-git grep -nE "\"floating\"|'floating'|max_borrow_sec|meter_quota|meter_period_sec|assertion_ttl_seconds|legacyTrialDeadlineSql" -- services/cloudflare-license-admin/src/worker packages/licensing-domain/src packages/cloudflare-runtime/src
+git grep -nE "\"floating\"|'floating'|max_borrow_sec|meter_quota|meter_period_sec|assertion_ttl_seconds" -- services/cloudflare-license-admin/src/worker packages/licensing-domain/src packages/cloudflare-runtime/src
+git grep -nE "legacyTrialDeadlineSql|checkouts|releases" -- services/cloudflare-license-admin/src/worker
 ```
 
-  Expected: only reads that Task 34 deletes with the columns: `entitlement_mutation.mjs` `ENTITLEMENT_COLUMNS`, `entitlement_json.mjs`, `plan_projection.mjs` INSERT defaults, `policy_store.mjs`. List them in the PR.
+  Expected for the first: only reads that Task 38 deletes with the columns: `entitlement_mutation.mjs` `ENTITLEMENT_COLUMNS`, `entitlement_json.mjs`, `plan_projection.mjs` INSERT defaults, `policy_store.mjs`. List them in the PR. The second must print nothing.
 - [ ] **Step 6: Run the gates.**
   - `npm run test --workspace @licensecc/licensing-domain`
   - `npm run test --workspace @licensecc/cloudflare-runtime`
@@ -1642,12 +1799,12 @@ git grep -nE "\"floating\"|'floating'|max_borrow_sec|meter_quota|meter_period_se
   - `npm run check:pr`
 - [ ] **Step 7: Commit.** `refactor(admin)!: drop floating policies, seat, borrow, meter and TTL fields`
 
-### Task 25: Admin UI — remove the legacy screens and fields
+### Task 27: Admin UI — remove the legacy screens and fields
 
 **Files:**
 - Delete `services/cloudflare-license-admin/src/ui/features/entitlements/EntitlementInspectors.tsx` (35) and `useEntitlementInspection.ts` (158).
 - Modify `src/ui/features/entitlements/Entitlements.tsx`: :3, :10, :21-24, :39, :100, :103-104, :235, :382-547 (`refreshReleasedEntitlement`, `releaseSeats`, `deviceTransition`).
-- Modify `src/ui/features/entitlements/EntitlementList.tsx`: :16, :42, :47-49, :60, :92-94, :118-121, :139, :144.
+- Modify `src/ui/features/entitlements/EntitlementList.tsx`: :2 (the `EntitlementDeviceRecord` import), :16, :42, :47-49, :60, :92-94, :118-121, :139, :144.
 - Modify `src/ui/features/entitlements/EntitlementEditor.tsx`: :70-72, :86, :98-102 (Device hash, Assertion TTL).
 - Modify `src/ui/features/entitlements/workflow.ts`: :30-31, :46-47, :61-62, :72-73, :92-95, :111, :115-116, :153, :159-161, :173-174, :185-186, :217-257, :336-338, :349-350, :365-381.
 - Modify `src/ui/features/entitlements/DeviceLimitForm.tsx:74,80` (mode conditionals; the form stays).
@@ -1661,9 +1818,10 @@ git grep -nE "\"floating\"|'floating'|max_borrow_sec|meter_quota|meter_period_se
 - Modify `src/ui/shared/messages.ts:73-79,173,191-192`.
 - Modify `src/ui/shared/useMediaQuery.ts:20-27`: delete the `MediaQueryList.addListener` fallback; `addEventListener("change", …)` only.
 - Modify `src/ui/shared/mutationGuards.ts`: 49-53, 95-113 (`releaseSeats`/`deviceTransition` policies), 404-415, 450-468, 477-480, 493, 807-813, 841.
-  - Leave `hasEntitlementRecordData` (:350-364) and the policy and catalog record guards that check legacy columns unchanged: the API still returns those columns until Task 34 changes the guard and the schema together.
+  - Leave `hasEntitlementRecordData` (:350-364) and the policy and catalog record guards that check legacy columns unchanged: the API still returns those columns; Task 37 relaxes the guards and Task 38 drops the columns.
   - `wc -l` must be ≤ 866; lower the baseline to the new count.
-- Modify `src/shared/api.ts`: :137, :155, :182, :191, :198, :206, :215, :221, :226, :235, :408, :410 (legacy request and response types, where they are not needed for reading still-present columns).
+- Modify `src/shared/api.ts`: :14-15 (the `DeviceStatus` and `EntitlementDeviceRecord` imports), :137, :155, :182, :191, :198, :206, :215, :221, :226, :235, :408, :410 (legacy request and response types, where they are not needed for reading still-present columns).
+- Modify `packages/licensing-domain/src/entitlements/contracts.d.ts:9,12-22`: delete `DeviceStatus` and `EntitlementDeviceRecord`. Their last consumers are `api.ts:14-15` and the admin UI entitlement files this task deletes or trims (`EntitlementInspectors.tsx:2,15,22`, `useEntitlementInspection.ts:2,48,73-75`, `EntitlementList.tsx:2,49`, `Entitlements.tsx:3,479`), so admin `typecheck` stays green. The runtime re-export went in Task 25.
 - Modify the e2e specs:
   - `test/admin-ui.consequences.e2e.mjs`: :18, :91, :1067, :1097, :1408, :1463, :1486, :1563;
   - `test/admin-ui.reads.e2e.mjs`: :514, :554;
@@ -1672,11 +1830,11 @@ git grep -nE "\"floating\"|'floating'|max_borrow_sec|meter_quota|meter_period_se
   - `test/admin-ui.workspace.e2e.mjs:146`.
 - Modify `test/admin-ui.fixture.mjs`: :80-84, :164-167, :655-656, :681, :815-830, :871, :878-898, :960-980, :987, :1858-1920.
 - Modify `test/admin-ui-e2e-layout.test.mjs:36` (the new title count, stated in the commit).
-- Modify the UI workflow tests: `test/admin-ui-workflow/lists-reports.test.mjs:116-126`, `policies.test.mjs:61-62,88,113-114`, `messages.test.mjs:129`, `device-limit.test.mjs:39-44`, `glossary-copy.test.mjs:19-20` (labels "Activated devices"/"Floating seats").
+- Modify the UI workflow tests: `test/admin-ui-workflow/lists-reports.test.mjs:116-126`, `policies.test.mjs:61-62,88,113-114`, `messages.test.mjs:129`, `device-limit.test.mjs:39-44`, `glossary-copy.test.mjs:19-20` (labels "Activated devices"/"Floating seats"), and `entitlements.test.mjs:130-158` (the edit-patch payload loses `device_hash` and `assertion_ttl_seconds`), `:200-215` (the device-path helpers) and `:311-316` (the force-release confirm copy), which pin the workflow fields and helpers this task deletes.
 - Modify `doc/architecture/glossary.md:28-29` (rows "Legacy device" and "Floating seat"; `glossary-copy.test.mjs` reads it), :60-73, :101-105.
 
 **Interfaces:**
-- Consumes: Tasks 23 and 24.
+- Consumes: Tasks 24–26.
 - Produces: the console shows protected grants, device limits, protected connections, policies (`trial`, `node_locked`, `subscription`), the catalog and refused-connection reports. There are no seat, legacy-device, meter or account-token views.
 
 - [ ] **Step 1: Write the failing e2e assertion** in `test/admin-ui.workspace.e2e.mjs`: a customer workspace shows "Connected devices" and no "Activated devices", "Floating seats" or "Account tokens" tab. Run `cd services/cloudflare-license-admin && CI=1 npx playwright test test/admin-ui.workspace.e2e.mjs`. Expected: FAIL.
@@ -1686,6 +1844,7 @@ git grep -nE "\"floating\"|'floating'|max_borrow_sec|meter_quota|meter_period_se
 
 ```bash
 git grep -nE "releaseSeats|Release seats|Floating seats|Activated devices|Account tokens|EntitlementInspectors|useEntitlementInspection|addListener\(|readableScopes|Checkouts vs denials" -- services/cloudflare-license-admin/src services/cloudflare-license-admin/test doc/architecture/glossary.md
+git grep -nE "EntitlementDeviceRecord|\bDeviceStatus\b" -- services packages ':!**/*.md'
 ```
 
   Expected: no output.
@@ -1693,13 +1852,15 @@ git grep -nE "releaseSeats|Release seats|Floating seats|Activated devices|Accoun
   - `npm run test:admin`
   - `npm run test:ui --workspace @licensecc/cloudflare-license-admin`
   - `CI=1 npm run test:e2e --workspace @licensecc/cloudflare-license-admin`
+  - `npm run test --workspace @licensecc/licensing-domain`
+  - `npm run typecheck`
   - `npm run check:hotspots`
   - `npm run test:docs-accuracy`
   - `npm run check:docs`
   - `npm run check:pr`
 - [ ] **Step 6: Commit.** `refactor(admin-ui)!: remove seat, legacy-device, meter and account-token views`
 
-### Task 26: Admin mutations require the expected owner and revocation sequence
+### Task 28: Admin mutations require the expected owner and revocation sequence
 
 Controller ruling: `expected_customer_id` and `expected_revocation_seq` become required on:
 - `PATCH /api/admin/entitlements/{id}`;
@@ -1718,7 +1879,7 @@ Today they are optional (`openapi/paths/entitlements.ts:28-34`, `dependentRequir
 - Modify `services/cloudflare-license-admin/README.md:134-138,703-708`.
 
 **Interfaces:**
-- Consumes: Task 25.
+- Consumes: Task 27.
 - Produces: the four mutation routes return 400 `invalid_request` without both fields. The device-limit PATCH (`setEntitlementCapacity`, `entitlement_mutation.mjs:576`) goes through the same guard. After this task it is mandatory there too, and the UI already sends both fields (`src/ui/features/entitlements/deviceLimit.ts:13`).
 
 - [ ] **Step 1: Write the failing tests** in `test/worker/entitlements.test.mjs`:
@@ -1741,18 +1902,18 @@ Today they are optional (`openapi/paths/entitlements.ts:28-34`, `dependentRequir
 ## P5a — Backend runtime, routes, drills and CI
 
 Order follows the import graph:
-- `routes/leases.ts`, `seats.ts`, `metering.ts` and `reports.ts` import helpers from `routes/verify.ts`, and `emergency.ts` re-serves them. They go first (Task 28).
-- `verify.ts` imports `accountAuth`, so account tokens go together with `/v1/verify` (Task 30).
-- Each task also deletes the scripts, drills, workflow steps, vectors and shared-package modules whose last consumer it removes. Nothing is left orphaned for a later task.
+- `routes/leases.ts`, `seats.ts`, `metering.ts` and `reports.ts` import helpers from `routes/verify.ts`, and `emergency.ts` re-serves them. They go first (Task 30), and the scripts and shared modules they leave unused follow (Task 31).
+- `verify.ts` imports `accountAuth`, so account tokens go right after `/v1/verify`: Task 32 deletes the route and its deploy drills, Task 33 the account tokens, request proof and selectors.
+- Each task also deletes the scripts, drills, workflow steps, vectors and shared-package modules whose last consumer it removes. Where a deletion is split in two (Tasks 30/31 and 32/33), the first task removes the routes and every workflow step that calls them, and the second removes the scripts, modules and configuration that are then unused. Nothing stays orphaned beyond the next task.
 
-### Task 27: Replace the health readiness contract and add a protected production smoke
+### Task 29: Replace the health readiness contract and add a protected production smoke
 
 Backend `/health` reports `account_token_mode` (`src/routes/meta.ts:17-32`). Portal `/health` is healthy only when that equals `required` (`services/cloudflare-customer-portal/src/worker/routes/meta.ts:16,24-29,101-145`). The rollback checker requires both (`scripts/check-worker-rollback-health.mjs:229-240,249-259`). All three change together to a protected-readiness signal. The deploy materializer also starts validating `BOUND_DEVICE_CONFIG`, which is a non-secret var.
 
 **Files:**
 - Create `services/cloudflare-licensing-backend/src/device/bound_readiness.mjs`. Export `async function boundDeviceReadiness(env)`, which returns `{ ready: boolean, checks: { registry, signing_key_pair, approval_key_ring, global_rate_limit } }`.
   - The logic moves from `scripts/protected-device-readiness.mjs:11-36`. It must be Worker-safe: no `node:` imports.
-  - It is memoised per `env` object in a module-level `WeakMap`, because `/health` is unauthenticated and the check signs with RSA-3072.
+  - It is memoised per `env` object in a module-level `WeakMap`, because `/health` is unauthenticated and the check signs with RSA-3072. The key is sound: in module Workers the `env` object is stable for the life of an isolate, so the check runs once per isolate, and each test builds a fresh `env`, so tests never share a cached result. State this in a comment next to the `WeakMap`.
 - Modify `services/cloudflare-licensing-backend/scripts/protected-device-readiness.mjs`: import `boundDeviceReadiness`; the output shape is unchanged.
 - Modify `services/cloudflare-licensing-backend/src/routes/meta.ts:17-32`: `handleHealth` becomes `async` and returns `{ ok, service: "licensecc-online-verifier", protected_device_ready, …invalid-mode fields while the selectors still exist, …config_warnings }`, with status 200 when `ok` and 503 otherwise. `account_token_mode` is removed.
 - Modify `services/cloudflare-licensing-backend/src/openapi/components.ts:142-187` (`HealthSuccess`, `HealthConfigError`), `src/openapi/paths/meta.ts:40-72` (description and examples) and `services/cloudflare-licensing-backend/README.md:439`.
@@ -1767,6 +1928,7 @@ Backend `/health` reports `account_token_mode` (`src/routes/meta.ts:17-32`). Por
   - :251-254 portal requires `data.backend_protected_ready === true`.
 - Modify `scripts/check-worker-rollback-health.test.mjs:60,66`.
 - Modify `scripts/materialize-deploy-configs.mjs` (`validateBackend`, :352): require `vars.BOUND_DEVICE_CONFIG`, validated by `boundDeviceConfig` imported from `services/cloudflare-licensing-backend/src/device/bound_config.mjs`, and `vars.BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM` (a PEM `PUBLIC KEY`). Also modify `scripts/materialize-deploy-configs.test.mjs` (the fixture gains both).
+  - This creates a Release/CI-tooling → backend import edge that `check:architecture` does not scan (it covers only `services/*/src` and `packages/*/src`, `doc/architecture/system-map.md:130-137`). The edge is kept rather than moving the validator into `packages/cloudflare-runtime`: `bound_config.mjs` depends on the backend's `bound_request.mjs` and `bound_crypto.mjs`, and the config shape is backend-owned. The edge works because `bound_config.mjs` imports only those two modules and `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM` is a var (`src/env.ts:93`). Task 45 records it in `doc/architecture/ownership.md`.
 - Create `services/cloudflare-licensing-backend/scripts/protected-readiness-smoke.mjs` and `services/cloudflare-licensing-backend/test/protected-readiness-smoke.test.mjs`, and add package script `validate:protected-smoke` (`node scripts/protected-readiness-smoke.mjs`). The script:
   - `GET {url}/health` requires 200 and `protected_device_ready === true`;
   - `POST {url}/v2/device-challenges` with `{ purpose: "exchange", attempt_handle: <32 random bytes base64url>, operation_id: <32 random bytes base64url> }` requires 404 `authorization_unavailable` (`src/device/bound_enrollment.mjs:79`);
@@ -1778,7 +1940,7 @@ Backend `/health` reports `account_token_mode` (`src/routes/meta.ts:17-32`). Por
 - Modify `services/cloudflare-licensing-backend/README.md:801-802` ("do not yet certify this staged v2 rollout"), `doc/operations/cloudflare-setup.md:378-416`, `doc/operations/production-readiness.md` PRD-03 (`/health` wording).
 
 **Interfaces:**
-- Consumes: Task 20.
+- Consumes: Task 21.
 - Produces:
   - Backend `/health`: `protected_device_ready: boolean`. Portal `/health`: `data.backend_protected_ready: boolean`, with code `backend_not_ready` on 503.
   - `boundDeviceReadiness(env)`.
@@ -1795,7 +1957,7 @@ Backend `/health` reports `account_token_mode` (`src/routes/meta.ts:17-32`). Por
   Run `npm run test:release-operations`, `npm run test:portal` and `npm run test --workspace @licensecc/cloudflare-licensing-backend`. Expected: FAIL.
 - [ ] **Step 2: Implement** the readiness module, the three health changes, the materializer check and the smoke script.
 - [ ] **Step 3: Regenerate contracts** (`npm run write:contract-baselines`, review the backend and portal health schemas, then `npm run test:contracts`).
-- [ ] **Step 4: Grep.** `git grep -nE "account_token_mode|REQUIRED_ACCOUNT_TOKEN_MODE" -- services scripts doc` must print nothing. The `accountTokenMode` function in `services/cloudflare-licensing-backend/src/auth/account_auth.mjs` stays until Task 30, but no health path imports it any more.
+- [ ] **Step 4: Grep.** `git grep -nE "account_token_mode|REQUIRED_ACCOUNT_TOKEN_MODE" -- services scripts doc` must print nothing. The `accountTokenMode` function in `services/cloudflare-licensing-backend/src/auth/account_auth.mjs` stays until Task 33, but no health path imports it any more.
 - [ ] **Step 5: Run the gates.**
   - `npm run test:release-operations`
   - `npm run test:worker-rollback`
@@ -1808,110 +1970,193 @@ Backend `/health` reports `account_token_mode` (`src/routes/meta.ts:17-32`). Por
   - `npm run check:pr`
 - [ ] **Step 6: Commit.** `feat(ops)!: health and rollback readiness certify protected licensing instead of account tokens`. The PR description tells operators to put `BOUND_DEVICE_CONFIG` and `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM` in the deploy config vars.
 
-### Task 28: Delete the lease, seat, meter, report and emergency routes
+### Task 30: Delete the lease, seat, meter, report and emergency routes
+
+This task removes the backend routes, their SQL, their OpenAPI and their tests, and the staging workflow step that drills them, so no deploy runs a lease drill against a backend without lease routes. The drill and signing scripts, the shared-package modules and the deploy configuration go in Task 31.
 
 **Files:**
 - Delete backend source:
   - `services/cloudflare-licensing-backend/src/routes/leases.ts` (420), `seats.ts` (401), `metering.ts`, `reports.ts`, `emergency.ts`;
   - `src/lease/issuance_sql.mjs` (174);
   - `src/openapi/paths/leases.ts`, `seats.ts`, `metering.ts`, `reports.ts`, `emergency.ts`.
-- Delete backend scripts: `lease-sign.mjs`, `staging-lease-drill.mjs`, `report.mjs`.
-- Delete backend tests:
-  - `test/lease-sign.test.mjs`, `lease-worker.test.mjs`, `seat-worker.test.mjs`, `staging-lease-drill.test.mjs` (the 7 Node-24 failures end here);
-  - `test/usage-report.test.mjs`, `usage-worker.test.mjs`;
-  - `test/sql/lease-rebind.test.mjs`, `metering.test.mjs`, `seat-pool.test.mjs`, `seat-revocation-sla.test.mjs`, `trial-activation.test.mjs`, `usage-events.test.mjs`;
+- Delete backend tests that drive these routes or `issuance_sql.mjs`:
+  - `test/lease-worker.test.mjs`, `seat-worker.test.mjs`, `usage-worker.test.mjs`;
+  - `test/device-proof.test.mjs` (every case drives `POST /v1/checkout` or `POST /v1/activate`);
+  - `test/sql/lease-rebind.test.mjs`, `seat-pool.test.mjs`, `seat-revocation-sla.test.mjs`, `trial-activation.test.mjs`;
   - `test/fulfillment/account_isolation.test.mjs` (account-token isolation of the scoped and emergency routes).
-- Delete from `packages/cloudflare-runtime`: `src/lease/metering.mjs`, `src/lease/trial_store.mjs`, `trial_store.d.ts`, their `package.json` exports, and the `test/runtime-primitives.test.mjs:20` subpath entry.
-- Delete from `packages/licensing-domain`: `src/lease/canonical_payload.mjs`, `src/lease/trial.mjs`, `src/usage/usage_report.mjs`, their `package.json` exports (`./lease/canonical_payload`, `./lease/trial`, `./usage/usage_report`) and the domain tests that cover them.
 - Modify `services/cloudflare-licensing-backend/src/routes.ts:28-49`: delete `SCOPED_ROUTES` and `EMERGENCY_PREFIX`; `allCanonicalRoutes()` returns `[...META_ROUTES, ...CLIENT_ROUTES]`.
 - Modify `src/app.ts`: imports :5, :6, :8, :10, :11 and `SCOPED_ROUTES` at :14; dispatch :32-38; :43; the `/v1/emergency/` condition at :72; :85-91.
-- Modify `src/maintenance/index.ts`: :1, :7, :10-14, :16-65 (`sweepLapsedSeats`, `reclaimOvercapSeats`), :73-74, :80-92. Keep the `usage_events` retention (:75-79) until Task 33, and keep protected cleanup (:72), portal sweeps, webhooks and the audit digest.
+- Modify `src/maintenance/index.ts`: :1, :7, :10-14, :16-65 (`sweepLapsedSeats`, `reclaimOvercapSeats`), :73-74, :80-92 (the `lease_issuance` and `usage_meters` retention sweeps). Keep the `usage_events` retention (:75-79) until Task 36, and keep protected cleanup (:72), portal sweeps, webhooks and the audit digest.
+- Modify `test/app-composition.test.mjs:84`: remove `lease_issuance` and `usage_meters` from the retention-table list that asserts `DELETE FROM ${table}`; `usage_events` stays until Task 36.
 - Modify `src/env.ts`: `LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM`, `LEASE_SIGNING_KEY_ID`, `LEASE_SKEW_DAYS`, `EMERGENCY_OPERATOR_BEARER`, and the `AccountOperation` type (:22).
 - Modify `src/openapi/document.ts:28-39,49-58` (paths and the `lease`/`seat`/`report`/`emergency` tags).
 - Modify `src/openapi/components.ts`: `LEASE_SUCCESS` :57-64, `SEAT_SUCCESS` :66-71, `REPORT_SUCCESS` :73-78, `leaseBearer` :119-124, `emergencyBearer` :125-130, and schemas `LeaseRequest` through `ReportSuccess` (:302-484).
-- Modify `wrangler.example.toml`: :8-10 (the cron comment becomes "protected-device cleanup, portal session sweeps, webhook delivery and the audit digest"), :113-115 (`EMERGENCY_OPERATOR_BEARER`).
-- Modify `scripts/materialize-deploy-configs.mjs`: :82-85 (`EMERGENCY_OPERATOR_BEARER`, `LEASE_ISSUE_BEARER`, `LEASE_SIGNING_*` in `workerSecretNames`); :377 (the cron label `"seat-reclamation"` becomes `"maintenance"`).
-- Modify `scripts/materialize-deploy-configs.test.mjs:72-73,552`.
-- Modify `services/cloudflare-licensing-backend/scripts/backend-secret-inventory.mjs:16-28` (`LEASE_SIGNING_*`) and `test/backend-secret-inventory.test.mjs`.
-- Modify `services/cloudflare-licensing-backend/package.json`:
-  - scripts `report`, `validate:staging-lease`;
-  - `test:deployed-readiness` drops `test/staging-lease-drill.test.mjs`;
-  - `test:sql` (:21) drops `test/fulfillment/account_isolation.test.mjs`.
-- Modify `.github/workflows/deploy-staging.yml:146-156` (step "Verify scoped staging leases, proof, and signatures") and `scripts/workflow-action-pins.test.mjs:666-678`.
+- Modify `src/openapi/paths/meta.ts:2` and `src/openapi/paths/orders.ts:2`: drop the `LEASE_SUCCESS`, `REPORT_SUCCESS` and `SEAT_SUCCESS` imports, which this task deletes (backend `typecheck` fails otherwise).
+- Modify `services/cloudflare-licensing-backend/package.json` `test:sql` (:21): drop `test/fulfillment/account_isolation.test.mjs`.
+- Modify `.github/workflows/deploy-staging.yml:146-156` (step "Verify scoped staging leases, proof, and signatures") and its pin in `scripts/workflow-action-pins.test.mjs:666-678`.
 - Modify tests:
   - `test/app-composition.test.mjs:145-191` (meter, emergency, "seven scoped operations");
   - `test/openapi-spec.test.mjs:16-23,67-81,113-136,166-178`;
-  - `test/sql/bound-device-store.test.mjs:9` (imports legacy issuance SQL);
-  - `test/contexts/fixtures.mjs:14-69` (mocks only what `/v1/verify` still needs).
-- Modify `scripts/canonical-contracts.mjs:15,419` (23 → 9) and `doc/architecture/system-map.md:67` (9), plus the backend source total at :123.
-- Modify `doc/capabilities/registry.json`: delete entry `backend-metering` (:147-161); update `doc/capabilities/index.rst`.
-- Modify `services/cloudflare-licensing-backend/README.md`: :200-239 "Machine activation and renewal", :357-389 (staging lease drill).
-- Modify `doc/release-artifacts.md:267-282` and `doc/operations/production-readiness.md:176-186` (lease drill).
+  - `test/sql/bound-device-store.test.mjs:9` (imports legacy issuance SQL).
+- Modify `scripts/canonical-contracts.mjs:15,419` (23 → 9) and `doc/architecture/system-map.md:67` (9), plus the backend source total at :123 and the backend `app.ts` composition row.
+- Modify `doc/capabilities/registry.json`: delete entry `backend-metering` (:147-161); remove its id from `doc/capabilities/index.rst:86-91`.
 
 **Interfaces:**
-- Consumes: Tasks 21, 23, 24 and 27. Portal and admin no longer call or read these routes, and the staging drill is protected.
+- Consumes: Tasks 22, 24, 26 and 29. Portal and admin no longer call or read these routes, and the staging drill is protected.
 - Produces:
   - The backend serves 9 canonical routes: `GET /openapi.json`, `GET /docs`, `GET /health`, `POST /v1/verify`, `POST /v1/orders`, and the four `/v2` routes.
   - No emergency prefix.
-  - The cron label is `maintenance`.
+  - No workflow step calls a lease route. `validate:staging-lease`, `lease-sign.mjs`, `report.mjs` and the shared lease modules remain, unused by any route, until Task 31.
 
 - [ ] **Step 1: Write the failing test** in `test/app-composition.test.mjs`: `the backend serves no lease, seat, meter, report or emergency route`. It asserts that `allCanonicalRoutes().length === 9`, and that `POST /v1/activate`, `POST /v1/checkout` and `POST /v1/emergency/v1/release` each return 404 `not_found`. Run `npm run test --workspace @licensecc/cloudflare-licensing-backend`. Expected: FAIL.
-- [ ] **Step 2: Delete the files, scripts, tests and package modules** as listed.
-- [ ] **Step 3: Trim `app.ts`, `routes.ts`, maintenance, env, OpenAPI, wrangler, materializer, secret inventory and the staging workflow.**
+- [ ] **Step 2: Delete the route files, OpenAPI paths and tests** as listed.
+- [ ] **Step 3: Trim `app.ts`, `routes.ts`, maintenance, env, OpenAPI, the staging workflow step and its pin.**
 - [ ] **Step 4: Regenerate contracts** (`npm run write:contract-baselines`, review `test/contracts/backend.json`: routeCount 9, and the removed paths and schemas; then `npm run test:contracts`).
 - [ ] **Step 5: Grep.**
 
 ```bash
-git grep -nE "/v1/(activate|renew|checkout|heartbeat|release|meter|admin/report|emergency)|handleLeaseIssue|handleSeat|handleMeter|handleUsageReport|handleEmergencyRoute|SCOPED_ROUTES|EMERGENCY_PREFIX|EMERGENCY_OPERATOR_BEARER|LEASE_SIGNING|LEASE_SKEW_DAYS|issuance_sql|canonical_payload|usage_report|trial_store|lease/metering|staging-lease-drill|lease-sign|seat-reclamation" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis' ':!doc/**/*.md' ':!**/README.md' ':!CHANGELOG.md'
+git grep -nE "/v1/(activate|renew|checkout|heartbeat|release|meter|admin/report|emergency)|handleLeaseIssue|handleSeat|handleMeter|handleUsageReport|handleEmergencyRoute|SCOPED_ROUTES|EMERGENCY_PREFIX|issuance_sql|validate:staging-lease" -- services/cloudflare-licensing-backend/src services/cloudflare-licensing-backend/test .github scripts ':!services/cloudflare-licensing-backend/test/staging-lease-drill.test.mjs' ':!services/cloudflare-licensing-backend/test/lease-sign.test.mjs' ':!services/cloudflare-licensing-backend/test/usage-report.test.mjs' ':!services/cloudflare-licensing-backend/test/sql/metering.test.mjs' ':!services/cloudflare-licensing-backend/test/sql/usage-events.test.mjs'
 ```
 
-  Expected: no output. The prose docs are finished in Task 40; list the doc hits in the PR.
+  Expected: no output. The drill, signing and report scripts, the five excluded tests and the prose docs still name these routes until Task 31.
 - [ ] **Step 6: Run the gates.**
-  - `npm run check:pr`. The Node-24 exception no longer applies: every test must pass.
+  - `npm run check:pr` (the Node-24 `staging-lease-drill` exception still applies until Task 31)
   - `npm run test:e2e`
   - `npm run check:dry-run`
-  - `npm run test:release-operations`
   - `npm run test:workflow-pins`
+  - `npm run test:capabilities`
+  - `npm run check:capabilities`
   - `npm run test:docs-accuracy`
   - `npm run check:docs`
 - [ ] **Step 7: Commit.** `refactor(backend)!: delete lease, seat, metering, usage-report and emergency routes`
 
-### Task 29: Retire the local SQLite online demo
+### Task 31: Delete the lease drill and signing scripts, the shared lease modules and the local online demo
 
-The local host (`services/cloudflare-licensing-backend/local-host/server.mjs`) only demonstrates `POST /v1/verify` and forwards legacy env (:86-116, :203). The owner accepted losing the zero-cloud online demo. The SQLite adapter itself stays: `test/db/db-conformance.test.mjs` and `test/e2e/catalog-admin-projection-flow.test.mjs` use `local-host/db-sqlite.mjs`.
+After Task 30 no route uses the lease signer, the seat and metering modules or the legacy trial deadline, and no workflow runs the lease drill. This task deletes those scripts and modules, the secrets and cron label that served them, and the local SQLite online demo, which only demonstrated `POST /v1/verify` and forwarded legacy env (`local-host/server.mjs:86-116,203`). The owner accepted losing the zero-cloud online demo. The SQLite adapter itself stays: `test/db/db-conformance.test.mjs` and `test/e2e/catalog-admin-projection-flow.test.mjs` use `local-host/db-sqlite.mjs`.
 
 **Files:**
-- Delete:
+- Delete backend scripts: `services/cloudflare-licensing-backend/scripts/lease-sign.mjs`, `staging-lease-drill.mjs`, `report.mjs`.
+- Delete backend tests: `test/lease-sign.test.mjs`, `test/staging-lease-drill.test.mjs` (the 7 Node-24 failures end here), `test/usage-report.test.mjs`, `test/sql/metering.test.mjs`, `test/sql/usage-events.test.mjs`.
+- Delete from `packages/cloudflare-runtime`:
+  - `src/lease/metering.mjs`, `src/lease/trial_store.mjs` and `trial_store.d.ts`, including `legacyTrialDeadlineSql` (`trial_store.mjs:11`, `.d.ts:27`), and their `package.json` exports;
+  - `test/legacy-trial-deadline.test.mjs`;
+  - the `lease/metering` (:20) and `lease/trial_store` (:22) entries in `test/runtime-primitives.test.mjs` `RUNTIME_SUBPATHS` (line numbers at the verified ref; Task 25 already removed `lease/seat_reclaim` between them).
+- Modify `packages/cloudflare-runtime/src/device/bound_trial.mjs:5`: the comment no longer points a legacy row at `legacyTrialDeadlineSql`.
+- Delete from `packages/licensing-domain`: `src/lease/canonical_payload.mjs`, `src/lease/trial.mjs`, `src/usage/usage_report.mjs`, their `package.json` exports (`./lease/canonical_payload`, `./lease/trial`, `./usage/usage_report`) and the domain tests that cover them (`test/domain-contracts.test.mjs` imports them).
+- Delete the local online demo:
   - `services/cloudflare-licensing-backend/local-host/server.mjs` (204; includes the Node < 20 WebCrypto shim at :40-46);
   - `local-host/README.md` (203);
-  - `services/cloudflare-licensing-backend/host-common.mjs`, `host-common.test.mjs` (used only by the two deleted hosts);
+  - `services/cloudflare-licensing-backend/host-common.mjs`, `host-common.test.mjs` (used only by the deleted hosts);
   - `doc/tutorials/local-online-evaluation.rst`.
-- Modify `services/cloudflare-licensing-backend/package.json` (script `local:server`; keep `db:local:init` and `db:local:reset`).
-- Modify:
-  - `README.md:28` (the row);
+- Modify `services/cloudflare-licensing-backend/package.json`:
+  - scripts `report`, `validate:staging-lease`, `local:server` (keep `db:local:init` and `db:local:reset`);
+  - `test:deployed-readiness` drops `test/staging-lease-drill.test.mjs`.
+- Modify `wrangler.example.toml`: :8-10 (the cron comment becomes "protected-device cleanup, portal session sweeps, webhook delivery and the audit digest"), :113-115 (`EMERGENCY_OPERATOR_BEARER`).
+- Modify `scripts/materialize-deploy-configs.mjs`: :82-85 (`EMERGENCY_OPERATOR_BEARER`, `LEASE_ISSUE_BEARER`, `LEASE_SIGNING_*` in `workerSecretNames`); :377 (the cron label `"seat-reclamation"` becomes `"maintenance"`).
+- Modify `scripts/materialize-deploy-configs.test.mjs:72-73,552`.
+- Modify `services/cloudflare-licensing-backend/scripts/backend-secret-inventory.mjs:16-28` (`LEASE_SIGNING_*`) and `test/backend-secret-inventory.test.mjs`.
+- Modify docs:
+  - `services/cloudflare-licensing-backend/README.md`: :15 (local host), :200-239 "Machine activation and renewal", :357-389 (staging lease drill);
+  - `doc/release-artifacts.md:267-282` and `doc/operations/production-readiness.md:176-186` (lease drill);
+  - `README.md:28` (the local demo row);
   - `doc/index.rst:26-28`, `doc/tutorials/index.rst:11`, `doc/usage/repository-workflows.rst:28,111`;
-  - `doc/operations/database-backends.md` (the local SQLite row becomes "test and local schema adapter");
-  - `services/cloudflare-licensing-backend/README.md:15`.
+  - `doc/operations/database-backends.md` (the local SQLite row becomes "test and local schema adapter").
 - Modify `scripts/docs-accuracy.test.mjs:292-307`: the tutorial list is `doc/tutorials/offline-first-license.rst` only.
 
 **Interfaces:**
-- Consumes: Task 28.
-- Produces: `local-host/db-sqlite.mjs` and `migrate.mjs` remain for tests and `db:local:init`. There is no local HTTP host.
+- Consumes: Task 30.
+- Produces:
+  - `legacyTrialDeadlineSql`, `@licensecc/cloudflare-runtime/lease/{metering,trial_store}` and `@licensecc/licensing-domain/{lease/canonical_payload,lease/trial,usage/usage_report}` no longer exist.
+  - The backend cron label is `maintenance`; no deploy config expects `LEASE_SIGNING_*`, `LEASE_ISSUE_BEARER` or `EMERGENCY_OPERATOR_BEARER`.
+  - `local-host/db-sqlite.mjs` and `migrate.mjs` remain for tests and `db:local:init`. There is no local HTTP host.
 
-- [ ] **Step 1: Delete the files and the script entry.**
-- [ ] **Step 2: Update the doc links, toctrees and the docs-accuracy tutorial list.**
-- [ ] **Step 3: Grep.** `git grep -nE "local-online-evaluation|local:server|local-host/server|host-common|Evaluate online verification" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'` must print nothing.
-- [ ] **Step 4: Run the gates.**
-  - `npm run test:backend`
+- [ ] **Step 1: Write the failing test** in `scripts/materialize-deploy-configs.test.mjs`: `the backend cron is labelled maintenance and no lease or emergency secret is expected`. The materialized backend config names the cron `maintenance`, and its expected worker secrets contain none of `LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM`, `LEASE_SIGNING_KEY_ID`, `LEASE_ISSUE_BEARER`, `EMERGENCY_OPERATOR_BEARER`. Run `node --test scripts/materialize-deploy-configs.test.mjs`. Expected: FAIL.
+- [ ] **Step 2: Delete the scripts, tests, package modules and local host** as listed.
+- [ ] **Step 3: Update the package manifests, wrangler template, materializer, secret inventory, doc links, toctrees and the docs-accuracy tutorial list.**
+- [ ] **Step 4: Grep.** Both must print nothing:
+
+```bash
+git grep -nE "/v1/(activate|renew|checkout|heartbeat|release|meter|admin/report|emergency)|EMERGENCY_OPERATOR_BEARER|LEASE_SIGNING|LEASE_SKEW_DAYS|canonical_payload|usage_report|trial_store|legacyTrialDeadlineSql|lease/metering|staging-lease-drill|lease-sign|seat-reclamation|validate:staging-lease" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis' ':!doc/**/*.md' ':!**/README.md' ':!CHANGELOG.md'
+git grep -nE "local-online-evaluation|local:server|local-host/server|host-common|Evaluate online verification" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'
+```
+
+  The remaining prose docs are finished in Task 45; list the doc hits of the first pattern in the PR.
+- [ ] **Step 5: Run the gates.**
+  - `npm run check:pr`. The Node-24 exception no longer applies: every test must pass.
+  - `npm run test:deployed-readiness --workspace @licensecc/cloudflare-licensing-backend`
+  - `npm run test:e2e`
+  - `npm run check:dry-run`
+  - `npm run test:release-operations`
   - `npm run test:docs-accuracy`
   - `npm run check:docs`
+- [ ] **Step 6: Commit.** `refactor(backend)!: delete the lease drill and signer, the shared lease modules and the local online demo`
+
+### Task 32: Delete `/v1/verify`
+
+This removes the last legacy route, its SQL, OpenAPI and tests, and the two deploy steps that drill it (the staging and production public-verifier drills). The protected production smoke from Task 29 remains. Account tokens, the request-proof module, the security-mode selectors, the drill and key scripts, the vectors and the limiter rename follow in Task 33, once nothing routes to them.
+
+**Files:**
+- Delete backend source: `services/cloudflare-licensing-backend/src/routes/verify.ts` (933), `src/db/verify-statements.mjs`, `src/openapi/paths/verify.ts`.
+- Delete backend tests:
+  - `test/contexts/assertion-signing.test.mjs`, `entitlement.test.mjs`, `rate-limit.test.mjs`, `replay.test.mjs`, `request-proof.test.mjs` (each drives `/v1/verify` through `dist/app.js`);
+  - `test/online-verifier.test.mjs`, the aggregator that imports every `test/contexts/*.test.mjs` suite.
+- Modify `services/cloudflare-licensing-backend/package.json` `test` (:19): add `test/contexts/*.test.mjs`. The package glob `test/*.mjs` does not descend into `test/contexts/`, so without this the surviving `meta.test.mjs` and `operator-tools.test.mjs` would silently stop running when the aggregator goes.
+- Modify `test/contexts/fixtures.mjs`: drop the `dist/routes/verify.js` import (:3-6), `validBody`, `requestProofFixture` and the `entitlement_devices` mocks in `testKeyEnv` (:28-40). Keep the file: `meta.test.mjs` imports `testKeyEnv` and `operator-tools.test.mjs` imports `derPayloadOffset` (verified).
+- Modify `src/routes.ts:20` and `src/app.ts:12,26`. The catch-all log event `verify.unhandled_error` becomes `request.unhandled_error`; keep the response code.
+- Modify `src/observability/index.ts`: the `LOG_FIELD_NAMES` entries used only by verify (`assertion_ttl_seconds`, `client_hardening`, `d1_duration_ms`, `request_proof`, `request_signature_mode`, `window_from`; grep each before removing).
+- Modify `src/fulfillment/order_event.mjs:21,28,53,69`: the comments that point at `src/routes/verify.ts` state the rule they cite (feature-name size, bounded id, Unix-seconds shape) without naming the deleted file.
+- Modify `src/openapi/components.ts`: :42-55 (`ACCOUNT_TOKEN_AUTH_ERRORS`), :84-90 (the `requestProof` security scheme), :112-118 (the `accountToken` security scheme), :188-228 (`RequestProofFields` and the verify request and response schemas); `src/openapi/paths/meta.ts:2` and `paths/orders.ts:2` (drop the `ACCOUNT_TOKEN_AUTH_ERRORS` import); `src/openapi/document.ts` (the verify path and the `client` tag).
+- Modify tests: `test/openapi-spec.test.mjs` (the verify path and schemas), `test/app-composition.test.mjs` (route inventory).
+- Modify workflows:
+  - `.github/workflows/deploy-staging.yml:167-175` (step "Run proof-authenticated staging verifier drill");
+  - `.github/workflows/deploy-production.yml:10-13` (the `backend_url` description) and :134-142 (step "Run proof-authenticated backend post-deploy drill"; the protected smoke from Task 29 remains).
+- Modify `scripts/workflow-action-pins.test.mjs`: :615-633 (the production verifier step, its secrets and the `remainingProductionDrills` public-verifier key check) and :695-703 (the staging verifier step and its secrets). The capacity pins stay until Task 33.
+- Modify `scripts/hotspot-baseline.json`: delete `services/cloudflare-licensing-backend/src/routes/verify.ts`.
+- Modify `scripts/docs-accuracy.test.mjs:513-525`: drop the `verify.ts` hotspot row; otherwise `lineCount` throws at :523.
+- Modify `doc/architecture/system-map.md`: :108 (delete the `verify.ts` row), :67 (backend routes 9 → 8), :117 (backend `app.ts` count), :123 (backend total).
+- Modify `scripts/canonical-contracts.mjs:15,419` (9 → 8).
+- Modify `doc/capabilities/registry.json`:
+  - delete entry `backend-request-proof` (:132-146); it cites `verify.ts` and `test/contexts/request-proof.test.mjs`;
+  - add entry `protected-device-licensing`: status `experimental`; the limitation says live TPM, browser and backend journeys remain a release gate; the surfaces are the backend `/v2` routes and the portal consent routes; evidence is `services/cloudflare-licensing-backend/src/routes/bound_devices.mjs` (`handleBoundDevice`), `test/sql/bound-device-http.test.mjs`, the route contract `POST /v2/device-authorizations/exchange` in `test/contracts/backend.json`, and `test/e2e/protected-admin-enrollment.test.mjs`. Follow `scripts/capability-registry.schema.json` for the field set.
+  - Update the ids in `doc/capabilities/index.rst:86-91`.
+
+**Interfaces:**
+- Consumes: Tasks 12–14 (SDKs no longer call the backend), Tasks 30 and 31.
+- Produces:
+  - The backend serves 8 routes: META ×3, `POST /v1/orders`, and the four `/v2` routes.
+  - No workflow calls `validate:public-verifier`; `capacity.yml` (manual only) still does until Task 33.
+  - `accountAuth`, `request_proof.mjs` and the security-mode parsers have no route caller; Task 33 deletes them.
+
+- [ ] **Step 1: Write the failing tests.**
+  - `test/app-composition.test.mjs`: `the backend serves exactly eight routes and no /v1/verify`. It asserts `allCanonicalRoutes().length === 8` and that `POST /v1/verify` returns 404 `not_found`.
+  - `scripts/workflow-action-pins.test.mjs`: `no deploy workflow runs the public-verifier drill`. Neither `deploy-staging.yml` nor `deploy-production.yml` contains `validate:public-verifier` or `LICENSECC_PUBLIC_VERIFIER_`.
+
+  Run `npm run test --workspace @licensecc/cloudflare-licensing-backend` and `npm run test:workflow-pins`. Expected: FAIL.
+- [ ] **Step 2: Delete the route, statements, OpenAPI path, tests and aggregator**; add `test/contexts/*.test.mjs` to the `test` script and trim `fixtures.mjs`. Confirm `meta.test.mjs` and `operator-tools.test.mjs` still run (`npm run test --workspace @licensecc/cloudflare-licensing-backend` lists them).
+- [ ] **Step 3: Delete the two deploy steps and their pins.**
+- [ ] **Step 4: Regenerate contracts** (`npm run write:contract-baselines`, review `backend.json`: routeCount 8, and the removed verify schemas and the `requestProof`/`accountToken` security schemes; then `npm run test:contracts`).
+- [ ] **Step 5: Grep.** This must print nothing:
+
+```bash
+git grep -nE "/v1/verify|handleVerify|VERIFY_SQL|verify-statements|routes/verify|validateVerifyRequest|canonicalRequestProofPayloadForTests|online-verifier\.test|backend-request-proof|validate:public-verifier|LICENSECC_PUBLIC_VERIFIER_" -- services/cloudflare-licensing-backend/src services/cloudflare-licensing-backend/test .github/workflows/deploy-staging.yml .github/workflows/deploy-production.yml doc/capabilities scripts/canonical-contracts.mjs scripts/docs-accuracy.test.mjs scripts/hotspot-baseline.json ':!services/cloudflare-licensing-backend/test/public-verifier-drill.test.mjs' ':!services/cloudflare-licensing-backend/test/public-verifier-capacity.test.mjs'
+```
+
+  The drill and capacity scripts, their tests, `capacity.yml` and the prose docs still name the verifier until Task 33.
+- [ ] **Step 6: Run the gates.**
   - `npm run check:pr`
-- [ ] **Step 5: Commit.** `chore(backend): retire the local online-verification demo host`
+  - `npm run test:e2e`
+  - `npm run check:dry-run`
+  - `npm run test:workflow-pins`
+  - `npm run test:capabilities`
+  - `npm run check:capabilities`
+  - `npm run check:hotspots`
+  - `npm run test:docs-accuracy`
+  - `npm run check:docs`
+- [ ] **Step 7: Commit.** `refactor(backend)!: delete the /v1/verify route and its deploy drills`
 
-### Task 30: Delete `/v1/verify`, account tokens, request proof v1 and the online signer
+### Task 33: Delete account tokens, request proof v1, the online signer and the legacy selectors; rename the registration limiter
 
-This removes the last legacy route. With it go:
-- customer account tokens;
+With `/v1/verify` gone (Task 32), nothing routes to account tokens, the request-proof module or the online signer. This task deletes them with:
 - the `REQUEST_SIGNATURE_MODE`, `ACCOUNT_TOKEN_MODE` and `DEVICE_PROOF_MODE` selectors;
 - `LEASE_ISSUE_BEARER`;
 - the legacy D1 limiter tiers;
@@ -1920,26 +2165,23 @@ This removes the last legacy route. With it go:
 
 It also renames `VERIFY_RATE_LIMITER`: protected registration uses it (`src/device/bound_rate.mjs:88`), so deleting it silently would drop the edge limiter on `POST /v2/device-authorizations`.
 
-**`DEVICE_PROOF_MODE` evidence.** Its only readers are `src/routes/verify.ts` (:740), `leases.ts` and `seats.ts` (deleted in Task 28), plus the config checks in `scripts/materialize-deploy-configs.mjs:360` and `scripts/backend-secret-inventory.mjs:93`. Nothing protected reads it, so it is deleted rather than kept. Step 5 records the grep.
+**`DEVICE_PROOF_MODE` evidence.** Its only readers were `src/routes/verify.ts` (:740, deleted in Task 32), `leases.ts` and `seats.ts` (deleted in Task 30), plus the config checks in `scripts/materialize-deploy-configs.mjs:360` and `scripts/backend-secret-inventory.mjs:93`. Nothing protected reads it, so it is deleted rather than kept. Step 6 records the grep.
 
 **Files:**
-- Delete backend source: `services/cloudflare-licensing-backend/src/routes/verify.ts` (933), `src/db/verify-statements.mjs`, `src/auth/account_auth.mjs`, `src/auth/account_token.mjs`, `src/device/request_proof.mjs`, `request_proof.d.ts`, `src/openapi/paths/verify.ts`.
-- Delete backend scripts: `account-token.mjs`, `token-guards.mjs`, `device-key.mjs`, `generate-online-key.mjs`, `generate-online-assertion-fixture.mjs`, `public-verifier-capacity.mjs`, `public-verifier-capacity-lib.mjs`, `public-verifier-drill.mjs`.
-- Delete backend tests:
-  - `test/auth/account_token.test.mjs`, `account_token_cli.test.mjs`;
-  - `test/contexts/assertion-signing.test.mjs`, `entitlement.test.mjs`, `rate-limit.test.mjs`, `replay.test.mjs`, `request-proof.test.mjs`;
-  - `test/online-verifier.test.mjs`, `device-proof.test.mjs`, `request-proof-contract.test.mjs`, `public-verifier-capacity.test.mjs`, `public-verifier-drill.test.mjs`.
-- Delete `packages/cloudflare-runtime/src/auth/account_token_issue.mjs` and its export. Trim `src/auth/primitives.mjs` to `constantTimeEqual`, which `src/http/kit.mjs:11` re-exports. Its other consumers (`account_token_issue.mjs`, portal `portal_token.mjs`, backend `account_auth.mjs` and `account_token.mjs`) are all deleted by this task or Task 21. Confirm with `git grep -n "auth/primitives"`.
+- Delete backend source: `src/auth/account_auth.mjs`, `src/auth/account_token.mjs`, `src/device/request_proof.mjs`, `request_proof.d.ts`.
+- Delete backend scripts: `account-token.mjs`, `token-guards.mjs`, `device-key.mjs`, `generate-online-key.mjs`, `generate-online-assertion-fixture.mjs`, `public-verifier-capacity.mjs`, `public-verifier-capacity-lib.mjs`, `public-verifier-drill.mjs`. `device-key.mjs` and `public-verifier-capacity-lib.mjs` import `src/device/request_proof.mjs`; `account-token.mjs` imports `src/auth/account_token.mjs`.
+- Delete backend tests: `test/auth/account_token.test.mjs`, `account_token_cli.test.mjs`, `test/request-proof-contract.test.mjs`, `public-verifier-capacity.test.mjs`, `public-verifier-drill.test.mjs`.
+- Delete `packages/cloudflare-runtime/src/auth/account_token_issue.mjs` and its `package.json` export. Trim `src/auth/primitives.mjs` to `constantTimeEqual`, which `src/http/kit.mjs:11` re-exports. Its other consumers (`account_token_issue.mjs`, portal `portal_token.mjs`, backend `account_auth.mjs` and `account_token.mjs`) are all deleted by this task or Task 22. Confirm with `git grep -n "auth/primitives"`.
+- Modify `packages/cloudflare-runtime/test/runtime-primitives.test.mjs`: remove `auth/account_token_issue` from `RUNTIME_SUBPATHS` (:9), drop the `generateAccountToken`/`hashToken` imports (:3), and rewrite "runtime auth primitives are stateless and fail closed" (:29-38) to cover `constantTimeEqual` and `secret_map` only.
 - Delete vectors: `test/vectors/online_assertion/` (4 files) and `test/vectors/device_proof/v1/` (10 files).
-- Delete `.github/workflows/capacity.yml`.
+- Delete `.github/workflows/capacity.yml`; modify `scripts/workflow-action-pins.test.mjs:721-851` (the capacity workflow test, including :736 and :812).
 - Modify `services/cloudflare-licensing-backend/package.json`:
   - `exports["./device/request_proof"]` (:6-11);
   - scripts `account-token`, `device-key`, `generate-online-key`, `generate-online-assertion-fixture`, `validate:public-verifier`, `capacity:public-verifier`, `test:capacity`;
-  - the `test` script (:19) drops `test/auth/account_token.test.mjs test/auth/account_token_cli.test.mjs` and keeps `test/*.mjs` and the four `test/fulfillment/order_*.test.mjs` entries;
+  - the `test` script (:19) drops `test/auth/account_token.test.mjs test/auth/account_token_cli.test.mjs` and keeps `test/*.mjs`, `test/contexts/*.test.mjs` and the four `test/fulfillment/order_*.test.mjs` entries;
   - `test:deployed-readiness` drops `public-verifier-drill.test.mjs`.
-- Modify `src/routes.ts:20` and `src/app.ts:12,26`. The catch-all log event `verify.unhandled_error` becomes `request.unhandled_error`; keep the response code.
-- Modify `src/security_modes.mjs`: delete `parseAccountTokenMode`, `parseRequestSignatureMode`, `parseDeviceProofMode`. `invalidSecurityModeNames` checks `ORDER_SIGNER_SCOPE_MODE` only until Task 31.
-- Modify `src/observability/index.ts`: :5, :7, :98-107, and the `LOG_FIELD_NAMES` entries used only by verify (`assertion_ttl_seconds`, `client_hardening`, `d1_duration_ms`, `request_proof`, `request_signature_mode`, `window_from`; grep each before removing).
+- Modify `src/security_modes.mjs`: delete `parseAccountTokenMode`, `parseRequestSignatureMode`, `parseDeviceProofMode`. `invalidSecurityModeNames` checks `ORDER_SIGNER_SCOPE_MODE` only until Task 34.
+- Modify `src/observability/index.ts`: the imports at :3-8 and the account-token and request-signature warnings at :98-107.
 - Modify `src/env.ts`:
   - remove `ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM`, `ONLINE_SIGNING_KEY_ID`, `MAX_ASSERTION_TTL_SECONDS`, `MAX_CACHE_TTL_SECONDS`, `LOG_RATE_LIMIT_DECISIONS`, the ten `D1_*RATE_LIMIT*` vars, `REQUEST_SIGNATURE_MODE`, `REQUEST_SIGNATURE_MAX_SKEW_SECONDS`, `DEVICE_PROOF_MODE`, `ACCOUNT_TOKEN_PEPPERS`, `ACCOUNT_TOKEN_ACTIVE_PEPPER_ID`, `ACCOUNT_TOKEN_MODE`, `ACCOUNT_TOKEN_LAST_USED_THROTTLE_SEC`, `LEASE_ISSUE_BEARER`;
   - remove the types at :17-20 and :140-217;
@@ -1951,77 +2193,71 @@ It also renames `VERIFY_RATE_LIMITER`: protected registration uses it (`src/devi
   - delete the secret comments :102-104 and :109-112.
 - Modify `scripts/materialize-deploy-configs.mjs`:
   - :76, :86-87 (`ACCOUNT_TOKEN_PEPPERS`, `ONLINE_SIGNING_*` in `workerSecretNames`);
-  - :354-356: `ORDER_*` only, until Task 31;
+  - :354-356: `ORDER_*` only, until Task 34;
   - delete :360 (`DEVICE_PROOF_MODE`), :362-368 (pepper id, request-signature skew);
   - :370-376: exactly two limiters, `BOUND_REGISTRATION_RATE_LIMITER` and `BOUND_SESSION_RATE_LIMITER`, each with positive `namespace_id`, `limit` and `period`.
 - Modify `scripts/materialize-deploy-configs.test.mjs`: :76-80, :102-105, :374-379, :551.
 - Modify `services/cloudflare-licensing-backend/scripts/backend-secret-inventory.mjs:16-36,90-100` and `test/backend-secret-inventory.test.mjs`.
-- Modify `src/openapi/components.ts`: :19-20 (`INVALID_SECURITY_MODE_CONFIG_ERROR` names only `ORDER_SIGNER_SCOPE_MODE`), :42-55, :84-90, :112-118, :177, :188-228.
-- Modify `src/openapi/paths/meta.ts:2` and `paths/orders.ts:2` (unused legacy imports), `src/openapi/document.ts` (the `client` tag).
+- Modify `src/openapi/components.ts`: :19-20 (`INVALID_SECURITY_MODE_CONFIG_ERROR` names only `ORDER_SIGNER_SCOPE_MODE`) and :177 (the health `invalid_config_modes` enum lists only `ORDER_SIGNER_SCOPE_MODE`).
 - Modify tests:
-  - `test/contexts/fixtures.mjs` (drop the `dist/routes/verify.js` import at :3-6 and the `entitlement_devices` mocks);
-  - `test/contexts/meta.test.mjs`;
+  - `test/contexts/fixtures.mjs`: `testKeyEnv` drops the `ONLINE_SIGNING_*` env (:23-24); delete `derPayloadOffset` with its only user below;
+  - `test/contexts/meta.test.mjs` (the account-token mode, request-signature and paired-mode warning cases at :12-32 and :50-115; the invalid-selector case keeps only `ORDER_SIGNER_SCOPE_MODE`);
   - `test/contexts/operator-tools.test.mjs:11-37` (`generate-online-key`);
   - `test/security-modes.test.mjs` (keep only the `ORDER_SIGNER_SCOPE_MODE` cases at :46-86);
-  - `test/openapi-spec.test.mjs`, `test/app-composition.test.mjs`;
+  - `test/openapi-spec.test.mjs` (the selector names in the config-error text and the health enum);
   - `test/sql/bound-device-http.test.mjs`: :43 (drop the legacy env); :364 (force the `/v2` 503 with `ORDER_SIGNER_SCOPE_MODE: "invalid"` instead of `REQUEST_SIGNATURE_MODE`);
   - `test/db/bound-device-worker.test.mjs:32`, `test/e2e/protected-admin-enrollment.test.mjs:39`: env without legacy selectors, with `BOUND_REGISTRATION_RATE_LIMITER` where a limiter is bound.
 - Modify `scripts/check-architecture.mjs:414` and `scripts/check-architecture.test.mjs:367,394-395` (`device_proof/v1/manifest.json`).
-- Modify workflows:
-  - `.github/workflows/deploy-staging.yml:167-175` (step "Run proof-authenticated staging verifier drill");
-  - `.github/workflows/deploy-production.yml:10-13` (the `backend_url` description) and :134-142 (step "Run proof-authenticated backend post-deploy drill"; the protected smoke from Task 27 remains).
-- Modify `scripts/workflow-action-pins.test.mjs`: :604, :615-633, :695-703, :721-851 (capacity), :736, :812.
-- Modify `scripts/hotspot-baseline.json`: delete `services/cloudflare-licensing-backend/src/routes/verify.ts`.
-- Modify `scripts/docs-accuracy.test.mjs:513-525`: drop the `verify.ts` hotspot row; otherwise `lineCount` throws at :523.
-- Modify `doc/architecture/system-map.md`: :108 (delete the `verify.ts` row), :67 (backend routes 9 → 8), :117 (backend `app.ts` count), :123 (backend total).
-- Modify `scripts/canonical-contracts.mjs:15,419` (9 → 8).
-- Modify `doc/capabilities/registry.json`:
-  - delete entry `backend-request-proof` (:132-146);
-  - add entry `protected-device-licensing`: status `experimental`; the limitation says live TPM, browser and backend journeys remain a release gate; the surfaces are the backend `/v2` routes and the portal consent routes; evidence is `services/cloudflare-licensing-backend/src/routes/bound_devices.mjs` (`handleBoundDevice`), `test/sql/bound-device-http.test.mjs`, the route contract `POST /v2/device-authorizations/exchange` in `test/contracts/backend.json`, and `test/e2e/protected-admin-enrollment.test.mjs`. Follow `scripts/capability-registry.schema.json` for the field set.
-  - Add the id to `doc/capabilities/index.rst:86-91`.
+- Modify `doc/architecture/system-map.md:123` (backend source total).
+- Modify `doc/operations/customer-account-deletion.md:69-74`: delete the `account-token.mjs revoke-customer` step and its trailing sentence about the `revoke-customer` audit row; the script no longer exists.
 - Modify `services/cloudflare-licensing-backend/README.md`:
   - :1 title "Licensecc Cloudflare Online Verifier" becomes "Licensecc Cloudflare Licensing Backend";
   - :25-45, :84-104, :128-156, :184-198, :241-312 (public-verifier capacity), :316-355, :416-482, :807-809, :874-876 (`VERIFY_RATE_LIMITER`);
   - keep the sentences `scripts/docs-accuracy.test.mjs` still asserts.
 
 **Interfaces:**
-- Consumes: Tasks 12–14 (SDKs no longer read the vectors), Task 5 (native no longer reads `device_proof/v1`), Tasks 28 and 29.
+- Consumes: Tasks 12–14 (SDKs no longer read the vectors), Task 6 (native no longer reads `device_proof/v1`), Task 22 (the portal no longer mints account tokens), Task 32.
 - Produces:
-  - The backend serves 8 routes: META ×3, `POST /v1/orders`, and the four `/v2` routes.
   - The rate-limiter bindings are `BOUND_REGISTRATION_RATE_LIMITER` and `BOUND_SESSION_RATE_LIMITER`.
   - Account tokens, request proof v1 and the online signer no longer exist.
+  - `ORDER_SIGNER_SCOPE_MODE` is the only security-mode selector left; Task 34 deletes it.
 
 - [ ] **Step 1: Write the failing tests.**
   - `services/cloudflare-licensing-backend/test/db/bound-device-worker.test.mjs`: `registration is edge-limited through BOUND_REGISTRATION_RATE_LIMITER`. Bind a fake limiter under `BOUND_REGISTRATION_RATE_LIMITER` that returns `{ success: false }`; `POST /v2/device-authorizations` returns 429; the fake saw the key `device-v2:<hash>`.
-  - `test/app-composition.test.mjs`: `the backend serves exactly eight routes and no /v1/verify`.
   - `scripts/materialize-deploy-configs.test.mjs`: `backend config must bind BOUND_REGISTRATION_RATE_LIMITER and BOUND_SESSION_RATE_LIMITER`.
 
-  Run `npm run test:backend` and `npm run test:release-operations`. Expected: FAIL.
+  Run `npm run test:sql --workspace @licensecc/cloudflare-licensing-backend` and `npm run test:release-operations`. Expected: FAIL.
 - [ ] **Step 2: Delete the source, scripts, tests, vectors and workflow** as listed.
 - [ ] **Step 3: Rename the limiter** across `bound_rate.mjs`, `env.ts`, `wrangler.example.toml`, the materializer and its test, and `services/cloudflare-licensing-backend/README.md:874-876`.
-- [ ] **Step 4: Regenerate contracts** (`npm run write:contract-baselines`, review `backend.json`: routeCount 8, and the removed schemas and security schemes; then `npm run test:contracts`).
-- [ ] **Step 5: Grep.** This must print nothing:
+- [ ] **Step 4: Trim the selectors, env, observability, secret inventory and the remaining tests** as listed.
+- [ ] **Step 5: Regenerate contracts** (`npm run write:contract-baselines`, review `backend.json`: the config-error text and the health `invalid_config_modes` enum; then `npm run test:contracts`).
+- [ ] **Step 6: Grep.** This must print nothing:
 
 ```bash
-git grep -nE "/v1/verify|handleVerify|VERIFY_SQL|verify-statements|account_auth|account_token|accountAuth|ACCOUNT_TOKEN_|REQUEST_SIGNATURE_|DEVICE_PROOF_MODE|parseDeviceProofMode|LEASE_ISSUE_BEARER|ONLINE_SIGNING_|D1_(CLIENT_|ENTITLEMENT_|GLOBAL_)?RATE_LIMIT|MAX_(ASSERTION|CACHE)_TTL_SECONDS|VERIFY_RATE_LIMITER|request_proof|device_proof/v1|online_assertion|public-verifier|capacity\.yml|device-key\.mjs|lccoa1" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis' ':!doc/**/*.md' ':!doc/**/*.rst' ':!**/README.md' ':!CHANGELOG.md'
+git grep -nE "handleVerify|VERIFY_SQL|account_auth|account_token|accountAuth|ACCOUNT_TOKEN_|REQUEST_SIGNATURE_|DEVICE_PROOF_MODE|parseDeviceProofMode|LEASE_ISSUE_BEARER|ONLINE_SIGNING_|D1_(CLIENT_|ENTITLEMENT_|GLOBAL_)?RATE_LIMIT|MAX_(ASSERTION|CACHE)_TTL_SECONDS|VERIFY_RATE_LIMITER|request_proof|device_proof/v1|online_assertion|public-verifier|capacity\.yml|device-key\.mjs|lccoa1" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis' ':!doc/**/*.md' ':!doc/**/*.rst' ':!**/README.md' ':!CHANGELOG.md' ':!services/cloudflare-customer-portal/src/auth/portal_session.mjs' ':!services/cloudflare-customer-portal/src/auth/portal_otp.mjs' ':!services/cloudflare-customer-portal/test/portal-account-deletion-runbook.test.mjs' ':!services/cloudflare-licensing-backend/migrations/0001_baseline.sql' ':!services/cloudflare-licensing-backend/schema.sql' ':!services/cloudflare-d1-backup'
 ```
 
+  The excluded files still name the account-token and request-proof tables until Task 35 drops them: `portal_session.mjs:90` (the `account_token_id` column in the session `INSERT`), `portal_otp.mjs:6` (a comment on the same column), `portal-account-deletion-runbook.test.mjs:12,47` (`account_token_events` in `KEPT` and its seed), the baseline and `schema.sql`, and the restore drill's table, index and trigger inventories. Task 35's grep covers all of them.
+
   Record the `DEVICE_PROOF_MODE` evidence in the PR: the grep above, plus `git grep -n "DEVICE_PROOF_MODE" -- services packages scripts` printing nothing.
-- [ ] **Step 6: Run the gates.**
+- [ ] **Step 7: Run the gates.**
   - `npm run check:pr`
   - `npm run test:e2e`
   - `npm run check:dry-run`
   - `npm run test:sdks` (the vectors are gone)
   - `ctest --preset dev-debug` (the vectors are gone)
   - `npm run test:release-operations`
+  - `npm run test:deployed-readiness --workspace @licensecc/cloudflare-licensing-backend`
   - `npm run test:workflow-pins`
+  - `npm run check:architecture`
+  - `npm run test:architecture`
   - `npm run test:docs-accuracy`
   - `npm run check:docs`
-- [ ] **Step 7: Commit.** `refactor(backend)!: delete online verification, account tokens and request-proof v1`. The PR description lists the operator actions:
+- [ ] **Step 8: Commit.** `refactor(backend)!: delete account tokens, request-proof v1, the online signer and the legacy selectors`. The PR description lists the operator actions:
   - rename the `VERIFY_RATE_LIMITER` binding to `BOUND_REGISTRATION_RATE_LIMITER` in deploy configs;
   - delete the `ONLINE_SIGNING_*`, `ACCOUNT_TOKEN_*`, `LEASE_*` and `EMERGENCY_OPERATOR_BEARER` secrets.
 
-### Task 31: Order-ingest security is always enforced
+### Task 34: Order-ingest security is always enforced
 
 Owner decision: "Security modes are always `required`. Delete `off`/`soft` … with no dev override." Two selectors remain:
 - `ORDER_INGEST_MODE` is parsed in `src/fulfillment/order_ingest.mjs:187-193`. `off` returns 404, `soft` only observes, and an invalid value silently becomes `required`.
@@ -2053,7 +2289,7 @@ Both selectors are deleted. HMAC ingest and signer-scope enforcement always appl
 - Modify `services/cloudflare-licensing-backend/README.md:430-441,514-574` and `doc/security/threat-model.md` TM-09.
 
 **Interfaces:**
-- Consumes: Task 30.
+- Consumes: Task 33.
 - Produces:
   - `POST /v1/orders` always verifies the HMAC, audience, skew and nonce.
   - It always enforces `ORDER_SIGNER_SCOPES`: missing or malformed returns 503 `config_error`; out of scope returns 403 `signer_scope_forbidden`.
@@ -2088,9 +2324,9 @@ git grep -nE "ORDER_INGEST_MODE|ORDER_SIGNER_SCOPE_MODE|security_modes|invalidSe
 
 ## P5b — Legacy-only tables
 
-### Task 32: Drop the legacy-only tables and reject triggers from the baseline
+### Task 35: Drop the legacy-only tables and reject triggers from the baseline
 
-Every writer and reader of these tables is gone after Tasks 16–31. `usage_events` stays until Task 33 replaces it, and `entitlements` columns stay until Task 34.
+Every writer and reader of these tables is gone after Tasks 16–34. `usage_events` stays until Task 36 replaces it, and `entitlements` columns stay until Task 38.
 
 **Files:**
 - Modify `services/cloudflare-licensing-backend/migrations/0001_baseline.sql`:
@@ -2114,13 +2350,15 @@ Every writer and reader of these tables is gone after Tasks 16–31. `usage_even
 - Modify `services/cloudflare-d1-backup/README.md:303-306` ("50 tables, 75 named indexes, and 53 triggers" → 42, 63, 48).
 - Modify the backend tests that still name these tables:
   - `test/sql/bound-device-store.test.mjs:268-269,363-368,406-424` (legacy-trigger cases deleted);
-  - `test/app-composition.test.mjs:84` (table list);
   - `test/contexts/operator-tools.test.mjs:115-124` (the `entitlement_devices` schema test deleted).
-- Modify `services/cloudflare-customer-portal/src/auth/portal_session.mjs:90` (drop `account_token_id` from the session `INSERT`) and any test that inserts `portal_sessions.account_token_id` (`services/cloudflare-customer-portal/test/portal-account-deletion-runbook.test.mjs:24`; grep `account_token_id`).
-- Modify `doc/operations/customer-account-deletion.md:40,56-60,71,74` (no token tables or `account-token.mjs revoke-customer` step).
+
+  `test/app-composition.test.mjs:84` needs no change here: Task 30 removed `lease_issuance` and `usage_meters` from its retention list, and Task 36 renames `usage_events`.
+- Modify `services/cloudflare-customer-portal/src/auth/portal_session.mjs:90` (drop `account_token_id` from the session `INSERT`).
+- Modify `services/cloudflare-customer-portal/test/portal-account-deletion-runbook.test.mjs`: :12 (drop `account_token_events` from `KEPT`) and :47 (delete the `account_token_events` seed insert, which fails once the table is gone). Grep `account_token_id` for any other session insert that names the dropped column.
+- Modify `doc/operations/customer-account-deletion.md`: the rows at :40 (`account_tokens`), :56 (`account_token_events`) and :58 (`entitlement_devices`, `account_tokens`), and the :60 heading "Disable the customer and revoke their tokens". Task 33 already removed the `account-token.mjs revoke-customer` step (:69-74).
 
 **Interfaces:**
-- Consumes: Tasks 23, 28, 30.
+- Consumes: Tasks 24, 25, 27 and 30–33 (the admin device and token reads, the seat and device helpers, the lease routes and modules, `/v1/verify` and account tokens).
 - Produces: the baseline has 42 tables. `usage_events` is still present. `EXPECTED_SCHEMA_SIGNATURE_SHA256` is re-pinned.
 
 - [ ] **Step 1: Write the failing test** in `services/cloudflare-d1-backup/test/backup-restore-drill.test.mjs`: `the baseline has no legacy-only tables`. It asserts that none of the eight table names appears in `ALL_RESTORE_TABLES` or in `schemaRowsFromGeneratedSnapshot(schema.sql)`, and that no `tr_bound_reject_legacy_*` trigger appears. Run `npm run test:backup`. Expected: FAIL.
@@ -2132,7 +2370,7 @@ Every writer and reader of these tables is gone after Tasks 16–31. `usage_even
 git grep -nE "account_token|entitlement_devices|lease_issuance|request_proof_nonces|seat_checkouts|usage_meters|tr_bound_reject_legacy|legacy_protocol_disabled" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'
 ```
 
-  `legacy_protocol_disabled` still appears in `src/device/bound_issue.mjs:60` and the protected route error lists until Task 35.
+  `legacy_protocol_disabled` still appears in `src/device/bound_issue.mjs:60` and the protected route error lists until Task 39.
 - [ ] **Step 5: Run the gates.**
   - `npm run check:schema-parity`
   - `npm run test:backup`
@@ -2140,6 +2378,7 @@ git grep -nE "account_token|entitlement_devices|lease_issuance|request_proof_non
   - `npm run test:e2e`
   - `npm run check:dry-run`
   - `npm run test:docs-accuracy`
+  - `npm run check:docs` (this task edits `doc/operations/customer-account-deletion.md`)
   - `npm run check:pr`
 - [ ] **Step 6: Commit.** `refactor(db)!: drop legacy-only tables and reject triggers from the baseline`. The body says to recreate every D1 database.
 
@@ -2147,23 +2386,25 @@ git grep -nE "account_token|entitlement_devices|lease_issuance|request_proof_non
 
 ## P6 — Schema columns, mode and baseline tidy-ups
 
-Each task edits `migrations/0001_baseline.sql` in place, regenerates `schema.sql`, re-pins `EXPECTED_SCHEMA_SIGNATURE_SHA256`, and updates the restore-drill inventories and counts. The schema object counts (tables / named indexes / triggers, total rows) are:
+Each task except Task 37 edits `migrations/0001_baseline.sql` in place, regenerates `schema.sql`, re-pins `EXPECTED_SCHEMA_SIGNATURE_SHA256`, and updates the restore-drill inventories and counts. Task 37 changes only the admin and portal readers, so the schema is unchanged there. The schema object counts (tables / named indexes / triggers, total rows) are:
 
 | After task | Tables | Indexes | Triggers | Rows |
 |---|---:|---:|---:|---:|
-| 32 | 42 | 63 | 48 | 153 |
-| 33 | 42 | 63 | 48 | 153 |
-| 34 | 42 | 63 | 48 | 153 |
-| 35 | 42 | 63 | 46 | 151 |
-| 36 | 42 | 63 | 46 | 151 |
-| 37 | 42 | 63 | 46 | 151 |
+| 35 | 42 | 63 | 48 | 153 |
+| 36 | 42 | 63 | 48 | 153 |
+| 37 (no schema change) | 42 | 63 | 48 | 153 |
 | 38 | 42 | 63 | 48 | 153 |
+| 39 | 42 | 63 | 48 | 153 |
+| 40 | 42 | 63 | 46 | 151 |
+| 41 | 42 | 63 | 46 | 151 |
+| 42 | 42 | 63 | 46 | 151 |
+| 43 | 42 | 63 | 48 | 153 |
 
 If a count differs, the implementer finds the unexpected object before re-pinning. A count mismatch is a finding, not a number to copy.
 
-### Task 33: Replace `usage_events` with a protected denial table
+### Task 36: Replace `usage_events` with a protected denial table
 
-Protected issuance writes a best-effort `usage_events('denied','device_limit_reached')` row, deduplicated per 15 minutes (`src/device/bound_issue.mjs:84-94`). The admin lists it as "recent refused connections" (`services/cloudflare-license-admin/src/worker/groups/customers/bindings.ts:75-83`) and in the timeseries (`groups/summary-reports/operations.ts:110-116`). Nothing else writes `usage_events` after Task 28.
+Protected issuance writes a best-effort `usage_events('denied','device_limit_reached')` row, deduplicated per 15 minutes (`src/device/bound_issue.mjs:84-94`). The admin lists it as "recent refused connections" (`services/cloudflare-license-admin/src/worker/groups/customers/bindings.ts:75-83`) and in the timeseries (`groups/summary-reports/operations.ts:110-116`). Nothing else writes `usage_events` after Task 30.
 
 **Files:**
 - Modify `services/cloudflare-licensing-backend/migrations/0001_baseline.sql`:
@@ -2188,6 +2429,7 @@ CREATE INDEX IF NOT EXISTS idx_device_bound_denials_ts ON device_bound_denials(t
 - Modify `services/cloudflare-licensing-backend/src/device/bound_issue.mjs:84-94` (the insert and the 15-minute `NOT EXISTS` read use `device_bound_denials`/`key_id`).
 - Modify `services/cloudflare-licensing-backend/src/maintenance/index.ts`: the `usage_events` retention (:9, :75-79) becomes `DEVICE_DENIAL_RETENTION_SEC` on `device_bound_denials`.
 - Modify `services/cloudflare-license-admin/src/worker/groups/customers/bindings.ts:75-83` and `groups/summary-reports/operations.ts:110-116` (read `device_bound_denials`).
+- Modify `services/cloudflare-license-admin/src/shared/api.ts:420,461` (comments that name `usage_events`) and any admin OpenAPI description that still names `usage_events` (`src/worker/openapi/components.ts`, the timeseries and bindings schemas; Task 26 rewrote the timeseries fields).
 - Modify `services/cloudflare-d1-backup/scripts/restore-drill.mjs`: `PRESENCE_ONLY_TABLES` (`usage_events` becomes `device_bound_denials`), `EXPECTED_INDEXES`, the signature.
 - Modify `services/cloudflare-d1-backup/test/backup-restore-drill.test.mjs` (table lists and presence-only list).
 - Modify tests:
@@ -2198,7 +2440,7 @@ CREATE INDEX IF NOT EXISTS idx_device_bound_denials_ts ON device_bound_denials(t
   - `test/sql/workstream-f.test.mjs` (timeseries cases).
 
 **Interfaces:**
-- Consumes: Task 32.
+- Consumes: Task 35.
 - Produces: `device_bound_denials(project, feature, license_fingerprint, key_id, reason, ts)`. It is the only usage-style table, and it holds protected refusals only.
 
 - [ ] **Step 1: Write the failing test** in `bound-device-http.test.mjs`: `a device-limit refusal writes one device_bound_denials row per 15 minutes and the admin lists it`.
@@ -2209,28 +2451,72 @@ CREATE INDEX IF NOT EXISTS idx_device_bound_denials_ts ON device_bound_denials(t
 - [ ] **Step 2: Edit the baseline**, regenerate `schema.sql`, run `npm run check:schema-parity`.
 - [ ] **Step 3: Switch the writer, retention and the two admin readers.**
 - [ ] **Step 4: Re-pin the restore drill** (counts unchanged: 42/63/48).
-- [ ] **Step 5: Grep.** `git grep -nE "usage_events|idx_usage_events" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'` must print nothing.
-- [ ] **Step 6: Run the gates.**
+- [ ] **Step 5: Regenerate contracts.** `npm run write:contract-baselines`, review the admin diff (only description wording that named `usage_events` should move), then `npm run test:contracts`.
+- [ ] **Step 6: Grep.** `git grep -nE "usage_events|idx_usage_events" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'` must print nothing. The hits it finds before the fix include the `src/shared/api.ts:420,461` comments.
+- [ ] **Step 7: Run the gates.**
   - `npm run check:schema-parity`
   - `npm run test:services`
+  - `npm run test:contracts`
   - `npm run test:e2e`
   - admin `CI=1 npm run test:e2e` (`admin-ui.connections.e2e.mjs`)
   - `npm run check:dry-run`
   - `npm run check:pr`
-- [ ] **Step 7: Commit.** `refactor(db): record protected refusals in device_bound_denials`
+- [ ] **Step 8: Commit.** `refactor(db): record protected refusals in device_bound_denials`
 
-### Task 34: Drop the legacy entitlement, policy and catalog columns
+### Task 37: The admin and portal readers accept entitlement, policy and catalog rows without the legacy columns
 
-This task removes the legacy columns in lockstep with the admin UI record guard. `hasEntitlementRecordData` (`services/cloudflare-license-admin/src/ui/shared/mutationGuards.ts:350-364`) **requires** `device_hash`, `assertion_ttl_seconds`, `rebind_window_sec`, `pool_size`, `heartbeat_grace_sec`, `max_borrow_sec`, `meter_quota`, `meter_period_sec`, `allow_overdraft` and `trial_require_device_proof`. Changing the schema without the guard makes the console reject every entitlement read. The file is an 866-line hotspot at its baseline.
+`hasEntitlementRecordData` (`services/cloudflare-license-admin/src/ui/shared/mutationGuards.ts:350-364`) **requires** `device_hash`, `assertion_ttl_seconds`, `rebind_window_sec`, `pool_size`, `heartbeat_grace_sec`, `max_borrow_sec`, `meter_quota`, `meter_period_sec`, `allow_overdraft` and `trial_require_device_proof`. Dropping the columns first would make the console reject every entitlement read. This task changes the readers first, while the columns still exist: the guards stop checking the legacy fields, so they accept both today's rows (the extra fields are ignored) and the rows Task 38 produces. The schema does not change here.
+
+**Files:**
+- Modify `services/cloudflare-license-admin/src/ui/shared/mutationGuards.ts`:
+  - `hasEntitlementRecordData` (:350-364) stops checking `device_hash`, `assertion_ttl_seconds`, `rebind_window_sec`, `pool_size`, `heartbeat_grace_sec`, `max_borrow_sec`, `allow_overdraft`, `meter_quota`, `meter_period_sec` and `trial_require_device_proof`. It keeps every other check, including `max_active_devices`, `lease_seconds`, the trial fields and `license_mode`.
+  - The policy and catalog record guards at :361, :381, :401, :461-462, :513, :575, :644, :665 stop checking `assertion_ttl_seconds`, `pool_size`, `max_borrow_sec`, `trial_require_device_proof`, `meter_quota` and `meter_period_sec`.
+  - Removing checks shrinks the file: `wc -l` must not exceed its `scripts/hotspot-baseline.json` entry; lower the entry to the new count.
+- Modify the portal:
+  - `services/cloudflare-customer-portal/src/worker/support.ts:15-31,76-79`: `OwnedEntitlement` drops the legacy fields; `licenseMode` derives from `is_trial` alone (`trial` or `node_locked`);
+  - the entitlements `SELECT` in `src/worker/routes/self-service.ts` stops reading `pool_size` and the other dropped columns;
+  - `src/ui/types.ts` drops the legacy fields.
+- Modify `services/cloudflare-customer-portal/test/portal-worker-self-service.test.mjs` where it asserts a legacy field in the entitlements response.
+- Modify `doc/architecture/system-map.md:123` (portal source total).
+
+**Interfaces:**
+- Consumes: Tasks 25, 26 and 27 (no admin screen writes or displays a legacy field), Task 36.
+- Produces:
+  - The admin UI record guards accept an entitlement, policy or catalog row with or without the legacy columns.
+  - The portal reads no legacy entitlement column.
+  - No route, OpenAPI document or contract baseline changes.
+
+- [ ] **Step 1: Write the failing test** in `services/cloudflare-license-admin/test/admin-ui-workflow/entitlements.test.mjs` (run through `test/admin-ui-workflow.test.mjs`): `the entitlement record guard accepts the protected row shape`. `hasEntitlementRecordData` accepts a row with only the columns Task 38 keeps (plus `enforcement_mode: "device_bound_v1"`) and rejects the same row without `max_active_devices`. Add the matching policy case: `the policy record guard accepts a policy without seat, borrow, meter or TTL fields`. Run `npm run test:ui --workspace @licensecc/cloudflare-license-admin`. Expected: FAIL (legacy fields required).
+- [ ] **Step 2: Relax the guards** and update the portal support types, `SELECT` and UI types.
+- [ ] **Step 3: Confirm no contract moved.** Run `npm run write:contract-baselines`; `git diff --exit-code test/contracts` must succeed; then `npm run test:contracts`.
+- [ ] **Step 4: Grep.** This must print nothing:
+
+```bash
+git grep -nE "\b(device_hash|assertion_ttl_seconds|rebind_window_sec|pool_size|heartbeat_grace_sec|max_borrow_sec|allow_overdraft|meter_quota|meter_period_sec|trial_require_device_proof)\b" -- services/cloudflare-license-admin/src/ui/shared/mutationGuards.ts services/cloudflare-customer-portal/src
+```
+
+- [ ] **Step 5: Run the gates.**
+  - `npm run test:admin`
+  - `npm run test:portal`
+  - admin and portal `CI=1 npm run test:e2e`
+  - `npm run check:hotspots`
+  - `npm run test:docs-accuracy`
+  - `npm run check:pr`
+- [ ] **Step 6: Commit.** `refactor(admin-ui): accept entitlement, policy and catalog rows without seat, meter or TTL fields`
+
+### Task 38: Drop the legacy entitlement, policy and catalog columns
+
+With the readers tolerant (Task 37), this task drops the columns from the baseline and from every writer, projection, type, OpenAPI schema, backup check and test that names them.
 
 **Files:**
 - Modify `services/cloudflare-licensing-backend/migrations/0001_baseline.sql`.
   - `entitlements`: rewrite the `CREATE TABLE` as one clean column list without `device_hash`, `assertion_ttl_seconds`, `cache_ttl_seconds`, `rebind_window_sec`, `pool_size`, `heartbeat_grace_sec`, `max_borrow_sec`, `allow_overdraft`, `meter_quota`, `meter_period_sec`, `trial_require_device_proof`.
-    - Keep `max_active_devices`, `lease_seconds`, `revocation_seq`, `authority_revision`, `is_trial`, `trial_expiration_basis`, `trial_duration_sec`, `trial_one_per_device`, `trial_started_at`, `trial_device_hash`, `last_applied_order_seq`, `last_applied_order_epoch`, `policy_id`, `customer_id`, `license_id`, `valid_from`, `valid_until`, `status`, `notes`, `enforcement_mode` (dropped in Task 35), `created_at`, `updated_at`.
+    - Keep `max_active_devices`, `lease_seconds`, `revocation_seq`, `authority_revision`, `is_trial`, `trial_expiration_basis`, `trial_duration_sec`, `trial_one_per_device`, `trial_started_at`, `trial_device_hash`, `last_applied_order_seq`, `last_applied_order_epoch`, `policy_id`, `customer_id`, `license_id`, `valid_from`, `valid_until`, `status`, `notes`, `enforcement_mode` (dropped in Task 40), `created_at`, `updated_at`.
   - `entitlement_events`: drop `device_hash`.
   - `entitlement_policies`: the `type` CHECK becomes `('trial', 'node_locked', 'subscription')`; drop `assertion_ttl_seconds`, `pool_size`, `max_borrow_sec`, `trial_require_device_proof`, `meter_quota`, `meter_period_sec`.
   - `catalog_plan_features`: drop `assertion_ttl_seconds`, `pool_size`, `max_borrow_sec`, `meter_quota`, `meter_period_sec`.
-  - `tr_bound_entitlement_revision`: delete the `pool_size` and `trial_require_device_proof` terms. The re-derived watch list is `status`, `customer_id`, `valid_from`, `valid_until`, `max_active_devices`, `lease_seconds`, `enforcement_mode` (until Task 35), `revocation_seq`, `is_trial`, `trial_started_at`, `trial_duration_sec`, `trial_expiration_basis`, `trial_one_per_device`, `trial_device_hash`.
+  - `tr_bound_entitlement_revision`: delete the `pool_size` and `trial_require_device_proof` terms. The re-derived watch list is `status`, `customer_id`, `valid_from`, `valid_until`, `max_active_devices`, `lease_seconds`, `enforcement_mode` (until Task 40), `revocation_seq`, `is_trial`, `trial_started_at`, `trial_duration_sec`, `trial_expiration_basis`, `trial_one_per_device`, `trial_device_hash`.
+  - Keep the catalog projection seed `INSERT` as the last statement.
 - Regenerate `schema.sql`.
 - Modify `packages/cloudflare-runtime`:
   - `src/d1/entitlement_mutation.mjs:36` (`ENTITLEMENT_COLUMNS`), plus the `createEntitlement` INSERT and UPDATE column lists; lower the hotspot entry to the new count;
@@ -2249,8 +2535,7 @@ This task removes the legacy columns in lockstep with the admin UI record guard.
   - `entitlements/operations.ts`;
   - `src/shared/api.ts` (record types);
   - `src/worker/openapi/components.ts` (entitlement, policy and catalog record schemas);
-  - `src/ui/shared/mutationGuards.ts`: `hasEntitlementRecordData` (:350-364) drops the legacy fields, and `license_mode` becomes `trial | node_locked`; also the policy and catalog guards at :361, :381, :401, :461-462, :513, :575, :644, :665. `wc -l` must be ≤ 866; lower the baseline to the new count.
-- Modify the portal: `src/worker/support.ts:15-31,76-79` (`OwnedEntitlement`; `licenseMode` from `is_trial`), the entitlements `SELECT` in `src/worker/routes/self-service.ts`, and `src/ui/types.ts`.
+  - `src/ui/shared/mutationGuards.ts`: `LICENSE_MODES` becomes `trial | node_locked`, now that the runtime can no longer emit `floating`.
 - Modify `services/cloudflare-d1-backup/scripts/restore-drill.mjs`:
   - `entitlementSemanticsSql` (:757-777): delete `AND assertion_ttl_seconds > 0 AND (device_hash = '' OR length(device_hash) = 64)`;
   - rename `verifier_candidates` to `authority_candidates`, and the SQL aliases `active_verifier_candidate_count`, `revoked_verifier_denial_count`, `disabled_verifier_denial_count` to `active_authority_candidate_count`, `revoked_authority_denial_count`, `disabled_authority_denial_count`;
@@ -2266,44 +2551,104 @@ This task removes the legacy columns in lockstep with the admin UI record guard.
   - `test/admin-ui-workflow/*`;
   - `packages/cloudflare-runtime/test/entitlement-json.test.mjs:132,268`.
 
-  Find the remaining files with the Step 6 grep.
+  Find the remaining files with the Step 7 grep.
+- Modify `doc/architecture/system-map.md` (the backend, admin and D1-backup source totals, the admin `components.ts` and backup `core.ts` hotspot rows if they change).
 
 **Interfaces:**
-- Consumes: Tasks 17, 18, 24, 25, 33.
+- Consumes: Tasks 18, 19, 26, 27, 36 and 37.
 - Produces:
   - Entitlement records carry only protected-relevant fields.
   - `license_mode` ∈ {`trial`, `node_locked`}.
   - Policies ∈ {`trial`, `node_locked`, `subscription`}.
   - Restore-drill evidence uses `authority_candidates`.
 
-- [ ] **Step 1: Write the failing tests.**
-  - `services/cloudflare-license-admin/test/admin-ui-workflow/entitlements.test.mjs` (run through `test/admin-ui-workflow.test.mjs`): `the entitlement record guard accepts the protected row shape`. `hasEntitlementRecordData` accepts a row with only the kept columns (plus `enforcement_mode: "device_bound_v1"`) and rejects the same row without `max_active_devices`.
-  - `services/cloudflare-licensing-backend/test/sql/bound-device-store.test.mjs`: `entitlement authority revision advances for every authority column`. Update each of `status`, `customer_id`, `valid_from`, `valid_until`, `max_active_devices`, `lease_seconds`, `revocation_seq`, `is_trial`, `trial_started_at`, `trial_duration_sec`, `trial_expiration_basis`, `trial_one_per_device`, `trial_device_hash` in turn, and assert that `authority_revision` increments by exactly one each time. Updating `notes` must not bump it.
-
-  Run `npm run test:admin` and `npm run test:sql --workspace @licensecc/cloudflare-licensing-backend`. Expected: the guard test FAILS (legacy fields required). The revision test passes today; keep it as the regression guard for this task and Task 35.
-- [ ] **Step 2: Edit the baseline** and regenerate `schema.sql`. Run `npm run check:schema-parity`.
-- [ ] **Step 3: Update the runtime, domain, backend, admin, portal and backup code** as listed, including the guard in the same commit.
-- [ ] **Step 4: Re-pin the restore drill**, then regenerate contracts (`npm run write:contract-baselines`; review admin, portal and backend; `npm run test:contracts`).
-- [ ] **Step 5: Confirm the capacity rule survived.** `node --experimental-sqlite --test services/cloudflare-licensing-backend/test/sql/bound-capacity-predicate.test.mjs` passes. It pins `tr_bound_capacity_decrease`'s `hold_until > unixepoch()` rule against `boundOccupiedSql`.
-- [ ] **Step 6: Grep.** This must print nothing:
+- [ ] **Step 1: Write the regression test** in `services/cloudflare-licensing-backend/test/sql/bound-device-store.test.mjs`: `entitlement authority revision advances for every authority column`. Update each of `status`, `customer_id`, `valid_from`, `valid_until`, `max_active_devices`, `lease_seconds`, `revocation_seq`, `is_trial`, `trial_started_at`, `trial_duration_sec`, `trial_expiration_basis`, `trial_one_per_device`, `trial_device_hash` in turn, and assert that `authority_revision` increments by exactly one each time. Updating `notes` must not bump it. Run `npm run test:sql --workspace @licensecc/cloudflare-licensing-backend`. Expected: PASS today; it is the regression guard for the trigger rewrite in this task and in Task 40.
+- [ ] **Step 2: Write the failing schema test** in the same file: `the entitlements table has no seat, meter, TTL or device-hash column`. `PRAGMA table_info(entitlements)` on the baseline contains none of the eleven dropped names. Expected: FAIL.
+- [ ] **Step 3: Edit the baseline** and regenerate `schema.sql`. Run `npm run check:schema-parity`.
+- [ ] **Step 4: Update the runtime, domain, backend, admin and backup code and the tests** as listed.
+- [ ] **Step 5: Re-pin the restore drill**, then regenerate contracts (`npm run write:contract-baselines`; review admin, portal and backend; `npm run test:contracts`).
+- [ ] **Step 6: Confirm the capacity rule survived.** `node --experimental-sqlite --test services/cloudflare-licensing-backend/test/sql/bound-capacity-predicate.test.mjs` passes. It pins `tr_bound_capacity_decrease`'s `hold_until > unixepoch()` rule against `boundOccupiedSql`.
+- [ ] **Step 7: Grep.** This must print nothing:
 
 ```bash
 git grep -nE "\b(device_hash|assertion_ttl_seconds|cache_ttl_seconds|rebind_window_sec|pool_size|heartbeat_grace_sec|max_borrow_sec|allow_overdraft|meter_quota|meter_period_sec|trial_require_device_proof)\b" -- services packages ':!**/*.md'
 ```
 
   One exception: `LccConfigInput.device_hash` lives under `include/` and `sdks/` (config tokens), not under `services`/`packages`, so it is not matched.
-- [ ] **Step 7: Run the gates.**
+- [ ] **Step 8: Run the gates.**
   - `npm run check:schema-parity`
   - `npm run test:services`
   - `npm run test:e2e`
-  - admin and portal `test:ui` and `CI=1 npm run test:e2e`
+  - admin and portal `test:ui` and `CI=1 npm run test:e2e` (admin `admin-ui.lifecycle.e2e.mjs` must pass)
   - `npm run check:hotspots`
   - `npm run check:dry-run`
   - `npm run test:docs-accuracy`
   - `npm run check:pr`
-- [ ] **Step 8: Commit.** `refactor(db)!: drop seat, meter, TTL and device-hash columns from grants, policies and catalog`
+- [ ] **Step 9: Commit.** `refactor(db)!: drop seat, meter, TTL and device-hash columns from grants, policies and catalog`
 
-### Task 35: Drop `enforcement_mode`; require an owner; rename the trial key column; default leases to 24 hours
+### Task 39: Protected is the schema default; no code reads, checks or sends `enforcement_mode`
+
+The column goes in two steps. This task makes `device_bound_v1` the column default and removes every place that names the mode: the protected predicates, the `legacy_protocol_disabled` denial, the admin create field, and the writers, sync, CLI and drills that send it. The column, its CHECK and its two triggers stay until Task 40, so every intermediate schema is valid.
+
+**Files:**
+- Modify `services/cloudflare-licensing-backend/migrations/0001_baseline.sql`: `entitlements.enforcement_mode` becomes `TEXT NOT NULL DEFAULT 'device_bound_v1'` (the CHECK is unchanged). Regenerate `schema.sql`; re-pin `EXPECTED_SCHEMA_SIGNATURE_SHA256` in `services/cloudflare-d1-backup/scripts/restore-drill.mjs` (counts unchanged: 42/63/48).
+- Modify the backend:
+  - `src/device/bound_consent.mjs:79,102,117`, `bound_consent_page.mjs:45`, `bound_enrollment.mjs:58`, `bound_recovery.mjs:20`, `bound_retire.mjs:13`, `bound_store.mjs:14`: drop the `enforcement_mode='device_bound_v1'` predicates;
+  - `bound_issue.mjs:59-60`: delete the mode check and the `legacy_protocol_disabled` denial;
+  - delete `legacy_protocol_disabled` from the `/v2` error code lists and OpenAPI (`src/openapi/paths/bound-devices.ts` and any shared error enum);
+  - `src/fulfillment/order_ingest.mjs` `buildCreateStatement`: stop inserting `enforcement_mode` (the default applies).
+- Modify `packages/cloudflare-runtime`:
+  - `src/d1/entitlement_mutation.mjs:342-350`: `createEntitlement` no longer inserts or guards on `enforcement_mode`; delete `enforcement_mode_conflict` and the `invalid_patch` refusal of a non-protected mode; update `entitlement_mutation.d.ts`;
+  - `src/d1/plan_projection.mjs`: the INSERT stops naming `enforcement_mode`.
+- Modify the admin:
+  - `src/worker/groups/entitlements/create-enforcement.ts:19,41,47,55,59,66`: `enforcement_mode` is no longer accepted. A body carrying it is refused by `validateEntitlementInput`, which already rejects that key at `validation.ts:75,121`.
+  - `entitlement-schema.ts:7,38,41,76`; `protected-checks.ts:69,101,126`; `groups/customers/bindings.ts:17,34,67,79`; `summary-reports/operations.ts:177`; `idempotency.ts:113`; `openapi/paths/entitlements.ts:75` (the create request schema);
+  - `src/worker/groups/sync/operations.ts` (sync no longer carries `enforcement_mode`);
+  - UI: `DeviceLimitForm.tsx:74`, `EntitlementEditor.tsx` (the read-only "Protected devices" text stays; it no longer reads the field), `Entitlements.tsx:235`, `entitlements/workflow.ts:25,56,111,153,365-367` (the form state has no `enforcement_mode`), `shared/messages.ts:69` (`enforcement_mode_conflict`), `shared/mutationGuards.ts:60` (the record guard no longer checks `enforcement_mode`);
+  - `src/shared/api.ts` (request types; the record type keeps the field until Task 40).
+- Modify the sync and CLI paths that send `enforcement_mode`: `services/cloudflare-license-admin/scripts/sync-entitlement.mjs`, `src/shared/sync-client.ts`, `services/cloudflare-licensing-backend/scripts/entitlement.mjs` (`upsert`), `services/cloudflare-license-admin/scripts/validate-access-admin.mjs`, `remote-d1-atomicity.mjs` (the raw `INSERT` omits the column).
+- Modify the portal: `src/worker/support.ts:29` (`OwnedEntitlement.enforcement_mode`), `src/ui/types.ts:14`, and the self-service entitlements `SELECT` (it stops reading the column).
+- Modify the tests:
+  - `services/cloudflare-license-admin/test/worker/entitlements.test.mjs`: the Task 16 tests `admin create without enforcement_mode is refused` and `admin create with enforcement_mode legacy is refused` become `admin create with an enforcement_mode key is refused` (400 `invalid_request`) and `admin create without enforcement_mode creates a protected grant`;
+  - every backend, admin, portal and e2e test that sends `enforcement_mode` in a request body (the admin, sync and e2e suites fail until it is removed), or asserts `legacy_protocol_disabled` or `enforcement_mode_conflict` (the first Step 5 grep lists those). Tests that insert rows with SQL, and fixtures that model a returned row, keep naming the column until Task 40.
+- Modify `doc/architecture/system-map.md` (the backend, admin and portal source totals).
+
+**Interfaces:**
+- Consumes: Task 38.
+- Produces:
+  - A new `entitlements` row is `device_bound_v1` without naming the column.
+  - No production code reads, checks or writes `enforcement_mode`.
+  - Admin create with an `enforcement_mode` key returns 400 `invalid_request`.
+  - The `/v2` routes have no `legacy_protocol_disabled` code.
+
+- [ ] **Step 1: Write the failing tests.**
+  - `services/cloudflare-licensing-backend/test/sql/bound-device-store.test.mjs`: `a grant inserted without enforcement_mode is protected by default`. An `INSERT` that omits the column yields `enforcement_mode = 'device_bound_v1'`, and a protected exchange for it succeeds.
+  - `services/cloudflare-license-admin/test/worker/entitlements.test.mjs`: `admin create with an enforcement_mode key is refused` and `admin create without enforcement_mode creates a protected grant`.
+
+  Run `npm run test:sql --workspace @licensecc/cloudflare-licensing-backend` and `npm run test:admin`. Expected: FAIL.
+- [ ] **Step 2: Edit the baseline default**, regenerate `schema.sql`, run `npm run check:schema-parity`, and re-pin the restore drill.
+- [ ] **Step 3: Remove every mode predicate, the denial, the admin field and every sender** as listed.
+- [ ] **Step 4: Regenerate contracts** (`npm run write:contract-baselines`; review the admin create request schema and the backend `/v2` error codes; `npm run test:contracts`).
+- [ ] **Step 5: Grep.** This must print nothing:
+
+```bash
+git grep -nE "legacy_protocol_disabled|enforcement_mode_conflict" -- services packages scripts ':!**/*.md'
+git grep -nE "enforcement_mode" -- 'services/*/src' 'packages/*/src' 'services/*/scripts'
+```
+
+  The first must print nothing. The second's only expected hits are the runtime `ENTITLEMENT_COLUMNS` projection, `entitlement_json.mjs`, and the admin and domain record types and record schema, which Task 40 removes with the column. List them in the PR.
+- [ ] **Step 6: Run the gates.**
+  - `npm run check:schema-parity`
+  - `npm run test:services`
+  - `npm run test:e2e`
+  - admin and portal `test:ui` and `CI=1 npm run test:e2e`
+  - `npm run check:dry-run`
+  - `npm run check:hotspots`
+  - `npm run test:docs-accuracy`
+  - `npm run check:pr`
+- [ ] **Step 7: Commit.** `refactor(entitlements)!: make protected the schema default and stop reading or sending the enforcement mode`
+
+### Task 40: Drop `enforcement_mode`; require an owner; rename the trial key column; default leases to 24 hours
 
 **Files:**
 - Modify `services/cloudflare-licensing-backend/migrations/0001_baseline.sql`.
@@ -2326,59 +2671,65 @@ BEGIN SELECT RAISE(ABORT, 'capacity_in_use'); END;
 ```
 
   - Rewrite `tr_bound_entitlement_revision`'s `WHEN` so it watches exactly `status`, `customer_id`, `valid_from`, `valid_until`, `max_active_devices`, `lease_seconds`, `revocation_seq`, `is_trial`, `trial_started_at`, `trial_duration_sec`, `trial_expiration_basis`, `trial_one_per_device`, `trial_device_key_id`.
+  - No other surviving trigger names `enforcement_mode`: the `tr_bound_reject_legacy_*` triggers that did (`schema.sql:1210-1233`) were deleted in Task 35.
+  - Keep the catalog projection seed `INSERT` as the last statement.
 - Regenerate `schema.sql`.
-- Modify the backend:
-  - `src/device/bound_consent.mjs:79,102,117`, `bound_consent_page.mjs:45`, `bound_enrollment.mjs:58`, `bound_recovery.mjs:20`, `bound_retire.mjs:13`, `bound_store.mjs:14`: drop the `enforcement_mode='device_bound_v1'` predicates;
-  - `bound_store.mjs:73-75,135`: `trial_device_key_id`;
-  - `bound_issue.mjs:59-60`: delete the mode check and the `legacy_protocol_disabled` denial;
-  - delete `legacy_protocol_disabled` from the `/v2` error code lists and OpenAPI (`src/openapi/paths/bound-devices.ts` and any shared error enum).
+- Modify the backend: `src/device/bound_store.mjs:73-75,135` (`trial_device_key_id`).
 - Modify `packages/cloudflare-runtime`:
   - `src/device/bound_trial.mjs:15-17,33-42` (`trial_device_key_id`);
-  - `src/d1/entitlement_json.mjs:62`;
-  - `src/d1/entitlement_mutation.mjs:36,342-350`: delete the mode handling and `enforcement_mode_conflict`.
+  - `src/d1/entitlement_json.mjs:62` (no `enforcement_mode`);
+  - `src/d1/entitlement_mutation.mjs:36` (`ENTITLEMENT_COLUMNS` drops `enforcement_mode`, renames the trial column);
+  - `src/d1/plan_projection.mjs:557`: a projection input without `customer_id` is refused with `invalid_patch` before any write, instead of binding `input.customer_id ?? null`, which the schema now refuses.
 - Modify `packages/licensing-domain/src/entitlements/contracts.d.ts:26,46,77`.
-- Modify the admin:
-  - `src/worker/groups/entitlements/create-enforcement.ts:19,41,47,55,59,66`: `enforcement_mode` is no longer accepted. A body carrying it is refused by `validateEntitlementInput`, which already rejects that key at `validation.ts:75,121`.
-  - `entitlement-schema.ts:7,38,41,76`; `protected-checks.ts:69,101,126`; `groups/customers/bindings.ts:17,34,67,79`; `summary-reports/operations.ts:177`; `idempotency.ts:113`; `openapi/components.ts:363`; `openapi/paths/entitlements.ts:75`;
-  - UI: `DeviceLimitForm.tsx:74`, `EntitlementEditor.tsx`, `Entitlements.tsx:235`, `entitlements/workflow.ts:25,56,111,153,365-367`, `shared/messages.ts:69`, `shared/mutationGuards.ts:60`, the record guards (`trial_device_hash` → `trial_device_key_id`);
-  - `src/shared/api.ts`.
-- Modify the admin sync and CLI paths that sent `enforcement_mode` (`services/cloudflare-license-admin/scripts/sync-entitlement.mjs`, `src/shared/sync-client.ts`, `services/cloudflare-licensing-backend/scripts/entitlement.mjs`, `services/cloudflare-license-admin/scripts/validate-access-admin.mjs`, `remote-d1-atomicity.mjs`).
-- Modify the portal: `src/worker/support.ts:29`, `src/ui/types.ts:14`, the self-service entitlements `SELECT`.
+- Modify the admin: `src/shared/api.ts` (record types), `src/worker/openapi/components.ts:363` (the record schema's `enforcement_mode` property), the record guards in `src/ui/shared/mutationGuards.ts` (`trial_device_hash` → `trial_device_key_id`), and any UI or worker code that reads `trial_device_hash`.
 - Modify `services/cloudflare-d1-backup/scripts/restore-drill.mjs` (`EXPECTED_TRIGGERS` drops the two mode triggers; re-pin the signature; triggers 48 → 46) and its test and README counts.
 - Modify every test that inserts or asserts `enforcement_mode` or `trial_device_hash`, about 33 files. They are listed by the Step 5 grep; the known ones are:
   - backend: `db/bound-device-d1:78`, `db/bound-device-worker:59,101,176,193`, `fulfillment/order_ingest_exactly_once:217`, `sql/bound-admin-writers:12`, `sql/bound-cleanup-backlog:14`, `sql/bound-consent:17,34,310,359`, `sql/bound-device-http:28,590`, `sql/bound-device-store:21`, `sql/bound-retire:15`, `sql/entitlement-cli-sql:29`, `sql/plan-projection:319,339-340`, `e2e/protected-admin-enrollment:34,70`;
   - admin: the SQL and worker suites;
   - portal: `test/helpers.mjs`, `test/portal-worker-bindings.test.mjs:7`.
+- Modify every test that inserts an `entitlements` row without `customer_id`. `git grep -c "INSERT INTO entitlements" -- services/*/test packages/*/test` finds 33 files; the ones known to omit the owner include:
+  - `packages/cloudflare-runtime/test/bound-capacity.test.mjs`;
+  - `services/cloudflare-d1-backup/test/backup-core.test.mjs` (2 inserts) and `services/cloudflare-d1-backup/test/backup-bound-restore.test.mjs`;
+  - `services/cloudflare-licensing-backend/test/sql/plan-projection.test.mjs` (12 inserts);
+  - the admin SQL suites.
+
+  Each inserted row names an owning `customer_id` (and seeds the customer where a foreign key or trigger needs it).
+- Modify `doc/architecture/system-map.md` (the source totals that change).
 
 **Interfaces:**
-- Consumes: Task 34.
+- Consumes: Task 39.
 - Produces:
   - No `enforcement_mode` anywhere.
-  - Every entitlement has a `customer_id`; inserting NULL fails with `NOT NULL constraint failed`.
+  - Every entitlement has a `customer_id`; inserting NULL fails with `NOT NULL constraint failed`, and plan projection refuses an owner-less input with `invalid_patch`.
   - `trial_device_key_id` holds the proven key id.
   - `lease_seconds` defaults to 86400.
-  - Admin create with an `enforcement_mode` key returns 400 `invalid_request`.
 
-- [ ] **Step 1: Write the failing tests** in `services/cloudflare-licensing-backend/test/sql/bound-device-store.test.mjs`:
-  - `an entitlement without a customer is refused by the schema`: an `INSERT` with `customer_id` NULL throws `/NOT NULL constraint failed: entitlements.customer_id/`.
-  - `a protected trial locks to the proven key in trial_device_key_id`: first exchange on a trial grant stores the key id in `trial_device_key_id`; a second key is refused per `bound_trial.mjs`.
-  - `a new grant's lease_seconds defaults to 86400`.
-  - Extend `entitlement authority revision advances for every authority column` from Task 34 to use `trial_device_key_id`.
+- [ ] **Step 1: Write the failing tests.**
+  - In `services/cloudflare-licensing-backend/test/sql/bound-device-store.test.mjs`:
+    - `an entitlement without a customer is refused by the schema`: an `INSERT` with `customer_id` NULL throws `/NOT NULL constraint failed: entitlements.customer_id/`.
+    - `a protected trial locks to the proven key in trial_device_key_id`: first exchange on a trial grant stores the key id in `trial_device_key_id`; a second key is refused per `bound_trial.mjs`.
+    - `a new grant's lease_seconds defaults to 86400`.
+    - Extend `entitlement authority revision advances for every authority column` from Task 38 to use `trial_device_key_id`.
+  - In `services/cloudflare-licensing-backend/test/sql/plan-projection.test.mjs`: `plan projection refuses an entitlement input without an owner` (`invalid_patch`, and no row is written).
 
   Run `npm run test:sql --workspace @licensecc/cloudflare-licensing-backend`. Expected: FAIL.
 - [ ] **Step 2: Edit the baseline**, regenerate `schema.sql`, run `npm run check:schema-parity`.
-- [ ] **Step 3: Remove every mode predicate and rename the trial column** across backend, runtime, domain, admin, portal and tests.
-- [ ] **Step 4: Re-pin the restore drill; regenerate contracts** (`npm run write:contract-baselines`, review, `npm run test:contracts`).
-- [ ] **Step 5: Grep.** This must print nothing:
+- [ ] **Step 3: Drop the column from the runtime, domain and admin record code, rename the trial column, add the plan-projection owner check, and fix every test insert** across backend, runtime, domain, admin, portal and backup.
+- [ ] **Step 4: Re-pin the restore drill; regenerate contracts** (`npm run write:contract-baselines`, review the admin record schema, `npm run test:contracts`).
+- [ ] **Step 5: Grep.** The first must print nothing:
 
 ```bash
-git grep -nE "enforcement_mode|device_bound_v1'|\"device_bound_v1\"|trial_device_hash|legacy_protocol_disabled|protected_mode_(downgrade|migration_required)|tr_bound_mode_|enforcement_mode_conflict" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'
+git grep -nE "enforcement_mode|device_bound_v1'|\"device_bound_v1\"|trial_device_hash|legacy_protocol_disabled|protected_mode_(downgrade|migration_required)|tr_bound_mode_|enforcement_mode_conflict" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis' ':!CHANGELOG.md'
+git grep -n "INSERT INTO entitlements" -- services packages
 ```
+
+  `CHANGELOG.md` still names `device_bound_v1` until Task 45 resets it. For the second grep, every hit must name `customer_id` in its column list; check each one.
 
   The protected wire names (`lccdl1`, `device-lease`, `lcc-device-proof-v2`) are E5 versioned names and are not matched.
 - [ ] **Step 6: Run the gates.**
   - `npm run check:schema-parity`
-  - `npm run test:services`
+  - `npm run test:services` (includes `test:backup`)
+  - `npm run test --workspace @licensecc/cloudflare-runtime`
   - `npm run test:e2e`
   - admin and portal `test:ui` and `CI=1 npm run test:e2e`
   - `npm run check:dry-run`
@@ -2387,15 +2738,16 @@ git grep -nE "enforcement_mode|device_bound_v1'|\"device_bound_v1\"|trial_device
   - `npm run check:pr`
 - [ ] **Step 7: Commit.** `refactor(db)!: remove the enforcement mode, require an owner and store the trial key id`
 
-### Task 36: Enrollment requires a requested feature
+### Task 41: Enrollment requires a requested feature
 
-The v1 enrollment comparison and the optional `requested_feature` exist only for "older clients without the field" (backend `README.md:855-861`). Native clients always send the feature: `bound_public_config.cpp:45` requires a non-empty `session.feature`. The staging drill sends it too (Task 20).
+The v1 enrollment comparison and the optional `requested_feature` exist only for "older clients without the field" (backend `README.md:855-861`). Native clients always send the feature: `bound_public_config.cpp:45` requires a non-empty `session.feature`. The staging drill sends it too (Task 21).
 
 **Files:**
 - Modify native:
   - `src/library/device_identity/bound_protocol.cpp:230-249`: `enrollment_comparison_input` always uses `lcc-device-enrollment-comparison-v2`; an empty feature is an error;
   - `bound_protocol.hpp:31` (comment);
-  - `test/library/device_identity/device_bound_vectors_test.cpp:95-137`: delete the v1 comparison case and keep :139-156.
+  - `src/library/device_identity/bound_wire.cpp:190-208`: the registration encoder serialises `requested_feature` only when it is non-empty today; an empty `requested_feature` becomes an encoding error, because the backend now refuses a registration without it;
+  - `test/library/device_identity/device_bound_vectors_test.cpp:95-137`: delete the v1 comparison case and keep :139-156; add `registration_with_an_empty_requested_feature_is_an_encoding_error`, which calls the registration encoder with an empty feature and expects the encoding error and no output bytes.
 - Delete `test/vectors/device_bound/v1/enrollment_comparison.json`. Keep `enrollment_comparison_feature.json`.
 - Modify the SDK vector tests: `sdks/python/tests/test_device_bound_vectors.py:39-42`, `sdks/dotnet/test/Licensecc.Client.Tests/DeviceBoundVectorsTests.cs:125-129`, `sdks/java/src/test/java/io/licensecc/client/DeviceBoundVectorsTest.java:33,127-129`.
 - Modify `packages/licensing-domain/src/lease/device_protocol.mjs:48-59` (`requested_feature` required; v2 prefix only) and `packages/licensing-domain/test/device-protocol.test.mjs:27-28`.
@@ -2419,13 +2771,16 @@ The v1 enrollment comparison and the optional `requested_feature` exist only for
   - `doc/api/device_enrollment.rst:38,53`.
 
 **Interfaces:**
-- Consumes: Task 35.
+- Consumes: Task 40.
 - Produces: `POST /v2/device-authorizations` without `requested_feature` returns 400 `invalid_request`. The comparison transcript is always `lcc-device-enrollment-comparison-v2`.
 
-- [ ] **Step 1: Write the failing test** in `services/cloudflare-licensing-backend/test/bound-device-request.test.mjs`: `an authorization without requested_feature is refused` (`validateBoundRequest("authorize", …)` throws `invalid_request`). Run `npm run test --workspace @licensecc/cloudflare-licensing-backend`. Expected: FAIL.
+- [ ] **Step 1: Write the failing tests.**
+  - `services/cloudflare-licensing-backend/test/bound-device-request.test.mjs`: `an authorization without requested_feature is refused` (`validateBoundRequest("authorize", …)` throws `invalid_request`). Run `npm run test --workspace @licensecc/cloudflare-licensing-backend`. Expected: FAIL.
+  - The native `registration_with_an_empty_requested_feature_is_an_encoding_error` case above. Run `ctest --preset dev-debug -R device_bound`. Expected: FAIL (the field is silently omitted today).
 - [ ] **Step 2: Implement** across native, domain, backend, baseline and portal.
-- [ ] **Step 3: Grep.** `git grep -nE "comparison-v1|enrollment_comparison\.json|Older clients|older clients" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'` must print nothing.
-- [ ] **Step 4: Run the gates.**
+- [ ] **Step 3: Regenerate contracts.** `npm run write:contract-baselines`, review the `bound-devices` request schema in `test/contracts/backend.json` (`requested_feature` is now required), then `npm run test:contracts`.
+- [ ] **Step 4: Grep.** `git grep -nE "comparison-v1|enrollment_comparison\.json|Older clients|older clients" -- ':!docs/superpowers/plans' ':!docs/implementation' ':!doc/analysis'` must print nothing.
+- [ ] **Step 5: Run the gates.**
   - `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug`
   - `ctest --preset dev-debug`
   - WSL `ctest --preset ci-linux-debug`
@@ -2435,9 +2790,9 @@ The v1 enrollment comparison and the optional `requested_feature` exist only for
   - portal `CI=1 npm run test:e2e`
   - `npm run test:contracts`
   - `npm run check:pr`
-- [ ] **Step 5: Commit.** `feat(device-bound)!: require the requested feature and drop the v1 enrollment comparison`
+- [ ] **Step 6: Commit.** `feat(device-bound)!: require the requested feature and drop the v1 enrollment comparison`
 
-### Task 37: Baseline tidy-ups — the order nonce column and the portal session auth method
+### Task 42: Baseline tidy-ups — the order nonce column and the portal session auth method
 
 **Files:**
 - Modify `services/cloudflare-licensing-backend/migrations/0001_baseline.sql`:
@@ -2454,7 +2809,7 @@ The v1 enrollment comparison and the optional `requested_feature` exist only for
   - the order nonce tests (`test/fulfillment/order_hmac.test.mjs`, `order_ingest_exactly_once.test.mjs`) that read the column.
 
 **Interfaces:**
-- Consumes: Task 36.
+- Consumes: Task 41.
 - Produces: `order_ingest_nonces(key_id, request_nonce_id, …)`, and `portal_sessions.auth_method` ∈ {`otp`, `oauth`, `password`} with no default.
 
 - [ ] **Step 1: Write the failing tests.**
@@ -2470,7 +2825,7 @@ The v1 enrollment comparison and the optional `requested_feature` exist only for
   - `npm run check:pr`
 - [ ] **Step 5: Commit.** `refactor(db): name the order request nonce and require an explicit portal session method`
 
-### Task 38: Webhook endpoints need an explicit scope and canonical event types
+### Task 43: Webhook endpoints need an explicit scope and canonical event types
 
 Controller ruling: "require an explicit scope, or an explicit `global` marker for operator-wide endpoints; drop the NULL default." The legacy `event_types` tolerance is also removed:
 - today, patch may resend an unknown token unchanged (`services/cloudflare-license-admin/src/worker/webhook_event_types.ts:6-11,60-77`; `webhooks.ts:98-106,123-129,305-313`);
@@ -2484,9 +2839,11 @@ A SQLite `CHECK` cannot inspect CSV tokens, so the baseline enforces membership 
 
 ```sql
 CHECK ((scope_kind = 'global' AND scope_project IS NULL AND scope_customer_id IS NULL)
-    OR (scope_kind = 'project' AND length(scope_project) > 0 AND scope_customer_id IS NULL)
-    OR (scope_kind = 'customer' AND length(scope_customer_id) > 0 AND scope_project IS NULL))
+    OR (scope_kind = 'project' AND scope_project IS NOT NULL AND length(scope_project) > 0 AND scope_customer_id IS NULL)
+    OR (scope_kind = 'customer' AND scope_customer_id IS NOT NULL AND length(scope_customer_id) > 0 AND scope_project IS NULL))
 ```
+
+  The explicit `IS NOT NULL` guards are required: without them a `project` row with a NULL `scope_project` makes that branch NULL, the whole expression `FALSE OR NULL OR FALSE` is NULL, and SQLite treats a NULL CHECK result as satisfied.
 
   - Add `tr_webhook_event_types_known_insert` (`BEFORE INSERT ON webhook_endpoints`) and `tr_webhook_event_types_known_update` (`BEFORE UPDATE OF event_types ON webhook_endpoints`), each:
 
@@ -2522,7 +2879,7 @@ BEGIN SELECT RAISE(ABORT, 'invalid_event_types'); END;
 - Modify `services/cloudflare-license-admin/README.md` (webhook section).
 
 **Interfaces:**
-- Consumes: Task 37.
+- Consumes: Task 42.
 - Produces:
   - `POST /api/admin/webhooks` requires `scope_kind` ∈ {`global`, `project`, `customer`} with the matching field.
   - A missing `scope_kind` returns 400 `invalid_request`.
@@ -2531,7 +2888,7 @@ BEGIN SELECT RAISE(ABORT, 'invalid_event_types'); END;
 
 - [ ] **Step 1: Write the failing tests.**
   - `services/cloudflare-license-admin/test/worker/webhooks.test.mjs`: `a webhook without scope_kind is refused` (400 `invalid_request`); `patching a webhook keeps rejecting an unknown event token even when unchanged`.
-  - `services/cloudflare-license-admin/test/sql/webhook-admin.test.mjs`: `the schema refuses a webhook with no scope_kind or an unknown event type`.
+  - `services/cloudflare-license-admin/test/sql/webhook-admin.test.mjs`: `the schema refuses a webhook with no scope_kind or an unknown event type`. Its rows include: no `scope_kind`; an unknown event token; `scope_kind = 'project'` with `scope_project` NULL; `scope_kind = 'project'` with `scope_project` `''`; `scope_kind = 'customer'` with `scope_customer_id` NULL; `scope_kind = 'customer'` with `scope_customer_id` `''`; and `scope_kind = 'global'` with a project set. Each raw `INSERT` throws `CHECK constraint failed` or `invalid_event_types`.
   - `services/cloudflare-licensing-backend/test/sql/webhook-dispatch.test.mjs`: `a global endpoint receives every event only when scope_kind is global`.
 
   Run `npm run test:admin` and `npm run test:backend`. Expected: FAIL.
@@ -2558,7 +2915,7 @@ git grep -nE "back-compat|legacy value|legacy token|unknownWebhookEventTypes|bla
 
 ## P7 — Tooling aliases, documentation and final sweep
 
-### Task 39: Remove the tooling compatibility aliases and require an explicit deploy profile
+### Task 44: Remove the tooling compatibility aliases and require an explicit deploy profile
 
 **Files:**
 - Modify root `package.json:8`: delete `check:all`.
@@ -2603,13 +2960,15 @@ git grep -nE "check:all|IncludeBackend|ci-linux-core|\"ci-windows-msvc\"|ci-wind
   - `npm run check:pr`
 - [ ] **Step 5: Commit.** `chore(tooling)!: drop compatibility aliases and require an explicit deploy profile`
 
-### Task 40: Rewrite the maintained documentation for protected-only licensing
+### Task 45: Rewrite the maintained documentation for protected-only licensing and reset the CHANGELOG
 
-This finishes every doc not already forced by an earlier task's gates. It also fixes the stale protected-docs text the brief found:
+This finishes every doc not already forced by an earlier task's gates, and resets the CHANGELOG. It also fixes the stale protected-docs text the brief found:
 - the backend README still says "the native protected consumer remains unfinished";
 - `device_identity.rst:375` says "no production transport on non-Windows platforms";
 - `sdks.rst:33-36` describes "Windows"-only adapters;
 - `device_enrollment.rst:1` and the portal `README.md:52` still say "Staged".
+
+Controller ruling for the CHANGELOG: "reset the CHANGELOG to a single 'Unreleased: initial release' baseline". The inherited-bare-tag text is compatibility-only history. The rule itself ("no new bare `v*` tags") is enforced by `scripts/check-release-tag.mjs` and stays.
 
 **Files:**
 - Modify `doc/operations/production-readiness.md`:
@@ -2636,15 +2995,31 @@ This finishes every doc not already forced by an earlier task's gates. It also f
   - TM-16 (:79): delete it, because `DEVICE_PROOF_MODE` is gone;
   - add rows for the global fuse denying all licensing (`BOUND_GLOBAL_RATE_LIMIT`), protected signer compromise, and consent phishing;
   - :123-125 (verification column).
-- Modify `doc/architecture/system-map.md:14-17` (module responsibilities: no "online decision/seat lifecycle" or "online verification"), `doc/architecture/ownership.md:16` (backend owns "protected device licensing, fulfillment, webhooks, D1 schema, backend OpenAPI and deployment").
-- Modify `doc/architecture/glossary.md`: the copy-guard term lists and any remaining legacy rows not handled in Task 25.
+- Modify `doc/architecture/system-map.md:14-17` (module responsibilities: no "online decision/seat lifecycle" or "online verification").
+- Modify `doc/architecture/ownership.md`:
+  - :16: the backend owns "protected device licensing, fulfillment, webhooks, D1 schema, backend OpenAPI and deployment";
+  - record the tooling-to-backend import edge Task 29 created: `scripts/materialize-deploy-configs.mjs` (Release/CI tooling) imports `services/cloudflare-licensing-backend/src/device/bound_config.mjs` to validate `BOUND_DEVICE_CONFIG`. State that the backend owns the config shape, that `check:architecture` scans only `services/*/src` and `packages/*/src` and so does not see this edge, and that a change to `bound_config.mjs` must run `npm run test:release-operations`.
+- Modify `doc/architecture/glossary.md`: the copy-guard term lists and any remaining legacy rows not handled in Task 27.
 - Modify `README.md:12,120-121` (product summary: offline `.lic` files, config tokens, and protected device-bound online licensing).
 - Modify `services/cloudflare-licensing-backend/README.md`: :1-57, :58-199, :590-602 (the "staged implementation" heading and the stale "native protected consumer remains unfinished" text), :758-764 (cutover), :801-812.
-- Modify `services/cloudflare-customer-portal/README.md:52`, `services/cloudflare-license-admin/README.md` (the remaining legacy lines at :410, :476, :482-486, :661-668, :689-700), `doc/usage/concepts.rst`, `doc/usage/integration.rst`, `doc/usage/examples.rst`, `doc/index.rst`. Each must be clean against the Step 2 grep.
+- Modify `services/cloudflare-customer-portal/README.md:52`, `services/cloudflare-license-admin/README.md` (the remaining legacy lines at :410, :476, :482-486, :661-668, :689-700), `doc/usage/concepts.rst`, `doc/usage/integration.rst`, `doc/usage/examples.rst`, `doc/index.rst`. Each must be clean against the Step 3 grep.
 - Modify `doc/capabilities/index.rst` (status narrative).
 - Modify `scripts/docs-accuracy.test.mjs` where a prose pin names text this task deletes. Never weaken a pin to make prose pass.
+- Modify `CHANGELOG.md`. The whole file becomes:
+  - the title and the Keep-a-Changelog line;
+  - the two version lines `check-version-contract.mjs:425-435` requires (`- **C++ library** (\`CMakeLists.txt\`): \`2.1.0\` …` and `- **Platform packages** … \`0.1.0-rc.2\` (Python \`0.1.0rc2\`) …`);
+  - the tag-namespace sentence, without "The reachable bare tag (`v1.0.0`) predates … and remains legacy history";
+  - one section `## [Unreleased] — initial release`, with:
+    - `### Included`: offline v201 `.lic` licensing with `lccgen`; `lcccfg1` config tokens; protected device-bound licensing and feature sessions (Windows and Linux TPM); backend order ingest and the four `/v2` routes; the admin console; the customer portal (consent, connected devices); webhooks and audit; the D1 backup and restore drill; Python, .NET and Java SDKs (config tokens and protected adapters);
+    - `### Not included`: the capability-loss list below, one line each.
+- Modify `doc/architecture/decisions/0005-platform-version-and-release-tags.md`:
+  - :13: drop the sentence about the bare `v1.0.0` tag;
+  - :61-62: keep "no new bare `v*` tags"; drop "Existing bare tags remain immutable legacy history…";
+  - :85: drop "without interpreting inherited bare tags".
+- Modify `SECURITY.md:11-13`: drop "inherited legacy tags do not describe the current platform".
+- No test pins the removed tag sentences (verified: no hit for "legacy history" or "inherited" in `scripts/check-version-contract*.mjs`, `scripts/release-artifacts.test.mjs`, `scripts/docs-accuracy.test.mjs`).
 
-The owner-accepted capability losses to state in `production-readiness.md` Launch scope and in the root README status:
+The owner-accepted capability losses to state in `production-readiness.md` Launch scope, in the root README status and in the CHANGELOG "Not included" section:
 1. floating/concurrent seats;
 2. metering and quotas;
 3. usage reports;
@@ -2662,60 +3037,34 @@ Also state:
 - the protected global fuse can deny all online licensing.
 
 **Interfaces:**
-- Consumes: Tasks 1–39.
-- Produces: maintained docs describe only the surviving system.
+- Consumes: Tasks 1–44.
+- Produces:
+  - Maintained docs describe only the surviving system.
+  - `CHANGELOG.md` has one Unreleased section. `npm run check:versions` still finds both version lines.
+  - `doc/architecture/ownership.md` records the materializer's import of the backend config validator.
 
-- [ ] **Step 1: Rewrite the pages** listed above.
-- [ ] **Step 2: Grep the maintained docs.**
+- [ ] **Step 1: Rewrite the pages** listed above, including the ownership edge.
+- [ ] **Step 2: Rewrite the CHANGELOG and the three tag sentences** (ADR 0005 and `SECURITY.md`).
+- [ ] **Step 3: Grep the maintained docs and the release text.** All must print nothing:
 
 ```bash
 git grep -nIiE "/v1/(verify|activate|renew|checkout|heartbeat|release|meter|admin/report|emergency)|lccoa1|account token|floating seat|seat pool|DEVICE_PROOF_MODE|REQUEST_SIGNATURE|public verifier|staged (device|browser|implementation)|older clients|v200" -- README.md CONTRIBUTING.md SECURITY.md AGENTS.md .agents doc services/*/README.md sdks/*/README.md sdks/*/native/README.md examples fuzz/README.md ':!doc/analysis'
+git grep -nIiE "legacy history|inherited (bare|legacy) tags|Upgrade notes" -- CHANGELOG.md SECURITY.md doc/architecture
 ```
 
-  Expected: no output, except capability-loss statements that name a removed feature in order to say it is gone. List each remaining line in the PR.
-- [ ] **Step 3: Run the gates.**
+  For the first grep, the only allowed hits are capability-loss statements that name a removed feature in order to say it is gone. List each remaining line in the PR.
+- [ ] **Step 4: Run the gates.**
   - `npm run test:docs-accuracy`
   - `npm run check:docs`
   - `npm run check:capabilities`
   - `npm run test:docs-quickstart`
-  - `npm run check:pr`
-- [ ] **Step 4: Commit.** `docs: describe protected-only licensing, the single schema baseline and the capabilities removed`
-
-### Task 41: Reset the CHANGELOG and remove the inherited-tag narrative
-
-Controller ruling: "reset the CHANGELOG to a single 'Unreleased: initial release' baseline". The inherited-bare-tag text is compatibility-only history. The rule itself ("no new bare `v*` tags") is enforced by `scripts/check-release-tag.mjs` and stays.
-
-**Files:**
-- Modify `CHANGELOG.md`. The whole file becomes:
-  - the title and the Keep-a-Changelog line;
-  - the two version lines `check-version-contract.mjs:425-435` requires (`- **C++ library** (\`CMakeLists.txt\`): \`2.1.0\` …` and `- **Platform packages** … \`0.1.0-rc.2\` (Python \`0.1.0rc2\`) …`);
-  - the tag-namespace sentence, without "The reachable bare tag (`v1.0.0`) predates … and remains legacy history";
-  - one section `## [Unreleased] — initial release`, with:
-    - `### Included`: offline v201 `.lic` licensing with `lccgen`; `lcccfg1` config tokens; protected device-bound licensing and feature sessions (Windows and Linux TPM); backend order ingest and the four `/v2` routes; the admin console; the customer portal (consent, connected devices); webhooks and audit; the D1 backup and restore drill; Python, .NET and Java SDKs (config tokens and protected adapters);
-    - `### Not included`: the capability-loss list from Task 40, one line each.
-- Modify `doc/architecture/decisions/0005-platform-version-and-release-tags.md`:
-  - :13: drop the sentence about the bare `v1.0.0` tag;
-  - :61-62: keep "no new bare `v*` tags"; drop "Existing bare tags remain immutable legacy history…";
-  - :85: drop "without interpreting inherited bare tags".
-- Modify `SECURITY.md:11-13`: drop "inherited legacy tags do not describe the current platform".
-- No test pins the removed tag sentences (verified: no hit for "legacy history" or "inherited" in `scripts/check-version-contract*.mjs`, `scripts/release-artifacts.test.mjs`, `scripts/docs-accuracy.test.mjs`).
-
-**Interfaces:**
-- Consumes: Task 40.
-- Produces: `CHANGELOG.md` has one Unreleased section. `npm run check:versions` still finds both version lines.
-
-- [ ] **Step 1: Rewrite the CHANGELOG and the three tag sentences.**
-- [ ] **Step 2: Grep.** `git grep -nIiE "legacy history|inherited (bare|legacy) tags|Upgrade notes" -- CHANGELOG.md SECURITY.md doc/architecture` must print nothing.
-- [ ] **Step 3: Run the gates.**
   - `npm run check:versions`
   - `npm run test:versions`
   - `npm run test:release-artifacts`
-  - `npm run test:docs-accuracy`
-  - `npm run check:docs`
   - `npm run check:pr`
-- [ ] **Step 4: Commit.** `docs: reset the changelog to a single initial-release baseline`
+- [ ] **Step 5: Commit.** `docs: describe protected-only licensing and reset the changelog to a single initial-release baseline`
 
-### Task 42: Whole-repository sweep, ADR update and evidence report
+### Task 46: Whole-repository sweep, ADR update and evidence report
 
 **Files:**
 - Modify `doc/architecture/decisions/0006-device-bound-licensing.md`:
@@ -2734,7 +3083,7 @@ Controller ruling: "reset the CHANGELOG to a single 'Unreleased: initial release
 **ADR decision.** The change guide does not require a new ADR. ADR 0006 has been amended in place before (its status line records later changes), and ADR 0002 uses an "Amended:" line. So the decision is recorded by amending ADR 0006, with no ADR 0007.
 
 **Interfaces:**
-- Consumes: Tasks 1–41.
+- Consumes: Tasks 1–45.
 - Produces: the evidence report, and ADR 0006 in its final form.
 
 - [ ] **Step 1: Run the sweep greps** from the repository root:
@@ -2761,7 +3110,7 @@ git grep -nIiE "supabase|postgres|pg-parity" -- ':!docs/superpowers/plans' ':!do
     - pepper and key rotation;
     - `portal_otp.mjs:194` (empty pepper map);
     - `doc/architecture/decisions/0005` release-tag rule text;
-    - the capability-loss statements from Tasks 40 and 41.
+    - the capability-loss statements from Task 45.
   - Anything else is **fix**: fix it in this task and re-run the grep.
 - [ ] **Step 3: Update ADR 0006 and `doc/architecture/index.rst`** as listed.
 - [ ] **Step 4: Write the evidence report.** Follow-ups (not removed, with reasons):
