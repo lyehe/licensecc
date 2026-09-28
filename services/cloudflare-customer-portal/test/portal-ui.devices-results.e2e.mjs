@@ -331,6 +331,44 @@ test("browser Back while a Release seat confirmation is open keeps it usable, an
   await expect(alphaCard.getByRole("status")).toHaveCount(0);
 });
 
+// A release confirmed on another page has no seat card on screen to report into. A refusal must still
+// be reported where the customer is, in the page-level line, and it belongs to that visit only.
+test("a seat release confirmed on another page after Back and refused by the server is reported on that page, and not again on Devices", async ({ page }) => {
+  const requests = setup(page, {
+    entitlements: [ENT_ALPHA],
+    releaseResponse: () => ({ status: 503, body: { ok: false, code: "verification_error", request_id: "devices-results-offpage-refusal" } }),
+  });
+  await signIn(page);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
+  const alphaCard = page.locator(".seatCard").filter({ hasText: "alpha" });
+  await alphaCard.getByRole("button", { name: "Start seat" }).click();
+  await expect(alphaCard.getByRole("status")).toContainText("Seat started.");
+  await alphaCard.getByRole("button", { name: "Release seat" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await page.goBack();
+  await expect(page.locator("h1")).toHaveText("Apps");
+  await dialog.getByRole("button", { name: "Confirm release" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => requests.releases).toBe(1);
+
+  // Reported on Apps, in the same words and with the same technical details the seat's own line uses.
+  const pageLine = page.locator(".feedback").getByRole("status");
+  await expect(pageLine).toContainText("We couldn't verify that request. Try again.");
+  await expect(pageLine).toHaveClass(/error/);
+  await pageLine.getByText("Technical details", { exact: true }).click();
+  await expect(pageLine.getByText("verification_error (devices-results-offpage-refusal)", { exact: true })).toBeVisible();
+  await expect(page.locator("#content")).toBeFocused();
+
+  // On Devices the seat is still held, and the refusal shows neither as the seat's result nor still as
+  // the page-level line: it belonged to the visit where it was reported.
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await expect(alphaCard.getByRole("button", { name: "Release seat" })).toBeEnabled();
+  await expect(alphaCard.getByRole("status")).toHaveCount(0);
+  await expect(page.getByText("We couldn't verify that request. Try again.")).toHaveCount(0);
+});
+
 // Fix round 1 (Important): seatMessages/deviceMessages/downloads.messages live one level ABOVE the
 // components that only render while their own page is showing, so nothing used to reset them when
 // that page was left and revisited -- a stale "Seat started." would reappear in a freshly mounted

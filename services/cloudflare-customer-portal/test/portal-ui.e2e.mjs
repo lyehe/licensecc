@@ -643,7 +643,7 @@ test("Account explains that the last sign-in method cannot be disconnected, with
 function makePortalApiFixture() {
   const VALID_CODE = "80315426";
   let authed = false;
-  const controls = { rejectUsage: false, failMe: false, failNextRelease: false, deferNextRelease: false, rejectNextRelease: false, rejectRefreshes: 0, resolveRelease: null, email: null };
+  const controls = { rejectUsage: false, failMe: false, failNextRelease: false, failNextDeviceRelease: false, deferNextRelease: false, rejectNextRelease: false, rejectRefreshes: 0, resolveRelease: null, email: null };
   const requests = { authRequests: 0, verifies: 0, checkouts: 0, heartbeats: 0, releases: 0, deviceReleases: 0, refreshRejects: 0, downloads: 0, logouts: 0, seatActions: [] };
 
   const entitlements = [
@@ -737,6 +737,10 @@ function makePortalApiFixture() {
 
     if (method === "POST" && path === "/api/portal/devices/release") {
       requests.deviceReleases += 1;
+      if (controls.failNextDeviceRelease) {
+        controls.failNextDeviceRelease = false;
+        return fulfill(503, { ok: false, code: "temporarily_unavailable", request_id: "portal-e2e-device-release-failure" });
+      }
       const body = await jsonBody(request);
       const index = devices.findIndex((item) => item.device_key_id === body.device_key_id);
       if (index >= 0) devices.splice(index, 1);
@@ -1402,6 +1406,48 @@ test("browser Back while a device Release confirmation is open keeps it usable, 
   await expect(main).not.toHaveAttribute("inert");
   await expect(page.getByRole("heading", { name: "Activated devices (older app versions)" })).toBeFocused();
   expect(api.requests.deviceReleases).toBe(0);
+
+  // A release confirmed on the page Back landed on succeeds with no result line anywhere, and the next
+  // visit to Devices lists the device as gone.
+  await releaseButton.click();
+  await page.goBack();
+  await expect(page.locator("h1")).toHaveText("Apps");
+  await dialog.getByRole("button", { name: "Confirm release" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => api.requests.deviceReleases).toBe(1);
+  await expect(page.locator(".feedback").getByRole("status")).toHaveCount(0);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Connected devices" })).toBeVisible();
+  await expect(page.getByText("d".repeat(40), { exact: true })).toHaveCount(0);
+  await expect(page.locator(".registrations")).toHaveCount(0);
+});
+
+// A release confirmed on another page has no device row on screen to report into. A refusal must still
+// be reported where the customer is, in the page-level line, and it belongs to that visit only.
+test("a device release confirmed on another page after Back and refused by the server is reported on that page, and not again on Devices", async ({ page }) => {
+  const api = makePortalApiFixture();
+  api.controls.failNextDeviceRelease = true;
+  await signIn(page, api);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.locator(".registrations").getByRole("button", { name: "Release", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await page.goBack();
+  await expect(page.locator("h1")).toHaveText("Apps");
+  await dialog.getByRole("button", { name: "Confirm release" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => api.requests.deviceReleases).toBe(1);
+
+  const pageLine = page.locator(".feedback").getByRole("status");
+  await expect(pageLine).toContainText("This is temporarily unavailable. Try again shortly.");
+  await expect(pageLine).toHaveClass(/error/);
+  await pageLine.getByText("Technical details", { exact: true }).click();
+  await expect(pageLine.getByText("temporarily_unavailable (portal-e2e-device-release-failure)", { exact: true })).toBeVisible();
+
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await expect(page.getByText("d".repeat(40), { exact: true })).toBeVisible();
+  await expect(page.locator(".registrations").getByRole("status")).toHaveCount(0);
+  await expect(page.getByText("This is temporarily unavailable. Try again shortly.")).toHaveCount(0);
 });
 
 test("protected access uses app enrollment while legacy downloads respect date boundaries", async ({ page }, testInfo) => {
