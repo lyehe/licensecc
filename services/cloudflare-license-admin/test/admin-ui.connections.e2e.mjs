@@ -197,3 +197,33 @@ test("admin connections report no refused connections when this list's licenses 
   const f=fixture();f.behavior.denied=[];await open(page,f);
   await expect(region(page)).toContainText("No refused connections in this list's licenses.");
 });
+
+// A disclosure's open/closed state must stay visible: either the native marker (the browser's own
+// triangle, which requires the default `display: list-item`) or an explicit indicator element such
+// as "More actions"' own `.actionChevron`. 'History' and 'Connection details' are plain disclosures
+// with no indicator of their own, so they depend entirely on the native marker.
+async function summariesShowIndicatorAndSize(scope){
+  const summaries=scope.locator('summary:visible');
+  const count=await summaries.count();
+  expect(count,'at least one visible summary is expected here').toBeGreaterThan(0);
+  for(let index=0;index<count;index+=1){
+    const summary=summaries.nth(index);
+    const box=await summary.boundingBox();
+    expect(box,`visible summary ${index} must report a bounding box`).not.toBeNull();
+    expect(box.width,`summary ${index} must be at least 24px wide`).toBeGreaterThanOrEqual(24);
+    expect(box.height,`summary ${index} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
+    const hasNativeMarker=await summary.evaluate((element)=>{
+      const style=window.getComputedStyle(element);
+      return style.display==='list-item' && style.listStyleType!=='none';
+    });
+    const hasExplicitIndicator=(await summary.locator('.actionChevron, [data-disclosure-indicator]').count())>0;
+    const label=await summary.textContent();
+    expect(hasNativeMarker||hasExplicitIndicator,`summary "${label}" (index ${index}) must show an open/closed indicator`).toBe(true);
+  }
+}
+
+test("admin connections' History and Connection details disclosures show their open/closed state",async({page})=>{
+  const f=fixture();await open(page,f);
+  await expect(region(page)).toContainText('Design workstation');
+  await summariesShowIndicatorAndSize(region(page));
+});

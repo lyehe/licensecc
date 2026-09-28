@@ -447,3 +447,51 @@ test("checkboxes and disclosure summaries meet the minimum touch target on Overv
     expect(box.height, `summary ${index} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
   }
 });
+
+// A disclosure's open/closed state must stay visible: either the native marker (the browser's own
+// triangle, which requires the default `display: list-item`) or an explicit indicator element such
+// as "More actions"' own `.actionChevron`. Losing both leaves a control that looks unclickable.
+async function summariesShowIndicatorAndSize(page) {
+  const summaries = page.locator("summary:visible");
+  const count = await summaries.count();
+  expect(count, "at least one visible summary is expected here").toBeGreaterThan(0);
+  for (let index = 0; index < count; index += 1) {
+    const summary = summaries.nth(index);
+    const box = await summary.boundingBox();
+    expect(box, `visible summary ${index} must report a bounding box`).not.toBeNull();
+    expect(box.width, `summary ${index} must be at least 24px wide`).toBeGreaterThanOrEqual(24);
+    expect(box.height, `summary ${index} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
+    const hasNativeMarker = await summary.evaluate((element) => {
+      const style = window.getComputedStyle(element);
+      return style.display === "list-item" && style.listStyleType !== "none";
+    });
+    const hasExplicitIndicator = (await summary.locator(".actionChevron, [data-disclosure-indicator]").count()) > 0;
+    const label = await summary.textContent();
+    expect(hasNativeMarker || hasExplicitIndicator, `summary "${label}" (index ${index}) must show an open/closed indicator`).toBe(true);
+  }
+}
+
+test("disclosure summaries show their open/closed state on Overview, Entitlements, and Webhooks", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlements(3);
+  const webhook = api.seed.webhook();
+  api.behavior.webhookTestResponses.push({ status: 200, body: { ok: true, code: "webhook_test_sent", request_id: "ui-e2e-indicator-check", data: { status_class: "2xx" } } });
+  await page.route("**/api/admin/**", api.route);
+  await page.route("**/api/admin/summary", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ ok: false, code: "summary_unavailable", request_id: "ui-e2e-overview-tech-details" }) });
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  await page.goto("/#/overview");
+  await expect(page.getByRole("alert")).toContainText("Could not load");
+  await summariesShowIndicatorAndSize(page);
+
+  await page.goto("/#/entitlements");
+  await summariesShowIndicatorAndSize(page);
+
+  await page.goto("/#/webhooks");
+  await page.getByRole("row").filter({ hasText: webhook.url }).getByRole("button", { name: "Send test event", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: `Test event to ${webhook.url}` })).toBeVisible();
+  await summariesShowIndicatorAndSize(page);
+});
