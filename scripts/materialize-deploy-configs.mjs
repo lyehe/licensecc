@@ -376,6 +376,10 @@ function validateBackend(config, target, profile, profileName) {
   if (!Number.isInteger(simple.limit) || simple.limit < 1 || !Number.isInteger(simple.period) || simple.period < 1) fail(target, "must set positive integer rate-limit values");
   validateCronList(config, target, "seat-reclamation");
   if (config.assets !== undefined) fail(target, "must not define static assets for the backend");
+  const flags = config.compatibility_flags;
+  if (!Array.isArray(flags) || !flags.includes("global_fetch_strictly_public") || flags.includes("global_fetch_private_origin")) {
+    fail(target, "must enable compatibility flag global_fetch_strictly_public so webhook fetches cannot reach this zone's origin directly");
+  }
   return { databaseId, origin: validateRouting(config, target, profileName) };
 }
 

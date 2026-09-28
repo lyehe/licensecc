@@ -1,6 +1,7 @@
 name = "licensecc-online-verifier"
 main = "src/index.ts"
 compatibility_date = "2026-06-03"
+compatibility_flags = ["global_fetch_strictly_public"]
 workers_dev = true
 preview_urls = false
 

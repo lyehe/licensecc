@@ -28,7 +28,7 @@ async function bundle(relativePath) {
 test("the admin Worker sends a signed test event through the backend WebhookOperator entrypoint", async (t) => {
   const [backend, admin] = await Promise.all([bundle("../../src/index.ts"), bundle("../../../cloudflare-license-admin/src/worker/index.ts")]);
   const mf = new Miniflare(convertV4MiniflareOptions({ workers: [
-    { name: "backend", modules: true, script: backend, compatibilityDate: "2026-08-01", d1Databases: { DB: "hooks" }, outboundService: "receiver",
+    { name: "backend", modules: true, script: backend, compatibilityDate: "2026-08-01", compatibilityFlags: ["global_fetch_strictly_public"], d1Databases: { DB: "hooks" }, outboundService: "receiver",
       bindings: { WEBHOOK_SIGNING_SECRETS: SECRETS, WEBHOOK_SIGNING_KEY_ID: "hooks" } },
     // Test-only receiver: records every request it is sent, then answers by path.
     { name: "receiver", modules: true, compatibilityDate: "2026-08-01", d1Databases: { DB: "hooks" },

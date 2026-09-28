@@ -156,6 +156,12 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   entitlement/customer/order set with `400 invalid_event_types`
   (`data.allowed` lists the grouped allow-list), instead of accepting a
   placeholder value that never matches a delivery (remediation).
+- The backend Worker must now deploy with `compatibility_flags =
+  ["global_fetch_strictly_public"]`, so an outbound webhook `fetch` to a URL on
+  the deployment's own zone always goes through Cloudflare's front door instead
+  of reaching the zone's origin server directly; the deploy-config materializer
+  refuses a backend config that omits the flag. Operators must update the
+  base64 backend config secret before the next deploy.
 
 ### Upgrade notes
 - Existing Linux build trees that cached `LCC_ENABLE_LINUX_DESKTOP=ON` without

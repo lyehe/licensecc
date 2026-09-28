@@ -325,6 +325,17 @@ the environment-specific `ORDER_INGEST_AUDIENCE`, and requires a structured
 bounded output. Only secret names are parsed; secret values, Wrangler
 diagnostics, the account, and the Worker target are never emitted.
 
+The deployed backend config must also set `compatibility_flags =
+["global_fetch_strictly_public"]`. Without it, a `fetch` call from the backend
+Worker to a URL on the deployment's own zone (for example an operator-configured
+webhook pointed at its own domain) reaches the zone's origin server directly and
+bypasses Cloudflare security settings instead of going through the front door.
+The materializer refuses to write a backend config that omits this flag or that
+also sets `global_fetch_private_origin`. Update the base64
+`LICENSECC_BACKEND_WRANGLER_CONFIG_B64` secret to include the flag before the
+next deploy; an unmigrated existing config now fails materialization instead of
+deploying silently.
+
 The required deployed secret names are:
 
 - `ACCOUNT_TOKEN_PEPPERS`
