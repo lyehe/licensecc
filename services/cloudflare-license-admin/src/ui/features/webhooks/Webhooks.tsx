@@ -41,7 +41,7 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
   const [webhookDeliveryFilter, setWebhookDeliveryFilter] = useState<WebhookDeliveryFilter>({ endpoint_id: "", status: "" });
   // The latest "Send test event" result, keyed by a counter so each new result renders collapsed.
   const [testResult, setTestResult] = useState<(WebhookTestOutcome & { url: string; key: number }) | null>(null);
-  const { busy: requestBusy, operationLocked, currentReason, requestConfirm, runConsequenceAction, runKeyedMutation, runMutation, setFeedback, setReason } = useOperatorControls();
+  const { busy: requestBusy, operationLocked, currentReason, requestConfirm, runConsequenceAction, runKeyedMutation, runMutation, setFeedback, setMessage, setReason } = useOperatorControls();
   const busy = requestBusy || operationLocked;
   const { routeVersion } = useAdminNavigation();
   const formFeedback = useFormFeedback(WEBHOOK_FORM, routeVersion);
@@ -245,6 +245,13 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
       body = normalizeWebhookPatch(webhookForm, baseline);
     } catch (error) {
       formFeedback.show(validationCode(error), null, webhookFieldForCode);
+      return;
+    }
+    // Nothing differs from the loaded endpoint: an empty PATCH would still bump updated_at and
+    // reorder the endpoint list, so nothing is sent.
+    if (Object.keys(body).length === 0) {
+      closeEditor();
+      setMessage("No changes to save.");
       return;
     }
     formFeedback.clear();
