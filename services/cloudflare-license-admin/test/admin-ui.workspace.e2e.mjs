@@ -20,6 +20,58 @@ async function expectDocumentFitsViewport(page) {
   expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
 }
 
+test("a feature that fails to render shows a local fallback and leaves the console usable", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  // The default fixture starts with no events (`addEvent` only fires from a mutating request), so
+  // Events would render zero rows and never call formatEpoch. This override supplies one row so the
+  // Events tab genuinely renders a timestamp through formatEpoch -> Date#toLocaleString.
+  await page.route("**/api/admin/events*", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(makeEnvelope("events_listed", {
+        items: [{
+          id: 1,
+          event_type: "create",
+          project: "CAD",
+          feature: "render",
+          license_fingerprint: "a".repeat(64),
+          request_id: "ui-e2e-workspace-boundary-event",
+          status: "active",
+          source: "admin",
+          actor: "admin@example.com",
+          actor_type: "access",
+          revocation_seq: 1,
+          detail: "",
+          created_at: 1_760_000_000,
+          reason: "",
+        }],
+        next_cursor: null,
+      })),
+    });
+  });
+  await page.addInitScript(() => {
+    const original = Date.prototype.toLocaleString;
+    Date.prototype.toLocaleString = function (...args) {
+      if (globalThis.__lccFailLocaleRender === true) throw new Error("injected render failure");
+      return original.apply(this, args);
+    };
+  });
+  await page.goto("/");
+  await page.evaluate(() => { globalThis.__lccFailLocaleRender = true; });
+  // A hash-only navigation is a same-document navigation here (the router listens for
+  // "hashchange"; nothing forces a reload), so the flag set above survives this goto.
+  await page.goto("/#/events");
+  const fallback = page.getByRole("alert").filter({ hasText: "This page could not be shown" });
+  await expect(fallback).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reload the page" })).toBeVisible();
+  await page.evaluate(() => { globalThis.__lccFailLocaleRender = false; });
+  await page.getByRole("link", { name: "Overview", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+  await expect(fallback).toHaveCount(0);
+});
+
 test("admin adds a portal user and reconciles a lost creation response without duplicating the account", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
