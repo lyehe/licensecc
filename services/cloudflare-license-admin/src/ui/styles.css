@@ -47,19 +47,7 @@ button.danger:hover:not(:disabled) {
   color: var(--canvas);
 }
 
-/* Typed-confirm modal for irreversible / broad-blast actions. */
-.modalOverlay {
-  align-items: center;
-  background: rgba(27, 31, 35, 0.45);
-  display: flex;
-  inset: 0;
-  justify-content: center;
-  overflow: auto;
-  padding: 16px;
-  position: fixed;
-  z-index: 50;
-}
-
+/* Typed-confirm modal for irreversible / broad-blast actions (native <dialog>). */
 .modal {
   background: var(--surface);
   border-radius: 6px;
@@ -187,11 +175,6 @@ button.danger:hover:not(:disabled) {
 }
 
 @media (max-width: 520px) {
-  .modalOverlay {
-    align-items: flex-start;
-    padding: 8px;
-  }
-
   .modal {
     max-height: calc(100% - 16px);
   }

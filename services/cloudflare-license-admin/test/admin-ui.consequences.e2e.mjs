@@ -312,40 +312,6 @@ test("admin UI consequence dialogs contain focus, isolate the background, and re
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 });
 
-test("admin UI fallback consequence dialogs keep the background inert", async ({ page }) => {
-  await page.addInitScript(() => {
-    try {
-      Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value: undefined });
-    } catch {
-      HTMLDialogElement.prototype.showModal = undefined;
-    }
-  });
-  const api = makeAdminApiFixture();
-  await page.route("**/api/admin/**", api.route);
-  await page.goto("/");
-  await page.getByRole("link", { name: "License access", exact: true }).click();
-  if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
-  const createForm = page.locator(".editorLayout form");
-  await createForm.getByLabel("Project").fill("fallback");
-  await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
-  await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
-
-  const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
-  await revealAction(trigger);
-  await trigger.focus();
-  await clickAction(trigger);
-  const dialog = page.getByRole("dialog");
-  await expect(page.locator(".modalOverlay")).toBeVisible();
-  await expect(page.locator("main")).toHaveAttribute("inert", "");
-  await expect(dialog.getByLabel("Reason (required)")).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(dialog).toHaveCount(0);
-  await expect(trigger).toBeFocused();
-  await expect(page.locator("main")).not.toHaveAttribute("inert", "");
-});
-
 test("admin UI typed failures keep consequence dialogs open and restore focus", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);

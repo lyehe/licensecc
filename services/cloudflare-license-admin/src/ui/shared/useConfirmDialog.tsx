@@ -11,13 +11,9 @@ import type { ActionNotice, ActionNoticeControls } from "./useActionNotice";
 
 /*
  * The shared confirmation dialog: its state, its reason field, focus
- * management while it is open and after it closes, and its render. Browsers
- * without a native <dialog> get an equivalent non-native modal.
+ * management while it is open and after it closes, and its render. It
+ * requires a native <dialog> element (current evergreen browsers).
  */
-
-function supportsNativeDialog(): boolean {
-  return typeof HTMLDialogElement !== "undefined" && typeof HTMLDialogElement.prototype.showModal === "function";
-}
 
 export interface ConfirmDialogDependencies {
   gate: OperationGate;
@@ -33,7 +29,7 @@ export interface ConfirmDialogControls {
   modalActive: boolean;
   confirmActionRef: RefObject<ConfirmAction | null>;
   /** The dialog element, rendered after the provider's children. */
-  dialog: React.ReactElement;
+  dialog: React.ReactElement | null;
 }
 
 export function useConfirmDialog({ gate, focus, notice }: ConfirmDialogDependencies): ConfirmDialogControls {
@@ -48,14 +44,11 @@ export function useConfirmDialog({ gate, focus, notice }: ConfirmDialogDependenc
   const [confirmPending, setConfirmPending] = useState(false);
   const [confirmError, setConfirmError] = useState<Pick<OperatorFeedback, "message" | "detail"> | null>(null);
   const [confirmUnknown, setConfirmUnknown] = useState(false);
-  const [nativeDialogEnabled, setNativeDialogEnabled] = useState(supportsNativeDialog);
   const confirmId = useId().replace(/:/g, "-");
   const titleId = `confirm-title-${confirmId}`;
   const descriptionId = `confirm-description-${confirmId}`;
   const errorId = `confirm-error-${confirmId}`;
   const nativeDialogRef = useRef<HTMLDialogElement | null>(null);
-  const fallbackOverlayRef = useRef<HTMLDivElement | null>(null);
-  const fallbackDialogRef = useRef<HTMLDivElement | null>(null);
   const reasonInputRef = useRef<HTMLInputElement | null>(null);
   const typedConfirmationInputRef = useRef<HTMLInputElement | null>(null);
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -220,35 +213,29 @@ export function useConfirmDialog({ gate, focus, notice }: ConfirmDialogDependenc
     if (confirmAction === null || !confirmPending) {
       return;
     }
-    const dialog = nativeDialogEnabled ? nativeDialogRef.current : fallbackDialogRef.current;
+    const dialog = nativeDialogRef.current;
     if (dialog !== null) {
       focusSoon(confirmButtonRef.current ?? dialog);
     }
-  }, [confirmAction, confirmPending, focusSoon, nativeDialogEnabled]);
+  }, [confirmAction, confirmPending, focusSoon]);
 
   useLayoutEffect(() => {
     if (confirmAction === null) {
       return;
     }
-    const dialog = nativeDialogEnabled ? nativeDialogRef.current : fallbackDialogRef.current;
-    const modalContainer = nativeDialogEnabled ? nativeDialogRef.current : fallbackOverlayRef.current;
-    if (dialog === null || modalContainer === null) {
+    const dialog = nativeDialogRef.current;
+    if (dialog === null) {
       return;
     }
-    if (nativeDialogEnabled && nativeDialogRef.current !== null && !nativeDialogRef.current.open) {
-      try {
-        nativeDialogRef.current.showModal();
-      } catch {
-        setNativeDialogEnabled(false);
-        return;
-      }
+    if (!dialog.open) {
+      dialog.showModal();
     }
 
-    const backgroundRoot = modalContainer.parentElement;
+    const backgroundRoot = dialog.parentElement;
     const backgroundElements = backgroundRoot === null
       ? []
       : Array.from(backgroundRoot.children)
-        .filter((element) => element !== modalContainer)
+        .filter((element) => element !== dialog)
         .map((element) => element as HTMLElement);
     const previousBackgroundState = backgroundElements.map((element) => ({
       element,
@@ -274,18 +261,18 @@ export function useConfirmDialog({ gate, focus, notice }: ConfirmDialogDependenc
           previous.element.setAttribute("aria-hidden", previous.ariaHidden);
         }
       }
-      if (nativeDialogEnabled && dialog instanceof HTMLDialogElement && dialog.open) {
+      if (dialog.open) {
         dialog.close();
       }
     };
-  }, [confirmAction, focusSoon, nativeDialogEnabled]);
+  }, [confirmAction, focusSoon]);
 
   useEffect(() => {
     if (confirmAction === null) {
       return;
     }
     const onKey = (event: KeyboardEvent): void => {
-      const dialog = nativeDialogEnabled ? nativeDialogRef.current : fallbackDialogRef.current;
+      const dialog = nativeDialogRef.current;
       if (dialog === null) {
         return;
       }
@@ -319,7 +306,7 @@ export function useConfirmDialog({ gate, focus, notice }: ConfirmDialogDependenc
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [confirmAction, dismissConfirm, nativeDialogEnabled]);
+  }, [confirmAction, dismissConfirm]);
 
   const modalContent = confirmAction === null ? null : (
     <div className="modalSurface" onClick={(event) => event.stopPropagation()}>
@@ -362,39 +349,28 @@ export function useConfirmDialog({ gate, focus, notice }: ConfirmDialogDependenc
     </div>
   );
 
-  const dialog = (
-    <>
-      {confirmAction !== null && nativeDialogEnabled && (
-        <dialog
-          ref={nativeDialogRef}
-          className="modal danger"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby={titleId}
-          aria-describedby={confirmError === null ? descriptionId : `${descriptionId} ${errorId}`}
-          aria-busy={confirmPending && !confirmAction.keepDialogLive}
-          tabIndex={-1}
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              dismissConfirm();
-            }
-          }}
-          onCancel={(event) => {
-            event.preventDefault();
-            dismissConfirm();
-          }}
-        >
-          {modalContent}
-        </dialog>
-      )}
-      {confirmAction !== null && !nativeDialogEnabled && (
-        <div ref={fallbackOverlayRef} className="modalOverlay" role="presentation" onClick={dismissConfirm}>
-          <div ref={fallbackDialogRef} className="modal danger" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={confirmError === null ? descriptionId : `${descriptionId} ${errorId}`} aria-busy={confirmPending && !confirmAction.keepDialogLive} tabIndex={-1} onClick={(event) => event.stopPropagation()}>
-            {modalContent}
-          </div>
-        </div>
-      )}
-    </>
+  const dialog = confirmAction === null ? null : (
+    <dialog
+      ref={nativeDialogRef}
+      className="modal danger"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-describedby={confirmError === null ? descriptionId : `${descriptionId} ${errorId}`}
+      aria-busy={confirmPending && !confirmAction.keepDialogLive}
+      tabIndex={-1}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          dismissConfirm();
+        }
+      }}
+      onCancel={(event) => {
+        event.preventDefault();
+        dismissConfirm();
+      }}
+    >
+      {modalContent}
+    </dialog>
   );
 
   return { reason, setReason, currentReason, requestConfirm, modalActive: confirmAction !== null, confirmActionRef, dialog };

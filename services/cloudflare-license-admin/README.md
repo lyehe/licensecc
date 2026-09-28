@@ -6,6 +6,9 @@ verification entitlements stored in the shared D1 database.
 **Audience:** contributors and authorized operators of the hosted control
 plane. It is not required for offline native licensing.
 
+**Supported browsers:** current evergreen browsers (native `<dialog>`
+required).
+
 | Goal | Start here | Side effects |
 | --- | --- | --- |
 | Validate code locally | [Local validation](#local-validation) | Local build/test output and a disposable local D1 database |
