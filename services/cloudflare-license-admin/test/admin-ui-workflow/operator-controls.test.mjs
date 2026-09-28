@@ -136,9 +136,12 @@ test("useActionNotice publishes generations, locks the gate while recoverable an
   const refreshOnly = renderPublished({ message: hooks.CONFIRM_REFRESH_FAILURE_MESSAGE, manualRefresh: { label: "Refresh status", run: async () => "applied" }, focusTarget: noFocus, dismissible: false });
   assert.equal(refreshOnly.actionNotice.unresolvedKey, undefined);
   assert.equal(refreshOnly.operationLocked, true, "a status-refresh control alone still locks operations");
+  assert.equal(refreshOnly.operationRetained, true, "a status-refresh control retains the operation");
   const informational = renderPublished({ message: "action_failed", focusTarget: noFocus, dismissible: true });
   assert.equal(informational.actionNotice.message, "action_failed");
-  assert.equal(informational.operationLocked, false, "a plain dismissible notice does not lock operations");
+  // Until it is acknowledged the notice holds the operation slot, so other actions must look unavailable.
+  assert.equal(informational.operationLocked, true, "a dismissible notice shows other operations as locked");
+  assert.equal(informational.operationRetained, false, "a dismissible notice retains no recovery");
 });
 
 test("useKeyedMutation retains an unknown outcome under its key and reconciles by replaying that exact request", async () => {
