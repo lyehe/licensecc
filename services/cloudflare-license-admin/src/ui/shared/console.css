@@ -4,6 +4,9 @@
   --canvas: #0f0f0f; --surface: #161616; --ink: #e8e8e8; --muted: #a8a8a8;
   --border: #2a2a2a; --accent: #b8b8b8; --accent-soft: #242424;
   --danger: #db9292; --radius: 6px;
+  --status-ok-bg: #203020; --status-ok-ink: #9bc49b;
+  --status-warn-bg: #302a20; --status-warn-ink: #d6b783;
+  --status-danger-bg: #302020; --status-danger-ink: #db9292;
   --font-ui: "IBM Plex Sans", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --text-small: 12px; --text-body: 14px; --text-section: 16px; --text-display: 24px;
   --weight-normal: 400; --weight-strong: 600;
@@ -88,8 +91,8 @@ fieldset:disabled { opacity: .75; }
 .searchResult { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; padding: 10px; text-decoration: none; border-radius: 4px; }
 .searchResult:hover { background: var(--accent-soft); }
 .searchResultMeta { flex-shrink: 1; overflow-wrap: anywhere; }
-.activityMessage[data-tone="error"] { background: #302020; color: #db9292; border-color: #714848; }
-.activityMessage[data-tone="success"] { background: #242424; color: #9bc49b; }
+.activityMessage[data-tone="error"] { background: var(--status-danger-bg); color: var(--status-danger-ink); border-color: #714848; }
+.activityMessage[data-tone="success"] { background: #242424; color: var(--status-ok-ink); }
 .listPage, .recordDetail, .workspace { display: grid; gap: 24px; min-width: 0; }
 .workspace { grid-template-columns: minmax(0, 1fr); padding: 0; }
 .listStatusHeader { display: none; }
@@ -152,9 +155,9 @@ pre, pre code { font-family: ui-monospace, Consolas, monospace; font-size: var(-
 .recordCard h3 { font-size: var(--text-body); }
 .muted { color: var(--muted); }
 .status { white-space: nowrap; border-radius: 999px; display: inline-block; padding: 3px 9px; font-size: var(--text-small); text-align: center; text-transform: capitalize; }
-.status.active { background: #203020; color: #9bc49b; }
-.status.disabled { background: #302a20; color: #d6b783; }
-.status.revoked { background: #302020; color: #db9292; }
+.status.active { background: var(--status-ok-bg); color: var(--status-ok-ink); }
+.status.disabled { background: var(--status-warn-bg); color: var(--status-warn-ink); }
+.status.revoked { background: var(--status-danger-bg); color: var(--status-danger-ink); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .statusActions { display: inline-flex; vertical-align: middle; }
 .statusActions[data-status="active"] [data-focus-action="reenable"], .statusActions[data-status="disabled"] .danger { display: none; }
@@ -171,8 +174,8 @@ pre, pre code { font-family: ui-monospace, Consolas, monospace; font-size: var(-
 .activitySummary .fulfillmentSpark, .chartPanels { margin: 16px 0 0; padding: 0; }
 .trialPanel { grid-column: 1 / -1; }
 .selectedRow td { background: #242424; }
-.staleRow td { background: #302020; }
-.staleFlag { color: #db9292; background: #302020; padding: 3px 8px; border-radius: 999px; font-size: var(--text-small); }
+.staleRow td { background: var(--status-danger-bg); }
+.staleFlag { color: var(--status-danger-ink); background: var(--status-danger-bg); padding: 3px 8px; border-radius: 999px; font-size: var(--text-small); }
 .reason { margin-top: 16px; max-width: 480px; }
 .typedConfirmation { margin-top: 16px; max-width: 480px; }
 .reasonPresets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -188,8 +191,8 @@ pre, pre code { font-family: ui-monospace, Consolas, monospace; font-size: var(-
 .metrics p { font-size: var(--text-small); margin-top: 8px; }
 .metrics.reportCards { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); padding: 0; }
 .activityMessage, .readState { padding: 12px 16px; border: 1px solid var(--border); border-radius: 6px; background: #1e1e1e; color: #a8a8a8; margin-bottom: 16px; overflow-wrap: anywhere; }
-.activityMessage.success { background: #242424; color: #9bc49b; }
-.activityMessage.error, .readState.error { background: #302020; color: #db9292; border-color: #714848; }
+.activityMessage.success { background: #242424; color: var(--status-ok-ink); }
+.activityMessage.error, .readState.error { background: var(--status-danger-bg); color: var(--status-danger-ink); border-color: #714848; }
 .readState { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .singleRecordBanner { padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 12px; }
 .emptyState { padding: 32px 16px; text-align: center; color: var(--muted); }
@@ -256,4 +259,4 @@ pre, pre code { font-family: ui-monospace, Consolas, monospace; font-size: var(-
 .operatorNotice .noticeMessage { flex: 1 1 260px; overflow-wrap: anywhere; }
 .fieldError { display: block; color: var(--danger); font-size: var(--text-small); }
 .formStatus { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: #1e1e1e; color: var(--muted); margin: 8px 0; }
-.formStatus[data-tone="error"] { background: #302020; color: var(--danger); border-color: #714848; }
+.formStatus[data-tone="error"] { background: var(--status-danger-bg); color: var(--danger); border-color: #714848; }

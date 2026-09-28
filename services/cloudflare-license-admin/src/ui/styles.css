@@ -38,12 +38,12 @@ label.checkboxRow input {
 /* Destructive action buttons (Revoke entitlement, Disable customer, modal Confirm). */
 button.danger {
   border-color: #714848;
-  color: #db9292;
+  color: var(--status-danger-ink);
 }
 
 button.danger:hover:not(:disabled) {
-  background: #db9292;
-  border-color: #db9292;
+  background: var(--status-danger-ink);
+  border-color: var(--status-danger-ink);
   color: #0f0f0f;
 }
 
@@ -79,7 +79,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .modal.danger {
-  border-top: 4px solid #db9292;
+  border-top: 4px solid var(--status-danger-ink);
 }
 
 .modalSurface {
@@ -139,9 +139,9 @@ button.danger:hover:not(:disabled) {
 }
 
 .modal .modalError {
-  background: #302020;
-  border-left: 3px solid #db9292;
-  color: #db9292;
+  background: var(--status-danger-bg);
+  border-left: 3px solid var(--status-danger-ink);
+  color: var(--status-danger-ink);
   padding: 8px 10px;
 }
 
@@ -165,7 +165,7 @@ button.danger:hover:not(:disabled) {
 
 .operatorNotice {
   align-items: center;
-  background: #302a20;
+  background: var(--status-warn-bg);
   border: 1px solid #76613d;
   border-radius: 4px;
   box-shadow: 0 6px 20px rgba(27, 31, 35, 0.18);
@@ -372,20 +372,20 @@ button.danger:hover:not(:disabled) {
 }
 
 .checkoutsLine {
-  stroke: #9bc49b;
+  stroke: var(--status-ok-ink);
 }
 
 .denialsLine {
-  stroke: #db9292;
+  stroke: var(--status-danger-ink);
   stroke-dasharray: 4 3;
 }
 
 .denialRateLine {
-  stroke: #d6b783;
+  stroke: var(--status-warn-ink);
 }
 
 .chartBar {
-  fill: #9bc49b;
+  fill: var(--status-ok-ink);
 }
 
 /* Legend chips beneath the line/area chart. */
@@ -411,11 +411,11 @@ button.danger:hover:not(:disabled) {
 }
 
 .checkoutsLegend::before {
-  background: #9bc49b;
+  background: var(--status-ok-ink);
 }
 
 .denialsLegend::before {
-  background: #db9292;
+  background: var(--status-danger-ink);
 }
 
 .fulfillmentSpark {
@@ -433,7 +433,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .expiringSoonRow td {
-  background: #302a20;
+  background: var(--status-warn-bg);
 }
 
 .daysLeft {
@@ -446,8 +446,8 @@ button.danger:hover:not(:disabled) {
 }
 
 .daysLeft.urgent {
-  background: #302a20;
-  color: #d6b783;
+  background: var(--status-warn-bg);
+  color: var(--status-warn-ink);
 }
 
 /* Entitlement-health badge next to the status pill. Reuses the .status palette
@@ -463,19 +463,19 @@ button.danger:hover:not(:disabled) {
 }
 
 .health-healthy {
-  background: #203020;
-  color: #9bc49b;
+  background: var(--status-ok-bg);
+  color: var(--status-ok-ink);
 }
 
 .health-expiring {
-  background: #302a20;
-  color: #d6b783;
+  background: var(--status-warn-bg);
+  color: var(--status-warn-ink);
 }
 
 .health-expired,
 .health-suspended {
-  background: #302020;
-  color: #db9292;
+  background: var(--status-danger-bg);
+  color: var(--status-danger-ink);
 }
 
 @media (max-width: 920px) {

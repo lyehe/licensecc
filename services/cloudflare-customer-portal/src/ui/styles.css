@@ -7,13 +7,32 @@
 }
 
 :root {
-  color-scheme:dark;
-  color:#e8e8e8;
-  background:#0f0f0f;
-  font:400 14px/1.5 "IBM Plex Sans",system-ui,sans-serif;
+  --canvas:#0f0f0f;
   --surface:#161616;
+  --ink:#e8e8e8;
+  --muted:#a8a8a8;
   --border:#2a2a2a;
-  --muted:#a8a8a8
+  --accent:#b8b8b8;
+  --accent-soft:#242424;
+  --danger:#db9292;
+  --radius:6px;
+  --status-ok-bg:#203020;
+  --status-ok-ink:#9bc49b;
+  --status-warn-bg:#302a20;
+  --status-warn-ink:#d6b783;
+  --status-danger-bg:#302020;
+  --status-danger-ink:#db9292;
+  --font-ui:"IBM Plex Sans", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --text-small:12px;
+  --text-body:14px;
+  --text-section:16px;
+  --text-display:24px;
+  --weight-normal:400;
+  --weight-strong:600;
+  color-scheme:dark;
+  color:var(--ink);
+  background:var(--canvas);
+  font:var(--weight-normal) var(--text-body)/1.5 var(--font-ui)
 }
 
 * {
@@ -33,15 +52,15 @@ h1,h2,h3,p {
 }
 
 h1 {
-  font-size:24px;
+  font-size:var(--text-display);
   line-height:1.25;
-  font-weight:600;
+  font-weight:var(--weight-strong);
   overflow-wrap:anywhere
 }
 
 h2,h3 {
-  font-size:16px;
-  font-weight:600
+  font-size:var(--text-section);
+  font-weight:var(--weight-strong)
 }
 
 p {
@@ -50,7 +69,7 @@ p {
 }
 
 strong,b {
-  font-weight:600
+  font-weight:var(--weight-strong)
 }
 
 a {
@@ -68,7 +87,7 @@ button,.button {
   justify-content:center;
   min-height:44px;
   padding:10px 12px;
-  color:#e8e8e8;
+  color:var(--ink);
   background:var(--surface);
   border:1px solid #747474;
   border-radius:4px;
@@ -81,10 +100,10 @@ button:hover:not(:disabled),.button:hover {
 }
 
 button.primary {
-  background:#b8b8b8;
-  border-color:#b8b8b8;
+  background:var(--accent);
+  border-color:var(--accent);
   color:#161616;
-  font-weight:600
+  font-weight:var(--weight-strong)
 }
 
 button.primary:hover:not(:disabled){background:#d4d4d4;border-color:#d4d4d4}
@@ -119,8 +138,8 @@ button:disabled {
   display:inline-flex;
   gap:10px;
   align-items:center;
-  font-size:16px;
-  font-weight:600;
+  font-size:var(--text-section);
+  font-weight:var(--weight-strong);
   text-decoration:none
 }
 
@@ -129,7 +148,7 @@ button:disabled {
   place-items:center;
   width:30px;
   height:30px;
-  background:#242424;
+  background:var(--accent-soft);
   border:1px solid #3a3a3a;
   border-radius:6px
 }
@@ -162,7 +181,7 @@ nav a {
 nav a[aria-current="page"] {
   background:#242424;
   color:#e8e8e8;
-  font-weight:600
+  font-weight:var(--weight-strong)
 }
 
 nav a:hover {
@@ -211,18 +230,18 @@ nav a:hover {
 /* D5 carried (B3, decision 7): the full-license capacity message reuses this same error colour for
    clear emphasis, rather than adding a second literal for the same tone. */
 .statusline.error,.consentCapacity p {
-  color:#db9292
+  color:var(--danger)
 }
 
 .statusline small {
   display:block;
-  font-size:12px;
+  font-size:var(--text-small);
   color:var(--muted)
 }
 
 .appList {
   border:1px solid var(--border);
-  border-radius:6px;
+  border-radius:var(--radius);
   background:var(--surface)
 }
 
@@ -244,10 +263,10 @@ nav a:hover {
   place-items:center;
   width:40px;
   height:40px;
-  background:#242424;
+  background:var(--accent-soft);
   border-radius:6px;
-  font-size:16px;
-  font-weight:600
+  font-size:var(--text-section);
+  font-weight:var(--weight-strong)
 }
 
 .appIdentity {
@@ -270,7 +289,7 @@ nav a:hover {
   min-width:0;
   background:var(--surface);
   border:1px solid var(--border);
-  border-radius:6px;
+  border-radius:var(--radius);
   padding:24px
 }
 
@@ -294,7 +313,7 @@ nav a:hover {
   padding:40px 24px;
   border:1px solid var(--border);
   background:var(--surface);
-  border-radius:6px
+  border-radius:var(--radius)
 }
 
 .emptyState>button {
@@ -345,7 +364,7 @@ input,select,textarea {
   padding:10px 12px;
   border:1px solid #747474;
   border-radius:4px;
-  color:#e8e8e8;
+  color:var(--ink);
   background:#1a1a1a
 }
 
@@ -370,7 +389,7 @@ th,td {
 
 th {
   color:var(--muted);
-  font-weight:400;
+  font-weight:var(--weight-normal);
   background:#1a1a1a
 }
 
@@ -396,20 +415,20 @@ code {
 }
 
 .status.active {
-  background:#203026;
-  color:#9bc49b
+  background:var(--status-ok-bg);
+  color:var(--status-ok-ink)
 }
 
 .status.disabled,
 .status.not_started {
-  background:#30291f;
-  color:#d6b783
+  background:var(--status-warn-bg);
+  color:var(--status-warn-ink)
 }
 
 .status.revoked,
 .status.expired {
-  background:#302020;
-  color:#db9292
+  background:var(--status-danger-bg);
+  color:var(--status-danger-ink)
 }
 
 .actions {
@@ -432,7 +451,7 @@ code {
 .seatCard {
   background:var(--surface);
   border:1px solid var(--border);
-  border-radius:6px;
+  border-radius:var(--radius);
   padding:20px;
   display:grid;
   gap:16px;
@@ -467,7 +486,7 @@ code {
 .authCard {
   background:var(--surface);
   border:1px solid var(--border);
-  border-radius:6px;
+  border-radius:var(--radius);
   padding:32px
 }
 
@@ -502,9 +521,9 @@ code {
 /* D5 carried (B3, decision 7): not the default muted paragraph colour -- this is live state about the
    chosen license, not secondary copy. */
 .consentConnected { color:inherit; }
-.consentComparison { margin:20px 0; padding:16px; background:#0f0f0f; border-radius:8px; text-align:center; }
+.consentComparison { margin:20px 0; padding:16px; background:var(--canvas); border-radius:8px; text-align:center; }
 .consentComparison p { margin:0 0 10px; }
-.consentComparison .consentCode { margin:8px 0 12px; color:inherit; font-size:clamp(20px,5vw,28px); font-weight:600; letter-spacing:.06em; font-variant-numeric:tabular-nums; }
+.consentComparison .consentCode { margin:8px 0 12px; color:inherit; font-size:clamp(20px,5vw,28px); font-weight:var(--weight-strong); letter-spacing:.06em; font-variant-numeric:tabular-nums; }
 .consentConfirm { display:flex; gap:10px; align-items:center; justify-content:center; min-height:44px; cursor:pointer; }
 .consentConfirm input { width:auto; flex:none; margin:4px 0 0; }
 .consentPages { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:16px 0; }
@@ -519,7 +538,7 @@ code {
 .consentAccount { width:min(100%,520px); margin-top:20px; color:var(--muted); overflow-wrap:anywhere; }
 .consentAccount summary,.consentReference summary { cursor:pointer; padding:10px 0; min-height:44px; }
 .consentAccount p { font-size:inherit; }
-.consentEmail { color:#e8e8e8; }
+.consentEmail { color:var(--ink); }
 .consentCard .consentReference { margin-top:0; }
 .consentCard .consentReference summary { padding:4px 0; min-height:44px; }
 .consentCard>.button { display:inline-block; margin-top:20px; }
@@ -529,7 +548,7 @@ code {
   top:-80px;
   left:16px;
   padding:12px;
-  background:#242424;
+  background:var(--accent-soft);
   z-index:60
 }
 
@@ -652,7 +671,7 @@ code {
    ProtectedNodes' own retirement confirm -- one visual treatment for the one native <dialog> pattern. */
 .confirmDialog button.danger { color: #db9292; }
 
-.referenceDetails { margin-top:8px; color:var(--muted); font-size:14px; }
+.referenceDetails { margin-top:8px; color:var(--muted); font-size:var(--text-body); }
 .referenceDetails summary { cursor:pointer; width:fit-content; padding:4px 0; }
 .referenceDetails[open] summary { margin-bottom:8px; }
 .referenceDetails .identifier { display:block; overflow-wrap:anywhere; }
@@ -695,6 +714,6 @@ code {
 
 /* Apps list: an app with an expired, suspended or revoked license. The words carry the meaning; the
    colour only repeats it. */
-.attentionBadge { display:inline-block; border-radius:4px; padding:2px 8px; background:#302020; color:#db9292; }
+.attentionBadge { display:inline-block; border-radius:4px; padding:2px 8px; background:var(--status-danger-bg); color:var(--status-danger-ink); }
 
 @media(min-width:1024px) { .licenseTable th:first-child { width:18%; } .licenseTable th:last-child { width:28%; } .licenseTable td { vertical-align:top; } }
