@@ -16,7 +16,7 @@ import { DEVICE_LIMIT_RULE, ENTITLEMENT_NOT_RELOADED_AFTER_STALE, patchPath } fr
  * limit below its connected devices, and the refusal says how many to disconnect first.
  */
 export function DeviceLimitForm({ item, locked }: { item: EntitlementRecord; locked: boolean }): React.ReactElement {
-  const { busy, operationLocked, runKeyedMutation, setFeedback, setMessage } = useOperatorControls();
+  const { busy, operationLocked, operationRetained, runKeyedMutation, setFeedback, setMessage } = useOperatorControls();
   const { refreshCore } = useCoreRefresh();
   const [draft, setDraft] = useState(item.max_active_devices);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +28,9 @@ export function DeviceLimitForm({ item, locked }: { item: EntitlementRecord; loc
     setDraft((current) => current === shown.current ? item.max_active_devices : current);
     shown.current = item.max_active_devices;
   }, [item.max_active_devices]);
-  useNavigationGuard({ when: !locked && draft !== item.max_active_devices, onDiscard: () => setDraft(item.max_active_devices) });
+  // Guard on the retained flag, not the visible lock: a dismissible notice locks the fieldset but
+  // must not silence an unsaved-change prompt (matches the Entitlements/Catalog guards).
+  useNavigationGuard({ when: !operationRetained && draft !== item.max_active_devices, onDiscard: () => setDraft(item.max_active_devices) });
 
   async function save(event: FormEvent): Promise<void> {
     event.preventDefault();
