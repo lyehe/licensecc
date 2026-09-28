@@ -326,8 +326,9 @@ test("browser Back while a Release seat confirmation is open keeps it usable, an
   await page.getByRole("link", { name: "Devices", exact: true }).click();
   // No live seat and no leftover result, so the section is collapsed again.
   await expect(page.locator("details.browserSessions")).toHaveCount(1);
-  await expect(page.locator(".seatCard").getByText("Seat released.")).toHaveCount(0);
+  await page.getByText("Browser seats", { exact: true }).click();
   await expect(alphaCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
+  await expect(alphaCard.getByRole("status")).toHaveCount(0);
 });
 
 // Fix round 1 (Important): seatMessages/deviceMessages/downloads.messages live one level ABOVE the
@@ -398,7 +399,14 @@ test("leaving and returning to Apps clears a stale license-download result", asy
 // one: the SPA never aborts an in-flight fetch on a hash-route change, so the delayed response's
 // `.then` still runs and would otherwise write straight back into the (already-cleared) map.
 const RACE_DELAY_MS = 1000;
-const RACE_WAIT_MS = 1500;
+
+// The race is over only once the delayed response has arrived AND the action that sent it has
+// finished with it: every action holds the shared busy flag until then, and Sign out is gated on that
+// flag, so it re-enables exactly when the late result would have been written. No fixed sleep.
+async function waitForActionToSettle(page, responsePromise) {
+  await responsePromise;
+  await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeEnabled();
+}
 
 test("a delayed seat-start response that arrives after leaving Devices does not show a stale result, and the real session still exists", async ({ page }) => {
   setup(page, { entitlements: [ENT_ALPHA], checkoutDelayMs: RACE_DELAY_MS });
@@ -408,10 +416,11 @@ test("a delayed seat-start response that arrives after leaving Devices does not 
   const alphaCard = page.locator(".seatCard").filter({ hasText: "alpha" });
 
   // Click Start seat, then leave for Apps immediately -- well before the delayed response arrives.
+  const checkout = page.waitForResponse((response) => response.url().endsWith("/api/portal/checkout"));
   await alphaCard.getByRole("button", { name: "Start seat" }).click();
   await page.getByRole("link", { name: "Apps", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
-  await page.waitForTimeout(RACE_WAIT_MS); // past the delayed response, still on Apps
+  await waitForActionToSettle(page, checkout); // past the delayed response, still on Apps
 
   await page.getByRole("link", { name: "Devices", exact: true }).click();
   await page.getByText("Browser seats", { exact: true }).click();
@@ -434,10 +443,11 @@ test("a delayed, FAILING seat-start response that arrives after leaving Devices 
   await page.getByText("Browser seats", { exact: true }).click();
   const alphaCard = page.locator(".seatCard").filter({ hasText: "alpha" });
 
+  const checkout = page.waitForResponse((response) => response.url().endsWith("/api/portal/checkout"));
   await alphaCard.getByRole("button", { name: "Start seat" }).click();
   await page.getByRole("link", { name: "Apps", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
-  await page.waitForTimeout(RACE_WAIT_MS);
+  await waitForActionToSettle(page, checkout);
 
   await page.getByRole("link", { name: "Devices", exact: true }).click();
   // No session was ever created (the checkout failed) and no message survived the visit, so the panel
@@ -456,6 +466,7 @@ test("a delayed download response that arrives after leaving Apps does not show 
   await page.locator("tr").filter({ has: page.getByLabel("Device key for DEFAULT solo") }).getByText("Activate and download", { exact: true }).click();
   await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
   const downloadPromise = page.waitForEvent("download");
+  const downloadResponse = page.waitForResponse((response) => response.url().endsWith("/api/portal/download"));
   await page.getByRole("button", { name: "Activate and download .lic" }).click();
 
   await page.getByRole("link", { name: "Devices", exact: true }).click();
@@ -463,7 +474,7 @@ test("a delayed download response that arrives after leaving Apps does not show 
   // The real download still completes in the background regardless of which page is showing -- an
   // SPA hash-route change never aborts an in-flight fetch.
   await downloadPromise;
-  await page.waitForTimeout(RACE_WAIT_MS);
+  await waitForActionToSettle(page, downloadResponse);
 
   await page.getByRole("link", { name: "Apps", exact: true }).click();
   await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();

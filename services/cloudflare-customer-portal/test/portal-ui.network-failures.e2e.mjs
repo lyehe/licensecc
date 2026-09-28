@@ -272,7 +272,8 @@ test("an aborted account refresh shows the failure message with exactly one retr
   await page.getByRole("button", { name: "Verify", exact: true }).click();
   // Initial load fails; shows error state with Retry button.
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
-  // Click Retry; this will fail again (deviceRequestCount === 1).
+  // Click Retry: this second devices request fails too (deviceRequestCount === 2), so the failure copy
+  // shows with exactly one retry control.
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByText("Account refresh failed")).toBeVisible();
   // Exactly one button should match the retry patterns.
