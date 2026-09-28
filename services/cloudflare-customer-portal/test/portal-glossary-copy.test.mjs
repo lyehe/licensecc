@@ -17,6 +17,7 @@ const RETIRED_TERMS = [
   { name: "'Binding:' identifier label (protected binding)", pattern: /\bBinding:/, useInstead: '"Connection ID:"' },
   { name: "'Retire connection' action (protected binding)", pattern: /Retire connection/, useInstead: '"Disconnect"' },
   { name: "'Registered nodes' list label (legacy device)", pattern: /Registered nodes/, useInstead: '"Activated devices"' },
+  { name: "'Registered machines' section label (activated devices and seats)", pattern: /Registered machines/, useInstead: '"Activated devices and seats"' },
   { name: "'Floating sessions' list label (floating seat)", pattern: /Floating sessions/, useInstead: '"Floating seats"' },
   { name: '\'"enabled"\' as a displayed status', pattern: /"enabled"/, useInstead: '"active"' },
 ];
@@ -43,6 +44,20 @@ test("portal UI source never reintroduces a term the F1 glossary retired", () =>
         offenses.push(`${file}: found ${term.name} — use ${term.useInstead} (doc/architecture/glossary.md)`);
       }
     }
+  }
+  assert.deepEqual(offenses, [], offenses.join("\n"));
+});
+
+// One apostrophe style across the portal: the straight one most copy (and the shared result copy)
+// already uses, so a customer never sees a straight and a curly "couldn't" on neighbouring screens.
+const CURLY_APOSTROPHE = String.fromCodePoint(0x2019);
+
+test("portal UI copy uses straight apostrophes only", () => {
+  const offenses = [];
+  for (const file of collectSourceFiles(UI_SOURCE_ROOT)) {
+    readFileSync(file, "utf8").split(/\r?\n/u).forEach((line, index) => {
+      if (line.includes(CURLY_APOSTROPHE)) offenses.push(`${file}:${index + 1}: use a straight apostrophe (')`);
+    });
   }
   assert.deepEqual(offenses, [], offenses.join("\n"));
 });

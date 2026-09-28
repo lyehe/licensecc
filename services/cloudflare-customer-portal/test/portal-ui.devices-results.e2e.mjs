@@ -220,6 +220,10 @@ test("pool_exhausted names the actual problem and links to support, never the ra
   await expect(page.getByText("pool_exhausted", { exact: false })).not.toBeVisible();
 });
 
+function utcDay(epochSeconds) {
+  return new Date(epochSeconds * 1000).toISOString().slice(0, 10);
+}
+
 test("an expired or not-yet-valid floating license disables Start seat even while the wire status still says active", async ({ page }) => {
   const expired = { ...ENT_ALPHA, id: "ent_expired", feature: "expired-feature", valid_from: NOW - 20000, valid_until: NOW - 10000 };
   const notStarted = { ...ENT_ALPHA, id: "ent_not_started", feature: "future-feature", valid_from: NOW + 10000, valid_until: null };
@@ -227,8 +231,103 @@ test("an expired or not-yet-valid floating license disables Start seat even whil
   await signIn(page);
   await page.getByRole("link", { name: "Devices", exact: true }).click();
   await page.getByText("Browser seats", { exact: true }).click();
-  await expect(page.locator(".seatCard").filter({ hasText: "expired-feature" }).getByRole("button", { name: "Start seat" })).toBeDisabled();
-  await expect(page.locator(".seatCard").filter({ hasText: "future-feature" }).getByRole("button", { name: "Start seat" })).toBeDisabled();
+  const expiredCard = page.locator(".seatCard").filter({ hasText: "expired-feature" });
+  const futureCard = page.locator(".seatCard").filter({ hasText: "future-feature" });
+  await expect(expiredCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
+  await expect(futureCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
+  // A disabled Start seat says why, in the same words the Apps page uses for the same license, instead
+  // of inviting the customer to use a seat the license dates do not allow.
+  await expect(expiredCard.locator(".seatState")).toHaveText(`Expired on ${utcDay(expired.valid_until)}. Contact your administrator to renew.`);
+  await expect(futureCard.locator(".seatState")).toHaveText(`Starts ${utcDay(notStarted.valid_from)}.`);
+  await expect(page.getByText(/shared seats until released/)).toHaveCount(0);
+});
+
+test("a license with a single seat is described in the singular, and the page says device, not machine", async ({ page }) => {
+  setup(page, { entitlements: [{ ...ENT_ALPHA, pool_size: 1 }] });
+  await signIn(page);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await expect(page.getByText("Open your application and choose Connect to add this device.", { exact: true })).toBeVisible();
+  await page.getByText("Browser seats", { exact: true }).click();
+  const alphaCard = page.locator(".seatCard").filter({ hasText: "alpha" });
+  await expect(alphaCard.locator(".seatState")).toHaveText("Uses this license's only seat until released or it expires.");
+  await expect(page.getByText("These controls manage seats created in this browser. They do not list or control native app sessions on other devices.", { exact: true })).toBeVisible();
+  await expect(page.getByText(/machine/)).toHaveCount(0);
+});
+
+test("the sign-out note on Account says browser seats started here are released while one is held", async ({ page }) => {
+  setup(page, { entitlements: [ENT_ALPHA] });
+  await signIn(page);
+  await page.getByRole("link", { name: "Account", exact: true }).click();
+  await expect(page.getByText("Your apps and devices stay connected.", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
+  const alphaCard = page.locator(".seatCard").filter({ hasText: "alpha" });
+  await alphaCard.getByRole("button", { name: "Start seat" }).click();
+  await expect(alphaCard.getByRole("status")).toContainText("Seat started.");
+  await page.getByRole("link", { name: "Account", exact: true }).click();
+  await expect(page.getByText("Your apps and connected devices stay connected. Browser seats started here are released.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Your apps and devices stay connected.", { exact: true })).toHaveCount(0);
+});
+
+// Browser Back and Forward are not blocked by the inert page behind a confirmation, so the dialog has
+// to outlive the page it was opened from: it stays open and usable on the page Back lands on, and it
+// is still there when Forward returns to Devices.
+test("browser Back while a Release seat confirmation is open keeps it usable, and Forward returns to it", async ({ page }) => {
+  const requests = setup(page, { entitlements: [ENT_ALPHA] });
+  await signIn(page);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
+  const alphaCard = page.locator(".seatCard").filter({ hasText: "alpha" });
+  await alphaCard.getByRole("button", { name: "Start seat" }).click();
+  await expect(alphaCard.getByRole("status")).toContainText("Seat started.");
+  const dialog = page.getByRole("dialog");
+  const main = page.locator("main");
+
+  // Back, then Cancel on the page Back landed on: the page is usable again and focus is not lost.
+  await alphaCard.getByRole("button", { name: "Release seat" }).click();
+  await expect(dialog).toBeVisible();
+  await page.goBack();
+  await expect(page.locator("h1")).toHaveText("Apps");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(main).not.toHaveAttribute("inert");
+  await expect(main).not.toHaveAttribute("aria-hidden");
+  await expect(page.locator("#content")).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  expect(requests.releases).toBe(0);
+
+  // Back, then Forward to Devices: the same confirmation is still open there, and closing it returns
+  // focus to the section heading as usual.
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await alphaCard.getByRole("button", { name: "Release seat" }).click();
+  await expect(dialog).toBeVisible();
+  await page.goBack();
+  await expect(page.locator("h1")).toHaveText("Apps");
+  await page.goForward();
+  await expect(page.locator("h1")).toHaveText("Devices");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(main).not.toHaveAttribute("inert");
+  await expect(page.getByRole("heading", { name: "Browser seats", level: 2 })).toBeFocused();
+  await expect(alphaCard.getByRole("button", { name: "Release seat" })).toBeEnabled();
+
+  // Confirming on the page Back landed on releases the seat for real, and the result of that release
+  // does not turn up later on Devices as if it belonged to the next visit.
+  await alphaCard.getByRole("button", { name: "Release seat" }).click();
+  await page.goBack();
+  await expect(page.locator("h1")).toHaveText("Apps");
+  await dialog.getByRole("button", { name: "Confirm release" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(main).not.toHaveAttribute("inert");
+  await expect(page.locator("#content")).toBeFocused();
+  await expect.poll(() => requests.releases).toBe(1);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  // No live seat and no leftover result, so the section is collapsed again.
+  await expect(page.locator("details.browserSessions")).toHaveCount(1);
+  await expect(page.locator(".seatCard").getByText("Seat released.")).toHaveCount(0);
+  await expect(alphaCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
 });
 
 // Fix round 1 (Important): seatMessages/deviceMessages/downloads.messages live one level ABOVE the
@@ -423,7 +522,8 @@ test("a seat whose release fails at sign-out is listed again after signing in an
   // expanded (a live/failed seat makes the panel a <section>, never the collapsed <details>).
   await signIn(page);
   await page.getByRole("link", { name: "Devices", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Browser seats" })).toBeVisible();
+  // A peer of the other two sections on this page, so the same heading level.
+  await expect(page.getByRole("heading", { name: "Browser seats", level: 2 })).toBeVisible();
   const alphaCardAgain = page.locator(".seatCard").filter({ hasText: "alpha" });
   await expect(alphaCardAgain.getByRole("button", { name: "Start seat" })).toBeDisabled();
   await expect(alphaCardAgain.getByRole("button", { name: "Release seat" })).toBeEnabled();

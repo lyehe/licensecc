@@ -92,7 +92,7 @@ test('nodes: mobile layout, dialog focus and escape remain usable',async({page},
 test('nodes: protected recovery remains available when legacy account data fails',async({page})=>{
   await setup(page);
   await page.route('**/api/portal/entitlements',route=>route.fulfill({status:503,json:{ok:false,code:'temporarily_unavailable'}}));
-  await page.goto('/#/nodes');await expect(page.getByText('Registered machines unavailable')).toBeVisible();
+  await page.goto('/#/nodes');await expect(page.getByRole('heading',{name:'Activated devices and seats unavailable'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Disconnect',exact:true})).toBeEnabled();
   await page.getByRole('button',{name:'Disconnect',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible();
 });

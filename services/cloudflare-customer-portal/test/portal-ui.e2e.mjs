@@ -83,7 +83,7 @@ test("password login errors clear the secret and explain recovery", async ({ pag
   await page.getByText("Forgot your password?", { exact: true }).click();
   // Carried from A5: reworded to drop "verified" -- an admin-invited account with an
   // unverified login email also recovers, and verifies, through this same reset.
-  await expect(page.getByText(/We’ll email a reset link to your login address/)).toBeVisible();
+  await expect(page.getByText(/We'll email a reset link to your login address/)).toBeVisible();
   await page.route("**/portal/v1/auth/password/reset", route => {
     expect(route.request().postDataJSON()).toEqual({ email: "new@example.com" });
     return route.fulfill({ status: 202, json: makeEnvelope("verification_requested") });
@@ -519,6 +519,34 @@ test("the resend cooldown counts down and re-enables at zero", async ({ page }) 
   await expect(page.getByRole("button", { name: "Resend code (0:29)", exact: true })).toBeDisabled();
   await page.clock.runFor("00:29");
   await expect(page.getByRole("button", { name: "Resend code", exact: true })).toBeEnabled();
+});
+
+test("the resend countdown stops its timer once it reaches zero", async ({ page }) => {
+  await page.clock.install();
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }) }));
+  await page.route("**/portal/v1/auth/request", (route) => route.fulfill({ json: { ok: true, code: "otp_requested", request_id: "resend-stop-e2e" } }));
+  await page.goto("/");
+  // Count the countdown timer's ticks: it is the page's only 250 ms interval. Installed after the
+  // fake clock, so it wraps the clock's own setInterval.
+  await page.evaluate(() => {
+    const original = window.setInterval;
+    window.__countdownTicks = 0;
+    window.setInterval = (callback, delay, ...rest) => original((...args) => {
+      if (delay === 250) window.__countdownTicks += 1;
+      return callback(...args);
+    }, delay, ...rest);
+  });
+  await page.getByLabel("Email", { exact: true }).fill("user@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await expect(page.getByRole("button", { name: "Resend code (0:59)", exact: true })).toBeDisabled();
+  await page.clock.runFor("00:30");
+  expect(await page.evaluate(() => window.__countdownTicks)).toBeGreaterThan(0);
+  await page.clock.runFor("00:30");
+  await expect(page.getByRole("button", { name: "Resend code", exact: true })).toBeEnabled();
+  const ticksAtZero = await page.evaluate(() => window.__countdownTicks);
+  await page.clock.runFor("00:10");
+  expect(await page.evaluate(() => window.__countdownTicks)).toBe(ticksAtZero);
 });
 
 test("Account shows connected methods and keeps linking failures visible", async ({ page }) => {
@@ -1088,6 +1116,13 @@ async function signIn(page, api) {
   await page.getByRole("button", { name: "Verify", exact: true }).click();
 }
 
+test("signing in moves focus to the signed-in page content", async ({ page }) => {
+  const api = makePortalApiFixture();
+  await signIn(page, api);
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  await expect(page.locator("#content")).toBeFocused();
+});
+
 test("the signed-in header and the empty Apps state show the resolved account email", async ({ page }) => {
   const api = makePortalApiFixture();
   api.entitlements.length = 0;
@@ -1273,6 +1308,8 @@ test("usage failure stays local and removing a searched registration keeps the f
   // only Cancel/Escape (already covered by the legacy-release test below).
   await expect(page.getByRole("heading", { name: "Activated devices (older app versions)" })).toBeFocused();
   await expect(page.getByRole("heading", { name: "No matching devices" })).toBeVisible();
+  // The released row is gone after the refresh, so its result shows under the list instead.
+  await expect(page.locator(".registrations").getByRole("status")).toContainText("Device released.");
   await expect(page.getByRole("searchbox", { name: "Find a device" })).toHaveValue("DEFAULT");
   await page.getByRole("searchbox", { name: "Find a device" }).fill("");
   await expect(page.getByText("second-node", { exact: true })).toBeVisible();
@@ -1307,6 +1344,64 @@ test("the legacy device release confirm names the device, app and feature; Escap
   await expect(dialog).toHaveCount(0);
   await expect.poll(() => api.requests.deviceReleases).toBe(0);
   await expect(heading).toBeFocused();
+});
+
+test("releasing the only activated device keeps its section, shows Device released. and keeps focus on the heading", async ({ page }) => {
+  const api = makePortalApiFixture();
+  await signIn(page, api);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  const section = page.locator(".registrations");
+  const heading = page.getByRole("heading", { name: "Activated devices (older app versions)" });
+  await section.getByRole("button", { name: "Release", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm release" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect.poll(() => api.requests.deviceReleases).toBe(1);
+  await expect(section.getByRole("heading", { name: "No activated devices" })).toBeVisible();
+  await expect(section.getByRole("status")).toContainText("Device released.");
+  await expect(heading).toBeFocused();
+  // The result belongs to this visit only.
+  await page.getByRole("link", { name: "Apps", exact: true }).click();
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await expect(page.getByText("Device released.")).toHaveCount(0);
+  await expect(section).toHaveCount(0);
+});
+
+// Browser Back is not blocked by the inert page behind a confirmation, so the device confirmation has
+// to outlive the Devices page: it stays open and usable where Back lands, and Forward returns to it.
+test("browser Back while a device Release confirmation is open keeps it usable, and Forward returns to it", async ({ page }) => {
+  const api = makePortalApiFixture();
+  await signIn(page, api);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  const releaseButton = page.locator(".registrations").getByRole("button", { name: "Release", exact: true });
+  const dialog = page.getByRole("dialog");
+  const main = page.locator("main");
+
+  await releaseButton.click();
+  await expect(dialog).toBeVisible();
+  await page.goBack();
+  await expect(page.locator("h1")).toHaveText("Apps");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(main).not.toHaveAttribute("inert");
+  await expect(main).not.toHaveAttribute("aria-hidden");
+  await expect(page.locator("#content")).toBeFocused();
+  await expect(page.getByRole("link", { name: "View licenses for DEFAULT" })).toBeVisible();
+
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await releaseButton.click();
+  await expect(dialog).toBeVisible();
+  await page.goBack();
+  await expect(page.locator("h1")).toHaveText("Apps");
+  await page.goForward();
+  await expect(page.locator("h1")).toHaveText("Devices");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("d".repeat(40));
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(main).not.toHaveAttribute("inert");
+  await expect(page.getByRole("heading", { name: "Activated devices (older app versions)" })).toBeFocused();
+  expect(api.requests.deviceReleases).toBe(0);
 });
 
 test("protected access uses app enrollment while legacy downloads respect date boundaries", async ({ page }, testInfo) => {

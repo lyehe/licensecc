@@ -90,3 +90,16 @@ test('devices: "View devices" from an app filters to that app, and Show all apps
   await expect(page.locator('.registrations tr').filter({hasText:'legacy-beta-002'})).toHaveCount(1);
   await expect(page.locator('.protectedNodes tr').filter({hasText:'Lab Tablet'})).toHaveCount(1);
 });
+
+test('devices: an app that is not in the account says so and links back to all apps',async({page})=>{
+  await setup(page);
+  await page.goto('/#/nodes/NO_SUCH_APP');
+  const notice=page.getByRole('status').filter({hasText:'No app named "NO_SUCH_APP" is in your account.'});
+  await expect(notice).toBeVisible();
+  await expect(notice.getByRole('link',{name:'Show all apps'})).toHaveAttribute('href','#/nodes');
+  await expect(page.getByText('App: NO_SUCH_APP')).toHaveCount(0);
+  await notice.getByRole('link',{name:'Show all apps'}).click();
+  await expect(page).toHaveURL(/#\/nodes$/);
+  await expect(page.locator('.registrations tr').filter({hasText:'legacy-alpha-001'})).toHaveCount(1);
+  await expect(page.getByText('No app named',{exact:false})).toHaveCount(0);
+});

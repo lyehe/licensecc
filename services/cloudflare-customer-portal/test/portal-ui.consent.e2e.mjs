@@ -465,21 +465,30 @@ test("consent: real encoded license references stay readable on mobile",async({p
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
 
-test("consent: license choice options show meaningful labels with expiry and usage",async({page})=>{
-  const expiryTime=Math.floor(Date.now()/1000)+86400*30;
-  await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
-    {id:"license-basic",feature:"BASIC",valid_until:expiryTime,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false},
-    {id:"license-pro",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:1,slot_free_at:null,device_connected:false},
-  ]}))})});
-  await page.goto(entry);
-  const basicOption=page.getByRole("option",{name:/BASIC.*expires.*0\/1 device$/});
-  const proOption=page.getByRole("option",{name:/PRO.*expires.*never.*1\/2 devices/});
-  await expect(basicOption).toHaveCount(1);
-  await expect(proOption).toHaveCount(1);
-  const basicText=await basicOption.textContent();
-  const proText=await proOption.textContent();
-  expect(basicText).not.toContain("license-basic");
-  expect(proText).not.toContain("license-pro");
+// A viewer west of UTC: a validity end at a UTC midnight is the previous evening in local time, so any
+// local-time rendering of it would show a different calendar day than the UTC date license dates use.
+test.describe("in a time zone west of UTC",()=>{
+  test.use({timezoneId:"America/Los_Angeles"});
+  test("consent: license choice options show meaningful labels with expiry and usage, and the summary shows the same expiry day",async({page})=>{
+    const expiryTime=Date.UTC(2031,11,31)/1000;
+    await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
+      {id:"license-basic",feature:"BASIC",valid_until:expiryTime,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false},
+      {id:"license-pro",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:1,slot_free_at:null,device_connected:false},
+    ]}))})});
+    await page.goto(entry);
+    const basicOption=page.getByRole("option",{name:/BASIC.*expires.*0\/1 device$/});
+    const proOption=page.getByRole("option",{name:/PRO.*expires.*never.*1\/2 devices/});
+    await expect(basicOption).toHaveCount(1);
+    await expect(proOption).toHaveCount(1);
+    const basicText=await basicOption.textContent();
+    const proText=await proOption.textContent();
+    expect(basicText).not.toContain("license-basic");
+    expect(proText).not.toContain("license-pro");
+    expect(basicText).toContain("expires 2031-12-31");
+    await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-basic");
+    const summaryExpiry=page.locator(".consentLicense div").filter({has:page.locator("dt",{hasText:/^Expires$/})}).locator("dd");
+    await expect(summaryExpiry).toHaveText("2031-12-31");
+  });
 });
 
 test("consent: a connected device option shows the connection note",async({page})=>{
@@ -500,7 +509,7 @@ const laterLicense={id:"license-101",feature:"PRO",valid_until:null,device_limit
 test("consent: malformed next cursors fail before page navigation",async({page})=>{
   await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:firstLicensePage(),has_more:true,next_page_cursor:"cGFnZTI"}))})});
   await page.goto(entry);
-  await expect(page.getByRole("alert")).toHaveText("We couldn’t load this request. Please try again.");
+  await expect(page.getByRole("alert")).toHaveText("We couldn't load this request. Please try again.");
   await expect(page.getByRole("button",{name:"Next",exact:true})).toHaveCount(0);
   await expect(page.getByRole("button",{name:"Approve",exact:true})).toHaveCount(0);
 });
@@ -558,6 +567,59 @@ test("consent: comparison mismatch can cancel but cannot approve without confirm
   await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeDisabled();
   await page.getByRole("button",{name:"Cancel",exact:true}).click();
   await expect(page.getByRole("heading",{name:"Connection cancelled"})).toBeVisible();
+});
+
+// The busy label names the operation actually running: only an approval reads "Connecting…".
+test("consent: paging to the next licenses keeps Approve's own label",async({page})=>{
+  let releaseNextPage;
+  await fixture(page,{inspect:async route=>{
+    const cursor=route.request().postDataJSON().page_cursor;
+    if(cursor)await new Promise(resolve=>{releaseNextPage=resolve;});
+    return route.fulfill({json:envelope("authorization_inspected",inspection(cursor?{entitlements:[laterLicense]}:{entitlements:firstLicensePage(),has_more:true,next_page_cursor:pageTwoCursor}))});
+  }});
+  await page.goto(entry);
+  await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-5");
+  await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
+  await page.getByRole("button",{name:"Next",exact:true}).click();
+  await expect.poll(()=>typeof releaseNextPage).toBe("function");
+  await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeDisabled();
+  await expect(page.getByRole("button",{name:"Connecting…",exact:true})).toHaveCount(0);
+  releaseNextPage();
+  await expect(page.getByText("Page 2",{exact:true})).toBeVisible();
+});
+
+test("consent: Cancel reads Cancelling… while cancelling",async({page})=>{
+  let releaseDeny;
+  await fixture(page,{deny:async route=>{
+    await new Promise(resolve=>{releaseDeny=resolve;});
+    return route.fulfill({json:envelope("authorization_denied",{status:"authorization_denied",revision:1})});
+  }});
+  await page.goto(entry);
+  await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-pro");
+  await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
+  await page.getByRole("button",{name:"Cancel",exact:true}).click();
+  await expect.poll(()=>typeof releaseDeny).toBe("function");
+  await expect(page.getByRole("button",{name:"Cancelling…",exact:true})).toBeDisabled();
+  await expect(page.getByRole("button",{name:/Connecting…|Checking…/})).toHaveCount(0);
+  releaseDeny();
+  await expect(page.getByRole("heading",{name:"Connection cancelled"})).toBeVisible();
+});
+
+test("consent: Approve reads Connecting… while approving",async({page})=>{
+  let releaseApproval;
+  await fixture(page,{approve:async route=>{
+    await new Promise(resolve=>{releaseApproval=resolve;});
+    return route.fulfill({json:envelope("authorization_approved",{callback_url:callback,expires_at:Math.floor(Date.now()/1000)+60,revision:1})});
+  }});
+  await page.route("http://127.0.0.1:44888/**",route=>route.fulfill({status:204}));
+  await page.goto(entry);
+  await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-pro");
+  await approve(page);
+  await expect.poll(()=>typeof releaseApproval).toBe("function");
+  await expect(page.getByRole("button",{name:"Connecting…",exact:true})).toBeDisabled();
+  await expect(page.getByRole("button",{name:/Cancelling…|Checking…/})).toHaveCount(0);
+  releaseApproval();
+  await expect(page.getByRole("link",{name:"Open app"})).toBeVisible();
 });
 
 test("consent: a changed comparison code cannot reuse a saved approval",async({page})=>{
