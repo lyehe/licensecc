@@ -127,7 +127,7 @@ async function unlink(request: Request, env: Env, reqId: string, now: number): P
       `DELETE FROM portal_identities WHERE customer_id = ? AND provider = ? AND ${liveSession} AND (` +
       "(? = 1 AND EXISTS (SELECT 1 FROM portal_passwords WHERE customer_id = ?)) OR " +
       "(? = 1 AND EXISTS (SELECT 1 FROM portal_identities WHERE customer_id = ? AND provider = ?)) OR " +
-      "(? = 1 AND EXISTS (SELECT 1 FROM customers WHERE id = ? AND email <> ''))) RETURNING provider",
+      "(? = 1 AND EXISTS (SELECT 1 FROM customers WHERE id = ? AND email <> '' AND instr(email, '@') > 1))) RETURNING provider",
     ).bind(session.customer_id, provider, session.id, session.customer_id, now, flag(passwordEnabled(env)), session.customer_id,
       flag(providerConfig(env, other) !== null), session.customer_id, other, flag(emailCodes), session.customer_id),
     // Directly after the DELETE: changes() is that statement's count.
