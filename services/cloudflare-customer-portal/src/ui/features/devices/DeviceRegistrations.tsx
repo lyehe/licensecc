@@ -16,14 +16,15 @@ export function DeviceRegistrations({ controller, query, project }: {
   const visible = devices.filter((item) => matchesDeviceSearch([item.device_key_id], item.project, query, project));
   // A failed release keeps its row, so its result shows in that row. A successful one removes the row
   // on the refresh that follows, so its result shows under the list from the start and stays there
-  // once the row is gone -- DevicesFeature keeps this section for it even when no device is left.
-  const listed = new Set(devices.map((item) => item.device_key_id));
+  // once the row is gone -- DevicesFeature keeps this section for it even when no device is left. A
+  // failure whose row the search hides shows under the list too, so no result is ever hidden.
+  const shownRows = new Set(visible.map((item) => item.device_key_id));
   const rowResult = (deviceKeyId: string): StatusMessage | null => {
     const message = messages[deviceKeyId] ?? null;
     return message !== null && !message.ok ? message : null;
   };
   const listResults = Object.entries(messages).filter((entry): entry is [string, StatusMessage] => (
-    entry[1] !== null && (entry[1].ok || !listed.has(entry[0]))
+    entry[1] !== null && (entry[1].ok || !shownRows.has(entry[0]))
   ));
   return <section className="registrations">
     <section className="tablePane full">

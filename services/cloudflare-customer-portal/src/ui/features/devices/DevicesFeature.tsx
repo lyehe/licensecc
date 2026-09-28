@@ -39,6 +39,9 @@ interface DeviceFeatureOptions {
   // this action started" against "the generation now" once their response arrives, and drop a result
   // that arrives after the customer has moved on -- see App.tsx's own comment for the full race.
   visitGenerationRef: React.RefObject<number>;
+  // Shows a release refusal in the page-level line of whatever page is showing, for as long as that
+  // page stays: used when the release's own section is not on screen when its result arrives.
+  showOffPageResult(message: StatusMessage): void;
 }
 
 // Focus to move once a seat "start" action's re-render lands (the seat's session is now present). D4:
@@ -106,7 +109,7 @@ function focusFirstAvailable(
 }
 
 export function useDevicesController(options: DeviceFeatureOptions): DevicesController {
-  const { busy, busyRef, customer, devices, entitlements, refreshData, runOnce, sessionEpoch, setMessage, visitGenerationRef } = options;
+  const { busy, busyRef, customer, devices, entitlements, refreshData, runOnce, sessionEpoch, setMessage, visitGenerationRef, showOffPageResult } = options;
   // D3: seeded empty rather than hydrated eagerly -- `customer` is not yet known at PortalShell's very
   // first render (auth starts as "loading"), so hydration happens in the effect below, keyed to the
   // customer id once a sign-in actually resolves.
@@ -117,6 +120,9 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   const seatStartButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const seatReleaseButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const seatCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  // Bumped by clear() (sign-out, session end), so a result from a session that has since ended is
+  // never reported, even in the page-level line.
+  const sessionGenerationRef = useRef(0);
   const panelHeadingRef = useRef<HTMLElement | null>(null);
 
   // D3 (decision 4) / fix round 1 (Critical): re-hydrate on the initial sign-in, a later customer
@@ -155,6 +161,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     // it), so a response that arrives after the customer has left (and possibly returned to) Devices
     // can be told apart from one that arrives while they are still on this same visit.
     const startGeneration = visitGenerationRef.current;
+    const startSession = sessionGenerationRef.current;
     await runOnce(async () => {
       const existing = seatSessions[item.id];
       if ((operation === "heartbeat" || operation === "release") && existing === undefined) {
@@ -174,8 +181,17 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
       });
       // The visit has moved on since this action started: the real outcome below (session/storage/
       // refresh) still applies, but this result must not write into a map the customer is no longer
-      // looking at, or reappear as if it belonged to a later visit.
-      if (visitGenerationRef.current === startGeneration) setSeatMessage(item.id, resultMessage(result));
+      // looking at, or reappear as if it belonged to a later visit. A release can also finish with its
+      // seat card off screen (browser Back leaves the confirmation open on another page); a refusal
+      // then goes to the page-level line where the customer is, never nowhere. A network failure is
+      // already reported by the confirmation, which stays open with its own message.
+      const seatCard = seatCardRefs.current[item.id];
+      const cardShowing = operation !== "release" || (seatCard != null && seatCard.isConnected);
+      if (visitGenerationRef.current === startGeneration && cardShowing) {
+        setSeatMessage(item.id, resultMessage(result));
+      } else if (operation === "release" && !result.ok && result.code !== "network_unavailable" && sessionGenerationRef.current === startSession) {
+        showOffPageResult(resultMessage(result));
+      }
       const resultData = result.data;
       const leaseExpiresAt = typeof resultData?.expires_at === "number" ? resultData.expires_at : 0;
       const seatId = typeof resultData?.seat_id === "string" ? resultData.seat_id : null;
@@ -257,9 +273,11 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   // pattern as the seat release above -- see deviceReleaseDialog.ts's own header comment.
   const deviceReleaseDialog = useDeviceReleaseDialog({
     visitGenerationRef,
+    sessionGenerationRef,
     runOnce,
     refreshData,
     setDeviceMessage,
+    showOffPageResult,
   });
 
   // D3: sign-out's best-effort seat release, called BEFORE the actual sign-out request. A released
@@ -280,6 +298,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   // Fix round 1 (CRITICAL) / D3: resets in-memory state only, never storage -- releaseSeatsOnSignOut()
   // may have just written a failed release there, which must survive this call (decision 2).
   function clear(): void {
+    sessionGenerationRef.current += 1;
     setSeatSessionsRaw({});
     seatReleaseDialog.resetForClear();
     deviceReleaseDialog.resetForClear();

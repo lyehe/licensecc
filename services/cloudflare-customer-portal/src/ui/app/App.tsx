@@ -83,6 +83,22 @@ function PortalShell(): React.ReactElement {
     previousPageRef.current = location.page;
   }, [location.page]);
 
+  // A release refusal that lands while its own section is off screen (browser Back left the
+  // confirmation open on another page) is shown in this page-level line instead, so a failure is never
+  // reported nowhere (DevicesFeature.tsx). It belongs to the page it was shown on: moving to another
+  // page clears it, unless something newer has replaced it already. A layout effect, so it never paints.
+  const offPageResultRef = useRef<StatusMessage | null>(null);
+  function showOffPageResult(result: StatusMessage): void {
+    offPageResultRef.current = result;
+    setMessage(result);
+  }
+  useLayoutEffect(() => {
+    const shown = offPageResultRef.current;
+    if (shown === null) return;
+    offPageResultRef.current = null;
+    setMessage((current) => (current === shown ? null : current));
+  }, [location.page]);
+
   // D2: download results now show next to their own control (LicenseDownloadAction), not the
   // page-level line, so setMessage is no longer passed through here.
   const downloads = useLicenseDownloads({ runOnce, visitGenerationRef: appsVisitGenerationRef });
@@ -97,6 +113,7 @@ function PortalShell(): React.ReactElement {
     sessionEpoch: auth.sessionEpoch,
     setMessage,
     visitGenerationRef: devicesVisitGenerationRef,
+    showOffPageResult,
   });
 
   // Fix round 1 (CRITICAL): PortalShell stays mounted across a session-ended transition, so a
@@ -167,8 +184,9 @@ function PortalShell(): React.ReactElement {
   // directly would fire the cleanup (clearing a result that was just set) on every unrelated render.
   //
   // Devices' results are cleared on entering the page too: a release confirmation can outlive the page
-  // (browser Back leaves it open, see ReleaseDialogs.tsx), so a result can land while another page is
-  // showing, and it belongs to that visit, not the next one. A layout effect, so it never paints.
+  // (browser Back leaves it open, see ReleaseDialogs.tsx). A release result that lands while another
+  // page is showing goes to the page-level line (above), and anything else written to these maps then
+  // belongs to that visit, not the next one. A layout effect, so it never paints.
   const clearDeviceMessagesRef = useRef<() => void>(() => {});
   clearDeviceMessagesRef.current = () => deviceController.clearMessages();
   useLayoutEffect(() => {

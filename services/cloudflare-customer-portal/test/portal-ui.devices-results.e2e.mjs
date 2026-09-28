@@ -357,9 +357,9 @@ test("a seat release confirmed on another page after Back and refused by the ser
   const pageLine = page.locator(".feedback").getByRole("status");
   await expect(pageLine).toContainText("We couldn't verify that request. Try again.");
   await expect(pageLine).toHaveClass(/error/);
+  await expect(page.locator("#content")).toBeFocused();
   await pageLine.getByText("Technical details", { exact: true }).click();
   await expect(pageLine.getByText("verification_error (devices-results-offpage-refusal)", { exact: true })).toBeVisible();
-  await expect(page.locator("#content")).toBeFocused();
 
   // On Devices the seat is still held, and the refusal shows neither as the seat's result nor still as
   // the page-level line: it belonged to the visit where it was reported.
