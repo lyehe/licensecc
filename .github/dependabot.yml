@@ -14,6 +14,16 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    ignore:
+      # @types/node tracks the Node major that CI and the Workers tooling run on (22).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # eslint 10 cannot install until eslint-plugin-import accepts it as a peer
+      # (2.32.0 allows eslint up to 9), so the whole group would fail npm ci.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-workspace:
         patterns:
