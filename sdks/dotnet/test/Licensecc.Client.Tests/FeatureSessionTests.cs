@@ -91,14 +91,4 @@ public unsafe class FeatureSessionTests
         var opened=library.Open(Config()); Assert.IsNull(opened.Session);
         Assert.AreEqual(Result.InvalidArgument,opened.Outcome.Code);
     }
-    [TestMethod]
-    public void OriginalExportsRejectOptionalApiWithoutBreakingDeviceBound()
-    {
-        var path=Environment.GetEnvironmentVariable("LCC_TEST_OLD_DEVICE_BOUND_DLL");
-        if(string.IsNullOrEmpty(path)) Assert.Inconclusive("Set LCC_TEST_OLD_DEVICE_BOUND_DLL to the original-export fixture.");
-        Assert.ThrowsExactly<NotSupportedException>(()=>new FeatureSessionLibrary(path!));
-        using var existing=new DeviceBoundLibrary(path!);
-        var opened=existing.OpenResume(Config());
-        Assert.IsNull(opened.Client); Assert.AreEqual(Result.InvalidArgument,opened.Outcome.Code);
-    }
 }

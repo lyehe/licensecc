@@ -140,7 +140,7 @@ shared key. Closing ends ownership; a stopped handle cannot start a new job.
 
 Build the bridge against a runtime that includes `feature_session.h`. Its
 independent `lcc_feature_session_bridge_layout` probe checks every new field.
-An older bridge raises `NotImplementedError` for this optional API; existing
-`DeviceBoundLibrary` usage stays compatible. Set `LCC_TEST_DEVICE_BOUND_DLL` to
+A bridge without these exports fails with the platform loader error; rebuild it
+in the same release as the SDK. Set `LCC_TEST_DEVICE_BOUND_DLL` to
 the newly built absolute DLL path when running pytest to include installed-ABI
 checks. Fake-adapter tests alone do not establish a live TPM/server journey.

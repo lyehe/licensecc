@@ -168,8 +168,6 @@ jobs:
          run: |
             $env:LCC_TEST_DEVICE_BOUND_DLL = Join-Path $env:GITHUB_WORKSPACE 'build/installed-python-device-bound/installed/bin/licensecc_device_bound_bridge.dll'
             if (-not (Test-Path -LiteralPath $env:LCC_TEST_DEVICE_BOUND_DLL -PathType Leaf)) { throw 'Installed bridge is missing' }
-            $env:LCC_TEST_OLD_DEVICE_BOUND_DLL = Join-Path $env:GITHUB_WORKSPACE 'build/installed-python-device-bound/Debug/licensecc_device_bound_original.dll'
-            if (-not (Test-Path -LiteralPath $env:LCC_TEST_OLD_DEVICE_BOUND_DLL -PathType Leaf)) { throw 'Original-export fixture is missing' }
             dotnet test sdks/dotnet/Licensecc.Client.sln -p:RestoreLockedMode=true
             if ($LASTEXITCODE -ne 0) { throw 'Installed .NET bridge tests failed' }
       -  name: Java for installed native adapter

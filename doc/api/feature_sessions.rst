@@ -99,7 +99,7 @@ checkout/heartbeat/release. Existing legacy and floating APIs are unchanged.
 
 Python ``licensecc.feature_session``, .NET ``FeatureSessionLibrary`` and Java
 ``FeatureSessionLibrary`` provide optional opaque native adapters using the
-application-owned Windows bridge DLL (JNI for Java). Older Python/.NET bridge
+application-owned native bridge (JNI for Java). Older Python/.NET bridge
 DLLs are explicitly unsupported for this new adapter; their existing
 device-bound API remains usable. Java is different: a JNI library from before
 this release (JNI protocol 1) is rejected at load, for device-bound use as well,

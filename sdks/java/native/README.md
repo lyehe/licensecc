@@ -5,10 +5,10 @@ four separate `FeatureSessionNative` exports. The six `DeviceBoundNative`
 exports use JNI protocol 2: every outcome array also carries the refusal detail.
 Build the JNI library from the same SDK version as the JAR; a JAR and library
 from different protocols fail at load with "Incompatible Licensecc JNI protocol".
-A library without the feature-session exports rejects the feature-session
-adapter explicitly while remaining usable for enrollment and device-bound
-operations. The installed gate tests this fallback in a separate JVM as well as
-the current library's no-effect and malformed-input paths.
+A library without the feature-session exports fails to load for the
+feature-session adapter with `UnsatisfiedLinkError`, while remaining usable
+for enrollment and device-bound operations. The installed gate exercises the
+current library's no-effect and malformed-input paths.
 
 The optional Java 17 JNI adapter calls the installed public
 `licensecc/device_bound.h` owner. Enrollment secrets, TPM handles, platform HTTPS,

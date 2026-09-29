@@ -12,7 +12,7 @@ public sealed record FeatureSessionOutcome(Result Code,FeatureSessionState State
     ProviderResult ProviderResult=ProviderResult.Ok,CheckpointResult CheckpointResult=CheckpointResult.NotAttempted,
     bool RenewalDue=false,ulong EffectiveTime=0,ulong RenewAfter=0,ulong ExpiresAt=0);
 
-/// <summary>Optional native session API. Old native bridges remain usable with DeviceBoundLibrary.</summary>
+/// <summary>Optional native session API. A bridge without these exports fails with the platform loader error.</summary>
 public sealed unsafe class FeatureSessionLibrary : IDisposable
 {
     private readonly IFeatureApi api;

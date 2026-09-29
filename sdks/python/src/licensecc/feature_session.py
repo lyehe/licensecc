@@ -66,8 +66,8 @@ class _Owner:
 class FeatureSessionLibrary:
     """Load the same application-owned absolute 64-bit Windows/Linux bridge library.
 
-    An older DLL raises NotImplementedError here; old DeviceBoundLibrary APIs
-    remain available. Calls block and belong on an application worker thread.
+    A bridge missing the feature-session exports fails with the platform
+    loader error. Calls block and belong on an application worker thread.
     """
     def __init__(self, dll_path):
         self._device_library = DeviceBoundLibrary(dll_path)

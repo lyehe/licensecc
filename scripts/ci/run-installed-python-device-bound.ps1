@@ -26,7 +26,6 @@ $bridgeSource = Join-Path $repositoryRoot 'sdks/python/native'
 $bridgeInstall = Join-Path $outputRoot 'installed'
 $testDll = Join-Path $bridgeInstall 'bin/licensecc_device_bound_bridge.dll'
 $previousDll = [Environment]::GetEnvironmentVariable('LCC_TEST_DEVICE_BOUND_DLL', 'Process')
-$previousOldDll = [Environment]::GetEnvironmentVariable('LCC_TEST_OLD_DEVICE_BOUND_DLL', 'Process')
 
 function Invoke-Checked([string]$Command, [string[]]$Arguments) {
     & $Command @Arguments
@@ -38,7 +37,7 @@ try {
     & (Join-Path $PSScriptRoot 'device-bound-exports.test.ps1')
     # CMake rejects a foreign cached source/generator; never delete or reset it.
     Invoke-Checked 'cmake' @('-S', $bridgeSource, '-B', $outputRoot,
-        '-G', $Generator, '-A', 'x64', "-Dlicensecc_DIR=$packageDirectory", "-DLCC_PROJECT_NAME=$ProjectName", '-DLCC_BRIDGE_BUILD_TESTS=ON')
+        '-G', $Generator, '-A', 'x64', "-Dlicensecc_DIR=$packageDirectory", "-DLCC_PROJECT_NAME=$ProjectName")
     Invoke-Checked 'cmake' @('--build', $outputRoot, '--config', $Configuration, '-j', '4')
     Invoke-Checked 'cmake' @('--install', $outputRoot, '--config', $Configuration, '--prefix', $bridgeInstall)
 
@@ -51,11 +50,6 @@ try {
     $exports = & $dumpbin /exports $testDll
     if ($LASTEXITCODE -ne 0) { throw 'Installed bridge export inspection failed' }
     $exportCount = Assert-DeviceBoundExports $exports (Get-Content -LiteralPath (Join-Path $bridgeSource 'bridge.def'))
-    $oldDll = Join-Path $outputRoot "$Configuration/licensecc_device_bound_original.dll"
-    $oldExports = & $dumpbin /exports $oldDll
-    if ($LASTEXITCODE -ne 0) { throw 'Original export fixture inspection failed' }
-    $oldDefinition = Get-Content -LiteralPath (Join-Path $bridgeSource 'bridge.def') | Where-Object { $_ -notmatch 'feature_session' }
-    $null = Assert-DeviceBoundExports $oldExports $oldDefinition
     $imports = & $dumpbin /dependents $testDll
     if ($LASTEXITCODE -ne 0) { throw 'Installed bridge dependency inspection failed' }
     if ($imports -match '(?i)(?:lib)?(?:ssl|crypto)[^\s]*\.dll') { throw 'Unexpected OpenSSL DLL dependency' }
@@ -63,12 +57,10 @@ try {
     # Require a real installed DLL, not the optional-test skip path. Invalid
     # native configuration is rejected before storage, key creation or network.
     $env:LCC_TEST_DEVICE_BOUND_DLL = $testDll
-    $env:LCC_TEST_OLD_DEVICE_BOUND_DLL = $oldDll
     Invoke-Checked 'uv' @('run', '--directory', 'sdks/python', '--locked', 'pytest',
         'tests/test_device_bound_bridge.py', 'tests/test_feature_session_bridge.py')
     Write-Host "Installed Python bridge passed: $exportCount exact exports, ABI and lifecycle boundary tests; no provisioning"
 } finally {
     [Environment]::SetEnvironmentVariable('LCC_TEST_DEVICE_BOUND_DLL', $previousDll, 'Process')
-    [Environment]::SetEnvironmentVariable('LCC_TEST_OLD_DEVICE_BOUND_DLL', $previousOldDll, 'Process')
     Pop-Location
 }

@@ -14,7 +14,7 @@ public final class SdkTest {
     public static void main(String[] args) throws Exception {
         Path root = Path.of(args[0]).toAbsolutePath().normalize();
         configGolden(root);
-        failClosedParsing(root);
+        failClosedParsing();
         DeviceBoundVectorsTest.run(root);
         DeviceBoundAdapterTest.run();
         FeatureSessionAdapterTest.run();
@@ -38,7 +38,7 @@ public final class SdkTest {
         check(!rejected.ok() && rejected.code() == RejectionCode.CONFIG_HASH_MISMATCH, "config hash rejects");
     }
 
-    private static void failClosedParsing(Path root) throws IOException {
+    private static void failClosedParsing() {
         expectFailure(() -> Json.parse("{\"value\":\"\ud800\"}"), "raw unpaired surrogate rejects");
         expectFailure(() -> Json.serialize(Map.of("value", "\udc00")), "serialized unpaired surrogate rejects");
         check(Json.serialize(Map.of("value", "🚀")).contains("🚀"),

@@ -19,8 +19,8 @@ renewal alone authorizes work. Do not fall back to cached permission after a
 failed start. Retry transient starts on the same handle with bounded backoff.
 
 The adapter requires the feature-session exports in the application-owned
-bridge DLL; an older DLL remains usable through `DeviceBoundLibrary` and
-explicitly rejects this optional adapter. See the
+bridge DLL; a DLL missing them fails to load for this optional adapter with
+the platform loader error, while `DeviceBoundLibrary` remains usable. See the
 [native API guide](../../doc/api/feature_sessions.rst) for failure semantics and
 the [installed bridge](../python/native/README.md) for building the shared DLL.
 
@@ -104,9 +104,6 @@ required; the installed-DLL test proves ABI loading and no-effect rejection only
 Set `LCC_TEST_DEVICE_BOUND_DLL` to an installed absolute DLL path when running
 `dotnet test` to require that test. Windows CI supplies it after the shared bridge
 is built and checked; other SDK runs explicitly skip the installed-DLL test.
-Set `LCC_TEST_OLD_DEVICE_BOUND_DLL` to the shared bridge's test-only
-`licensecc_device_bound_original.dll` to require the original-export compatibility
-test too. Windows CI supplies both paths. The fixture is not a distributable DLL.
 
 ## Layout
 

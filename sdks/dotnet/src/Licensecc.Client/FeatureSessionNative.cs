@@ -58,17 +58,13 @@ internal sealed unsafe partial class NativeApi
             this.owner=owner;
             using var pin=owner.Pin();
             T Export<T>(string name) where T : Delegate => Marshal.GetDelegateForFunctionPointer<T>(NativeLibrary.GetExport(owner.module.DangerousGetHandle(),name));
-            try
-            {
-                var probe=Export<Probe>("lcc_feature_session_bridge_layout"); FeatureAbi.Verify(i=>probe(i));
-                initialize=Export<Init>("lcc_init_feature_session_outcome");
-                open=Export<OpenFeature>("lcc_feature_session_open");
-                authorize=Export<Check>("lcc_feature_session_authorize");
-                close=Export<CloseCall>("lcc_feature_session_close");
-                operations=new[] { Export<Operation>("lcc_feature_session_start"),Export<Operation>("lcc_feature_session_renew"),
-                    Export<Operation>("lcc_feature_session_stop"),Export<Operation>("lcc_feature_session_save_checkpoint") };
-            }
-            catch(EntryPointNotFoundException error) { throw new NotSupportedException("This native bridge does not support feature sessions.",error); }
+            var probe=Export<Probe>("lcc_feature_session_bridge_layout"); FeatureAbi.Verify(i=>probe(i));
+            initialize=Export<Init>("lcc_init_feature_session_outcome");
+            open=Export<OpenFeature>("lcc_feature_session_open");
+            authorize=Export<Check>("lcc_feature_session_authorize");
+            close=Export<CloseCall>("lcc_feature_session_close");
+            operations=new[] { Export<Operation>("lcc_feature_session_start"),Export<Operation>("lcc_feature_session_renew"),
+                Export<Operation>("lcc_feature_session_stop"),Export<Operation>("lcc_feature_session_save_checkpoint") };
         }
         public IDisposable Pin() => owner.Pin();
         public Abi.Options Options() => owner.Options();

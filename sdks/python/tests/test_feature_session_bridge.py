@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from licensecc import _feature_session_abi as abi
 from licensecc.feature_session import FeatureSession, FeatureSessionLibrary, Outcome, State, _decode
-from licensecc.device_bound import CheckpointResult, Result, DeviceBoundLibrary
+from licensecc.device_bound import CheckpointResult, Result
 from test_device_bound_bridge import FakeApi as DeviceApi, config, pointed
 
 
@@ -111,11 +111,6 @@ def test_unknown_native_metadata_is_rejected(field, value):
         _decode(0, raw)
 
 
-def test_old_library_is_explicitly_unsupported_only_for_new_api():
-    with pytest.raises(NotImplementedError):
-        abi.NativeApi(SimpleNamespace(library=SimpleNamespace()))
-
-
 @pytest.mark.parametrize("index", range(len(abi.expected_layout())))
 def test_every_layout_mismatch_is_rejected_before_open(index):
     class Probe:
@@ -133,13 +128,3 @@ def test_installed_optional_bridge_rejects_invalid_config_without_provisioning()
     client, result = FeatureSessionLibrary(path).open(config())
     assert client is None and result.code is Result.INVALID_ARGUMENT
     assert result.state is State.UNKNOWN
-
-
-def test_original_exports_reject_optional_api_without_breaking_device_bound():
-    path = os.environ.get("LCC_TEST_OLD_DEVICE_BOUND_DLL")
-    if not path:
-        pytest.skip("Set LCC_TEST_OLD_DEVICE_BOUND_DLL to the original-export fixture")
-    with pytest.raises(NotImplementedError):
-        FeatureSessionLibrary(path)
-    client, outcome = DeviceBoundLibrary(path).open_resume(config())
-    assert client is None and outcome.code is Result.INVALID_ARGUMENT

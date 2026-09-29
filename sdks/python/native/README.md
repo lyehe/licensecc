@@ -3,9 +3,11 @@
 The same DLL also exports the optional feature-session owner for Python and
 .NET. `licensecc.feature_session.FeatureSessionLibrary` and .NET's
 `FeatureSessionLibrary` check a separate outcome-layout probe before using it.
-The existing device-bound layout and exports retain their contracts. Rebuild
-the DLL against the current installed runtime to use the new API; older DLLs
-remain supported by the existing device-bound adapter.
+The existing device-bound layout and exports retain their contracts. The
+bridge ships in the same release as the SDK, so rebuild the DLL against the
+current installed runtime: one missing the feature-session exports fails to
+load for this API with the platform loader error, while the existing
+device-bound adapter stays usable regardless.
 
 This optional 64-bit Windows/Linux library exposes the existing native device-bound owner
 to `licensecc.device_bound`. It owns enrollment, HTTP, TPM signing, lease
@@ -109,11 +111,6 @@ on PATH:
 ```powershell
 pwsh -NoProfile -File scripts/ci/run-installed-python-device-bound.ps1 -InstallPrefix C:/your-install
 ```
-
-The installed gate also builds a test-only DLL exporting the original 16
-device-bound symbols. `LCC_TEST_OLD_DEVICE_BOUND_DLL` selects that fixture to
-verify optional feature-session rejection followed by successful old-API loading.
-The fixture is never installed or bundled with an application.
 
 
 ## Linux build

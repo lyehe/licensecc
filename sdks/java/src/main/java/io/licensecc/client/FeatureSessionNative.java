@@ -6,11 +6,7 @@ import java.nio.file.Path;
 final class FeatureSessionNative implements FeatureSessionApi {
     static FeatureSessionNative load(Path path) throws IOException {
         DeviceBoundNative.load(path); // Reuse the pinned absolute-path loader and its JNI protocol check.
-        try {
-            if (version() != 1) throw new UnsupportedOperationException("Incompatible feature-session JNI protocol");
-        } catch (UnsatisfiedLinkError error) {
-            throw new UnsupportedOperationException("This native bridge does not support feature sessions", error);
-        }
+        if (version() != 1) throw new UnsupportedOperationException("Incompatible feature-session JNI protocol");
         return new FeatureSessionNative();
     }
     private static native int version();
