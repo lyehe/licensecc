@@ -170,8 +170,8 @@ BOOST_AUTO_TEST_CASE(project_initialize_rejects_invalid_project_names) {
 	const fs::path project_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "product_initialize_invalid_names");
 	const vector<string> invalid_names = {"", ".", "..", "1TEST", "TEST.", "TEST/NAME", "TEST\\NAME",
 										  "TEST[NAME]", "TEST NAME", "TEST:NAME", "TEST*NAME", "TEST?NAME",
-										  "TEST<NAME", "TEST>NAME", "TEST|NAME", "TEST\"NAME", "CON", "nul.h",
-										  "COM1", "lpt9.generated", string("TEST\nNAME"),
+										  "TEST<NAME", "TEST>NAME", "TEST|NAME", "TEST\"NAME", "CON", "nul", "nul.h",
+										  "COM1", "lpt9", "lpt9.generated", string("TEST\nNAME"),
 										  "my-product", "legacy.product-1"};
 
 	for (const string &project_name : invalid_names) {
@@ -249,7 +249,7 @@ BOOST_AUTO_TEST_CASE(project_initialize_force_is_fail_closed_and_preserves_exist
 
 	BOOST_CHECK_EQUAL(read_file(expected_private_key), private_key_before);
 	BOOST_CHECK_MESSAGE(!fs::exists(generated_include_folder),
-						"forced weak-key migration failure must not create adjacent project output");
+						"a forced re-initialize that fails closed must not create adjacent project output");
 }
 
 BOOST_AUTO_TEST_CASE(project_initialize_repairs_stale_metadata_but_rejects_tampered_or_mismatched_public_key) {
