@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using Licensecc.Client;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -153,27 +154,6 @@ namespace Licensecc.Client.Tests
         }
 
         [TestMethod]
-        public void Negative_WrongPurpose_RejectedViaOnlineVerifier()
-        {
-            // Feeding a config token (lcccfg1) to the online verifier (expects lccoa1) -> envelope prefix
-            // mismatch. Feeding the online token to the config verifier likewise rejects. This proves the
-            // purpose/prefix separation between the two token kinds.
-            OnlineAssertionExpected onlineExpected = new OnlineAssertionExpected
-            {
-                Project = "DEFAULT",
-                Feature = "EXPORT",
-                LicenseFingerprint = new string('a', 64),
-                DeviceHash = string.Empty,
-                Nonce = string.Empty,
-                NowEpochSeconds = AcceptNow,
-                TrustedKeys = Ring(),
-            };
-            VerifyResult<OnlineAssertionClaims> wrongKind = OnlineAssertionVerifier.Verify(Token, onlineExpected);
-            Assert.IsFalse(wrongKind.Ok);
-            Assert.AreEqual(VerifyFailureCode.Envelope, wrongKind.Code);
-        }
-
-        [TestMethod]
         public void Negative_WrongBinding_Rejected()
         {
             ConfigTokenExpected expected = BaseExpected();
@@ -196,10 +176,11 @@ namespace Licensecc.Client.Tests
         [TestMethod]
         public void Negative_UnknownKeyId_Rejected()
         {
-            // Trust only the ONLINE golden key -> the config token's key-id is unknown.
-            string onlineDerHex = GoldenVectors.ReadTrimmed(Path.Combine(GoldenVectors.OnlineDir, "golden.public_key.pkcs1.der.hex"));
+            // Trust only a freshly generated key -> the config token's key-id is unknown.
+            using RSA rsa = RSA.Create(3072);
             ConfigTokenExpected expected = BaseExpected();
-            expected.TrustedKeys = new TrustedKeyRing(TrustedPublicKey.FromPkcs1DerHex(onlineDerHex));
+            expected.TrustedKeys = new TrustedKeyRing(
+                TrustedPublicKey.FromPkcs1DerHex(Convert.ToHexString(rsa.ExportRSAPublicKey())));
             VerifyResult<ConfigTokenClaims> result = ConfigTokenVerifier.Verify(Token, expected);
             Assert.IsFalse(result.Ok);
             Assert.AreEqual(VerifyFailureCode.Signature, result.Code);

@@ -19,10 +19,8 @@ repository; public registry publication is a separate release operation.
      - :doc:`Generated Python API <python>` and
        `SDK guide <https://github.com/lyehe/licensecc/tree/main/sdks/python>`_
    * - .NET 8
-     - ``OnlineAssertionVerifier``, ``ConfigTokenVerifier``,
-       ``LicensingBackendClient``
-     - Offline signed-token verification and backend HTTP calls with BCL-only
-       runtime dependencies.
+     - ``ConfigTokenVerifier``
+     - Offline signed-token verification with BCL-only runtime dependencies.
      - `.NET SDK guide <https://github.com/lyehe/licensecc/tree/main/sdks/dotnet>`_
    * - Java 17
      - ``OnlineAssertion``, ``ConfigAttestation``,

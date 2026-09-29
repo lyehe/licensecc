@@ -14,7 +14,6 @@ namespace Licensecc.Client.Tests
     {
         public static string VectorsDir { get; } = ResolveVectorsDir();
 
-        public static string OnlineDir => Path.Combine(VectorsDir, "online_assertion");
         public static string ConfigDir => Path.Combine(VectorsDir, "config_attestation");
 
         public static string ReadText(string path) => File.ReadAllText(path);

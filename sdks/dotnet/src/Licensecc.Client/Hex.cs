@@ -3,8 +3,7 @@ using System.Text;
 
 namespace Licensecc.Client
 {
-    /// <summary>Lowercase hex encode/decode helpers and an ASCII-hex predicate matching the C++
-    /// verifier's <c>is_ascii_hex</c> (which uses <c>std::isxdigit</c>, i.e. both cases accepted).</summary>
+    /// <summary>Lowercase hex encode/decode helpers.</summary>
     internal static class Hex
     {
         public static byte[] Decode(string hex)
@@ -46,26 +45,6 @@ namespace Licensecc.Client
             }
 
             return sb.ToString();
-        }
-
-        /// <summary>True when <paramref name="value"/> is exactly <paramref name="expectedLength"/>
-        /// ASCII hex digits (upper or lower case), matching <c>is_ascii_hex(value, expected_size)</c>.</summary>
-        public static bool IsAsciiHex(string value, int expectedLength)
-        {
-            if (value == null || value.Length != expectedLength)
-            {
-                return false;
-            }
-
-            foreach (char c in value)
-            {
-                if (FromHexDigit(c) < 0)
-                {
-                    return false;
-                }
-            }
-
-            return true;
         }
 
         private static int FromHexDigit(char c)

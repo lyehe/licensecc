@@ -187,18 +187,16 @@
     },
     {
       "id": "dotnet-sdk",
-      "title": ".NET SDK token verification and HTTP client",
+      "title": ".NET SDK token verification",
       "status": "shipped",
       "owner": "SDK maintainer",
-      "surfaces": [".NET token verifier", ".NET HTTP client"],
+      "surfaces": [".NET token verifier"],
       "availability": {"release": "Platform 0.1.0-rc.2", "platforms": [".NET 8"], "limitations": ["The package is project-reference/local-package ready and not published to NuGet; it does not provide C++ binary enforcement."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "sdks/dotnet/README.md"],
       "evidence": [
-        {"kind": "implementation", "surface": ".NET token verifier", "path": "sdks/dotnet/src/Licensecc.Client/OnlineAssertion.cs", "selector": "public static class OnlineAssertionVerifier", "assertion": "The .NET SDK implements online-assertion verification."},
-        {"kind": "automated_test", "surface": ".NET token verifier", "path": "sdks/dotnet/test/Licensecc.Client.Tests/OnlineAssertionTests.cs", "selector": "public sealed class OnlineAssertionTests", "assertion": "The .NET online-assertion verifier has automated tests."},
-        {"kind": "implementation", "surface": ".NET HTTP client", "path": "sdks/dotnet/src/Licensecc.Client/LicensingBackendClient.cs", "selector": "public sealed class LicensingBackendClient", "assertion": "The .NET SDK implements a backend HTTP client."},
-        {"kind": "automated_test", "surface": ".NET HTTP client", "path": "sdks/dotnet/test/Licensecc.Client.Tests/HttpClientTests.cs", "selector": "public async Task VerifyAsync_PostsToV1Verify_ParsesAssertion()", "assertion": "The .NET backend client has an automated request test."}
+        {"kind": "implementation", "surface": ".NET token verifier", "path": "sdks/dotnet/src/Licensecc.Client/ConfigToken.cs", "selector": "public static class ConfigTokenVerifier", "assertion": "The .NET SDK implements config-attestation verification."},
+        {"kind": "automated_test", "surface": ".NET token verifier", "path": "sdks/dotnet/test/Licensecc.Client.Tests/ConfigTokenTests.cs", "selector": "public void Positive_GoldenConfigTokenVerifies()", "assertion": ".NET golden-vector verification is automated."}
       ]
     },
     {

@@ -23,11 +23,10 @@
     <Version>0.1.0-rc.2</Version>
     <Authors>licensecc</Authors>
     <Description>
-      .NET client SDK for the licensecc online licensing backend: a fail-closed offline verifier
-      for the lccoa1 online-assertion and lcccfg1 config-attestation signed tokens (RSA-PKCS1-SHA256),
-      plus a thin HttpClient wrapper for the licensing-backend HTTP API. Covers the HTTP + token
-      contract, plus an optional Windows x64 bridge to the native protected-device owner.
-      Binary anti-tamper and hardware enforcement stay in the C++ library.
+      .NET client SDK for licensecc licensing: a fail-closed offline verifier for the lcccfg1
+      config-attestation signed token (RSA-PKCS1-SHA256), plus an optional Windows and Linux x64
+      bridge to the native protected-device owner. Binary anti-tamper and hardware enforcement
+      stay in the C++ library.
     </Description>
     <PackageTags>licensecc;licensing;rsa;token;verification</PackageTags>
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
