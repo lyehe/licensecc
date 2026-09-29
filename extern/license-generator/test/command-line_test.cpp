@@ -557,7 +557,7 @@ BOOST_AUTO_TEST_CASE(license_issue_rejects_active_custom_key_output_aliases_with
 	check_active_key_output_is_rejected(default_private_key, default_private_key, project_folder, default_before,
 										 "default-key output");
 
-	// Normal v200 issuance with a custom active key still succeeds when the
+	// Normal issuance with a custom active key still succeeds when the
 	// output is distinct from every protected input artifact.
 	const fs::path ordinary_custom_key = copy_disposable_custom_key("custom-ordinary-key.pem");
 	const FileSnapshot ordinary_key_before = snapshot_file(ordinary_custom_key);
