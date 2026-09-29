@@ -83,9 +83,12 @@ bool valid_key_name(const std::string& key) {
 
 }  // namespace
 
-// Declared in the header so project-creation code outside this translation
-// unit (the generator's Project class) can reuse this exact rule instead of
-// a second, divergent copy of it.
+// Declared in the header so project-creation code elsewhere in this vendored
+// generator (the Project class, its CLI) can reuse this exact function
+// instead of keeping its own, divergent copy of the rule. This is the
+// generator's own copy; the core runtime's separate v201 canonical-payload
+// module, used for verification, keeps its own copy of the same rule and is
+// unaffected by this.
 bool valid_project_name(const std::string& value) {
 	if (value.empty() || value.size() > kMaxValueLength) {
 		return false;
