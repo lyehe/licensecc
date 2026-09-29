@@ -122,11 +122,6 @@ static string normalize_newlines(const string &contents) {
 	return normalized;
 }
 
-// v201 is now the only format License ever issues, so requesting it explicitly
-// is a no-op. Kept so existing call sites below read the same as before the
-// format became unconditional, without threading a removed option through them.
-static void request_v201(License& license) { (void)license; }
-
 // this test is incompatible with older version of boost
 #ifdef BOOST_TEST_GLOBAL_FIXTURE
 
@@ -243,14 +238,12 @@ BOOST_AUTO_TEST_CASE(generate_license_features) {
 
 BOOST_AUTO_TEST_CASE(validate_feature_names) {
 	License valid(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(valid);
 	BOOST_CHECK_NO_THROW(valid.add_parameter(PARAM_FEATURE_NAMES, "Feature_1,feature-2,feature.3"));
 
 	const vector<string> invalid_feature_lists = {"", "feature,", ",feature", "feature,,other", "feature name",
 											  "feature\nname", "feature,FEATURE"};
 	for (const string &feature_list : invalid_feature_lists) {
 		License license(nullptr, MyGlobalFixture::project_path.string());
-		request_v201(license);
 		license.add_parameter(PARAM_FEATURE_NAMES, feature_list);
 		BOOST_CHECK_THROW(license.write_license(), invalid_argument);
 	}
@@ -283,12 +276,38 @@ BOOST_AUTO_TEST_CASE(extend_license) {
 	BOOST_CHECK_MESSAGE(ini.GetValue("TEST_PROJECT", PARAM_CLIENT_SIGNATURE) == client_signature, "license extended");
 }
 
+// The removed CLI opt-in options (--legacy-rsa1024, --allow-insecure-key-size)
+// only ever governed key *generation*; this refusal is separate, live
+// security behavior in write_license() itself and stays regardless. The
+// shared 1024-bit fixture at test/data/private_key.rsa is deliberately never
+// regenerated (see MyGlobalFixture::setup()'s comment: the core runtime's
+// signature-verifier golden vectors pin its exact bytes), which makes it the
+// right fixture to prove this refusal is still enforced.
+BOOST_AUTO_TEST_CASE(write_license_refuses_an_existing_weak_project_key) {
+	const fs::path lic_location = MyGlobalFixture::licenses_path / "weak_key_refused.lic";
+	const string lic_location_str = lic_location.string();
+	fs::remove(lic_location);
+	License valid(&lic_location_str, MyGlobalFixture::project_path.string());
+	valid.write_license();
+	const string before = read_binary_file(lic_location);
+
+	License weak(&lic_location_str, MyGlobalFixture::project_path.string());
+	weak.add_parameter(PARAM_PRIMARY_KEY, (fs::path(PROJECT_TEST_SRC_DIR) / "data" / "private_key.rsa").string());
+	try {
+		weak.write_license();
+		BOOST_FAIL("weak-key issuance unexpectedly succeeded");
+	} catch (const runtime_error& ex) {
+		BOOST_CHECK_MESSAGE(string(ex.what()).find("will not be rotated automatically") != string::npos,
+							string("weak-key diagnostic explains the refusal: ") + ex.what());
+	}
+	BOOST_CHECK_EQUAL(read_binary_file(lic_location), before);
+}
+
 BOOST_AUTO_TEST_CASE(reject_malformed_client_signature) {
 	const vector<string> malformed = {"XXX-XXX-XXX", "", "AEBCQ0RFRkc=", "AEBC-Q0RF-Rkc=-", "AE=C-Q0RF-Rkc=",
 									  "A!BC-Q0RF-Rkc=", string("AEBC-Q0RF-Rkc=\n")};
 	for (const string &value : malformed) {
 		License license(nullptr, MyGlobalFixture::project_path.string());
-		request_v201(license);
 		license.add_parameter(PARAM_CLIENT_SIGNATURE, value);
 		BOOST_CHECK_THROW(license.write_license(), invalid_argument);
 	}
@@ -299,26 +318,22 @@ BOOST_AUTO_TEST_CASE(reject_invalid_client_signature_semantics) {
 									 ip_client_signature(), weak_disk_label_client_signature(), weak_disk_mutable_client_signature()};
 	for (const string &value : invalid) {
 		License license(nullptr, MyGlobalFixture::project_path.string());
-		request_v201(license);
 		license.add_parameter(PARAM_CLIENT_SIGNATURE, value);
 		BOOST_CHECK_THROW(license.write_license(), invalid_argument);
 	}
 	const vector<uint8_t> invalid_control_flags = {0x01, 0x02, 0x03, 0x3f, 0x80, 0xc0};
 	for (const uint8_t control_flags : invalid_control_flags) {
 		License license(nullptr, MyGlobalFixture::project_path.string());
-		request_v201(license);
 		license.add_parameter(PARAM_CLIENT_SIGNATURE, control_flag_client_signature(control_flags));
 		BOOST_CHECK_THROW(license.write_license(), invalid_argument);
 	}
 
 	License env_opt_in_license(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(env_opt_in_license);
 	env_opt_in_license.set_allow_env_selected_binding(true);
 	env_opt_in_license.add_parameter(PARAM_CLIENT_SIGNATURE, control_flag_client_signature(0xc0));
 	BOOST_CHECK_THROW(env_opt_in_license.write_license(), invalid_argument);
 
 	License valid(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(valid);
 	BOOST_CHECK_NO_THROW(valid.add_parameter(PARAM_CLIENT_SIGNATURE, valid_client_signature()));
 }
 
@@ -330,19 +345,16 @@ BOOST_AUTO_TEST_CASE(reject_invalid_client_signature_semantics) {
 // With a sufficiently strong key, granting the opt-in must let issuance succeed.
 BOOST_AUTO_TEST_CASE(weak_client_signature_modes_accept_opt_in) {
 	License ip_license(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(ip_license);
 	ip_license.set_allow_ip_binding(true);
 	ip_license.add_parameter(PARAM_CLIENT_SIGNATURE, ip_client_signature());
 	BOOST_CHECK_NO_THROW(ip_license.write_license());
 
 	License env_license(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(env_license);
 	env_license.set_allow_env_selected_binding(true);
 	env_license.add_parameter(PARAM_CLIENT_SIGNATURE, env_selected_client_signature());
 	BOOST_CHECK_NO_THROW(env_license.write_license());
 
 	License weak_disk_label_license(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(weak_disk_label_license);
 	weak_disk_label_license.set_allow_weak_disk_label_binding(true);
 	weak_disk_label_license.add_parameter(PARAM_CLIENT_SIGNATURE, weak_disk_label_client_signature());
 	BOOST_CHECK_NO_THROW(weak_disk_label_license.write_license());
@@ -359,17 +371,14 @@ BOOST_AUTO_TEST_CASE(reject_unknown_license_output_parameters) {
 
 BOOST_AUTO_TEST_CASE(validate_extra_data_parameter) {
 	License valid(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(valid);
 	BOOST_CHECK_NO_THROW(valid.add_parameter(PARAM_EXTRA_DATA, "printable 123"));
 	License max_length(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(max_length);
 	BOOST_CHECK_NO_THROW(max_length.add_parameter(PARAM_EXTRA_DATA, string(LCC_API_PROPRIETARY_DATA_SIZE, 'x')));
 
 	const vector<string> invalid_values = {"", " leading", "trailing ", "line\nbreak", "tab\tvalue",
 										   string(LCC_API_PROPRIETARY_DATA_SIZE + 1, 'x')};
 	for (const string &value : invalid_values) {
 		License license(nullptr, MyGlobalFixture::project_path.string());
-		request_v201(license);
 		license.add_parameter(PARAM_EXTRA_DATA, value);
 		BOOST_CHECK_THROW(license.write_license(), invalid_argument);
 	}
@@ -377,14 +386,12 @@ BOOST_AUTO_TEST_CASE(validate_extra_data_parameter) {
 
 BOOST_AUTO_TEST_CASE(validate_custom_limit_parameter) {
 	License valid(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(valid);
 	BOOST_CHECK_NO_THROW(valid.add_parameter(PARAM_CUSTOM_LIMIT, "cpu-max-8_memory-mib-max-4096"));
 
 	const vector<string> invalid_values = {"", " leading", "trailing ", "line\nbreak", "tab\tvalue",
 									   string(LCC_API_CUSTOM_LIMIT_SIZE + 1, 'x')};
 	for (const string &value : invalid_values) {
 		License license(nullptr, MyGlobalFixture::project_path.string());
-		request_v201(license);
 		license.add_parameter(PARAM_CUSTOM_LIMIT, value);
 		BOOST_CHECK_THROW(license.write_license(), invalid_argument);
 	}
@@ -394,25 +401,21 @@ BOOST_AUTO_TEST_CASE(validate_version_limit_parameters) {
 	const vector<string> invalid_versions = {"", "1..2", "1.2.3.4", "12345", "1.abc", ".1", "1."};
 	for (const string &version : invalid_versions) {
 		License license(nullptr, MyGlobalFixture::project_path.string());
-		request_v201(license);
 		license.add_parameter(PARAM_VERSION_FROM, version);
 		BOOST_CHECK_THROW(license.write_license(), invalid_argument);
 	}
 
 	License valid_range(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(valid_range);
 	BOOST_CHECK_NO_THROW(valid_range.add_parameter(PARAM_VERSION_FROM, "1.2"));
 	BOOST_CHECK_NO_THROW(valid_range.add_parameter(PARAM_VERSION_TO, "1.2.0"));
 	BOOST_CHECK_NO_THROW(valid_range.add_parameter(PARAM_VERSION_FROM, "0"));
 
 	License inverted_end(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(inverted_end);
 	BOOST_CHECK_NO_THROW(inverted_end.add_parameter(PARAM_VERSION_FROM, "2.0"));
 	BOOST_CHECK_NO_THROW(inverted_end.add_parameter(PARAM_VERSION_TO, "1.9"));
 	BOOST_CHECK_THROW(inverted_end.write_license(), invalid_argument);
 
 	License inverted_start(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(inverted_start);
 	BOOST_CHECK_NO_THROW(inverted_start.add_parameter(PARAM_VERSION_TO, "1.9"));
 	BOOST_CHECK_NO_THROW(inverted_start.add_parameter(PARAM_VERSION_FROM, "2.0"));
 	BOOST_CHECK_THROW(inverted_start.write_license(), invalid_argument);
@@ -423,27 +426,22 @@ BOOST_AUTO_TEST_CASE(validate_date_parameters) {
 										  "2020-01-00", "2020-13-01", "2020/1/01", "2020-01-01x"};
 	for (const string &date : invalid_dates) {
 		License license(nullptr, MyGlobalFixture::project_path.string());
-		request_v201(license);
 		license.add_parameter(PARAM_EXPIRY_DATE, date);
 		BOOST_CHECK_THROW(license.write_license(), invalid_argument);
 	}
 
 	License leap_year(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(leap_year);
 	BOOST_CHECK_NO_THROW(leap_year.add_parameter(PARAM_EXPIRY_DATE, "2020-02-29"));
 
 	License slash_form(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(slash_form);
 	BOOST_CHECK_NO_THROW(slash_form.add_parameter(PARAM_BEGIN_DATE, "2020/02/29"));
 
 	License inverted_end(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(inverted_end);
 	BOOST_CHECK_NO_THROW(inverted_end.add_parameter(PARAM_BEGIN_DATE, "2020-02-29"));
 	BOOST_CHECK_NO_THROW(inverted_end.add_parameter(PARAM_EXPIRY_DATE, "2020-02-28"));
 	BOOST_CHECK_THROW(inverted_end.write_license(), invalid_argument);
 
 	License inverted_start(nullptr, MyGlobalFixture::project_path.string());
-	request_v201(inverted_start);
 	BOOST_CHECK_NO_THROW(inverted_start.add_parameter(PARAM_EXPIRY_DATE, "2020-02-28"));
 	BOOST_CHECK_NO_THROW(inverted_start.add_parameter(PARAM_BEGIN_DATE, "2020-02-29"));
 	BOOST_CHECK_THROW(inverted_start.write_license(), invalid_argument);
