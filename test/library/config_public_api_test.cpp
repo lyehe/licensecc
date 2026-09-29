@@ -2,6 +2,7 @@
 
 #include <licensecc/licensecc.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -75,6 +76,31 @@ BOOST_AUTO_TEST_CASE(verify_config_rejects_malformed_input) {
 	input.config_len = sizeof(bytes);
 	input.size = 1;
 	BOOST_CHECK_EQUAL(lcc_verify_config(&caller, nullptr, &info, &input, &decision, nullptr), LICENSE_MALFORMED);
+}
+
+BOOST_AUTO_TEST_CASE(config_verify_options_with_old_size_are_rejected) {
+	CallerInformations caller;
+	lcc_init_caller_informations(&caller);
+	LicenseInfo info{};
+	LccConfigDecision decision;
+	lcc_init_config_decision(&decision);
+
+	LccConfigInput input;
+	lcc_init_config_input(&input);
+	input.token = "lcccfg1.x.y";
+	const unsigned char bytes[] = {1, 2, 3};
+	input.config_bytes = bytes;
+	input.config_len = sizeof(bytes);
+
+	// The old config-options v2 struct size (before custom_limit_check was
+	// added) is no longer accepted; only the current size and version verify.
+	LccConfigVerifyOptions options;
+	lcc_init_config_verify_options(&options);
+	options.size = offsetof(LccConfigVerifyOptions, custom_limit_check);
+	options.version = 2;
+
+	BOOST_CHECK_EQUAL(lcc_verify_config(&caller, nullptr, &info, &input, &decision, &options), LICENSE_MALFORMED);
+	BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
 }
 
 static const char* const kConfigFeature = "CONFIG";

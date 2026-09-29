@@ -103,6 +103,29 @@ BOOST_AUTO_TEST_CASE(lcc_strerror_known_and_unknown) {
 	BOOST_CHECK(string(lcc_strerror(PRODUCT_EXPIRED)).find("expired") != string::npos);
 	BOOST_CHECK(string(lcc_strerror(LICENSE_OK)).find("OK") != string::npos);
 	BOOST_CHECK(string(lcc_strerror(LICENSE_TAMPER_DETECTED)).find("tamper") != string::npos);
+
+	// Each LICENSE_CONFIG_* code has its own message and must not fall through
+	// to the unknown-event fallback.
+	const string token_invalid_msg = lcc_strerror(LICENSE_CONFIG_TOKEN_INVALID);
+	BOOST_CHECK(token_invalid_msg.find("token") != string::npos);
+	BOOST_CHECK_NE(token_invalid_msg, "unknown license event");
+
+	const string binding_mismatch_msg = lcc_strerror(LICENSE_CONFIG_BINDING_MISMATCH);
+	BOOST_CHECK(binding_mismatch_msg.find("bound") != string::npos);
+	BOOST_CHECK_NE(binding_mismatch_msg, "unknown license event");
+
+	const string hash_mismatch_msg = lcc_strerror(LICENSE_CONFIG_HASH_MISMATCH);
+	BOOST_CHECK(hash_mismatch_msg.find("hash") != string::npos);
+	BOOST_CHECK_NE(hash_mismatch_msg, "unknown license event");
+
+	const string config_expired_msg = lcc_strerror(LICENSE_CONFIG_EXPIRED);
+	BOOST_CHECK(config_expired_msg.find("expires") != string::npos);
+	BOOST_CHECK_NE(config_expired_msg, "unknown license event");
+
+	const string rollback_msg = lcc_strerror(LICENSE_CONFIG_ROLLBACK);
+	BOOST_CHECK(rollback_msg.find("sequence") != string::npos);
+	BOOST_CHECK_NE(rollback_msg, "unknown license event");
+
 	// Unassigned values within the enum's representable range use the fallback.
 	BOOST_CHECK_EQUAL(lcc_strerror(static_cast<LCC_EVENT_TYPE>(99)), "unknown license event");
 }
