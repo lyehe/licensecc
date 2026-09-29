@@ -19,8 +19,8 @@ reading v200 licenses independently of this generator change.
 
 `licensecc` also raised this vendored copy's OpenSSL floor to 3.0: its
 `CMakeLists.txt` requests `find_package(OpenSSL 3.0 ...)` and no longer falls
-back to Zlib for pre-3.0 OpenSSL, and `src/base_lib/openssl/crypto_helper_ssl.cpp`
-no longer calls the legacy `ERR_load_ERR_strings`/`ERR_load_crypto_strings`/
-`OpenSSL_add_all_algorithms` global init (unnecessary since OpenSSL 1.1.0 and
-removed in OpenSSL 3.0) and uses `EVP_MD_CTX_new`/`EVP_MD_CTX_free` instead of
-the deprecated `EVP_MD_CTX_create`/`EVP_MD_CTX_destroy`.
+back to Zlib for pre-3.0 OpenSSL, and
+`src/base_lib/openssl/crypto_helper_ssl.cpp` removed the pre-3.0 OpenSSL
+initialisation calls (unnecessary since OpenSSL 1.1.0 and removed outright in
+OpenSSL 3.0) and switched the digest context to the OpenSSL 3.0 allocation
+API.
