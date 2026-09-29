@@ -788,6 +788,34 @@ BOOST_AUTO_TEST_CASE(strict_source_fatal_rejects_malformed_path_candidate_before
 	locate::LocatorFactory::find_license_near_module(FIND_LICENSE_NEAR_MODULE);
 }
 
+BOOST_AUTO_TEST_CASE(rejected_candidate_is_fatal_by_default) {
+	const string malformed_path = write_temp_file(
+		"rejected-candidate-fatal-malformed.lic",
+		string("[") + LCC_PROJECT_NAME + "]\nlic_ver = 200\nunknown-key = value\nsig = QUJDRA==\n");
+	const string valid_path = issue_valid_license_file("rejected-candidate-fatal-valid-path");
+	locate::LocatorFactory::find_license_near_module(false);
+	lcc_set_environment_license_sources_enabled(false);
+
+	LicenseLocation location{};
+	location.license_data_type = LICENSE_PATH;
+	const string path_list = malformed_path + ";" + valid_path;
+	std::copy(path_list.begin(), path_list.end(), location.licenseData);
+	LicenseInfo info = prefilled_license_info();
+	LCC_EVENT_TYPE result = LICENSE_OK;
+
+	// No call to lcc_set_strict_source_fatal_enabled: this pins the default.
+	BOOST_CHECK_NO_THROW(result = acquire_license(nullptr, &location, &info));
+	BOOST_CHECK_EQUAL(result, LICENSE_MALFORMED);
+	BOOST_CHECK(has_status_event(info, LICENSE_MALFORMED));
+	BOOST_CHECK_EQUAL(info.proprietary_data[0], '\0');
+	BOOST_CHECK_EQUAL(info.license_version, 0);
+
+	std::remove(malformed_path.c_str());
+	std::remove(valid_path.c_str());
+	lcc_set_environment_license_sources_enabled(FIND_LICENSE_WITH_ENV_VAR);
+	locate::LocatorFactory::find_license_near_module(FIND_LICENSE_NEAR_MODULE);
+}
+
 BOOST_AUTO_TEST_CASE(runtime_policy_toggles_are_atomic_for_parallel_license_checks) {
 	const string valid_license_path = issue_valid_license_file("policy-toggle-atomic-valid");
 	UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
