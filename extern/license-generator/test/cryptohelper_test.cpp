@@ -113,13 +113,17 @@ BOOST_AUTO_TEST_CASE(test_generate_export_import_and_sign) {
 	BOOST_CHECK_MESSAGE(signature.size() == 512, "default generated signature uses RSA-3072");
 }
 
-BOOST_AUTO_TEST_CASE(test_generate_legacy_rsa1024_requires_explicit_size) {
+// CryptoHelper::generateKeyPair(size_t) has no floor of its own -- only the
+// generator CLI's project init and License::write_license() enforce one --
+// so an explicit smaller size, such as the one Project(..., 1024) still
+// relies on for fast test fixtures, must keep working at this level.
+BOOST_AUTO_TEST_CASE(test_generate_with_explicit_key_size_below_the_default) {
 	unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
 	crypto->generateKeyPair(1024);
 	const string pk = crypto->exportPrivateKey();
 	crypto->loadPrivateKey(pk);
 	const string signature = crypto->signString("testString");
-	BOOST_CHECK_MESSAGE(signature.size() == 172, "explicit legacy RSA-1024 signature is still supported");
+	BOOST_CHECK_MESSAGE(signature.size() == 172, "an explicit 1024-bit key still signs successfully");
 }
 
 BOOST_AUTO_TEST_CASE(test_load_private_key_error_does_not_leak_key_material) {
