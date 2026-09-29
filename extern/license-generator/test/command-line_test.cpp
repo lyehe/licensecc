@@ -192,7 +192,7 @@ BOOST_AUTO_TEST_CASE(product_initialize_issue_license) {
 	// load a license, check the project name corresponds and there are no extra elements.
 	CSimpleIniA ini;
 	ini.LoadFile(expected_license.c_str());
-	BOOST_CHECK_MESSAGE(ini.GetSectionSize(project_name.c_str()) == 2, "Section [" + project_name + "] has 2 elements");
+	BOOST_CHECK_MESSAGE(ini.GetSectionSize(project_name.c_str()) == 6, "Section [" + project_name + "] has 6 elements");
 }
 
 BOOST_AUTO_TEST_CASE(product_validate_keypair_and_v201_issue_reject_mismatch) {
@@ -238,7 +238,7 @@ BOOST_AUTO_TEST_CASE(product_validate_keypair_and_v201_issue_reject_mismatch) {
 	fs::remove(mismatched_license);
 	const string mismatched_license_str = mismatched_license.string();
 	const string project_folder_str = expected_project_folder.string();
-	int issue_argc = 13;
+	int issue_argc = 9;
 	const char* issue_argv[] = {"lcc",
 								"license",
 								"issue",
@@ -247,66 +247,9 @@ BOOST_AUTO_TEST_CASE(product_validate_keypair_and_v201_issue_reject_mismatch) {
 								"--" PARAM_LICENSE_OUTPUT,
 								mismatched_license_str.c_str(),
 								"--" PARAM_PROJECT_FOLDER,
-								project_folder_str.c_str(),
-								"--" PARAM_LICENSE_FORMAT_VERSION,
-								"201",
-								"--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-								"201"};
+								project_folder_str.c_str()};
 	BOOST_CHECK_EQUAL(CommandLineParser::parseCommandLine(issue_argc, issue_argv), 1);
 	BOOST_CHECK_MESSAGE(!fs::exists(mismatched_license), "mismatched v201 issuance must not create a license file");
-}
-
-BOOST_AUTO_TEST_CASE(product_validate_keypair_warns_on_insecure_key) {
-	const string project_name("TEST_VALIDATE_WEAK");
-	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
-	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_validate_weak");
-	const fs::path project_folder(projects_folder / project_name);
-	const fs::path private_key(project_folder / PRIVATE_KEY_FNAME);
-	const fs::path public_key(project_folder / "include" / "licensecc" / project_name / PUBLIC_KEY_INC_FNAME);
-	fs::remove_all(projects_folder);
-	const string mock_source = mock_source_folder.string();
-	const string projects_str = projects_folder.string();
-
-	// Create a deliberately-weak (2048-bit) project via the explicit override.
-	int init_argc = 12;
-	const char* init_argv[] = {"lcc",
-							   "project",
-							   "init",
-							   "-n",
-							   project_name.c_str(),
-							   "--projects-folder",
-							   projects_str.c_str(),
-							   "--templates",
-							   mock_source.c_str(),
-							   "--key-bits",
-							   "2048",
-							   "--allow-insecure-key-size"};
-	BOOST_REQUIRE_EQUAL(CommandLineParser::parseCommandLine(init_argc, init_argv), 0);
-
-	// validate-keypair on the weak project succeeds but must warn about the runtime floor.
-	const string private_key_str = private_key.string();
-	const string public_key_str = public_key.string();
-	int validate_argc = 7;
-	const char* validate_argv[] = {"lcc",
-								   "project",
-								   "validate-keypair",
-								   "--private-key",
-								   private_key_str.c_str(),
-								   "--public-key",
-								   public_key_str.c_str()};
-	boost::test_tools::output_test_stream captured;
-	std::streambuf* old_cerr = std::cerr.rdbuf(captured.rdbuf());
-	int result = 1;
-	try {
-		result = CommandLineParser::parseCommandLine(validate_argc, validate_argv);
-	} catch (...) {
-		std::cerr.rdbuf(old_cerr);
-		throw;
-	}
-	std::cerr.rdbuf(old_cerr);
-	BOOST_CHECK_EQUAL(result, 0);
-	BOOST_CHECK_MESSAGE(captured.str().find("NOT verify") != string::npos,
-						"validate-keypair insecure-key warning printed to stderr: " + captured.str());
 }
 
 BOOST_AUTO_TEST_CASE(v201_issue_derives_client_signature_source_strength_metadata) {
@@ -325,7 +268,7 @@ BOOST_AUTO_TEST_CASE(v201_issue_derives_client_signature_source_strength_metadat
 	const fs::path rejected_license("v201_weak_disk_label_rejected.lic");
 	fs::remove(rejected_license);
 	const string rejected_license_str = rejected_license.string();
-	int rejected_argc = 15;
+	int rejected_argc = 11;
 	const char* rejected_argv[] = {"lcc",
 								   "license",
 								   "issue",
@@ -335,10 +278,6 @@ BOOST_AUTO_TEST_CASE(v201_issue_derives_client_signature_source_strength_metadat
 								   rejected_license_str.c_str(),
 								   "--" PARAM_PROJECT_FOLDER,
 								   project_folder_str.c_str(),
-								   "--" PARAM_LICENSE_FORMAT_VERSION,
-								   "201",
-								   "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-								   "201",
 								   "--" PARAM_CLIENT_SIGNATURE,
 								   weak_signature.c_str()};
 	BOOST_CHECK_EQUAL(CommandLineParser::parseCommandLine(rejected_argc, rejected_argv), 1);
@@ -347,7 +286,7 @@ BOOST_AUTO_TEST_CASE(v201_issue_derives_client_signature_source_strength_metadat
 	const fs::path allowed_license("v201_weak_disk_label_allowed.lic");
 	fs::remove(allowed_license);
 	const string allowed_license_str = allowed_license.string();
-	int allowed_argc = 16;
+	int allowed_argc = 12;
 	const char* allowed_argv[] = {"lcc",
 								  "license",
 								  "issue",
@@ -357,10 +296,6 @@ BOOST_AUTO_TEST_CASE(v201_issue_derives_client_signature_source_strength_metadat
 								  allowed_license_str.c_str(),
 								  "--" PARAM_PROJECT_FOLDER,
 								  project_folder_str.c_str(),
-								  "--" PARAM_LICENSE_FORMAT_VERSION,
-								  "201",
-								  "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-								  "201",
 								  "--" PARAM_CLIENT_SIGNATURE,
 								  weak_signature.c_str(),
 								  "--allow-weak-disk-label-binding"};
@@ -370,40 +305,6 @@ BOOST_AUTO_TEST_CASE(v201_issue_derives_client_signature_source_strength_metadat
 	BOOST_REQUIRE_EQUAL(ini.LoadFile(allowed_license.c_str()), SI_Error::SI_OK);
 	BOOST_CHECK_EQUAL(string(ini.GetValue(project_name.c_str(), PARAM_CLIENT_SIGNATURE_SOURCE_STRENGTH, "")),
 					  "weak-disk-label");
-}
-
-BOOST_AUTO_TEST_CASE(product_initialize_legacy_rsa1024_requires_explicit_cli_flag) {
-	const string project_name("TEST_LEGACY_RSA1024");
-	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
-	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_legacy_rsa1024");
-	const fs::path expected_private_key(projects_folder / project_name / PRIVATE_KEY_FNAME);
-	const fs::path expected_public_key(projects_folder / project_name / "include" / "licensecc" / project_name /
-									   PUBLIC_KEY_INC_FNAME);
-	fs::remove_all(projects_folder);
-	const string mock_source = mock_source_folder.string();
-	const string projects_str = projects_folder.string();
-	int argc = 11;
-	const char* argv[] = {"lcc",
-						  "project",
-						  "init",
-						  "-n",
-						  project_name.c_str(),
-						  "--projects-folder",
-						  projects_str.c_str(),
-						  "--templates",
-						  mock_source.c_str(),
-						  "--legacy-rsa1024",
-						  "--allow-insecure-key-size"};
-	const int result = CommandLineParser::parseCommandLine(argc, argv);
-	BOOST_CHECK_EQUAL(result, 0);
-	BOOST_REQUIRE_MESSAGE(fs::exists(expected_private_key), "Private key created.");
-	BOOST_REQUIRE_MESSAGE(fs::exists(expected_public_key), "Public key created.");
-	const string public_key_header = read_binary_file(expected_public_key);
-	BOOST_CHECK_LT(public_key_len_from_header(public_key_header), static_cast<size_t>(200));
-	BOOST_CHECK_EQUAL(string_define_from_header(public_key_header, "LCC_PUBLIC_KEY_ALGORITHM"), "rsa");
-	BOOST_CHECK_EQUAL(numeric_define_from_header(public_key_header, "LCC_PUBLIC_KEY_BITS"), static_cast<size_t>(1024));
-	BOOST_CHECK_EQUAL(string_define_from_header(public_key_header, "LCC_SIGNATURE_ALGORITHM"), "rsa-pkcs1-sha256");
-	BOOST_CHECK_EQUAL(public_key_id_from_header(public_key_header).substr(0, 7), "sha256:");
 }
 
 static void write_binary_file(const fs::path& path, const string& contents) {
@@ -577,21 +478,27 @@ BOOST_AUTO_TEST_CASE(license_issue_rejects_active_custom_key_output_aliases_with
 #endif
 }
 
-BOOST_AUTO_TEST_CASE(legacy_v200_issue_preserves_safe_hyphenated_project_name) {
-	const string project_name("my-product");
+// The v201 canonical payload's "project" field is an identifier (ASCII
+// alpha/underscore start, then alnum/underscore only) and rejects a hyphen,
+// even though a project FOLDER name may contain one (Project::initialize()
+// allows '-', '.', '_' for portable generated paths). A hyphenated FEATURE
+// name has no such restriction, so it is what this test exercises surviving
+// issuance safely; the project name itself must be hyphen-free.
+BOOST_AUTO_TEST_CASE(issue_preserves_safe_hyphenated_feature_name) {
+	const string project_name("my_product");
 	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
-	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_hyphenated_v200");
+	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_hyphenated");
 	const fs::path expected_project_folder(projects_folder / project_name);
 	const fs::path expected_private_key(expected_project_folder / PRIVATE_KEY_FNAME);
 	const fs::path expected_public_key(expected_project_folder / "include" / "licensecc" / project_name /
 									   PUBLIC_KEY_INC_FNAME);
 	create_project(projects_folder, expected_private_key, expected_public_key, mock_source_folder, project_name);
-	const fs::path output_file("hyphenated_v200.lic");
+	const fs::path output_file("hyphenated.lic");
 	fs::remove(output_file);
 	const string private_key_str = expected_private_key.string();
 	const string project_folder_str = expected_project_folder.string();
 	const string output_file_str = output_file.string();
-	int argc = 9;
+	int argc = 11;
 	const char* argv[] = {"lcc",
 					  "license",
 					  "issue",
@@ -600,11 +507,13 @@ BOOST_AUTO_TEST_CASE(legacy_v200_issue_preserves_safe_hyphenated_project_name) {
 					  "--" PARAM_LICENSE_OUTPUT,
 					  output_file_str.c_str(),
 					  "--" PARAM_PROJECT_FOLDER,
-					  project_folder_str.c_str()};
+					  project_folder_str.c_str(),
+					  "--" PARAM_FEATURE_NAMES,
+					  "my-feature"};
 	BOOST_CHECK_EQUAL(CommandLineParser::parseCommandLine(argc, argv), 0);
 	CSimpleIniA ini;
 	BOOST_REQUIRE_EQUAL(ini.LoadFile(output_file.c_str()), SI_Error::SI_OK);
-	BOOST_CHECK_EQUAL(string(ini.GetValue("MY-PRODUCT", LICENSE_VERSION, "")), "200");
+	BOOST_CHECK_EQUAL(string(ini.GetValue("MY-FEATURE", LICENSE_VERSION, "")), "201");
 }
 
 BOOST_AUTO_TEST_CASE(test_sign_does_not_truncate_existing_output_before_safe_publication) {
@@ -721,133 +630,6 @@ BOOST_AUTO_TEST_CASE(test_sign_rejects_active_private_key_output_aliases_without
 #endif
 }
 
-BOOST_AUTO_TEST_CASE(project_migrate_weak_key_is_explicit_fail_closed_and_preserves_the_private_key) {
-	const string project_name("TEST_MIGRATE_WEAK_KEY");
-	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
-	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_migrate_weak_key");
-	const fs::path project_folder(projects_folder / project_name);
-	const fs::path private_key(project_folder / PRIVATE_KEY_FNAME);
-	fs::remove_all(projects_folder);
-	const string mock_source = mock_source_folder.string();
-	const string projects_str = projects_folder.string();
-	int init_argc = 11;
-	const char* init_argv[] = {"lcc",
-							   "project",
-							   "init",
-							   "-n",
-							   project_name.c_str(),
-							   "--projects-folder",
-							   projects_str.c_str(),
-							   "--templates",
-							   mock_source.c_str(),
-							   "--legacy-rsa1024",
-							   "--allow-insecure-key-size"};
-	BOOST_REQUIRE_EQUAL(CommandLineParser::parseCommandLine(init_argc, init_argv), 0);
-	const string private_before = read_binary_file(private_key);
-	const string project_folder_str = project_folder.string();
-	int migrate_argc = 5;
-	const char* migrate_argv[] = {"lcc", "project", "migrate-weak-key", "--project-folder", project_folder_str.c_str()};
-	boost::test_tools::output_test_stream captured;
-	std::streambuf* old_cerr = std::cerr.rdbuf(captured.rdbuf());
-	int result = 0;
-	try {
-		result = CommandLineParser::parseCommandLine(migrate_argc, migrate_argv);
-	} catch (...) {
-		std::cerr.rdbuf(old_cerr);
-		throw;
-	}
-	std::cerr.rdbuf(old_cerr);
-	BOOST_CHECK_EQUAL(result, 1);
-	BOOST_CHECK_MESSAGE(captured.str().find("Refusing automatic rotation") != string::npos,
-						"migration explains its fail-closed behavior: " + captured.str());
-	BOOST_CHECK_MESSAGE(captured.str().find("Back up") != string::npos,
-						"migration gives a restorable backup procedure: " + captured.str());
-	BOOST_CHECK_EQUAL(read_binary_file(private_key), private_before);
-}
-
-BOOST_AUTO_TEST_CASE(product_initialize_refuses_insecure_key_size_without_override) {
-	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
-	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_insecure_refused");
-	fs::remove_all(projects_folder);
-	const string mock_source = mock_source_folder.string();
-	const string projects_str = projects_folder.string();
-
-	// --legacy-rsa1024 (1024 bits) is refused without the explicit override.
-	{
-		const string project_name("TEST_REFUSE_LEGACY");
-		const fs::path expected_project_folder(projects_folder / project_name);
-		int argc = 10;
-		const char* argv[] = {"lcc",
-							  "project",
-							  "init",
-							  "-n",
-							  project_name.c_str(),
-							  "--projects-folder",
-							  projects_str.c_str(),
-							  "--templates",
-							  mock_source.c_str(),
-							  "--legacy-rsa1024"};
-		const int result = CommandLineParser::parseCommandLine(argc, argv);
-		BOOST_CHECK_EQUAL(result, 1);
-		BOOST_CHECK_MESSAGE(!fs::exists(expected_project_folder),
-							"Insecure --legacy-rsa1024 must not initialize " + expected_project_folder.string());
-	}
-
-	// --key-bits 2048 (below the 3072 runtime floor) is refused without the explicit override.
-	{
-		const string project_name("TEST_REFUSE_2048");
-		const fs::path expected_project_folder(projects_folder / project_name);
-		int argc = 11;
-		const char* argv[] = {"lcc",
-							  "project",
-							  "init",
-							  "-n",
-							  project_name.c_str(),
-							  "--projects-folder",
-							  projects_str.c_str(),
-							  "--templates",
-							  mock_source.c_str(),
-							  "--key-bits",
-							  "2048"};
-		const int result = CommandLineParser::parseCommandLine(argc, argv);
-		BOOST_CHECK_EQUAL(result, 1);
-		BOOST_CHECK_MESSAGE(!fs::exists(expected_project_folder),
-							"Insecure --key-bits 2048 must not initialize " + expected_project_folder.string());
-	}
-}
-
-BOOST_AUTO_TEST_CASE(product_initialize_accepts_insecure_key_size_with_override) {
-	const string project_name("TEST_INSECURE_OVERRIDE");
-	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
-	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_insecure_override");
-	const fs::path expected_private_key(projects_folder / project_name / PRIVATE_KEY_FNAME);
-	const fs::path expected_public_key(projects_folder / project_name / "include" / "licensecc" / project_name /
-									   PUBLIC_KEY_INC_FNAME);
-	fs::remove_all(projects_folder);
-	const string mock_source = mock_source_folder.string();
-	const string projects_str = projects_folder.string();
-	int argc = 12;
-	const char* argv[] = {"lcc",
-						  "project",
-						  "init",
-						  "-n",
-						  project_name.c_str(),
-						  "--projects-folder",
-						  projects_str.c_str(),
-						  "--templates",
-						  mock_source.c_str(),
-						  "--key-bits",
-						  "2048",
-						  "--allow-insecure-key-size"};
-	const int result = CommandLineParser::parseCommandLine(argc, argv);
-	BOOST_CHECK_EQUAL(result, 0);
-	BOOST_REQUIRE_MESSAGE(fs::exists(expected_private_key), "Private key created.");
-	BOOST_REQUIRE_MESSAGE(fs::exists(expected_public_key), "Public key created.");
-	const string public_key_header = read_binary_file(expected_public_key);
-	BOOST_CHECK_EQUAL(string_define_from_header(public_key_header, "LCC_PUBLIC_KEY_ALGORITHM"), "rsa");
-	BOOST_CHECK_EQUAL(numeric_define_from_header(public_key_header, "LCC_PUBLIC_KEY_BITS"), static_cast<size_t>(2048));
-}
-
 BOOST_AUTO_TEST_CASE(product_initialize_accepts_key_bits_at_3072_floor) {
 	// Pins the floor boundary: exactly 3072 bits must be accepted WITHOUT the insecure override.
 	const string project_name("TEST_KEY_BITS_3072");
@@ -875,43 +657,6 @@ BOOST_AUTO_TEST_CASE(product_initialize_accepts_key_bits_at_3072_floor) {
 	BOOST_REQUIRE_MESSAGE(fs::exists(expected_public_key), "Public key created.");
 	const string public_key_header = read_binary_file(expected_public_key);
 	BOOST_CHECK_EQUAL(numeric_define_from_header(public_key_header, "LCC_PUBLIC_KEY_BITS"), static_cast<size_t>(3072));
-}
-
-BOOST_AUTO_TEST_CASE(product_initialize_warns_on_insecure_key_size) {
-	// The override path must emit a runtime-rejection warning to stderr.
-	const string project_name("TEST_KEY_BITS_WARN");
-	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
-	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_key_bits_warn");
-	fs::remove_all(projects_folder);
-	const string mock_source = mock_source_folder.string();
-	const string projects_str = projects_folder.string();
-	int argc = 12;
-	const char* argv[] = {"lcc",
-						  "project",
-						  "init",
-						  "-n",
-						  project_name.c_str(),
-						  "--projects-folder",
-						  projects_str.c_str(),
-						  "--templates",
-						  mock_source.c_str(),
-						  "--key-bits",
-						  "2048",
-						  "--allow-insecure-key-size"};
-	boost::test_tools::output_test_stream captured;
-	std::streambuf* old_cerr = std::cerr.rdbuf(captured.rdbuf());
-	int result = 1;
-	try {
-		result = CommandLineParser::parseCommandLine(argc, argv);
-	} catch (...) {
-		std::cerr.rdbuf(old_cerr);
-		throw;
-	}
-	std::cerr.rdbuf(old_cerr);
-	const string stderr_str = captured.str();
-	BOOST_CHECK_EQUAL(result, 0);
-	BOOST_CHECK_MESSAGE(stderr_str.find("NOT verify") != string::npos,
-						"insecure key-size warning printed to stderr: " + stderr_str);
 }
 
 BOOST_AUTO_TEST_CASE(product_initialize_accepts_explicit_key_bits) {
@@ -956,7 +701,7 @@ BOOST_AUTO_TEST_CASE(product_initialize_rejects_invalid_key_bits) {
 	fs::remove_all(projects_folder);
 	const string mock_source = mock_source_folder.string();
 	const string projects_str = projects_folder.string();
-	const vector<string> invalid_key_bits = {"1024", "512", "1536", "4097", "3072x", "+3072", "03072", "2048 "};
+	const vector<string> invalid_key_bits = {"1024", "2048", "512", "1536", "4097", "3072x", "+3072", "03072", "2048 "};
 
 	for (size_t i = 0; i < invalid_key_bits.size(); ++i) {
 		const string project_name = "TEST_INVALID_KEY_BITS_" + to_string(i);
@@ -978,34 +723,6 @@ BOOST_AUTO_TEST_CASE(product_initialize_rejects_invalid_key_bits) {
 		BOOST_CHECK_MESSAGE(!fs::exists(expected_project_folder),
 							"Invalid --key-bits must not initialize " + expected_project_folder.string());
 	}
-}
-
-BOOST_AUTO_TEST_CASE(product_initialize_rejects_ambiguous_key_size_options) {
-	const string project_name("TEST_AMBIGUOUS_KEY_BITS");
-	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
-	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_ambiguous_key_bits");
-	const fs::path expected_project_folder(projects_folder / project_name);
-	fs::remove_all(projects_folder);
-	const string mock_source = mock_source_folder.string();
-	const string projects_str = projects_folder.string();
-	const string key_bits("3072");
-	int argc = 12;
-	const char* argv[] = {"lcc",
-						  "project",
-						  "init",
-						  "-n",
-						  project_name.c_str(),
-						  "--projects-folder",
-						  projects_str.c_str(),
-						  "--templates",
-						  mock_source.c_str(),
-						  "--legacy-rsa1024",
-						  "--key-bits",
-						  key_bits.c_str()};
-	const int result = CommandLineParser::parseCommandLine(argc, argv);
-	BOOST_CHECK_EQUAL(result, 1);
-	BOOST_CHECK_MESSAGE(!fs::exists(expected_project_folder),
-						"Ambiguous key-size options must not initialize a project.");
 }
 
 BOOST_AUTO_TEST_CASE(product_issue_license_base64_output) {
@@ -1043,7 +760,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_base64_output) {
 	BOOST_REQUIRE_MESSAGE(!decoded.empty(), "Encoded output decodes to license data.");
 	CSimpleIniA ini;
 	BOOST_REQUIRE_EQUAL(ini.LoadData(decoded), SI_Error::SI_OK);
-	BOOST_CHECK_MESSAGE(ini.GetSectionSize(project_name.c_str()) == 2, "Decoded section [TEST] has 2 elements");
+	BOOST_CHECK_MESSAGE(ini.GetSectionSize(project_name.c_str()) == 6, "Decoded section [TEST] has 6 elements");
 
 	int append_argc = 12;
 	const char* append_argv[] = {"lcc",
@@ -1064,8 +781,8 @@ BOOST_AUTO_TEST_CASE(product_issue_license_base64_output) {
 	BOOST_REQUIRE_MESSAGE(!appended_decoded.empty(), "Appended encoded output decodes to license data.");
 	ini.Reset();
 	BOOST_REQUIRE_EQUAL(ini.LoadData(appended_decoded), SI_Error::SI_OK);
-	BOOST_CHECK_MESSAGE(ini.GetSectionSize(project_name.c_str()) == 2, "Original section [TEST] is preserved");
-	BOOST_CHECK_MESSAGE(ini.GetSectionSize("EXTRA") == 2, "New section [EXTRA] is appended");
+	BOOST_CHECK_MESSAGE(ini.GetSectionSize(project_name.c_str()) == 6, "Original section [TEST] is preserved");
+	BOOST_CHECK_MESSAGE(ini.GetSectionSize("EXTRA") == 6, "New section [EXTRA] is appended");
 
 	int stdout_argc = 8;
 	const char* stdout_argv[] = {"lcc",
@@ -1104,7 +821,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_client_signature) {
 	fs::remove(expected_license);
 	const string expected_license_str = expected_license.string();
 
-	int argc = 15;
+	int argc = 11;
 	const char* argv2[] = {"lcc",
 						   "license",
 						   "issue",
@@ -1115,11 +832,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_client_signature) {
 						   "--" PARAM_PROJECT_FOLDER,
 						   project_folder_str.c_str(),
 						   "--" PARAM_CLIENT_SIGNATURE,
-						   "XXX-XXX-XXX",
-						   "--" PARAM_LICENSE_FORMAT_VERSION,
-						   "201",
-						   "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-						   "201"};
+						   "XXX-XXX-XXX"};
 	int result = CommandLineParser::parseCommandLine(argc, argv2);
 	BOOST_CHECK_EQUAL(result, 1);
 	BOOST_CHECK_MESSAGE(!fs::exists(expected_license), "Invalid client signature must not create a license file.");
@@ -1130,7 +843,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_client_signature) {
 		const fs::path reserved_license(string("bad_client_signature_reserved_") + to_string(i) + ".lic");
 		fs::remove(reserved_license);
 		const string reserved_license_str = reserved_license.string();
-		int reserved_argc = 15;
+		int reserved_argc = 11;
 		const char* reserved_argv[] = {"lcc",
 									   "license",
 									   "issue",
@@ -1141,11 +854,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_client_signature) {
 									   "--" PARAM_PROJECT_FOLDER,
 									   project_folder_str.c_str(),
 									   "--" PARAM_CLIENT_SIGNATURE,
-									   invalid_signature.c_str(),
-									   "--" PARAM_LICENSE_FORMAT_VERSION,
-									   "201",
-									   "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-									   "201"};
+									   invalid_signature.c_str()};
 		const int reserved_result = CommandLineParser::parseCommandLine(reserved_argc, reserved_argv);
 		BOOST_CHECK_EQUAL(reserved_result, 1);
 		BOOST_CHECK_MESSAGE(!fs::exists(reserved_license),
@@ -1209,7 +918,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_ip_client_signature_by_defaul
 	fs::remove(expected_license);
 	const string expected_license_str = expected_license.string();
 
-	int argc = 15;
+	int argc = 11;
 	const char* argv2[] = {"lcc",
 						   "license",
 						   "issue",
@@ -1220,11 +929,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_ip_client_signature_by_defaul
 						   "--" PARAM_PROJECT_FOLDER,
 						   project_folder_str.c_str(),
 						   "--" PARAM_CLIENT_SIGNATURE,
-						   client_signature.c_str(),
-						   "--" PARAM_LICENSE_FORMAT_VERSION,
-						   "201",
-						   "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-						   "201"};
+						   client_signature.c_str()};
 	int result = CommandLineParser::parseCommandLine(argc, argv2);
 	BOOST_CHECK_EQUAL(result, 1);
 	BOOST_CHECK_MESSAGE(!fs::exists(expected_license), "IP client signature requires explicit opt-in.");
@@ -1247,7 +952,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_accepts_ip_client_signature_with_opt_
 	fs::remove(expected_license);
 	const string expected_license_str = expected_license.string();
 
-	int argc = 16;
+	int argc = 12;
 	const char* argv2[] = {"lcc",
 						   "license",
 						   "issue",
@@ -1259,11 +964,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_accepts_ip_client_signature_with_opt_
 						   project_folder_str.c_str(),
 						   "--" PARAM_CLIENT_SIGNATURE,
 						   client_signature.c_str(),
-						   "--allow-ip-binding",
-						   "--" PARAM_LICENSE_FORMAT_VERSION,
-						   "201",
-						   "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-						   "201"};
+						   "--allow-ip-binding"};
 	int result = CommandLineParser::parseCommandLine(argc, argv2);
 	BOOST_CHECK_EQUAL(result, 0);
 	BOOST_REQUIRE_MESSAGE(fs::exists(expected_license), "License " + expected_license.string() + " created.");
@@ -1291,7 +992,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_accepts_env_selected_signature_with_o
 	fs::remove(expected_license);
 	const string expected_license_str = expected_license.string();
 
-	int argc = 16;
+	int argc = 12;
 	const char* argv2[] = {"lcc",
 						   "license",
 						   "issue",
@@ -1303,11 +1004,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_accepts_env_selected_signature_with_o
 						   project_folder_str.c_str(),
 						   "--" PARAM_CLIENT_SIGNATURE,
 						   client_signature.c_str(),
-						   "--allow-env-selected-binding",
-						   "--" PARAM_LICENSE_FORMAT_VERSION,
-						   "201",
-						   "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-						   "201"};
+						   "--allow-env-selected-binding"};
 	int result = CommandLineParser::parseCommandLine(argc, argv2);
 	BOOST_CHECK_EQUAL(result, 0);
 	BOOST_REQUIRE_MESSAGE(fs::exists(expected_license), "License " + expected_license.string() + " created.");
@@ -1334,7 +1031,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_version_bounds) {
 	const fs::path malformed_license("invalid_version_bound.lic");
 	fs::remove(malformed_license);
 	const string malformed_license_str = malformed_license.string();
-	int malformed_argc = 15;
+	int malformed_argc = 11;
 	const char* malformed_argv[] = {"lcc",
 									"license",
 									"issue",
@@ -1345,11 +1042,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_version_bounds) {
 									"--" PARAM_PROJECT_FOLDER,
 									project_folder_str.c_str(),
 									"--" PARAM_VERSION_FROM,
-									"1..2",
-									"--" PARAM_LICENSE_FORMAT_VERSION,
-									"201",
-									"--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-									"201"};
+									"1..2"};
 	int malformed_result = CommandLineParser::parseCommandLine(malformed_argc, malformed_argv);
 	BOOST_CHECK_EQUAL(malformed_result, 1);
 	BOOST_CHECK_MESSAGE(!fs::exists(malformed_license), "Malformed version bound must not create a license file.");
@@ -1357,7 +1050,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_version_bounds) {
 	const fs::path inverted_license("inverted_version_bound.lic");
 	fs::remove(inverted_license);
 	const string inverted_license_str = inverted_license.string();
-	int inverted_argc = 17;
+	int inverted_argc = 13;
 	const char* inverted_argv[] = {"lcc",
 								   "license",
 								   "issue",
@@ -1370,124 +1063,10 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_version_bounds) {
 								   "--" PARAM_VERSION_FROM,
 								   "2.0",
 								   "--" PARAM_VERSION_TO,
-								   "1.9",
-								   "--" PARAM_LICENSE_FORMAT_VERSION,
-								   "201",
-								   "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-								   "201"};
+								   "1.9"};
 	int inverted_result = CommandLineParser::parseCommandLine(inverted_argc, inverted_argv);
 	BOOST_CHECK_EQUAL(inverted_result, 1);
 	BOOST_CHECK_MESSAGE(!fs::exists(inverted_license), "Inverted version bounds must not create a license file.");
-}
-
-BOOST_AUTO_TEST_CASE(product_issue_license_version_option_is_guarded) {
-	const string project_name("TEST");
-	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
-	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_license_version");
-	const fs::path expected_project_folder(projects_folder / project_name);
-	const fs::path expectedPrivateKey(projects_folder / project_name / PRIVATE_KEY_FNAME);
-	const fs::path expected_public_key(projects_folder / project_name / "include" / "licensecc" / project_name /
-									   PUBLIC_KEY_INC_FNAME);
-
-	create_project(projects_folder, expectedPrivateKey, expected_public_key, mock_source_folder, project_name);
-	const string private_key_str = expectedPrivateKey.string();
-	const string project_folder_str = expected_project_folder.string();
-
-	const fs::path v200_license("license_version_200.lic");
-	fs::remove(v200_license);
-	const string v200_license_str = v200_license.string();
-	int v200_argc = 11;
-	const char* v200_argv[] = {"lcc",
-							   "license",
-							   "issue",
-							   "--" PARAM_PRIMARY_KEY,
-							   private_key_str.c_str(),
-							   "--" PARAM_LICENSE_OUTPUT,
-							   v200_license_str.c_str(),
-							   "--" PARAM_PROJECT_FOLDER,
-							   project_folder_str.c_str(),
-							   "--" PARAM_LICENSE_FORMAT_VERSION,
-							   "200"};
-	int v200_result = CommandLineParser::parseCommandLine(v200_argc, v200_argv);
-	BOOST_CHECK_EQUAL(v200_result, 0);
-	BOOST_REQUIRE_MESSAGE(fs::exists(v200_license), "v200 license should be created.");
-	CSimpleIniA ini;
-	ini.LoadFile(v200_license.c_str());
-	BOOST_CHECK_MESSAGE(string(ini.GetValue(project_name.c_str(), LICENSE_VERSION, "")) == "200",
-						"Explicit v200 option should emit lic_ver 200.");
-	const vector<string> v201_only_fields = {LICENSE_CANONICAL_VERSION, LICENSE_SIGNATURE_VERSION,
-											 LICENSE_SIGNATURE_ALGORITHM, LICENSE_KEY_ID};
-	for (const string &field : v201_only_fields) {
-		BOOST_CHECK_MESSAGE(ini.GetValue(project_name.c_str(), field.c_str(), nullptr) == nullptr,
-							"v200 output must not contain v201-only field " + field);
-	}
-
-	const fs::path v201_license("license_version_201.lic");
-	fs::remove(v201_license);
-	const string v201_license_str = v201_license.string();
-	int ungated_v201_argc = 11;
-	const char* ungated_v201_argv[] = {"lcc",
-									   "license",
-									   "issue",
-									   "--" PARAM_PRIMARY_KEY,
-									   private_key_str.c_str(),
-									   "--" PARAM_LICENSE_OUTPUT,
-									   v201_license_str.c_str(),
-									   "--" PARAM_PROJECT_FOLDER,
-									   project_folder_str.c_str(),
-									   "--" PARAM_LICENSE_FORMAT_VERSION,
-									   "201"};
-	int ungated_v201_result = CommandLineParser::parseCommandLine(ungated_v201_argc, ungated_v201_argv);
-	BOOST_CHECK_EQUAL(ungated_v201_result, 1);
-	BOOST_CHECK_MESSAGE(!fs::exists(v201_license),
-						"Explicit v201 must require a target-runtime compatibility signal.");
-
-	int v201_argc = 13;
-	const char* v201_argv[] = {"lcc",
-							   "license",
-							   "issue",
-							   "--" PARAM_PRIMARY_KEY,
-							   private_key_str.c_str(),
-							   "--" PARAM_LICENSE_OUTPUT,
-							   v201_license_str.c_str(),
-							   "--" PARAM_PROJECT_FOLDER,
-							   project_folder_str.c_str(),
-							   "--" PARAM_LICENSE_FORMAT_VERSION,
-							   "201",
-							   "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-							   "201"};
-	int v201_result = CommandLineParser::parseCommandLine(v201_argc, v201_argv);
-	BOOST_CHECK_EQUAL(v201_result, 0);
-	BOOST_REQUIRE_MESSAGE(fs::exists(v201_license), "Explicit v201 license should be created.");
-	ini.Reset();
-	BOOST_REQUIRE_EQUAL(ini.LoadFile(v201_license.c_str()), SI_Error::SI_OK);
-	BOOST_CHECK_EQUAL(string(ini.GetValue(project_name.c_str(), LICENSE_VERSION, "")), "201");
-	BOOST_CHECK_EQUAL(string(ini.GetValue(project_name.c_str(), LICENSE_CANONICAL_VERSION, "")), "1");
-	BOOST_CHECK_EQUAL(string(ini.GetValue(project_name.c_str(), LICENSE_SIGNATURE_VERSION, "")), "1");
-	BOOST_CHECK_EQUAL(string(ini.GetValue(project_name.c_str(), LICENSE_SIGNATURE_ALGORITHM, "")),
-					  LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256);
-	const string key_id = ini.GetValue(project_name.c_str(), LICENSE_KEY_ID, "");
-	BOOST_CHECK_EQUAL(key_id.substr(0, 7), "sha256:");
-	BOOST_CHECK_EQUAL(key_id.size(), static_cast<size_t>(71));
-
-	const fs::path invalid_license("license_version_invalid.lic");
-	fs::remove(invalid_license);
-	const string invalid_license_str = invalid_license.string();
-	int invalid_argc = 11;
-	const char* invalid_argv[] = {"lcc",
-								  "license",
-								  "issue",
-								  "--" PARAM_PRIMARY_KEY,
-								  private_key_str.c_str(),
-								  "--" PARAM_LICENSE_OUTPUT,
-								  invalid_license_str.c_str(),
-								  "--" PARAM_PROJECT_FOLDER,
-								  project_folder_str.c_str(),
-								  "--" PARAM_LICENSE_FORMAT_VERSION,
-								  "199"};
-	int invalid_result = CommandLineParser::parseCommandLine(invalid_argc, invalid_argv);
-	BOOST_CHECK_EQUAL(invalid_result, 1);
-	BOOST_CHECK_MESSAGE(!fs::exists(invalid_license), "Unsupported license versions must not create license files.");
 }
 
 BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
@@ -1525,7 +1104,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 	const fs::path invalid_date_license("invalid_date.lic");
 	fs::remove(invalid_date_license);
 	const string invalid_date_license_str = invalid_date_license.string();
-	int invalid_date_argc = 15;
+	int invalid_date_argc = 11;
 	const char* invalid_date_argv[] = {"lcc",
 									   "license",
 									   "issue",
@@ -1536,11 +1115,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 									   "--" PARAM_PROJECT_FOLDER,
 									   project_folder_str.c_str(),
 									   "--" PARAM_EXPIRY_DATE,
-									   "2020-02-30",
-									   "--" PARAM_LICENSE_FORMAT_VERSION,
-									   "201",
-									   "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-									   "201"};
+									   "2020-02-30"};
 	int invalid_date_result = CommandLineParser::parseCommandLine(invalid_date_argc, invalid_date_argv);
 	BOOST_CHECK_EQUAL(invalid_date_result, 1);
 	BOOST_CHECK_MESSAGE(!fs::exists(invalid_date_license), "Invalid dates must not create a license file.");
@@ -1548,7 +1123,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 	const fs::path inverted_date_license("inverted_date.lic");
 	fs::remove(inverted_date_license);
 	const string inverted_date_license_str = inverted_date_license.string();
-	int inverted_date_argc = 17;
+	int inverted_date_argc = 13;
 	const char* inverted_date_argv[] = {"lcc",
 										"license",
 										"issue",
@@ -1561,11 +1136,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 										"--" PARAM_BEGIN_DATE,
 										"2020-02-29",
 										"--" PARAM_EXPIRY_DATE,
-										"2020-02-28",
-										"--" PARAM_LICENSE_FORMAT_VERSION,
-										"201",
-										"--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-										"201"};
+										"2020-02-28"};
 	int inverted_date_result = CommandLineParser::parseCommandLine(inverted_date_argc, inverted_date_argv);
 	BOOST_CHECK_EQUAL(inverted_date_result, 1);
 	BOOST_CHECK_MESSAGE(!fs::exists(inverted_date_license), "Inverted dates must not create a license file.");
@@ -1573,7 +1144,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 	const fs::path invalid_feature_license("invalid_feature_name.lic");
 	fs::remove(invalid_feature_license);
 	const string invalid_feature_license_str = invalid_feature_license.string();
-	int invalid_feature_argc = 15;
+	int invalid_feature_argc = 11;
 	const char* invalid_feature_argv[] = {"lcc",
 										  "license",
 										  "issue",
@@ -1584,11 +1155,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 										  "--" PARAM_PROJECT_FOLDER,
 										  project_folder_str.c_str(),
 										  "--" PARAM_FEATURE_NAMES,
-										  "feature,FEATURE",
-										  "--" PARAM_LICENSE_FORMAT_VERSION,
-										  "201",
-										  "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-										  "201"};
+										  "feature,FEATURE"};
 	int invalid_feature_result = CommandLineParser::parseCommandLine(invalid_feature_argc, invalid_feature_argv);
 	BOOST_CHECK_EQUAL(invalid_feature_result, 1);
 	BOOST_CHECK_MESSAGE(!fs::exists(invalid_feature_license),
@@ -1597,7 +1164,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 	const fs::path invalid_extra_data_license("invalid_extra_data.lic");
 	fs::remove(invalid_extra_data_license);
 	const string invalid_extra_data_license_str = invalid_extra_data_license.string();
-	int invalid_extra_data_argc = 15;
+	int invalid_extra_data_argc = 11;
 	const char* invalid_extra_data_argv[] = {"lcc",
 											 "license",
 											 "issue",
@@ -1608,11 +1175,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 											 "--" PARAM_PROJECT_FOLDER,
 											 project_folder_str.c_str(),
 											 "--" PARAM_EXTRA_DATA,
-											 " leading",
-											 "--" PARAM_LICENSE_FORMAT_VERSION,
-											 "201",
-											 "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-											 "201"};
+											 " leading"};
 	int invalid_extra_data_result = CommandLineParser::parseCommandLine(invalid_extra_data_argc,
 																		invalid_extra_data_argv);
 	BOOST_CHECK_EQUAL(invalid_extra_data_result, 1);
@@ -1638,7 +1201,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 	const string valid_existing_original((istreambuf_iterator<char>(valid_existing_in)), istreambuf_iterator<char>());
 	BOOST_REQUIRE(!valid_existing_original.empty());
 
-	int invalid_existing_argc = 15;
+	int invalid_existing_argc = 11;
 	const char* invalid_existing_argv[] = {"lcc",
 										   "license",
 										   "issue",
@@ -1649,11 +1212,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 										   "--" PARAM_PROJECT_FOLDER,
 										   project_folder_str.c_str(),
 										   "--" PARAM_EXPIRY_DATE,
-										   "2020-02-30",
-										   "--" PARAM_LICENSE_FORMAT_VERSION,
-										   "201",
-										   "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-										   "201"};
+										   "2020-02-30"};
 	int invalid_existing_result = CommandLineParser::parseCommandLine(invalid_existing_argc, invalid_existing_argv);
 	BOOST_CHECK_EQUAL(invalid_existing_result, 1);
 	ifstream valid_existing_after_in(valid_existing_license_str.c_str(), ios::binary);
@@ -1796,7 +1355,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 		ofstream out(corrupt_license_str.c_str(), ios::binary | ios::trunc);
 		out << corrupt_original;
 	}
-	int corrupt_argc = 13;
+	int corrupt_argc = 9;
 	const char* corrupt_argv[] = {"lcc",
 								  "license",
 								  "issue",
@@ -1805,11 +1364,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 								  "--" PARAM_LICENSE_OUTPUT,
 								  corrupt_license_str.c_str(),
 								  "--" PARAM_PROJECT_FOLDER,
-								  project_folder_str.c_str(),
-								  "--" PARAM_LICENSE_FORMAT_VERSION,
-								  "201",
-								  "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-								  "201"};
+								  project_folder_str.c_str()};
 	int corrupt_result = CommandLineParser::parseCommandLine(corrupt_argc, corrupt_argv);
 	BOOST_CHECK_EQUAL(corrupt_result, 1);
 	ifstream corrupt_in(corrupt_license_str.c_str(), ios::binary);
@@ -1823,7 +1378,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 		ofstream out(bad_signature_license_str.c_str(), ios::binary | ios::trunc);
 		out << bad_signature_original;
 	}
-	int bad_signature_argc = 13;
+	int bad_signature_argc = 9;
 	const char* bad_signature_argv[] = {"lcc",
 										"license",
 										"issue",
@@ -1832,11 +1387,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 										"--" PARAM_LICENSE_OUTPUT,
 										bad_signature_license_str.c_str(),
 										"--" PARAM_PROJECT_FOLDER,
-										project_folder_str.c_str(),
-										"--" PARAM_LICENSE_FORMAT_VERSION,
-										"201",
-										"--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-										"201"};
+										project_folder_str.c_str()};
 	int bad_signature_result = CommandLineParser::parseCommandLine(bad_signature_argc, bad_signature_argv);
 	BOOST_CHECK_EQUAL(bad_signature_result, 1);
 	BOOST_CHECK_EQUAL(read_binary_file(bad_signature_license), bad_signature_original);
@@ -1848,7 +1399,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 		ofstream out(noncanonical_license_str.c_str(), ios::binary | ios::trunc);
 		out << noncanonical_original;
 	}
-	int noncanonical_argc = 13;
+	int noncanonical_argc = 9;
 	const char* noncanonical_argv[] = {"lcc",
 									   "license",
 									   "issue",
@@ -1857,11 +1408,7 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 									   "--" PARAM_LICENSE_OUTPUT,
 									   noncanonical_license_str.c_str(),
 									   "--" PARAM_PROJECT_FOLDER,
-									   project_folder_str.c_str(),
-									   "--" PARAM_LICENSE_FORMAT_VERSION,
-									   "201",
-									   "--" PARAM_TARGET_LICENSE_FORMAT_MAX,
-									   "201"};
+									   project_folder_str.c_str()};
 	int noncanonical_result = CommandLineParser::parseCommandLine(noncanonical_argc, noncanonical_argv);
 	BOOST_CHECK_EQUAL(noncanonical_result, 1);
 	BOOST_CHECK_EQUAL(read_binary_file(noncanonical_license), noncanonical_original);
@@ -1901,8 +1448,8 @@ BOOST_AUTO_TEST_CASE(product_initialize_issue_license_multi_feature) {
 	// load a license, check the project name corresponds and there are no extra elements.
 	CSimpleIniA ini;
 	ini.LoadFile(expected_license.c_str());
-	BOOST_CHECK_MESSAGE(ini.GetSectionSize(project_name.c_str()) == 2, "Section [" + project_name + "] has 2 elements");
-	BOOST_CHECK_MESSAGE(ini.GetSectionSize("feature1") == 2, "Section [feature1] has 2 elements");
+	BOOST_CHECK_MESSAGE(ini.GetSectionSize(project_name.c_str()) == 6, "Section [" + project_name + "] has 6 elements");
+	BOOST_CHECK_MESSAGE(ini.GetSectionSize("feature1") == 6, "Section [feature1] has 6 elements");
 }
 #endif
 
@@ -1973,10 +1520,10 @@ BOOST_AUTO_TEST_CASE(project_initialize_help_does_not_advertise_unsupported_key_
 						"unsupported public-key import is not advertised " + stdout_str);
 	BOOST_CHECK_MESSAGE(stdout_str.find("key-bits") != string::npos,
 						"explicit RSA key-size generation is advertised " + stdout_str);
-	BOOST_CHECK_MESSAGE(stdout_str.find("legacy-rsa1024") != string::npos,
-						"explicit legacy RSA-1024 opt-in is advertised " + stdout_str);
-	BOOST_CHECK_MESSAGE(stdout_str.find("allow-insecure-key-size") != string::npos,
-						"explicit insecure-key-size opt-in is advertised " + stdout_str);
+	BOOST_CHECK_MESSAGE(stdout_str.find("legacy-rsa1024") == string::npos,
+						"legacy RSA-1024 opt-in is no longer advertised " + stdout_str);
+	BOOST_CHECK_MESSAGE(stdout_str.find("allow-insecure-key-size") == string::npos,
+						"insecure-key-size opt-in is no longer advertised " + stdout_str);
 }
 
 BOOST_AUTO_TEST_CASE(issue_license_help) {
@@ -1997,8 +1544,8 @@ BOOST_AUTO_TEST_CASE(issue_license_help) {
 						"weak binding opt-in is documented in help " + stdout_str);
 	BOOST_CHECK_MESSAGE(stdout_str.find("allow-env-selected-binding") != string::npos,
 						"environment-selected binding opt-in is documented in help " + stdout_str);
-	BOOST_CHECK_MESSAGE(stdout_str.find(PARAM_TARGET_LICENSE_FORMAT_MAX) != string::npos,
-						"target runtime format gate is documented in help " + stdout_str);
+	BOOST_CHECK_MESSAGE(stdout_str.find("license-version") == string::npos,
+						"the removed license-version option is not documented in help " + stdout_str);
 	BOOST_CHECK_MESSAGE(stdout_str.find("Version 2.1.0.") != string::npos,
 						"standalone CLI reports the configured generator release version " + stdout_str);
 }

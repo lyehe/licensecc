@@ -34,9 +34,8 @@ typedef int bool;
 /**
  * Version at the beginning of license file.
  */
-#define LICENSE_FILE_VERSION_V200 200
 #define LICENSE_FILE_VERSION_V201 201
-#define LICENSE_FILE_VERSION LICENSE_FILE_VERSION_V200
+#define LICENSE_FILE_VERSION LICENSE_FILE_VERSION_V201
 
 /*
  * command line parameters
@@ -46,8 +45,6 @@ typedef int bool;
 #define PARAM_FEATURE_NAMES "feature-names"
 #define PARAM_PROJECT_FOLDER "project-folder"
 #define PARAM_PRIMARY_KEY "primary-key"
-#define PARAM_LICENSE_FORMAT_VERSION "license-version"
-#define PARAM_TARGET_LICENSE_FORMAT_MAX "target-license-format-max"
 
 // license file parameters -- copy this block to open-license-manager
 #define PARAM_BEGIN_DATE "valid-from"

@@ -141,10 +141,15 @@ BOOST_AUTO_TEST_CASE(project_initialize_private_key_is_restricted_before_atomic_
 }
 #endif
 
-BOOST_AUTO_TEST_CASE(project_initialize_legacy_rsa1024_requires_explicit_key_size) {
-	const string project_name("TEST_LEGACY_RSA1024");
+// The Project constructor's key_bits parameter has no floor of its own: the
+// 3072-bit floor is enforced only by the CLI (command_line-parser.cpp's
+// project_init_key_bits) and by license issuance (License::write_license()).
+// This test exercises the Project API directly with an explicit weak size, as
+// other tests below do, to keep key generation fast.
+BOOST_AUTO_TEST_CASE(project_initialize_generates_key_pair_at_requested_bit_size) {
+	const string project_name("TEST_WEAK_KEY_SIZE");
 	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
-	const fs::path project_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "product_initialize_legacy_rsa1024");
+	const fs::path project_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "product_initialize_weak_key_size");
 	const fs::path expected_public_key(project_folder / project_name / "include" / "licensecc" / project_name /
 									   PUBLIC_KEY_INC_FNAME);
 

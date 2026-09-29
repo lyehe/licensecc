@@ -232,7 +232,7 @@
         {"kind": "implementation", "surface": "C++ custom-limit callback", "path": "include/licensecc/datatypes.h", "selector": "typedef LCC_CUSTOM_LIMIT_RESULT (*LCC_CUSTOM_LIMIT_CHECK)(void* user_data, const char* policy,", "assertion": "The versioned public options expose a host evaluator for a signed custom-limit policy."},
         {"kind": "automated_test", "surface": "C++ custom-limit callback", "path": "test/functional/standard-license_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(generated_v201_custom_limit_is_signed_and_requires_a_host_evaluator)", "assertion": "The functional suite proves signature binding plus allow, deny, missing-evaluator, and tamper behavior."},
         {"kind": "implementation", "surface": "license generator CLI", "path": "extern/license-generator/src/license_generator/command_line-parser.cpp", "selector": "\t\t(PARAM_CUSTOM_LIMIT, po::value<string>(),", "assertion": "The repository-owned generator exposes the v201 custom-limit issuance option."},
-        {"kind": "automated_test", "surface": "license generator CLI", "path": "extern/license-generator/test/license_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(validate_custom_limit_parameter)", "assertion": "Generator tests reject v200, empty, oversized, whitespace, and control-character policies."}
+        {"kind": "automated_test", "surface": "license generator CLI", "path": "extern/license-generator/test/license_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(validate_custom_limit_parameter)", "assertion": "Generator tests reject empty, oversized, whitespace, and control-character policies."}
       ]
     },
     {

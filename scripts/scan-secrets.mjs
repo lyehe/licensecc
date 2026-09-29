@@ -13,6 +13,7 @@ const REPOSITORY_EXCLUSIONS = [
   "scripts/secret-lint.test.mjs",
   "extern/license-generator/test/cryptohelper_test.cpp",
   "extern/license-generator/test/data/private_key.rsa",
+  "extern/license-generator/test/data/private_key_3072.rsa",
   "services/cloudflare-licensing-backend/test/fulfillment/account_isolation.test.mjs",
   "services/cloudflare-licensing-backend/test/sql/trial-activation.test.mjs",
 ];

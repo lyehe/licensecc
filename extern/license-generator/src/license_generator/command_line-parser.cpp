@@ -51,7 +51,7 @@ static void printHelpHeader(const char *prog_name) {
 static void printBasicHelp(const char *prog_name) {
 	printHelpHeader(prog_name);
 	cout << fs::path(prog_name).filename().string() << " [command] [options]" << endl;
-	cout << " available commands: \"project init\", \"project validate-keypair\", \"project migrate-weak-key\", \"project list\", \"license issue\", \"license list\""
+	cout << " available commands: \"project init\", \"project validate-keypair\", \"project list\", \"license issue\", \"license list\""
 		 << endl;
 	cout << " to see specific command options type: " << prog_name << " [command] --help" << endl << endl;
 }
@@ -349,57 +349,27 @@ static void validate_project_keypair(const string &private_key_file, const strin
 	}
 	if (public_key_bits < 3072) {
 		cerr << "WARNING: this project key is " << public_key_bits
-			 << " bits. The licensecc runtime rejects keys below 3072 bits (v200 and v201), so licenses signed with "
-				"it will NOT verify in production."
+			 << " bits. The licensecc runtime rejects keys below 3072 bits, so licenses signed with it will NOT "
+				"verify in production."
 			 << endl;
 	}
 }
 
 static size_t parse_project_key_bits(const string &value) {
-	if (value == "2048") {
-		return 2048;
-	}
 	if (value == "3072") {
 		return 3072;
 	}
 	if (value == "4096") {
 		return 4096;
 	}
-	if (value == "1024") {
-		throw runtime_error("--key-bits 1024 is legacy-only; use --legacy-rsa1024");
-	}
-	throw runtime_error("--key-bits must be one of 2048, 3072, or 4096");
+	throw runtime_error("--key-bits must be 3072 or 4096");
 }
 
-static size_t project_init_key_bits(const po::variables_map &vm, bool legacy_rsa1024, bool allow_insecure_key_size) {
-	size_t key_bits;
-	if (legacy_rsa1024) {
-		if (vm.find(PARAM_PROJECT_KEY_BITS) != vm.end()) {
-			throw runtime_error("--legacy-rsa1024 cannot be combined with --key-bits");
-		}
-		key_bits = 1024;
-	} else if (vm.find(PARAM_PROJECT_KEY_BITS) == vm.end()) {
+static size_t project_init_key_bits(const po::variables_map &vm) {
+	if (vm.find(PARAM_PROJECT_KEY_BITS) == vm.end()) {
 		return 3072;
-	} else {
-		key_bits = parse_project_key_bits(vm[PARAM_PROJECT_KEY_BITS].as<string>());
 	}
-	// The licensecc runtime enforces a 3072-bit RSA floor on both the v200 (default) and v201
-	// license formats, so a project key below 3072 bits produces licenses that never verify.
-	// Refuse to generate such a key unless the caller explicitly opts in for compatibility tests.
-	if (key_bits < 3072) {
-		if (!allow_insecure_key_size) {
-			throw runtime_error(
-				"refusing to generate a " + to_string(key_bits) +
-				"-bit RSA project key: the licensecc runtime rejects keys below 3072 bits for both the v200 and v201 "
-				"license formats, so licenses signed with this key would never verify. Use 3072 or larger, or pass "
-				"--allow-insecure-key-size for compatibility tests that intentionally exercise weak keys.");
-		}
-		cerr << "WARNING: generating a " << key_bits
-			 << "-bit RSA project key. The licensecc runtime rejects keys below 3072 bits (v200 and v201), so licenses "
-				"signed with this key will NOT verify in production. Intended only for compatibility tests."
-			 << endl;
-	}
-	return key_bits;
+	return parse_project_key_bits(vm[PARAM_PROJECT_KEY_BITS].as<string>());
 }
 
 static bool rerunBoostPO(const po::parsed_options &parsed, const po::options_description &project_desc,
@@ -441,8 +411,6 @@ static int initializeProject(const po::parsed_options &parsed, po::variables_map
 	std::string project_name;
 	std::string project_folder;
 	std::string templates_folder;
-	bool legacy_rsa1024 = false;
-	bool allow_insecure_key_size = false;
 	project_desc.add_options()  //
 		("project-name,n", po::value<std::string>(&project_name)->required(), "New project name (required).")  //
 		("projects-folder,p", po::value<std::string>(&project_folder)->default_value("."),  //
@@ -450,14 +418,7 @@ static int initializeProject(const po::parsed_options &parsed, po::variables_map
 		("templates,t", po::value<std::string>(&templates_folder)->default_value("."),
 		 "path to the templates folder.")  //
 		(PARAM_PROJECT_KEY_BITS, po::value<std::string>(),
-		 "Generate a new RSA project key with explicit modulus bits. Allowed values: 2048, 3072, 4096. Default: 3072. "
-		 "Values below 3072 are rejected by the licensecc runtime and require --allow-insecure-key-size.")  //
-		("legacy-rsa1024", po::bool_switch(&legacy_rsa1024),
-		 "Generate a legacy RSA-1024 project key. Rejected by the licensecc runtime (v200 and v201); requires "
-		 "--allow-insecure-key-size and is intended only for compatibility tests or existing v200 migrations.")  //
-		("allow-insecure-key-size", po::bool_switch(&allow_insecure_key_size),
-		 "Allow generating an RSA project key below 3072 bits. Such keys are rejected by the licensecc runtime (v200 "
-		 "and v201) and are intended only for compatibility tests. Disabled by default.")  //
+		 "Generate a new RSA project key with explicit modulus bits. Allowed values: 3072, 4096. Default: 3072.")  //
 		("help", "Print this help.");  //
 	bool should_execute = false;
 	if (!rerunBoostPO(parsed, project_desc, vm, argv, "project init", global, should_execute)) {
@@ -465,7 +426,7 @@ static int initializeProject(const po::parsed_options &parsed, po::variables_map
 	}
 	if (should_execute) {
 		// cout << templates_folder.is_initialized() << endl;
-		const size_t key_bits = project_init_key_bits(vm, legacy_rsa1024, allow_insecure_key_size);
+		const size_t key_bits = project_init_key_bits(vm);
 		Project project(project_name, project_folder, templates_folder, false, key_bits);
 		project.initialize();
 	}
@@ -495,60 +456,6 @@ static int validateProjectKeyPair(const po::parsed_options &parsed, po::variable
 		}
 	}
 	return 0;
-}
-
-static int migrateWeakProjectKey(const po::parsed_options &parsed, po::variables_map &vm, const char **argv,
-								 const po::options_description &global) {
-	po::options_description project_desc("project migrate-weak-key options");
-	string project_folder;
-	project_desc.add_options()  //
-		(PARAM_PROJECT_FOLDER ",p", po::value<string>(&project_folder)->required(),
-		 "Existing project folder containing private_key.rsa. This command never modifies it.")  //
-		("help", "Print this help.");
-	bool should_execute = false;
-	if (!rerunBoostPO(parsed, project_desc, vm, argv, "project migrate-weak-key", global, should_execute)) {
-		return 1;
-	}
-	if (!should_execute) {
-		return 0;
-	}
-	const fs::path project_path(project_folder);
-	if (!fs::exists(project_path) || !fs::is_directory(project_path)) {
-		cerr << "Weak-key migration error: project folder does not exist or is not a directory [" << project_path.string()
-			 << "]" << endl;
-		return 1;
-	}
-	const fs::path private_key = project_path / PRIVATE_KEY_FNAME;
-	if (!fs::exists(private_key) || !fs::is_regular_file(private_key)) {
-		cerr << "Weak-key migration error: private key does not exist or is not a regular file [" << private_key.string()
-			 << "]" << endl;
-		return 1;
-	}
-	try {
-		unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
-		crypto->loadPrivateKey_file(private_key.string());
-		const size_t key_bits = rsa_public_key_bits(crypto->exportPublicKey());
-		if (key_bits >= 3072) {
-			cout << "Project key is " << key_bits << " bits; no weak-key migration is required. No files were changed."
-				 << endl;
-			return 0;
-		}
-		const fs::path parent = project_path.parent_path().empty() ? fs::current_path() : project_path.parent_path();
-		cerr << "Refusing automatic rotation of the existing " << key_bits << "-bit private key. No files were changed."
-			 << endl;
-		cerr << "Manual migration (backup-aware and restorable):" << endl;
-		cerr << "  1. Back up the complete project folder, including `" << private_key.string()
-			 << "`, before changing deployment." << endl;
-		cerr << "  2. Create a NEW project folder (do not reuse this one):" << endl;
-		cerr << "     lccgen project init --project-name <new-project-name> --projects-folder \""
-			 << parent.string() << "\" --templates <templates-folder> --key-bits 3072" << endl;
-		cerr << "  3. Deploy the new public_key.h, retain the old key only for legacy verification as needed, and reissue "
-				"all v201 licenses with the new project." << endl;
-		return 1;
-	} catch (const exception &ex) {
-		cerr << "Weak-key migration error: " << ex.what() << endl;
-		return 1;
-	}
 }
 
 static int issueLicense(const po::parsed_options &parsed, po::variables_map &vm, const char **argv,
@@ -590,12 +497,6 @@ static int issueLicense(const po::parsed_options &parsed, po::variables_map &vm,
 		 "Feature names: comma separate list of project features to enable. if not specified will be taken as project "
 		 "name.")  //
 		(PARAM_PRIMARY_KEY, po::value<string>(), "Primary key location, in case it is not in default folder")  //
-		(PARAM_LICENSE_FORMAT_VERSION, po::value<string>()->default_value(to_string(LICENSE_FILE_VERSION)),
-		 "License file format version to emit. 200 is the default compatible format; 201 requires an explicit "
-		 "--target-license-format-max=201 compatibility signal.")  //
-		(PARAM_TARGET_LICENSE_FORMAT_MAX, po::value<string>()->default_value(to_string(LICENSE_FILE_VERSION_V200)),
-		 "Maximum license file format supported by the target runtime. Keep 200 for legacy runtimes; pass 201 only "
-		 "when the deployed runtime verifies v201 licenses.")  //
 		(PARAM_PROJECT_FOLDER ",p", po::value<string>(&project_folder)->default_value("."),
 		 "path to where project configurations and licenses are stored.")  //
 		(PARAM_VERSION_FROM, po::value<string>()->default_value("0", "All Versions"),
@@ -603,7 +504,7 @@ static int issueLicense(const po::parsed_options &parsed, po::variables_map &vm,
 		(PARAM_VERSION_TO, po::value<string>()->default_value("0", "All Versions"),  //
 		 "Specify the last version of the software this license apply to.")  //
 		(PARAM_CUSTOM_LIMIT, po::value<string>(),
-		 "Signed host-defined execution policy. Requires license-version 201 and a runtime evaluator.")  //
+		 "Signed host-defined execution policy. Requires a runtime evaluator.")  //
 		(PARAM_EXTRA_DATA ",x", po::value<string>(), "Specify extra data to be included into the license")  //
 		("help,h", "Print this help.");  //
 	bool should_execute = false;
@@ -690,7 +591,7 @@ int CommandLineParser::parseCommandLine(int argc, const char **argv) {
 	global.add_options()("verbose,v", "Turn on verbose output");
 	po::options_description hidden("Hidden options");
 	hidden.add_options()("command", po::value<std::vector<std::string>>(),
-						 "command to execute: project init, project validate-keypair, project migrate-weak-key, project list, license issue")(
+						 "command to execute: project init, project validate-keypair, project list, license issue")(
 		"subargs", po::value<std::vector<std::string>>(), "Arguments for command, use option --help to see");
 
 	po::positional_options_description pos;
@@ -713,8 +614,6 @@ int CommandLineParser::parseCommandLine(int argc, const char **argv) {
 				result = initializeProject(parsed, vm, argv, global);
 			} else if (cmds[1] == "validate-keypair") {
 				result = validateProjectKeyPair(parsed, vm, argv, global);
-			} else if (cmds[1] == "migrate-weak-key") {
-				result = migrateWeakProjectKey(parsed, vm, argv, global);
 			} else if (cmds[1] == "list") {
 				po::options_description project_desc("project " + cmds[1] + " options");
 				boost::optional<string> project_folder;

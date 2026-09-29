@@ -417,8 +417,7 @@ const REVIEWED_JSON_VECTOR_FIXTURES = new Set([
 const VENDORED_GENERATOR_HYGIENE_FIXTURES = new Set([
   "extern/license-generator/build/.gitkeep",
   "extern/license-generator/test/data/private_key.rsa",
-  "extern/license-generator/test/data/v200/legacy_append_noncanonical.lic",
-  "extern/license-generator/test/data/v200/legacy_fixed_key.lic",
+  "extern/license-generator/test/data/private_key_3072.rsa",
 ]);
 
 function isGeneratedPrivateKey(filename) {

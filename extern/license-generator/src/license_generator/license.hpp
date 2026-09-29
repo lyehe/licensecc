@@ -17,8 +17,6 @@ class License {
 private:
 	std::string m_private_key;
 	std::string m_feature_names;
-	unsigned int m_license_file_version;
-	unsigned int m_target_license_format_max;
 
 	const bool m_base64;
 	const std::string *m_license_fname;
@@ -26,8 +24,6 @@ private:
 	std::map<std::string, std::string> values_map;
 
 	void print_as_ini(std::istream *previous_license, std::ostream &a_ostream) const;
-	void set_license_file_version(const std::string &license_version);
-	void set_target_license_format_max(const std::string &license_version);
 
 public:
 	License(const std::string *license_fname, const std::string &project_folder, bool base64 = false);

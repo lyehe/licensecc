@@ -77,12 +77,8 @@ BOOST_AUTO_TEST_CASE(offline_activation_request_round_trips_into_a_verifiable_li
 	BOOST_CHECK_EQUAL(decoded.nonce, fields.nonce);
 
 	// Operator issues a hardware-bound v201 license for the recovered hwid (existing generator/crypto).
-	const vector<string> extraArgs = {"--license-version",
-									  "201",
-									  "--target-license-format-max",
-									  "201",
-									  "--client-signature",
-									  decoded.hwid};
+	// v201 is the only format lccgen issues, so no explicit format flag is needed.
+	const vector<string> extraArgs = {"--client-signature", decoded.hwid};
 	const string licLocation = generate_license("offline_activation", extraArgs);
 
 	// Machine installs it; the ordinary verifier accepts it and reports it hardware-bound.

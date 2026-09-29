@@ -10,33 +10,12 @@ License generator for open-license-manager allow to create new projects (and the
 This code is intended to be used as a submodule of open-license-manager project. 
 All the documentation is in the main project.
 
-## Weak RSA-key migration
-
-`lccgen` never overwrites or silently rotates an existing private key. v201
-issuance refuses project keys below 3072 bits; legacy v200 issuance remains
-available only for compatibility with existing deployments.
-
-To inspect a legacy project and receive the exact fail-closed migration
-procedure, run:
-
-```text
-lccgen project migrate-weak-key --project-folder <existing-project-folder>
-```
-
-For a weak key this command makes no changes. First make a restorable copy of
-the entire existing project before changing deployment. For example:
-
-```text
-# PowerShell
-Copy-Item -LiteralPath 'C:\\projects\\legacy-product' -Destination 'C:\\projects\\legacy-product.pre-v201-backup' -Recurse
-
-# POSIX shell
-cp -a /srv/projects/legacy-product /srv/projects/legacy-product.pre-v201-backup
-```
-
-Then create a **new** 3072-bit project in a separate folder, deploy its
-`public_key.h`, and reissue v201 licenses. Keep the old project backup for any
-legacy verification/transition needs; do not replace its private key in place.
+`lccgen` never overwrites or silently rotates an existing private key. License
+issuance always emits the v201 format and refuses to sign with a project key
+below 3072 bits: `lccgen project init` only ever generates a 3072-bit or
+4096-bit key, and `license issue` fails closed if the project's private key is
+weaker than that. There is no automated key-rotation command; create a new
+project with `lccgen project init` and reissue licenses from it.
 
 ## Private-key file ownership
 

@@ -842,7 +842,7 @@ BOOST_AUTO_TEST_CASE(runtime_policy_toggles_are_atomic_for_parallel_license_chec
 		for (int i = 0; i < 100; ++i) {
 			LicenseInfo info = prefilled_license_info();
 			const LCC_EVENT_TYPE result = acquire_license(nullptr, &location, &info);
-			if (result != LICENSE_OK || info.license_version != 200) {
+			if (result != LICENSE_OK || info.license_version != 201) {
 				failed.store(true, std::memory_order_relaxed);
 			}
 		}

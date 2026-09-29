@@ -155,7 +155,8 @@ BOOST_AUTO_TEST_CASE(base64_encoded) {
 }
 
 BOOST_AUTO_TEST_CASE(generated_v201_license_verifies) {
-	const vector<string> extraArgs = {"--license-version", "201", "--target-license-format-max", "201"};
+	// v201 is the only format lccgen issues, so no explicit format flag is needed.
+	const vector<string> extraArgs;
 	const string licLocation = generate_license("generated_v201", extraArgs);
 
 	LicenseInfo license;
@@ -167,8 +168,7 @@ BOOST_AUTO_TEST_CASE(generated_v201_license_verifies) {
 }
 
 BOOST_AUTO_TEST_CASE(generated_v201_custom_limit_is_signed_and_requires_a_host_evaluator) {
-	const vector<string> extraArgs = {"--license-version", "201", "--target-license-format-max", "201",
-								  "--custom-limit", "cpu-max-8_memory-mib-max-4096"};
+	const vector<string> extraArgs = {"--custom-limit", "cpu-max-8_memory-mib-max-4096"};
 	const string licLocation = generate_license("generated_custom_limit_v201", extraArgs);
 	LicenseLocation location = {LICENSE_PATH};
 	BOOST_REQUIRE(lcc_set_license_path(&location, licLocation.c_str()));
@@ -195,11 +195,7 @@ BOOST_AUTO_TEST_CASE(generated_full_v201_license_verifies_and_signed_optional_fi
 	const string client_signature = current_strong_pc_identifier();
 	const string client_signature_source_strength =
 		hw_identifier::HwIdentifier(client_signature).source_strength_metadata();
-	const vector<string> extraArgs = {"--license-version",
-									  "201",
-									  "--target-license-format-max",
-									  "201",
-									  "--valid-from",
+	const vector<string> extraArgs = {"--valid-from",
 									  "2020-01-01",
 									  "--valid-to",
 									  "2050-12-31",

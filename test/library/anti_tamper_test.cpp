@@ -178,7 +178,7 @@ BOOST_AUTO_TEST_CASE(disabled_policy_ignores_host_callback) {
 	BOOST_CHECK_EQUAL(result, LICENSE_OK);
 	BOOST_CHECK_EQUAL(calls, 0);
 	BOOST_CHECK(!has_status_event(info, LICENSE_TAMPER_DETECTED));
-	BOOST_CHECK_EQUAL(info.license_version, 200);
+	BOOST_CHECK_EQUAL(info.license_version, 201);
 
 	std::remove(valid_path.c_str());
 }

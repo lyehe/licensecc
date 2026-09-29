@@ -37,7 +37,6 @@ namespace fs = boost::filesystem;
 static const unordered_set<string> NO_OUTPUT_PARAM = {
 	PARAM_BASE64,		  PARAM_LICENSE_OUTPUT, PARAM_FEATURE_NAMES,
 	PARAM_PROJECT_FOLDER, PARAM_PRIMARY_KEY,	PARAM_MAGIC_NUMBER,
-	PARAM_LICENSE_FORMAT_VERSION, PARAM_TARGET_LICENSE_FORMAT_MAX,
 };
 
 static const unordered_set<string> LICENSE_OUTPUT_PARAM = {
@@ -226,31 +225,6 @@ static const string normalize_date(const std::string &sDate) {
 	return oss.str();
 }
 
-// Preserve the historical v200 normalization. Strict calendar/date syntax is
-// part of v201 canonical payload validation, not a silent v200 migration.
-static const string normalize_legacy_date(const std::string &sDate) {
-	static const string formats[] = {"%4u-%2u-%2u", "%4u/%2u/%2u", "%4u%2u%2u"};
-	if (sDate.size() < 8U) {
-		throw invalid_argument("Date string too small for known formats");
-	}
-	unsigned int year = 0U;
-	unsigned int month = 0U;
-	unsigned int day = 0U;
-	bool found = false;
-	for (const string &format : formats) {
-		if (sscanf(sDate.c_str(), format.c_str(), &year, &month, &day) == 3) {
-			found = true;
-			break;
-		}
-	}
-	if (!found) {
-		throw invalid_argument("Date [" + sDate + "] did not match a known format. try YYYY-MM-DD");
-	}
-	ostringstream oss;
-	oss << year << "-" << setfill('0') << setw(2) << month << "-" << setfill('0') << setw(2) << day;
-	return oss.str();
-}
-
 static bool is_valid_feature_char(const unsigned char ch) {
 	return isalnum(ch) || ch == '_' || ch == '-' || ch == '.';
 }
@@ -273,12 +247,6 @@ static vector<string> normalized_feature_names(const string &feature_names) {
 			throw invalid_argument("feature-names must not contain duplicate entries");
 		}
 	}
-	return features;
-}
-
-static vector<string> legacy_feature_names(const string &feature_names) {
-	vector<string> features;
-	boost::algorithm::split(features, boost::to_upper_copy(feature_names), boost::is_any_of(","));
 	return features;
 }
 
@@ -355,24 +323,17 @@ static int compare_versions(const vector<unsigned int> &lhs, const vector<unsign
 	return 0;
 }
 
-static map<string, string> normalized_output_parameters(const map<string, string> &raw_values, bool v201,
+static map<string, string> normalized_output_parameters(const map<string, string> &raw_values,
 											 bool allow_ip_binding, bool allow_env_selected_binding,
 											 bool allow_weak_disk_label_binding) {
 	map<string, string> values(raw_values);
 	const auto begin = values.find(PARAM_BEGIN_DATE);
 	if (begin != values.end()) {
-		begin->second = v201 ? normalize_date(begin->second) : normalize_legacy_date(begin->second);
+		begin->second = normalize_date(begin->second);
 	}
 	const auto expiry = values.find(PARAM_EXPIRY_DATE);
 	if (expiry != values.end()) {
-		expiry->second = v201 ? normalize_date(expiry->second) : normalize_legacy_date(expiry->second);
-	}
-	const auto custom_limit = values.find(PARAM_CUSTOM_LIMIT);
-	if (!v201 && custom_limit != values.end()) {
-		throw invalid_argument("custom-limit requires license-version 201");
-	}
-	if (!v201) {
-		return values;
+		expiry->second = normalize_date(expiry->second);
 	}
 	if (begin != values.end() && expiry != values.end() && begin->second > expiry->second) {
 		throw invalid_argument(string(PARAM_BEGIN_DATE) + " must not be greater than " + PARAM_EXPIRY_DATE);
@@ -386,6 +347,7 @@ static map<string, string> normalized_output_parameters(const map<string, string
 	if (extra_data != values.end()) {
 		validate_extra_data(extra_data->second);
 	}
+	const auto custom_limit = values.find(PARAM_CUSTOM_LIMIT);
 	if (custom_limit != values.end()) {
 		validate_custom_limit(custom_limit->second);
 	}
@@ -796,14 +758,6 @@ static string decode_existing_base64_license(const string &license_file_name, co
 	return string(reinterpret_cast<const char *>(decoded.data()), decoded.size());
 }
 
-static const unordered_set<string> &existing_license_param_v200() {
-	static const unordered_set<string> params = {
-		LICENSE_VERSION,	   LICENSE_SIGNATURE, PARAM_BEGIN_DATE, PARAM_CLIENT_SIGNATURE,
-		PARAM_EXPIRY_DATE, PARAM_VERSION_FROM, PARAM_VERSION_TO,	  PARAM_EXTRA_DATA,
-	};
-	return params;
-}
-
 static const unordered_set<string> &existing_license_param_v201() {
 	static const unordered_set<string> params = {
 		LICENSE_VERSION,	  LICENSE_CANONICAL_VERSION,	 LICENSE_SIGNATURE_VERSION,
@@ -834,18 +788,14 @@ static void validate_existing_license_file(CSimpleIniA &ini, const string &licen
 		const char *license_version = ini.GetValue(section.pItem, LICENSE_VERSION);
 		const char *signature = ini.GetValue(section.pItem, LICENSE_SIGNATURE);
 		const string version = license_version == nullptr ? string() : string(license_version);
-		const unordered_set<string> *allowed_params = nullptr;
-		if (version == to_string(LICENSE_FILE_VERSION_V200)) {
-			allowed_params = &existing_license_param_v200();
-		} else if (version == to_string(LICENSE_FILE_VERSION_V201)) {
-			allowed_params = &existing_license_param_v201();
-		} else {
+		if (version != to_string(LICENSE_FILE_VERSION_V201)) {
 			throw runtime_error("Existing output file [" + license_file_name + "] contains a non-license section [" +
 								string(section.pItem) + "].");
 		}
+		const unordered_set<string> &allowed_params = existing_license_param_v201();
 		for (const auto &key : keys) {
 			const string key_name(key.pItem);
-			if (allowed_params->find(key_name) == allowed_params->end()) {
+			if (allowed_params.find(key_name) == allowed_params.end()) {
 				throw runtime_error("Existing output file [" + license_file_name +
 									"] contains a non-canonical license key [" + key_name + "].");
 			}
@@ -856,18 +806,6 @@ static void validate_existing_license_file(CSimpleIniA &ini, const string &licen
 								string(section.pItem) + "].");
 		}
 	}
-}
-
-static const string print_for_sign(const string &feature_name, const CSimpleIniA::TKeyVal *section) {
-	stringstream buf;
-	buf << boost::to_upper_copy(feature_name);
-	for (auto it = section->begin(); it != section->end(); it++) {
-		string key(it->first.pItem);
-		if (key != LICENSE_SIGNATURE) {
-			buf << boost::algorithm::trim_copy(key) << boost::algorithm::trim_copy(string(it->second));
-		}
-	}
-	return buf.str();
 }
 
 static void add_v201_field(vector<v201::CanonicalField> &fields, const string &key, const char *value) {
@@ -914,15 +852,7 @@ static void validate_existing_license_signatures(CSimpleIniA &ini, const CryptoH
 	ini.GetAllSections(sections);
 	for (const auto &section : sections) {
 		const char *signature = ini.GetValue(section.pItem, LICENSE_SIGNATURE);
-		const char *license_version = ini.GetValue(section.pItem, LICENSE_VERSION);
-		const string version = license_version == nullptr ? string() : string(license_version);
-		string license_for_sign;
-		if (version == to_string(LICENSE_FILE_VERSION_V201)) {
-			license_for_sign = v201_payload_for_section(project_name, section.pItem, ini, section.pItem);
-		} else {
-			const CSimpleIniA::TKeyVal *section_values = ini.GetSection(section.pItem);
-			license_for_sign = print_for_sign(section.pItem, section_values);
-		}
+		const string license_for_sign = v201_payload_for_section(project_name, section.pItem, ini, section.pItem);
 		const string expected_signature = crypto.signString(license_for_sign);
 		if (signature == nullptr || expected_signature != string(signature)) {
 			throw runtime_error("Existing output file [" + license_file_name +
@@ -932,9 +862,7 @@ static void validate_existing_license_signatures(CSimpleIniA &ini, const CryptoH
 }
 
 License::License(const std::string *licenseName, const std::string &project_folder, bool base64)
-	: m_license_file_version(LICENSE_FILE_VERSION),
-	  m_target_license_format_max(LICENSE_FILE_VERSION_V200),
-	  m_base64(base64),
+	: m_base64(base64),
 	  m_license_fname(licenseName),
 	  m_project_folder(normalize_project_path(project_folder)) {
 	fs::path proj_folder(m_project_folder);
@@ -948,12 +876,6 @@ void License::write_license() {
 	bool existing_license_loaded = false;
 	const fs::path project_path(m_project_folder);
 	const string project_name = project_path.filename().string();
-	const bool v201 = m_license_file_version == LICENSE_FILE_VERSION_V201;
-	if (m_license_file_version > m_target_license_format_max) {
-		throw invalid_argument(string("license-version ") + to_string(m_license_file_version) + " requires --" +
-							   PARAM_TARGET_LICENSE_FORMAT_MAX + "=" + to_string(m_license_file_version) +
-							   " or newer");
-	}
 	if (m_license_fname != nullptr) {
 		validate_output_target(*m_license_fname, m_project_folder, m_private_key);
 		const fs::path output_path(*m_license_fname);
@@ -969,74 +891,54 @@ void License::write_license() {
 				throw runtime_error(
 					"License file existing, but there were errors in loading it. Is it a license file?");
 			}
-			// v200 historically loaded and appended arbitrary existing INI
-			// sections.  Its serialized/signature quirks are a deployed format
-			// contract, so strict schema validation is deliberately a v201-only
-			// safety invariant.  v201 never inherits an unreviewed legacy file.
-			if (v201) {
-				validate_existing_license_file(ini, *m_license_fname);
-			}
+			// v201 is the only issuance format, so an existing file is never
+			// inherited without strict schema validation: it must already be a
+			// canonical v201 license, not an unreviewed foreign INI file.
+			validate_existing_license_file(ini, *m_license_fname);
 			existing_license_loaded = true;
 		}
 	}
 
-	const vector<string> feature_v = v201 ? normalized_feature_names(m_feature_names) : legacy_feature_names(m_feature_names);
+	const vector<string> feature_v = normalized_feature_names(m_feature_names);
 	const map<string, string> output_values =
-		normalized_output_parameters(values_map, v201, m_allow_ip_binding, m_allow_env_selected_binding,
+		normalized_output_parameters(values_map, m_allow_ip_binding, m_allow_env_selected_binding,
 									 m_allow_weak_disk_label_binding);
 	unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
 	crypto->loadPrivateKey_file(m_private_key);
-	// v200 remains available for established legacy projects.  v201 is the
-	// hardened issuance format, so it refuses weak keys before any output is
-	// changed and directs operators to the explicit migration workflow.
+	// v201 is the hardened issuance format: it refuses weak keys before any
+	// output is changed, rather than rotating the private key automatically.
 	const size_t issuance_key_bits = rsa_public_key_bits(crypto->exportPublicKey());
 	if (issuance_key_bits < 3072) {
-		if (m_license_file_version == LICENSE_FILE_VERSION_V201) {
-			throw runtime_error("v201 license issuance refuses the existing " + to_string(issuance_key_bits) +
-							"-bit project key. It will not be rotated automatically; run `lccgen project migrate-weak-key "
-							"--project-folder <project>` for the explicit backup-and-reissue procedure.");
-		}
-		cerr << "WARNING: issuing legacy v200 output with a " << issuance_key_bits
-			 << "-bit project key for compatibility. The licensecc runtime rejects keys below 3072 bits, so this "
-				"license will NOT verify in production."
-			 << endl;
+		throw runtime_error("v201 license issuance refuses the existing " + to_string(issuance_key_bits) +
+						"-bit project key. It will not be rotated automatically; create a new project with `lccgen "
+						"project init` (3072 bits or larger) and reissue licenses from that project.");
 	}
-	if (existing_license_loaded && v201) {
+	if (existing_license_loaded) {
 		validate_existing_license_signatures(ini, *crypto, *m_license_fname, project_name);
 	}
-	ProjectPublicMetadata public_metadata;
-	if (m_license_file_version == LICENSE_FILE_VERSION_V201) {
-		public_metadata = read_project_public_metadata(m_project_folder);
-		validate_project_public_metadata_matches_private_key(public_metadata, *crypto);
-	}
+	const ProjectPublicMetadata public_metadata = read_project_public_metadata(m_project_folder);
+	validate_project_public_metadata_matches_private_key(public_metadata, *crypto);
 
 	for (const string feature : feature_v) {
-		ini.SetLongValue(feature.c_str(), LICENSE_VERSION, m_license_file_version);
-		if (m_license_file_version == LICENSE_FILE_VERSION_V201) {
-			ini.SetValue(feature.c_str(), LICENSE_CANONICAL_VERSION, "1");
-			ini.SetValue(feature.c_str(), LICENSE_SIGNATURE_VERSION, "1");
-			ini.SetValue(feature.c_str(), LICENSE_SIGNATURE_ALGORITHM, public_metadata.signature_algorithm.c_str());
-			ini.SetValue(feature.c_str(), LICENSE_KEY_ID, public_metadata.key_id.c_str());
-		}
+		ini.SetLongValue(feature.c_str(), LICENSE_VERSION, LICENSE_FILE_VERSION);
+		ini.SetValue(feature.c_str(), LICENSE_CANONICAL_VERSION, "1");
+		ini.SetValue(feature.c_str(), LICENSE_SIGNATURE_VERSION, "1");
+		ini.SetValue(feature.c_str(), LICENSE_SIGNATURE_ALGORITHM, public_metadata.signature_algorithm.c_str());
+		ini.SetValue(feature.c_str(), LICENSE_KEY_ID, public_metadata.key_id.c_str());
 		for (const auto &it : output_values) {
 			ini.SetValue(feature.c_str(), it.first.c_str(), it.second.c_str());
 		}
-		if (m_license_file_version == LICENSE_FILE_VERSION_V201) {
-			const char *client_signature = ini.GetValue(feature.c_str(), PARAM_CLIENT_SIGNATURE, nullptr);
-			if (client_signature != nullptr && string(client_signature).size() > 0) {
-				const ClientSignatureInfo client_signature_info =
-					validate_client_signature(client_signature, m_allow_ip_binding, m_allow_env_selected_binding,
-											  m_allow_weak_disk_label_binding);
-				ini.SetValue(feature.c_str(), PARAM_CLIENT_SIGNATURE_SOURCE_STRENGTH,
-							 client_signature_info.source_strength.c_str());
-			} else {
-				ini.Delete(feature.c_str(), PARAM_CLIENT_SIGNATURE_SOURCE_STRENGTH);
-			}
+		const char *client_signature = ini.GetValue(feature.c_str(), PARAM_CLIENT_SIGNATURE, nullptr);
+		if (client_signature != nullptr && string(client_signature).size() > 0) {
+			const ClientSignatureInfo client_signature_info =
+				validate_client_signature(client_signature, m_allow_ip_binding, m_allow_env_selected_binding,
+										  m_allow_weak_disk_label_binding);
+			ini.SetValue(feature.c_str(), PARAM_CLIENT_SIGNATURE_SOURCE_STRENGTH,
+						 client_signature_info.source_strength.c_str());
+		} else {
+			ini.Delete(feature.c_str(), PARAM_CLIENT_SIGNATURE_SOURCE_STRENGTH);
 		}
-		const string license_for_sign =
-			m_license_file_version == LICENSE_FILE_VERSION_V201
-				? v201_payload_for_section(project_name, feature, ini, feature.c_str())
-				: print_for_sign(feature, ini.GetSection(feature.c_str()));
+		const string license_for_sign = v201_payload_for_section(project_name, feature, ini, feature.c_str());
 		const string signature = crypto->signString(license_for_sign);
 		ini.SetValue(feature.c_str(), LICENSE_SIGNATURE, signature.c_str());
 	}
@@ -1057,30 +959,6 @@ void License::write_license() {
 	}
 }
 
-void License::set_license_file_version(const std::string &license_version) {
-	if (license_version == to_string(LICENSE_FILE_VERSION_V200)) {
-		m_license_file_version = LICENSE_FILE_VERSION_V200;
-		return;
-	}
-	if (license_version == to_string(LICENSE_FILE_VERSION_V201)) {
-		m_license_file_version = LICENSE_FILE_VERSION_V201;
-		return;
-	}
-	throw invalid_argument("license-version must be 200 or 201");
-}
-
-void License::set_target_license_format_max(const std::string &license_version) {
-	if (license_version == to_string(LICENSE_FILE_VERSION_V200)) {
-		m_target_license_format_max = LICENSE_FILE_VERSION_V200;
-		return;
-	}
-	if (license_version == to_string(LICENSE_FILE_VERSION_V201)) {
-		m_target_license_format_max = LICENSE_FILE_VERSION_V201;
-		return;
-	}
-	throw invalid_argument("target-license-format-max must be 200 or 201");
-}
-
 void License::set_allow_weak_disk_label_binding(bool allow_weak_disk_label_binding) {
 	m_allow_weak_disk_label_binding = allow_weak_disk_label_binding;
 }
@@ -1088,9 +966,9 @@ void License::set_allow_weak_disk_label_binding(bool allow_weak_disk_label_bindi
 // TODO, split this code in multiple classes
 void License::add_parameter(const std::string &param_name, const std::string &param_value) {
 	if (LICENSE_OUTPUT_PARAM.find(param_name) != LICENSE_OUTPUT_PARAM.end()) {
-		// Defer canonical/input validation until the final format is known. The
-		// command-line parser's option iteration order is not a format contract,
-		// and v200 must retain its established input behavior.
+		// Defer canonical/input validation to write_license(), once every
+		// parameter has been collected. The command-line parser's option
+		// iteration order is not a format contract.
 		if ((param_name == PARAM_VERSION_FROM || param_name == PARAM_VERSION_TO) && param_value == "0") {
 			values_map.erase(param_name);
 		} else {
@@ -1110,10 +988,6 @@ void License::add_parameter(const std::string &param_name, const std::string &pa
 			throw logic_error("Primary key [" + param_value + "] not found");
 		}
 		m_private_key = param_value;
-	} else if (PARAM_LICENSE_FORMAT_VERSION == param_name) {
-		set_license_file_version(param_value);
-	} else if (PARAM_TARGET_LICENSE_FORMAT_MAX == param_name) {
-		set_target_license_format_max(param_value);
 	} else if (PARAM_LICENSE_OUTPUT == param_name || PARAM_PROJECT_FOLDER == param_name) {
 		// just ignore
 	} else {

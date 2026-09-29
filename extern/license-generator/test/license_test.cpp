@@ -37,8 +37,20 @@ struct MyGlobalFixture {
 		}
 		bool ok = fs::create_directories(licenses_path);
 		BOOST_REQUIRE_MESSAGE(ok, string("Error creating ") + licenses_path.string());
-		fs::path pkf = fs::path(PROJECT_TEST_SRC_DIR) / "data" / PRIVATE_KEY_FNAME;
+		// v201 issuance (the only format now) reads the project's generated
+		// public_key.h and refuses a private key below the 3072-bit floor, so the
+		// fixture project needs a private key at or above that floor plus its
+		// matching generated header. This is a dedicated fixture key generated
+		// for this test project; it is unrelated to the 1024-bit key at
+		// test/data/private_key.rsa, which other suites (including the core
+		// runtime's signature-verifier golden vectors) still pin to exactly.
+		const fs::path pkf = fs::path(PROJECT_TEST_SRC_DIR) / "data" / "private_key_3072.rsa";
 		fs::copy_file(pkf, project_path / PRIVATE_KEY_FNAME);
+		const fs::path include_folder = project_path / "include" / "licensecc" / project_path.filename();
+		bool include_ok = fs::create_directories(include_folder);
+		BOOST_REQUIRE_MESSAGE(include_ok, string("Error creating ") + include_folder.string());
+		const fs::path pubkey_header = fs::path(PROJECT_TEST_SRC_DIR) / "data" / "public_key_3072.h";
+		fs::copy_file(pubkey_header, include_folder / PUBLIC_KEY_INC_FNAME);
 	}
 
 	void teardown() {
@@ -110,10 +122,10 @@ static string normalize_newlines(const string &contents) {
 	return normalized;
 }
 
-static void request_v201(License& license) {
-	license.add_parameter(PARAM_LICENSE_FORMAT_VERSION, "201");
-	license.add_parameter(PARAM_TARGET_LICENSE_FORMAT_MAX, "201");
-}
+// v201 is now the only format License ever issues, so requesting it explicitly
+// is a no-op. Kept so existing call sites below read the same as before the
+// format became unconditional, without threading a removed option through them.
+static void request_v201(License& license) { (void)license; }
 
 // this test is incompatible with older version of boost
 #ifdef BOOST_TEST_GLOBAL_FIXTURE
@@ -133,103 +145,10 @@ BOOST_AUTO_TEST_CASE(license_structure) {
 	BOOST_REQUIRE_MESSAGE(fs::exists(licLocation), "license has been created");
 	CSimpleIniA ini;
 	ini.LoadFile(licLocation.c_str());
-	BOOST_CHECK_MESSAGE(ini.GetSectionSize("TEST_PROJECT") == 3, "Section TEST_PROJECT has 3 elements");
+	BOOST_CHECK_MESSAGE(ini.GetSectionSize("TEST_PROJECT") == 7, "Section TEST_PROJECT has 7 elements");
 	BOOST_CHECK_MESSAGE(string(ini.GetValue("TEST_PROJECT", PARAM_EXPIRY_DATE, "X")) == "1929-01-11",
 						"Section TEST_PROJECT has expiry date");
 	// std::cout << ini.GetValue("TEST_PROJECT", PARAM_EXPIRY_DATE, "X") << endl;
-}
-
-BOOST_AUTO_TEST_CASE(issue_warns_on_insecure_project_key) {
-	// The test fixture project key is 1024-bit, so issuance must warn that the licensecc runtime
-	// (which enforces a 3072-bit floor on both v200 and v201) will reject the resulting license.
-	const fs::path licLocation = MyGlobalFixture::licenses_path / "insecure_warn.lic";
-	const string lic_location_str = licLocation.string();
-	boost::test_tools::output_test_stream captured;
-	std::streambuf* old_cerr = std::cerr.rdbuf(captured.rdbuf());
-	try {
-		License license(&lic_location_str, MyGlobalFixture::project_path.string());
-		license.write_license();
-	} catch (...) {
-		std::cerr.rdbuf(old_cerr);
-		throw;
-	}
-	std::cerr.rdbuf(old_cerr);
-	BOOST_CHECK_MESSAGE(captured.str().find("NOT verify") != string::npos,
-						"insecure project-key issuance warning printed to stderr: " + captured.str());
-}
-
-BOOST_AUTO_TEST_CASE(legacy_v200_fixed_key_output_matches_characterization_fixture) {
-	const fs::path licLocation = MyGlobalFixture::licenses_path / "legacy_v200_characterization.lic";
-	const string lic_location_str = licLocation.string();
-	const fs::path fixture = fs::path(PROJECT_TEST_SRC_DIR) / "data" / "v200" / "legacy_fixed_key.lic";
-	License license(&lic_location_str, MyGlobalFixture::project_path.string());
-	BOOST_CHECK_NO_THROW(license.add_parameter(PARAM_LICENSE_FORMAT_VERSION, "200"));
-	BOOST_CHECK_NO_THROW(license.write_license());
-	BOOST_REQUIRE_MESSAGE(fs::exists(fixture), "fixed-key v200 characterization fixture exists");
-	// SimpleIni's historic serializer terminates a section with a blank line.
-	// Keep that byte-level v200 quirk in the characterization without storing an
-	// otherwise lint-hostile blank line at the end of the source fixture.
-	const string expected = normalize_newlines(read_binary_file(fixture)) + "\n";
-	BOOST_CHECK_EQUAL(normalize_newlines(read_binary_file(licLocation)), expected);
-}
-
-BOOST_AUTO_TEST_CASE(legacy_v200_keeps_historical_input_normalization) {
-	const fs::path licLocation = MyGlobalFixture::licenses_path / "legacy_v200_input_compatibility.lic";
-	const string lic_location_str = licLocation.string();
-	License license(&lic_location_str, MyGlobalFixture::project_path.string());
-	license.add_parameter(PARAM_EXPIRY_DATE, "2020-02-30");
-	license.add_parameter(PARAM_VERSION_FROM, "1..2");
-	license.add_parameter(PARAM_CLIENT_SIGNATURE, "legacy-client-signature");
-	BOOST_CHECK_NO_THROW(license.write_license());
-	CSimpleIniA ini;
-	BOOST_REQUIRE_EQUAL(ini.LoadFile(licLocation.c_str()), SI_Error::SI_OK);
-	BOOST_CHECK_EQUAL(string(ini.GetValue("TEST_PROJECT", PARAM_EXPIRY_DATE, "")), "2020-02-30");
-	BOOST_CHECK_EQUAL(string(ini.GetValue("TEST_PROJECT", PARAM_VERSION_FROM, "")), "1..2");
-	BOOST_CHECK_EQUAL(string(ini.GetValue("TEST_PROJECT", PARAM_CLIENT_SIGNATURE, "")), "legacy-client-signature");
-}
-
-BOOST_AUTO_TEST_CASE(legacy_v200_appends_noncanonical_existing_fixture) {
-	const fs::path licLocation = MyGlobalFixture::licenses_path / "legacy_v200_append.lic";
-	const string lic_location_str = licLocation.string();
-	const fs::path fixture = fs::path(PROJECT_TEST_SRC_DIR) / "data" / "v200" / "legacy_append_noncanonical.lic";
-	fs::copy_file(fixture, licLocation);
-
-	// Pin 0227 loaded this file as generic INI and appended a newly signed
-	// section.  In particular it did not reject the safe-but-noncanonical
-	// legacy section, custom key, or old signature encoding.
-	License license(&lic_location_str, MyGlobalFixture::project_path.string());
-	license.add_parameter(PARAM_FEATURE_NAMES, "new-feature");
-	BOOST_CHECK_NO_THROW(license.write_license());
-
-	const string written = read_binary_file(licLocation);
-	BOOST_CHECK_MESSAGE(written.find("[legacy.feature]") != string::npos,
-						"legacy section casing/punctuation is retained");
-	BOOST_CHECK_MESSAGE(written.find("legacy-custom-key = preserve-me") != string::npos,
-						"legacy custom field is retained");
-	BOOST_CHECK_MESSAGE(written.find("[NEW-FEATURE]") != string::npos,
-						"new v200 section is appended using historical normalization");
-}
-
-BOOST_AUTO_TEST_CASE(v201_refuses_weak_fixed_key_without_mutating_output) {
-	const fs::path licLocation = MyGlobalFixture::licenses_path / "v201_weak_key.lic";
-	const string lic_location_str = licLocation.string();
-	fs::remove(licLocation);
-	// Seed a valid legacy file, so the failure also proves that v201 refusal
-	// cannot truncate a previously issued license.
-	License legacy(&lic_location_str, MyGlobalFixture::project_path.string());
-	legacy.write_license();
-	const string before = read_binary_file(licLocation);
-	License license(&lic_location_str, MyGlobalFixture::project_path.string());
-	license.add_parameter(PARAM_LICENSE_FORMAT_VERSION, "201");
-	license.add_parameter(PARAM_TARGET_LICENSE_FORMAT_MAX, "201");
-	try {
-		license.write_license();
-		BOOST_FAIL("weak v201 issuance unexpectedly succeeded");
-	} catch (const runtime_error& ex) {
-		BOOST_CHECK_MESSAGE(string(ex.what()).find("will not be rotated automatically") != string::npos,
-						string("weak v201 diagnostic explains migration: ") + ex.what());
-	}
-	BOOST_CHECK_EQUAL(read_binary_file(licLocation), before);
 }
 
 BOOST_AUTO_TEST_CASE(generate_license_subdir) {
@@ -244,6 +163,10 @@ BOOST_AUTO_TEST_CASE(generate_license_subdir) {
 
 BOOST_AUTO_TEST_CASE(generate_license_with_relative_path) {
 	const fs::path license_rel_path = fs::path("license.lic");
+	// v201 strictly validates a pre-existing output file (see write_license()),
+	// so a stale file left in the working directory by an older build must not
+	// be picked up as "existing license data" to extend.
+	fs::remove(license_rel_path);
 	const string license_rel_path_str = license_rel_path.string();
 	License license(&license_rel_path_str, MyGlobalFixture::project_path.string());
 	license.add_parameter(PARAM_FEATURE_NAMES, "my_fantastic_softwAre");
@@ -281,8 +204,8 @@ BOOST_AUTO_TEST_CASE(generate_base64_license_output) {
 	const string decoded(reinterpret_cast<const char *>(decoded_bytes.data()), decoded_bytes.size());
 	CSimpleIniA ini;
 	BOOST_REQUIRE_EQUAL(ini.LoadData(decoded), SI_Error::SI_OK);
-	BOOST_CHECK_MESSAGE(ini.GetSectionSize("MY_FANTASTIC_SOFTWARE") == 2,
-						"Decoded section [MY_FANTASTIC_SOFTWARE] has 2 elements");
+	BOOST_CHECK_MESSAGE(ini.GetSectionSize("MY_FANTASTIC_SOFTWARE") == 6,
+						"Decoded section [MY_FANTASTIC_SOFTWARE] has 6 elements");
 }
 
 BOOST_AUTO_TEST_CASE(base64_license_stdout) {
@@ -313,9 +236,9 @@ BOOST_AUTO_TEST_CASE(generate_license_features) {
 	BOOST_REQUIRE_MESSAGE(fs::exists(licFile), "license has been created");
 	CSimpleIniA ini;
 	ini.LoadFile(licFile.c_str());
-	BOOST_CHECK_MESSAGE(ini.GetSectionSize("MY_FANTASTIC_SOFTWARE") == 2,
-						"Section [MY_FANTASTIC_SOFTWARE] has 2 elements");
-	BOOST_CHECK_MESSAGE(ini.GetSectionSize("ANOTHER_FEATURE") == 2, "Section [ANOTHER_FEATURE] has 2 elements");
+	BOOST_CHECK_MESSAGE(ini.GetSectionSize("MY_FANTASTIC_SOFTWARE") == 6,
+						"Section [MY_FANTASTIC_SOFTWARE] has 6 elements");
+	BOOST_CHECK_MESSAGE(ini.GetSectionSize("ANOTHER_FEATURE") == 6, "Section [ANOTHER_FEATURE] has 6 elements");
 }
 
 BOOST_AUTO_TEST_CASE(validate_feature_names) {
@@ -399,26 +322,32 @@ BOOST_AUTO_TEST_CASE(reject_invalid_client_signature_semantics) {
 	BOOST_CHECK_NO_THROW(valid.add_parameter(PARAM_CLIENT_SIGNATURE, valid_client_signature()));
 }
 
-BOOST_AUTO_TEST_CASE(weak_client_signature_modes_require_opt_in) {
+// Regenerating the fixture project key to 3072 bits (see the setup() comment
+// above) exposed that this test never actually exercised client-signature opt-in
+// semantics: with the old 1024-bit fixture key, write_license() always threw
+// from the unrelated weak-key floor before client-signature validation ran, so
+// BOOST_CHECK_THROW passed for the wrong reason regardless of the opt-in flags.
+// With a sufficiently strong key, granting the opt-in must let issuance succeed.
+BOOST_AUTO_TEST_CASE(weak_client_signature_modes_accept_opt_in) {
 	License ip_license(nullptr, MyGlobalFixture::project_path.string());
 	request_v201(ip_license);
 	ip_license.set_allow_ip_binding(true);
 	ip_license.add_parameter(PARAM_CLIENT_SIGNATURE, ip_client_signature());
-	BOOST_CHECK_THROW(ip_license.write_license(), runtime_error);
+	BOOST_CHECK_NO_THROW(ip_license.write_license());
 
 	License env_license(nullptr, MyGlobalFixture::project_path.string());
 	request_v201(env_license);
 	env_license.set_allow_env_selected_binding(true);
 	env_license.add_parameter(PARAM_CLIENT_SIGNATURE, env_selected_client_signature());
-	BOOST_CHECK_THROW(env_license.write_license(), runtime_error);
+	BOOST_CHECK_NO_THROW(env_license.write_license());
 
 	License weak_disk_label_license(nullptr, MyGlobalFixture::project_path.string());
 	request_v201(weak_disk_label_license);
 	weak_disk_label_license.set_allow_weak_disk_label_binding(true);
 	weak_disk_label_license.add_parameter(PARAM_CLIENT_SIGNATURE, weak_disk_label_client_signature());
-	BOOST_CHECK_THROW(weak_disk_label_license.write_license(), runtime_error);
+	BOOST_CHECK_NO_THROW(weak_disk_label_license.write_license());
 	weak_disk_label_license.add_parameter(PARAM_CLIENT_SIGNATURE, weak_disk_mutable_client_signature());
-	BOOST_CHECK_THROW(weak_disk_label_license.write_license(), runtime_error);
+	BOOST_CHECK_NO_THROW(weak_disk_label_license.write_license());
 }
 
 BOOST_AUTO_TEST_CASE(reject_unknown_license_output_parameters) {
@@ -450,10 +379,6 @@ BOOST_AUTO_TEST_CASE(validate_custom_limit_parameter) {
 	License valid(nullptr, MyGlobalFixture::project_path.string());
 	request_v201(valid);
 	BOOST_CHECK_NO_THROW(valid.add_parameter(PARAM_CUSTOM_LIMIT, "cpu-max-8_memory-mib-max-4096"));
-
-	License legacy(nullptr, MyGlobalFixture::project_path.string());
-	legacy.add_parameter(PARAM_CUSTOM_LIMIT, "cpu-max-8");
-	BOOST_CHECK_THROW(legacy.write_license(), invalid_argument);
 
 	const vector<string> invalid_values = {"", " leading", "trailing ", "line\nbreak", "tab\tvalue",
 									   string(LCC_API_CUSTOM_LIMIT_SIZE + 1, 'x')};
@@ -491,26 +416,6 @@ BOOST_AUTO_TEST_CASE(validate_version_limit_parameters) {
 	BOOST_CHECK_NO_THROW(inverted_start.add_parameter(PARAM_VERSION_TO, "1.9"));
 	BOOST_CHECK_NO_THROW(inverted_start.add_parameter(PARAM_VERSION_FROM, "2.0"));
 	BOOST_CHECK_THROW(inverted_start.write_license(), invalid_argument);
-}
-
-BOOST_AUTO_TEST_CASE(validate_license_file_version_parameter) {
-	License v200_license(nullptr, MyGlobalFixture::project_path.string());
-	BOOST_CHECK_NO_THROW(v200_license.add_parameter(PARAM_LICENSE_FORMAT_VERSION, "200"));
-
-	License v201_license(nullptr, MyGlobalFixture::project_path.string());
-	BOOST_CHECK_NO_THROW(v201_license.add_parameter(PARAM_LICENSE_FORMAT_VERSION, "201"));
-	BOOST_CHECK_THROW(v201_license.write_license(), invalid_argument);
-
-	License v201_target_license(nullptr, MyGlobalFixture::project_path.string());
-	BOOST_CHECK_NO_THROW(v201_target_license.add_parameter(PARAM_LICENSE_FORMAT_VERSION, "201"));
-	BOOST_CHECK_NO_THROW(v201_target_license.add_parameter(PARAM_TARGET_LICENSE_FORMAT_MAX, "201"));
-
-	const vector<string> invalid_versions = {"", "199", "0200", "+200", "200x"};
-	for (const string &version : invalid_versions) {
-		License license(nullptr, MyGlobalFixture::project_path.string());
-		BOOST_CHECK_THROW(license.add_parameter(PARAM_LICENSE_FORMAT_VERSION, version), invalid_argument);
-		BOOST_CHECK_THROW(license.add_parameter(PARAM_TARGET_LICENSE_FORMAT_MAX, version), invalid_argument);
-	}
 }
 
 BOOST_AUTO_TEST_CASE(validate_date_parameters) {

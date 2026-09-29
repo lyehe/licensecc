@@ -253,29 +253,32 @@ BOOST_AUTO_TEST_CASE(test_reject_invalid_signature_base64) {
 BOOST_AUTO_TEST_CASE(test_reject_malformed_license_version) {
 	const vector<string> extraArgs;
 	const string licLocation = generate_license("malformed_license_version_tamper", extraArgs);
-	replace_in_file(licLocation, "lic_ver = 200", "lic_ver = not-a-version");
+	replace_in_file(licLocation, "lic_ver = 201", "lic_ver = not-a-version");
 
 	BOOST_CHECK_EQUAL(acquire_from_path(licLocation), LICENSE_MALFORMED);
 }
 
 BOOST_AUTO_TEST_CASE(test_reject_noncanonical_license_version_values) {
-	const vector<pair<string, string>> replacements = {{"noncanonical_license_version_octal", "lic_ver = 0200"},
-													  {"noncanonical_license_version_plus", "lic_ver = +200"},
-													  {"noncanonical_license_version_suffix", "lic_ver = 200x"},
-													  {"noncanonical_license_version_leading_space", "lic_ver =  200"},
-													  {"noncanonical_license_version_trailing_space", "lic_ver = 200 "}};
+	const vector<pair<string, string>> replacements = {{"noncanonical_license_version_octal", "lic_ver = 0201"},
+													  {"noncanonical_license_version_plus", "lic_ver = +201"},
+													  {"noncanonical_license_version_suffix", "lic_ver = 201x"},
+													  {"noncanonical_license_version_leading_space", "lic_ver =  201"},
+													  {"noncanonical_license_version_trailing_space", "lic_ver = 201 "}};
 	for (const auto& replacement : replacements) {
 		const vector<string> extraArgs;
 		const string licLocation = generate_license(replacement.first, extraArgs);
-		replace_in_file(licLocation, "lic_ver = 200", replacement.second);
+		replace_in_file(licLocation, "lic_ver = 201", replacement.second);
 		BOOST_CHECK_EQUAL(acquire_from_path(licLocation), LICENSE_MALFORMED);
 	}
 }
 
+// A v201-issued license carries v201-only fields (canonical-v, sig-v, sig-alg,
+// key-id) that v200 does not recognize, so relabeling a genuine v201 license
+// as v200 without stripping them must still be rejected as malformed.
 BOOST_AUTO_TEST_CASE(test_reject_unsupported_license_version) {
 	const vector<string> extraArgs;
 	const string licLocation = generate_license("unsupported_license_version_tamper", extraArgs);
-	replace_in_file(licLocation, "lic_ver = 200", "lic_ver = 201");
+	replace_in_file(licLocation, "lic_ver = 201", "lic_ver = 200");
 
 	BOOST_CHECK_EQUAL(acquire_from_path(licLocation), LICENSE_MALFORMED);
 }

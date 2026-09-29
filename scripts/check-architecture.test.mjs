@@ -448,14 +448,13 @@ test("hygiene permits only the reviewed vendored generator fixture paths", () =>
     trackedPaths: [
       "extern/license-generator/build/.gitkeep",
       "extern/license-generator/test/data/private_key.rsa",
-      "extern/license-generator/test/data/v200/legacy_append_noncanonical.lic",
-      "extern/license-generator/test/data/v200/legacy_fixed_key.lic",
+      "extern/license-generator/test/data/private_key_3072.rsa",
     ],
   });
   assert.equal(allowed.exitCode, 0, allowed.diagnostics.join("\n"));
 
   const rejected = fixture({
-    trackedPaths: ["extern/license-generator/test/data/v200/unreviewed.lic"],
+    trackedPaths: ["extern/license-generator/test/data/unreviewed.lic"],
   });
   assert.equal(rejected.exitCode, 1);
   assert.deepEqual(errorCodes(rejected), ["ARCH_GENERATED_LICENSE"]);
