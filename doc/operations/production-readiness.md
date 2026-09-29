@@ -202,13 +202,15 @@ exists; release evidence must carry this residual-risk disposition.
   durable-table set and counts pinned in its manifest. Current live-source
   counts are informational only and cannot invalidate a valid historic
   snapshot after later writes.
-- The imported `d1_migrations` history must be an exact prefix of the
-  checked-out canonical backend migration sequence. Its historical schema
-  digest is recorded, the missing suffix is applied to scratch, and the final
-  history must be current.
-- After migration, the complete table, named-index, and trigger inventory is
-  compared to the canonical backend schema through a normalized digest/count
-  contract, and service-level invariants are checked.
+- The imported `d1_migrations` history must equal the checked-out canonical
+  backend baseline exactly. Its historical schema digest is recorded; any
+  other history (missing, divergent, ahead, or incomplete) fails the drill
+  closed, and no upgrade is attempted. A backup of a database created before
+  the current baseline cannot be restored this way — the database must be
+  recreated from the baseline instead.
+- After the baseline history is verified, the complete table, named-index,
+  and trigger inventory is compared to the canonical backend schema through a
+  normalized digest/count contract, and service-level invariants are checked.
 - Measured backup age starts at `snapshot_requested_at` immediately before D1
   export, not the later R2 upload time, and restore time meets the declared RPO
   and RTO.

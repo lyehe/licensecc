@@ -649,6 +649,9 @@ function migrationHistoryFromRows(rows, canonicalNames) {
   if (rows.length > canonicalNames.length) {
     throw new Error("snapshot_migration_history_ahead");
   }
+  if (rows.length < canonicalNames.length) {
+    throw new Error("snapshot_migration_history_incomplete");
+  }
   const names = rows.map((row, index) => {
     const id = Number(row.id);
     if (!Number.isSafeInteger(id) || id !== index + 1 || typeof row.name !== "string") {
@@ -676,12 +679,10 @@ function snapshotSchemaRows(database, config, mode, label) {
   return d1Json(database, config, mode, snapshotSchemaObjectSql(), label);
 }
 
-function migrateScratchToCurrent(options, deps = {}) {
+function verifyScratchMigrationHistory(options, deps = {}) {
   const inspectUserTables = deps.existingUserTables ?? existingUserTables;
   const inspectMigrationRows = deps.migrationRows ?? migrationRows;
   const inspectSchemaRows = deps.snapshotSchemaRows ?? snapshotSchemaRows;
-  const execute = deps.execute ?? runWrangler;
-  const now = deps.now ?? (() => performance.now());
   const canonicalNames = deps.canonicalNames ?? canonicalMigrationNames();
   const userTables = inspectUserTables(
     options.scratchDatabase,
@@ -692,7 +693,7 @@ function migrateScratchToCurrent(options, deps = {}) {
   if (!userTables.includes("d1_migrations")) {
     throw new Error("snapshot_migration_history_missing");
   }
-  const before = migrationHistoryFromRows(inspectMigrationRows(
+  const migrationHistory = migrationHistoryFromRows(inspectMigrationRows(
     options.scratchDatabase,
     options.scratchConfig,
     options.mode,
@@ -704,44 +705,10 @@ function migrateScratchToCurrent(options, deps = {}) {
     options.mode,
     "snapshot D1 schema-object inspection",
   ));
-  const startedAt = now();
-  let status = "already_current";
-  if (before.applied_migration_count < canonicalNames.length) {
-    if (options.scratchConfig === undefined) {
-      throw new Error("scratch_config_required_for_migration_upgrade");
-    }
-    execute([
-      "d1",
-      "migrations",
-      "apply",
-      options.scratchDatabase,
-      modeArg(options.mode),
-      ...configArgs(options.scratchConfig),
-    ], "scratch D1 canonical migration upgrade");
-    status = "migrated_to_current";
-  }
-  const elapsedMs = Math.max(0, Math.floor(now() - startedAt));
-  const after = migrationHistoryFromRows(inspectMigrationRows(
-    options.scratchDatabase,
-    options.scratchConfig,
-    options.mode,
-    "upgraded scratch D1 migration-history inspection",
-  ), canonicalNames);
-  if (after.applied_migration_count !== canonicalNames.length) {
-    throw new Error("scratch_migration_upgrade_incomplete");
-  }
   return {
     snapshot_schema_identity: {
-      migration_history: before,
+      migration_history: migrationHistory,
       schema_objects: snapshotSchemaIdentity,
-    },
-    migration_upgrade: {
-      status,
-      from_migration_count: before.applied_migration_count,
-      target_migration_count: canonicalNames.length,
-      migrations_applied: after.applied_migration_count - before.applied_migration_count,
-      current_migration: after.latest_migration,
-      elapsed_ms: elapsedMs,
     },
   };
 }
@@ -1296,7 +1263,7 @@ async function main() {
     const backupSource = await prepareBackupSource(options, tempDir);
     const restoreElapsedMs = restoreToScratch(options, backupSource.sqlFile);
     const snapshotFidelity = validateSnapshotFidelity(options, backupSource);
-    const { snapshot_schema_identity: snapshotSchemaIdentity, migration_upgrade: migrationUpgrade } = migrateScratchToCurrent(options);
+    const { snapshot_schema_identity: snapshotSchemaIdentity } = verifyScratchMigrationHistory(options);
     const { schemaIdentity, requiredCounts: restoredCounts, presenceOnlyCounts } = validateRestoredTables(options);
     const restoredEntitlementSemantics = entitlementSemantics(
       options.scratchDatabase,
@@ -1337,7 +1304,6 @@ async function main() {
       scratch_before: scratchBefore,
       snapshot_fidelity: snapshotFidelity,
       snapshot_schema_identity: snapshotSchemaIdentity,
-      migration_upgrade: migrationUpgrade,
       restored_schema_identity: schemaIdentity,
       restored_counts: restoredCounts,
       restored_presence_only_counts: presenceOnlyCounts,
@@ -1382,7 +1348,6 @@ export {
   liveSourceCountObservation,
   unavailableLiveSourceCountObservation,
   manifestSnapshotInventory,
-  migrateScratchToCurrent,
   migrationHistoryFromRows,
   migrationHistorySql,
   observedSchemaIdentityFromRows,
@@ -1406,6 +1371,7 @@ export {
   verifySqlFileContentIntegrity,
   userTableListSql,
   snapshotSchemaObjectSql,
+  verifyScratchMigrationHistory,
 };
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {

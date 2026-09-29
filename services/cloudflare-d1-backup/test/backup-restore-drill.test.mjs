@@ -29,7 +29,6 @@ import {
   liveSourceCountObservation,
   unavailableLiveSourceCountObservation,
   manifestSnapshotInventory,
-  migrateScratchToCurrent,
   migrationHistoryFromRows,
   migrationHistorySql,
   observedSchemaIdentityFromRows,
@@ -53,6 +52,7 @@ import {
   verifySqlFileContentIntegrity,
   userTableListSql,
   snapshotSchemaObjectSql,
+  verifyScratchMigrationHistory,
 } from "../scripts/restore-drill.mjs";
 
 const MANIFEST_NOW = Date.parse("2026-08-30T12:00:00.000Z");
@@ -262,54 +262,24 @@ test("operation tombstones require manifest counts and cannot disappear during r
   assert.throws(()=>validateSnapshotFidelity(options,{snapshotInventory:{...snapshotInventory,table_counts:{entitlements:1}}},deps),/snapshot_inventory_table_set_mismatch/);
 });
 
-test("canonical migration lineage upgrades an old snapshot before current-schema validation", () => {
+test("a snapshot whose migration history is not the complete baseline is refused, never upgraded", () => {
   const canonicalNames = ["0001_initial.sql", "0002_current.sql"];
-  let upgraded = false;
-  const executions = [];
-  const ticks = [100, 127];
-  const result = migrateScratchToCurrent({
-    scratchDatabase: "scratch-db",
-    scratchConfig: "C:\\protected\\backend.toml",
-    mode: "remote",
-  }, {
+  let executed = 0;
+  const deps = {
     canonicalNames,
     existingUserTables: () => ["d1_migrations", "entitlements"],
-    migrationRows: () => upgraded
-      ? [{ id: 1, name: canonicalNames[0] }, { id: 2, name: canonicalNames[1] }]
-      : [{ id: 1, name: canonicalNames[0] }],
-    snapshotSchemaRows: () => [{
-      type: "table",
-      name: "entitlements",
-      table_name: "entitlements",
-      sql: "CREATE TABLE entitlements (id TEXT PRIMARY KEY)",
-    }],
-    execute(args, label) {
-      executions.push({ args, label });
-      upgraded = true;
-    },
-    now: () => ticks.shift(),
-  });
-  assert.deepEqual(executions, [{
-    args: [
-      "d1", "migrations", "apply", "scratch-db", "--remote", "--config", "C:\\protected\\backend.toml",
-    ],
-    label: "scratch D1 canonical migration upgrade",
-  }]);
-  assert.equal(result.snapshot_schema_identity.migration_history.applied_migration_count, 1);
-  assert.equal(result.snapshot_schema_identity.schema_objects.recorded, true);
-  assert.deepEqual(result.migration_upgrade, {
-    status: "migrated_to_current",
-    from_migration_count: 1,
-    target_migration_count: 2,
-    migrations_applied: 1,
-    current_migration: "0002_current.sql",
-    elapsed_ms: 27,
-  });
+    migrationRows: () => [{ id: 1, name: canonicalNames[0] }],
+    snapshotSchemaRows: () => [{ type: "table", name: "entitlements", table_name: "entitlements", sql: "CREATE TABLE entitlements (id TEXT)" }],
+    execute() { executed += 1; },
+  };
+  assert.throws(() => verifyScratchMigrationHistory({ scratchDatabase: "scratch", scratchConfig: "backend.toml", mode: "remote" }, deps),
+    /snapshot_migration_history_incomplete/);
+  assert.equal(executed, 0);
 });
 
-test("migration lineage fails closed when history is absent, divergent, or incomplete", () => {
+test("migration lineage fails closed when history is absent, divergent, ahead, incomplete, or non-contiguous", () => {
   const canonicalNames = ["0001_initial.sql", "0002_current.sql"];
-  assert.throws(() => migrateScratchToCurrent({
+  assert.throws(() => verifyScratchMigrationHistory({
     scratchDatabase: "scratch-db",
     scratchConfig: "backend.toml",
     mode: "remote",
@@ -319,10 +289,20 @@ test("migration lineage fails closed when history is absent, divergent, or incom
   }), /snapshot_migration_history_missing/);
   assert.throws(() => migrationHistoryFromRows([
     { id: 1, name: "0001_other.sql" },
+    { id: 2, name: canonicalNames[1] },
   ], canonicalNames), /snapshot_migration_history_not_canonical_prefix/);
   assert.throws(() => migrationHistoryFromRows([
-    { id: 2, name: canonicalNames[0] },
+    { id: 1, name: canonicalNames[0] },
+    { id: 3, name: canonicalNames[1] },
   ], canonicalNames), /snapshot_migration_history_invalid/);
+  assert.throws(() => migrationHistoryFromRows([
+    { id: 1, name: canonicalNames[0] },
+    { id: 2, name: canonicalNames[1] },
+    { id: 3, name: "0003_extra.sql" },
+  ], canonicalNames), /snapshot_migration_history_ahead/);
+  assert.throws(() => migrationHistoryFromRows([
+    { id: 1, name: canonicalNames[0] },
+  ], canonicalNames), /snapshot_migration_history_incomplete/);
 });
 
 test("the checked-out backend migration inventory is the single baseline", () => {

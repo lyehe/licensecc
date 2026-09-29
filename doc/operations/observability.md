@@ -67,7 +67,7 @@ deployed version beside the measurements.
 | Abuse controls | `verify.rate_limited` by limiter source and malformed-request counts, without source identity |
 | Downstream delivery | pending/delivered/failed webhook counts, `webhook.*` warning/error events, and `portal.email_delivery_failed` counts by its four-value `error_type` |
 | Configuration | `/health` readiness, invalid mode names, and the count of consistency warnings |
-| Backup/recovery | last completed snapshot time, R2 upload time, backup age from `snapshot_requested_at`, Workflow result, SHA-256/size and object/manifest agreement, snapshot-count inventory status, historical migration/schema identity, migration-upgrade result, final schema digest, authenticity disposition, last scratch restore time, and measured RPO/RTO |
+| Backup/recovery | last completed snapshot time, R2 upload time, backup age from `snapshot_requested_at`, Workflow result, SHA-256/size and object/manifest agreement, snapshot-count inventory status, historical migration/schema identity, migration-history verification result, final schema digest, authenticity disposition, last scratch restore time, and measured RPO/RTO |
 | Four-Worker health | request/error/duration summaries for backend, admin, portal, and backup, split by environment |
 | Protected-device cleanup | scheduled invocation outcomes and last observed invocation time; sweep failures and limit warnings by source/target; all six backlog ages and snapshot times, with unavailable/stale measurements shown as unknown |
 
@@ -87,7 +87,7 @@ operational queue. Missing data fails closed for health and backup predicates.
 | --- | --- | --- | --- |
 | OBS-01 | public verifier unexpected 5xx or transport-failure ratio | at least 0.05% for 10 minutes; at low traffic, two failures in 10 minutes | at least 0.1% for 5 minutes, or any `verify.unhandled_error`, `verify.d1_error`, `verify.signing_error`, or `lease.signing_error`; page and block promotion |
 | OBS-02 | public verifier latency | p95 at least 400 ms or p99 at least 800 ms for 10 minutes | p95 at least 500 ms or p99 at least 1 second for 5 minutes; page and block promotion |
-| OBS-03 | latest completed, identity-valid, integrity-valid, and snapshot-inventory-valid backup age measured from `snapshot_requested_at` | 45 minutes | 60 minutes, missing/invalid manifest, failed Workflow, SQL/manifest digest or size mismatch, snapshot-count mismatch, noncanonical/incomplete migration upgrade, or invalid final schema identity; page and block migrations/promotion |
+| OBS-03 | latest completed, identity-valid, integrity-valid, and snapshot-inventory-valid backup age measured from `snapshot_requested_at` | 45 minutes | 60 minutes, missing/invalid manifest, failed Workflow, SQL/manifest digest or size mismatch, snapshot-count mismatch, noncanonical or incomplete migration history, or invalid final schema identity; page and block migrations/promotion |
 | OBS-04 | security configuration consistency | any non-empty `/health` warning or readiness probe failure | invalid security mode, disabled required enforcement, or warning lasting 5 minutes; page and block traffic promotion |
 | OBS-05 | webhook delivery | `webhook.signing_unconfigured`, `webhook.signing_key_missing`, `webhook.sign_failed`, `webhook.enqueue_error`, or `webhook.deliver_error` once | `webhook.delivery_failed` once or any enqueue/deliver error for 5 minutes; page and retain the failed delivery for controlled redrive |
 | OBS-06 | emergency/security anomaly | abnormal request-proof failure or rate-limit growth versus the preceding 24-hour staging/production baseline | any `account.emergency_override_used`; page immediately and open an incident record |
@@ -240,9 +240,9 @@ requires. The bundle and summary must contain or reference:
   deployment/version/commit, and before/after target stability;
 - selected manifest identity, snapshot and upload timestamps, streamed and
   downloaded SHA-256/size agreement, R2 metadata, manifest-pinned count result,
-  historical migration/schema identity, migration suffix result, final schema
-  digest/counts, `authenticity_verified` disposition, backup age, Workflow
-  status, restore elapsed time, and RPO/RTO result; and
+  historical migration/schema identity, migration-history verification
+  result, final schema digest/counts, `authenticity_verified` disposition,
+  backup age, Workflow status, restore elapsed time, and RPO/RTO result; and
 - log-review window, sampled event count, search categories, match count, and
   reviewer disposition.
 

@@ -75,9 +75,10 @@ npm run validate:deploy -- \
 - Metadata manifest next to every SQL dump.
 - Time Travel wrapper for emergency point-in-time lookup and restore.
 - Restore drill wrapper that imports a content-verified backup into an empty
-  scratch D1, verifies snapshot-pinned row counts, applies the checked-out
-  backend migration suffix, and validates the current canonical schema and
-  verifier-facing entitlement state semantics.
+  scratch D1, verifies snapshot-pinned row counts, requires the restored
+  `d1_migrations` history to exactly match the checked-out backend baseline,
+  and validates the current canonical schema and verifier-facing entitlement
+  state semantics.
 - Deploy validator that checks Worker health, unauthenticated manual-trigger
   fail-closed behavior, Worker secret-name presence, and Workflow registration.
 
@@ -286,12 +287,12 @@ requires the manifest's durable-table inventory to exactly match the counted
 tables present in the historical snapshot and requires every pinned count to
 match. This proves import fidelity against the exported snapshot rather than
 against a live database that may have advanced. It then requires
-`d1_migrations` to be present and to name an exact prefix of the checked-out
-backend migrations, records the historical schema-object digest, and runs
-`npx wrangler d1 migrations apply` against the scratch target when that prefix is
-old. Missing, divergent, ahead-of-repository, or incomplete migration history
-fails closed. A migration upgrade requires `--scratch-config` pointing at the
-backend configuration.
+`d1_migrations` to equal the checked-out backend baseline exactly and records
+the historical schema-object digest. Missing, divergent, ahead-of-baseline, or
+incomplete migration history fails closed; the drill never runs
+`wrangler d1 migrations apply`. A backup of a database created before the
+current baseline cannot be restored through this drill — the database must be
+recreated from the baseline instead.
 
 Device operation tombstones are durable counted state in the baseline schema.
 Older manifests that omit counts for an already-present `device_bound_operations`
@@ -300,7 +301,7 @@ revalidation, not an exemption treating tombstones as temporary records. Counts
 cannot prove the safety of restoring a snapshot taken before an operation existed;
 the protected-client cutover/restore procedure must address that rollback window.
 
-After the migration suffix is applied, the drill compares the normalized
+After the baseline migration history is verified, the drill compares the normalized
 SQLite DDL signature for all 50 tables, 75 named indexes, and 53 triggers
 against the canonical generated `cloudflare-licensing-backend/schema.sql`
 signature. Evidence emits only SHA-256 signatures and object/count metadata,
