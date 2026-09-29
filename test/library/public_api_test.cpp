@@ -87,7 +87,12 @@ static string issue_valid_license_file(const string& license_name) {
 	ss << LCC_EXE << " license issue";
 	ss << " --" PARAM_PRIMARY_KEY " " << LCC_PROJECT_PRIVATE_KEY;
 	ss << " --" PARAM_LICENSE_OUTPUT " " << file_path;
-	ss << " --" PARAM_PROJECT_FOLDER " " << LCC_TEST_LICENSES_PROJECT;
+	// v201 binds the license to the generated public-key metadata, which only
+	// the configured project (built by the top-level CMakeLists' project_public_header
+	// target) has. Point the issuer there instead of the clean, metadata-less
+	// test-output directory; the license itself still belongs in the isolated
+	// test directory above.
+	ss << " --" PARAM_PROJECT_FOLDER " " << LCC_PROJECT_FOLDER;
 	const int ret = std::system(ss.str().c_str());
 	BOOST_REQUIRE_EQUAL(ret, 0);
 	BOOST_REQUIRE_MESSAGE(ifstream(file_path.c_str()).good(), "issued license exists: " + file_path);
