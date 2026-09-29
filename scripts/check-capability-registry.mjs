@@ -21,7 +21,7 @@ const retiredClaims = Object.freeze([
   "root npm shortcuts call the same powershell script",
   "run ``scripts/dev-check.ps1`` before submitting.",
 ]);
-const statuses = new Set(["shipped", "experimental", "platform_limited", "planned", "deprecated"]);
+const statuses = new Set(["shipped", "experimental", "platform_limited", "planned"]);
 const statusesRequiringImplementation = new Set(["shipped", "experimental", "platform_limited"]);
 const owners = new Set([
   "C++ ABI and core maintainer",
@@ -366,7 +366,7 @@ function validateSurfaceCoverage(capability, evidenceByKind, errors) {
   }
 }
 
-function validateStatus(capability, evidenceByKind, hasReplacement, errors) {
+function validateStatus(capability, evidenceByKind, errors) {
   switch (capability.status) {
     case "shipped":
       if (!hasEvidence(evidenceByKind, "implementation", "automated_test")) addError(errors, "status_evidence", capability, "shipped requires implementation and automated_test evidence");
@@ -382,9 +382,6 @@ function validateStatus(capability, evidenceByKind, hasReplacement, errors) {
       if ((!evidenceByKind.has("plan") && !evidenceByKind.has("design")) || !plannedOnly) addError(errors, "planned_implementation_claim", capability, "planned evidence must be plan/design only");
       break;
     }
-    case "deprecated":
-      if (!hasReplacement && !evidenceByKind.has("fail_closed")) addError(errors, "status_evidence", capability, "deprecated requires a replacement or fail_closed evidence");
-      break;
     default:
       break;
   }
@@ -497,8 +494,7 @@ export function checkCapabilityRegistry({ root = repositoryRoot, trackedPaths = 
   for (const capability of registry.capabilities) {
     if (!capability || typeof capability !== "object" || Array.isArray(capability)) continue;
     const evidenceByKind = validateEvidence(root, tracked, capability, errors);
-    const hasReplacement = registry.capabilities.some((other) => other?.status !== "planned" && other?.status !== "deprecated" && Array.isArray(other?.replaces) && other.replaces.includes(capability.id));
-    validateStatus(capability, evidenceByKind, hasReplacement, errors);
+    validateStatus(capability, evidenceByKind, errors);
     validateSurfaceCoverage(capability, evidenceByKind, errors);
     validateReferenceList(capability, "references", identifiers, errors);
     validateReferenceList(capability, "replaces", identifiers, errors);

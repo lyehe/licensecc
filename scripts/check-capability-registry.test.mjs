@@ -13,7 +13,7 @@ function fixture(mutator = (registry) => registry) {
   const files = {
     "doc/capabilities/registry.json": "",
     "scripts/capability-registry.schema.json": schemaSource,
-    "doc/capabilities/index.rst": "Capability registry\n===================\n\ncapability: shipped-capability\ncapability: experimental-capability\ncapability: platform-capability\ncapability: planned-capability\ncapability: deprecated-capability\n",
+    "doc/capabilities/index.rst": "Capability registry\n===================\n\ncapability: shipped-capability\ncapability: experimental-capability\ncapability: platform-capability\ncapability: planned-capability\n",
     "doc/public.rst": "Public documentation marker.",
     "doc/analysis/features.rst": "Current capability evidence.\n",
     "doc/guide.rst": "Current guide.\n",
@@ -46,7 +46,6 @@ function fixture(mutator = (registry) => registry) {
     "doc/limitation.rst": "limitation marker",
     "docs/plan.md": "plan marker",
     "docs/design.md": "design marker",
-    "docs/fail-closed.md": "fail closed marker",
     "test/contracts/backend.json": JSON.stringify({
       service: "cloudflare-licensing-backend",
       allCanonicalRoutes: [{ method: "POST", path: "/v1/verify" }],
@@ -94,11 +93,6 @@ function fixture(mutator = (registry) => registry) {
           evidence("design", "docs/design.md", "design marker"),
         ],
       },
-      {
-        ...base("deprecated-capability", "deprecated", []),
-        evidence: [evidence("fail_closed", "docs/fail-closed.md", "fail closed marker")],
-        replaces: ["shipped-capability"],
-      },
     ],
   };
   writeFileSync(join(root, "doc/capabilities/registry.json"), `${JSON.stringify(mutator(registry), null, 2)}\n`);
@@ -124,7 +118,7 @@ test("rejects duplicate identifiers and titles plus unknown status or owner", (t
     registry.capabilities[1].id = registry.capabilities[0].id;
     registry.capabilities[2].title = registry.capabilities[0].title;
     registry.capabilities[3].status = "future";
-    registry.capabilities[4].owner = "";
+    registry.capabilities[3].owner = "";
     return registry;
   });
   t.after(() => rmSync(subject.root, { recursive: true, force: true }));
@@ -224,32 +218,6 @@ test("requires evidence to name an advertised surface and covers every surface",
   });
   t.after(() => rmSync(subject.root, { recursive: true, force: true }));
   assert.deepEqual(errors(check(subject)), ["invalid_evidence_surface", "status_evidence", "surface_evidence", "surface_evidence"]);
-});
-
-test("accepts only a shipped inbound successor as deprecated replacement evidence", (t) => {
-  const limitationEvidence = {
-    kind: "limitation",
-    path: "doc/limitation.rst",
-    selector: "limitation marker",
-    surface: "public API",
-    assertion: "limitation is evidenced",
-  };
-  const inbound = fixture((registry) => {
-    const deprecated = registry.capabilities[4];
-    deprecated.evidence = [limitationEvidence];
-    registry.capabilities[0].replaces = [deprecated.id];
-    return registry;
-  });
-  const outbound = fixture((registry) => {
-    const deprecated = registry.capabilities[4];
-    deprecated.evidence = [limitationEvidence];
-    deprecated.replaces = [registry.capabilities[0].id];
-    return registry;
-  });
-  t.after(() => rmSync(inbound.root, { recursive: true, force: true }));
-  t.after(() => rmSync(outbound.root, { recursive: true, force: true }));
-  assert.deepEqual(errors(check(inbound)), []);
-  assert.deepEqual(errors(check(outbound)), ["status_evidence"]);
 });
 
 test("rejects untracked paths and evidence selectors that are not literal source snippets", (t) => {
@@ -364,7 +332,7 @@ test("enforces status-specific evidence and valid capability references", (t) =>
     registry.capabilities[1].evidence = registry.capabilities[1].evidence.filter((item) => item.kind !== "limitation");
     registry.capabilities[2].evidence = registry.capabilities[2].evidence.filter((item) => item.kind !== "platform");
     registry.capabilities[3].evidence.push({ kind: "implementation", path: "src/implementation.txt", selector: "implemented marker", surface: "public API", assertion: "claim" });
-    registry.capabilities[4].replaces = ["missing-capability"];
+    registry.capabilities[3].replaces = ["missing-capability"];
     return registry;
   });
   t.after(() => rmSync(subject.root, { recursive: true, force: true }));
@@ -383,7 +351,6 @@ test("requires public capability entries in the index and rejects retired claims
   writeFileSync(join(subject.root, "doc/guide.rst"), "Travis CI publishes source-tree projects/ output.");
   t.after(() => rmSync(subject.root, { recursive: true, force: true }));
   assert.deepEqual(errors(check(subject)), [
-    "missing_index_representation",
     "missing_index_representation",
     "missing_index_representation",
     "missing_index_representation",

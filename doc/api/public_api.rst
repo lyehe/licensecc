@@ -19,6 +19,8 @@ Safe calling pattern
   synchronous call that receives them.
 * Use :c:func:`lcc_strerror` or :c:func:`print_error` for diagnostics, but do
   not make authorization decisions from message text.
+* The C ABI is unreleased; :c:enum:`LCC_EVENT_TYPE` values and struct layouts
+  may change until the first C++ release.
 
 Generated reference
 -------------------

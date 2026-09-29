@@ -39,23 +39,22 @@ typedef struct LccDeviceIdentity LccDeviceIdentity;
 typedef enum {
 	LICENSE_OK = 0,	 // OK
 	LICENSE_FILE_NOT_FOUND = 1,	 // license file not found
-	LICENSE_SERVER_NOT_FOUND = 2,  // license server can't be contacted
-	ENVIRONMENT_VARIABLE_NOT_DEFINED = 3,  // environment variable not defined
-	FILE_FORMAT_NOT_RECOGNIZED = 4,	 // license file has invalid format (not .ini file)
-	LICENSE_MALFORMED = 5,	// some mandatory field are missing, or data can't be fully read.
-	PRODUCT_NOT_LICENSED = 6,  // this product was not licensed
-	PRODUCT_EXPIRED = 7,  //!< PRODUCT_EXPIRED
-	LICENSE_CORRUPTED = 8,	// License signature didn't match with current license
-	IDENTIFIERS_MISMATCH = 9,  // Calculated identifier and the one provided in license didn't match
-	LICENSE_TAMPER_DETECTED = 10,  // Runtime tamper signal detected
+	ENVIRONMENT_VARIABLE_NOT_DEFINED = 2,  // environment variable not defined
+	FILE_FORMAT_NOT_RECOGNIZED = 3,	 // license file has invalid format (not .ini file)
+	LICENSE_MALFORMED = 4,	// some mandatory field are missing, or data can't be fully read.
+	PRODUCT_NOT_LICENSED = 5,  // this product was not licensed
+	PRODUCT_EXPIRED = 6,  //!< PRODUCT_EXPIRED
+	LICENSE_CORRUPTED = 7,	// License signature didn't match with current license
+	IDENTIFIERS_MISMATCH = 8,  // Calculated identifier and the one provided in license didn't match
+	LICENSE_TAMPER_DETECTED = 9,  // Runtime tamper signal detected
 
-	LICENSE_CONFIG_TOKEN_INVALID = 11,	// config token envelope, signature, or metadata invalid
-	LICENSE_CONFIG_BINDING_MISMATCH = 12,  // config token not bound to this project/feature/license/device
-	LICENSE_CONFIG_HASH_MISMATCH = 13,	// config bytes do not match the signed config-hash
-	LICENSE_CONFIG_EXPIRED = 14,  // config token outside its issued/expires window
-	LICENSE_CONFIG_ROLLBACK = 15,  // config-seq below the accepted minimum
-	LICENSE_CUSTOM_LIMIT_DENIED = 16,  // signed host-defined execution policy denied this environment
-	LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED = 17,  // required host policy evaluator was absent or failed
+	LICENSE_CONFIG_TOKEN_INVALID = 10,	// config token envelope, signature, or metadata invalid
+	LICENSE_CONFIG_BINDING_MISMATCH = 11,  // config token not bound to this project/feature/license/device
+	LICENSE_CONFIG_HASH_MISMATCH = 12,	// config bytes do not match the signed config-hash
+	LICENSE_CONFIG_EXPIRED = 13,  // config token outside its issued/expires window
+	LICENSE_CONFIG_ROLLBACK = 14,  // config-seq below the accepted minimum
+	LICENSE_CUSTOM_LIMIT_DENIED = 15,  // signed host-defined execution policy denied this environment
+	LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED = 16,  // required host policy evaluator was absent or failed
 
 	LICENSE_SPECIFIED = 100,  // license location was specified
 	LICENSE_FOUND = 101,  // License file has been found or license data has been located
@@ -64,8 +63,7 @@ typedef enum {
 } LCC_EVENT_TYPE;
 
 typedef enum {
-	LCC_LOCAL,
-	LCC_REMOTE	// remote licenses are not supported now.
+	LCC_LOCAL
 } LCC_LICENSE_TYPE;
 
 typedef enum { SVRT_INFO, SVRT_WARN, SVRT_ERROR } LCC_SEVERITY;
@@ -319,7 +317,7 @@ typedef struct {
 	unsigned int days_left;
 	bool has_expiry;
 	bool linked_to_pc;
-	LCC_LICENSE_TYPE license_type;	// Local or Remote
+	LCC_LICENSE_TYPE license_type;	// always LCC_LOCAL
 	/* A string of character inserted into the license understood
 	 * by the calling application.
 	 * '\0' if the application didn't specify one */

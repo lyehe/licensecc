@@ -27,8 +27,6 @@ Status vocabulary
   Implemented, but support is constrained by environment or platform behavior.
 ``planned``
   A recorded direction without accepted implementation and automated evidence.
-``deprecated``
-  Retained only for compatibility; use the replacement named in the registry.
 
 Current capability map
 ======================

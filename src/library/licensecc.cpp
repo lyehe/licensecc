@@ -57,8 +57,6 @@ const char* lcc_strerror(LCC_EVENT_TYPE event_type) {
 			return "license OK";
 		case LICENSE_FILE_NOT_FOUND:
 			return "license file not found";
-		case LICENSE_SERVER_NOT_FOUND:
-			return "license server can't be contacted";
 		case ENVIRONMENT_VARIABLE_NOT_DEFINED:
 			return "license environment variable not defined";
 		case FILE_FORMAT_NOT_RECOGNIZED:
@@ -75,6 +73,16 @@ const char* lcc_strerror(LCC_EVENT_TYPE event_type) {
 			return "the calculated hardware identifier and the one in the license didn't match";
 		case LICENSE_TAMPER_DETECTED:
 			return "runtime tamper signal detected";
+		case LICENSE_CONFIG_TOKEN_INVALID:
+			return "config token envelope, signature, or metadata is invalid";
+		case LICENSE_CONFIG_BINDING_MISMATCH:
+			return "config token is not bound to this project, feature, license, or device";
+		case LICENSE_CONFIG_HASH_MISMATCH:
+			return "config bytes do not match the signed config hash";
+		case LICENSE_CONFIG_EXPIRED:
+			return "config token is outside its issued/expires window";
+		case LICENSE_CONFIG_ROLLBACK:
+			return "config sequence is below the accepted minimum";
 		case LICENSE_CUSTOM_LIMIT_DENIED:
 			return "signed custom execution limit denied this environment";
 		case LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED:
@@ -414,27 +422,16 @@ static bool normalize_config_verify_options(const LccConfigVerifyOptions* option
 	if (options == nullptr) {
 		return true;
 	}
-	const size_t v2_size = offsetof(LccConfigVerifyOptions, custom_limit_check);
-	const bool is_v2 = options->version == 2U && options->size == v2_size;
-	const bool is_current = options->version == LCC_CONFIG_VERIFY_OPTIONS_VERSION &&
-		options->size == sizeof(LccConfigVerifyOptions);
-	if (!is_v2 && !is_current) {
-		error = "invalid LccConfigVerifyOptions size or version";
-		return false;
-	}
-	if (options->reserved != 0) {
-		error = "reserved fields must be zero";
+	if (options->version != LCC_CONFIG_VERIFY_OPTIONS_VERSION || options->size != sizeof(LccConfigVerifyOptions) ||
+		options->reserved != 0) {
+		error = "invalid LccConfigVerifyOptions size, version, or reserved fields";
 		return false;
 	}
 	if ((options->config_seq_floor_load == nullptr) != (options->config_seq_floor_store == nullptr)) {
 		error = "config-seq floor load and store callbacks must both be set or both be null";
 		return false;
 	}
-	if (is_v2) {
-		memcpy(&normalized, options, v2_size);
-	} else {
-		normalized = *options;
-	}
+	normalized = *options;
 	normalized.size = sizeof(LccConfigVerifyOptions);
 	normalized.version = LCC_CONFIG_VERIFY_OPTIONS_VERSION;
 	return true;

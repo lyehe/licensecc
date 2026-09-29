@@ -60,7 +60,9 @@ static LicenseInfo prefilled_license_info() {
 	info.days_left = 1234;
 	info.has_expiry = true;
 	info.linked_to_pc = true;
-	info.license_type = LCC_REMOTE;
+	// LCC_LOCAL is the only defined value; poison with an out-of-range value so the
+	// reset check below (lcc_init_license_info zeroing the struct) is meaningful.
+	info.license_type = static_cast<LCC_LICENSE_TYPE>(99);
 	std::copy(stale_data.begin(), stale_data.end(), info.proprietary_data);
 	info.license_version = 999;
 	return info;
@@ -233,29 +235,27 @@ BOOST_AUTO_TEST_CASE(public_abi_layout_profile_is_stable) {
 BOOST_AUTO_TEST_CASE(public_abi_enum_values_are_stable) {
 	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_OK), 0);
 	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_FILE_NOT_FOUND), 1);
-	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_SERVER_NOT_FOUND), 2);
-	BOOST_CHECK_EQUAL(static_cast<int>(ENVIRONMENT_VARIABLE_NOT_DEFINED), 3);
-	BOOST_CHECK_EQUAL(static_cast<int>(FILE_FORMAT_NOT_RECOGNIZED), 4);
-	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_MALFORMED), 5);
-	BOOST_CHECK_EQUAL(static_cast<int>(PRODUCT_NOT_LICENSED), 6);
-	BOOST_CHECK_EQUAL(static_cast<int>(PRODUCT_EXPIRED), 7);
-	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CORRUPTED), 8);
-	BOOST_CHECK_EQUAL(static_cast<int>(IDENTIFIERS_MISMATCH), 9);
-	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_TAMPER_DETECTED), 10);
-	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CONFIG_TOKEN_INVALID), 11);
-	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CONFIG_BINDING_MISMATCH), 12);
-	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CONFIG_HASH_MISMATCH), 13);
-	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CONFIG_EXPIRED), 14);
-	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CONFIG_ROLLBACK), 15);
-	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CUSTOM_LIMIT_DENIED), 16);
-	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED), 17);
+	BOOST_CHECK_EQUAL(static_cast<int>(ENVIRONMENT_VARIABLE_NOT_DEFINED), 2);
+	BOOST_CHECK_EQUAL(static_cast<int>(FILE_FORMAT_NOT_RECOGNIZED), 3);
+	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_MALFORMED), 4);
+	BOOST_CHECK_EQUAL(static_cast<int>(PRODUCT_NOT_LICENSED), 5);
+	BOOST_CHECK_EQUAL(static_cast<int>(PRODUCT_EXPIRED), 6);
+	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CORRUPTED), 7);
+	BOOST_CHECK_EQUAL(static_cast<int>(IDENTIFIERS_MISMATCH), 8);
+	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_TAMPER_DETECTED), 9);
+	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CONFIG_TOKEN_INVALID), 10);
+	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CONFIG_BINDING_MISMATCH), 11);
+	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CONFIG_HASH_MISMATCH), 12);
+	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CONFIG_EXPIRED), 13);
+	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CONFIG_ROLLBACK), 14);
+	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CUSTOM_LIMIT_DENIED), 15);
+	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED), 16);
 	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_SPECIFIED), 100);
 	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_FOUND), 101);
 	BOOST_CHECK_EQUAL(static_cast<int>(PRODUCT_FOUND), 102);
 	BOOST_CHECK_EQUAL(static_cast<int>(SIGNATURE_VERIFIED), 103);
 
 	BOOST_CHECK_EQUAL(static_cast<int>(LCC_LOCAL), 0);
-	BOOST_CHECK_EQUAL(static_cast<int>(LCC_REMOTE), 1);
 	BOOST_CHECK_EQUAL(static_cast<int>(SVRT_INFO), 0);
 	BOOST_CHECK_EQUAL(static_cast<int>(SVRT_WARN), 1);
 	BOOST_CHECK_EQUAL(static_cast<int>(SVRT_ERROR), 2);

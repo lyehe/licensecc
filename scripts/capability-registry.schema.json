@@ -22,7 +22,7 @@
       "properties": {
         "id": { "type": "string", "minLength": 1, "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$" },
         "title": { "type": "string", "minLength": 1 },
-        "status": { "enum": ["shipped", "experimental", "platform_limited", "planned", "deprecated"] },
+        "status": { "enum": ["shipped", "experimental", "platform_limited", "planned"] },
         "owner": {
           "enum": [
             "C++ ABI and core maintainer",

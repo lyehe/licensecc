@@ -100,7 +100,7 @@ repository-owned third-party `src/library/ini/` sources are excluded.
 
 | Path | Lines | Responsibility audit |
 | --- | ---: | --- |
-| `src/library/licensecc.cpp` | 919 | C++ public API orchestration; changes pair with public ABI tests and CMake packaging. |
+| `src/library/licensecc.cpp` | 916 | C++ public API orchestration; changes pair with public ABI tests and CMake packaging. |
 | `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 1,266 | Admin contract components; API-contract ownership stays with the admin deployable. |
 | `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,147 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
 | `services/cloudflare-licensing-backend/src/routes/verify.ts` | 933 | Backend verification route and abuse controls; it is not a shared package concern. |
