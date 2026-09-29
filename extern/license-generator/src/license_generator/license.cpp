@@ -789,8 +789,8 @@ static void validate_existing_license_file(CSimpleIniA &ini, const string &licen
 		const char *signature = ini.GetValue(section.pItem, LICENSE_SIGNATURE);
 		const string version = license_version == nullptr ? string() : string(license_version);
 		if (version != to_string(LICENSE_FILE_VERSION_V201)) {
-			throw runtime_error("Existing output file [" + license_file_name + "] contains a non-license section [" +
-								string(section.pItem) + "].");
+			throw runtime_error("Existing output file [" + license_file_name + "] section [" + string(section.pItem) +
+								"] is not a v201 license and cannot be extended.");
 		}
 		const unordered_set<string> &allowed_params = existing_license_param_v201();
 		for (const auto &key : keys) {
