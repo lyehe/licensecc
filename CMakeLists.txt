@@ -33,8 +33,18 @@ IF(NOT LCC_PROJECTS_BASE_DIR)
 	set(LCC_PROJECTS_BASE_DIR "${CMAKE_BINARY_DIR}/projects")
 ENDIF(NOT LCC_PROJECTS_BASE_DIR)
 
-set(LCC_SUPPORTED_LICENSE_FORMAT_MIN 201 CACHE STRING
-	"Minimum license file format version supported by this runtime package.")
+# Not a CACHE variable: the runtime accepts exactly one license file format
+# (v201, enforced in src/library/LicenseReader.cpp independently of this
+# value), so there is nothing left for a downstream build to legitimately
+# override here. A plain variable also can't retain a stale value: unlike a
+# CACHE STRING, it is recomputed by this line on every configure, so it
+# can't go on advertising an older default after that default changes.
+# Purge any CACHE entry a build tree configured before this change may still
+# be carrying, so neither a stale cache nor a `-D` override can make the
+# generated licensecc_properties.h advertise a floor this runtime no longer
+# supports.
+unset(LCC_SUPPORTED_LICENSE_FORMAT_MIN CACHE)
+set(LCC_SUPPORTED_LICENSE_FORMAT_MIN 201)
 set(LCC_SUPPORTED_LICENSE_FORMAT_MAX 201 CACHE STRING
 	"Maximum license file format version supported by this runtime package.")
 if(NOT DEFINED LCC_PROJECT_MAGIC_NUM OR "${LCC_PROJECT_MAGIC_NUM}" STREQUAL "")
