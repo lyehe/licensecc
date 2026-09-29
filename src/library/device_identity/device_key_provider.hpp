@@ -100,9 +100,6 @@ std::unique_ptr<DeviceKeyProvider> make_tpm2_openssl_provider(std::shared_ptr<Op
 bool derive_namespace_v1(const std::string& application_id, const std::string& project, std::uint32_t scope,
 						 DeviceNamespace& out) noexcept;
 
-LCC_DEVICE_RESULT build_request_proof_payload_v1(const LccDeviceProofInput& input, const std::string& device_key_id,
-												 std::vector<std::uint8_t>& out) noexcept;
-
 }  // namespace device_identity
 }  // namespace license
 

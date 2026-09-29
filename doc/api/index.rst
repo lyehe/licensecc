@@ -12,8 +12,7 @@ Runtime library
 * :doc:`public_api` — license acquisition, runtime tamper checks, and
   configuration attestation.
 * :doc:`types` — public structures, enums, callbacks, limits, and result data.
-* :doc:`device_identity` — provider-backed P-256 keys and signed request
-  proofs.
+* :doc:`device_identity` — provider-backed P-256 device keys.
 * :doc:`feature_sessions` — fresh online permission for each protected feature job.
 * :doc:`hardware_identifiers` — generated project strategy order and custom
   hardware-signature implementations.

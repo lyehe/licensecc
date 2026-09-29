@@ -4,17 +4,14 @@
 #include "p256_crypto.hpp"
 #include "device_identity_handle.hpp"
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <type_traits>
 #include <utility>
-#include <vector>
 
 namespace license {
 namespace device_identity {
@@ -55,48 +52,6 @@ static_assert(offsetof(LccDeviceIdentityMetadata, algorithm) == 24U + LCC_DEVICE
 static_assert(offsetof(LccDeviceIdentityMetadata, device_key_id) ==
 				  24U + LCC_DEVICE_PROVIDER_NAME_MAX + 1U + LCC_DEVICE_ALGORITHM_MAX + 1U,
 			  "metadata.key id ABI offset");
-
-static_assert(std::is_standard_layout<LccDeviceProofInput>::value, "proof input ABI must be standard-layout");
-static_assert(alignof(LccDeviceProofInput) ==
-				  (alignof(std::uint64_t) > alignof(std::uint32_t) ? alignof(std::uint64_t) : alignof(std::uint32_t)),
-			  "proof input ABI alignment");
-static_assert(offsetof(LccDeviceProofInput, size) == 0U, "proof input.size ABI offset");
-static_assert(offsetof(LccDeviceProofInput, version) == 4U, "proof input.version ABI offset");
-static_assert(offsetof(LccDeviceProofInput, audience) == 8U, "proof input.audience ABI offset");
-static_assert(offsetof(LccDeviceProofInput, client_hardening) == 12U, "proof input.hardening ABI offset");
-static_assert(offsetof(LccDeviceProofInput, request_timestamp) == align_up(16U, alignof(std::uint64_t)),
-			  "proof input.timestamp ABI offset");
-static_assert(offsetof(LccDeviceProofInput, project) == offsetof(LccDeviceProofInput, request_timestamp) + 8U,
-			  "proof input.project ABI offset");
-static_assert(offsetof(LccDeviceProofInput, feature) ==
-				  offsetof(LccDeviceProofInput, project) + LCC_API_ONLINE_PROJECT_SIZE + 1U,
-			  "proof input.feature ABI offset");
-static_assert(offsetof(LccDeviceProofInput, license_fingerprint) ==
-				  offsetof(LccDeviceProofInput, feature) + LCC_API_FEATURE_NAME_SIZE + 1U,
-			  "proof input.fingerprint ABI offset");
-static_assert(offsetof(LccDeviceProofInput, device_hash) == offsetof(LccDeviceProofInput, license_fingerprint) + 65U,
-			  "proof input.device hash ABI offset");
-static_assert(offsetof(LccDeviceProofInput, nonce) == offsetof(LccDeviceProofInput, device_hash) + 65U,
-			  "proof input.nonce ABI offset");
-
-static_assert(std::is_standard_layout<LccDeviceProof>::value, "proof ABI must be standard-layout");
-static_assert(alignof(LccDeviceProof) ==
-				  (alignof(std::uint64_t) > alignof(std::uint32_t) ? alignof(std::uint64_t) : alignof(std::uint32_t)),
-			  "proof ABI alignment");
-static_assert(offsetof(LccDeviceProof, size) == 0U, "proof.size ABI offset");
-static_assert(offsetof(LccDeviceProof, version) == 4U, "proof.version ABI offset");
-static_assert(offsetof(LccDeviceProof, request_signature_version) == 8U, "proof.signature version ABI offset");
-static_assert(offsetof(LccDeviceProof, reserved) == 12U, "proof.reserved ABI offset");
-static_assert(offsetof(LccDeviceProof, request_timestamp) == align_up(16U, alignof(std::uint64_t)),
-			  "proof.timestamp ABI offset");
-static_assert(offsetof(LccDeviceProof, device_key_id) == offsetof(LccDeviceProof, request_timestamp) + 8U,
-			  "proof.key id ABI offset");
-static_assert(offsetof(LccDeviceProof, request_signature_algorithm) ==
-				  offsetof(LccDeviceProof, device_key_id) + LCC_DEVICE_KEY_ID_MAX + 1U,
-			  "proof.algorithm ABI offset");
-static_assert(offsetof(LccDeviceProof, request_signature) ==
-				  offsetof(LccDeviceProof, request_signature_algorithm) + LCC_DEVICE_ALGORITHM_MAX + 1U,
-			  "proof.signature ABI offset");
 
 template <std::size_t N>
 bool fixed_string(const char (&value)[N], std::string& out) {
@@ -269,16 +224,6 @@ LCC_DEVICE_RESULT validate_output(const LccDeviceIdentityMetadata* output) {
 	return output->reserved == 0U ? LCC_DEVICE_OK : LCC_DEVICE_INVALID_ARGUMENT;
 }
 
-LCC_DEVICE_RESULT validate_output(const LccDeviceProof* output) {
-	if (output == nullptr || output->size < sizeof(LccDeviceProof)) {
-		return LCC_DEVICE_INVALID_ARGUMENT;
-	}
-	if (output->version != LCC_DEVICE_PROOF_VERSION) {
-		return LCC_DEVICE_UNSUPPORTED_VERSION;
-	}
-	return output->reserved == 0U ? LCC_DEVICE_OK : LCC_DEVICE_INVALID_ARGUMENT;
-}
-
 }  // namespace
 }  // namespace device_identity
 }  // namespace license
@@ -306,24 +251,6 @@ void lcc_init_device_identity_metadata(LccDeviceIdentityMetadata* metadata) {
 	std::memset(metadata, 0, sizeof(*metadata));
 	metadata->size = sizeof(*metadata);
 	metadata->version = LCC_DEVICE_IDENTITY_VERSION;
-}
-
-void lcc_init_device_proof_input(LccDeviceProofInput* input) {
-	if (input == nullptr) {
-		return;
-	}
-	std::memset(input, 0, sizeof(*input));
-	input->size = sizeof(*input);
-	input->version = LCC_DEVICE_PROOF_VERSION;
-}
-
-void lcc_init_device_proof(LccDeviceProof* proof) {
-	if (proof == nullptr) {
-		return;
-	}
-	std::memset(proof, 0, sizeof(*proof));
-	proof->size = sizeof(*proof);
-	proof->version = LCC_DEVICE_PROOF_VERSION;
 }
 
 LCC_DEVICE_RESULT lcc_device_identity_open(const LccDeviceIdentityOptions* options, LccDeviceIdentity** out) {
@@ -424,68 +351,6 @@ LCC_DEVICE_RESULT lcc_device_identity_get_public_spki(LccDeviceIdentity* identit
 	std::memcpy(out, identity->spki.data(), identity->spki.size());
 	*inout_size = identity->spki.size();
 	return LCC_DEVICE_OK;
-}
-
-LCC_DEVICE_RESULT lcc_device_identity_build_request_proof_v1(LccDeviceIdentity* identity,
-															 const LccDeviceProofInput* input, LccDeviceProof* out) {
-	using namespace license::device_identity;
-	try {
-		if (identity == nullptr || input == nullptr) {
-			return LCC_DEVICE_INVALID_ARGUMENT;
-		}
-		const LCC_DEVICE_RESULT output_result = validate_output(out);
-		if (output_result != LCC_DEVICE_OK) {
-			return output_result;
-		}
-		std::vector<std::uint8_t> payload;
-		const LCC_DEVICE_RESULT payload_result =
-			build_request_proof_payload_v1(*input, identity->device_key_id, payload);
-		if (payload_result != LCC_DEVICE_OK) {
-			return payload_result;
-		}
-		std::string input_project;
-		if (!fixed_string(input->project, input_project)) {
-			return LCC_DEVICE_INVALID_ARGUMENT;
-		}
-		if (input_project != identity->project) {
-			return LCC_DEVICE_POLICY_VIOLATION;
-		}
-
-		SensitiveArray<32> digest;
-		SensitiveArray<64> signature;
-		if (!sha256(payload.data(), payload.size(), digest.value)) {
-			return LCC_DEVICE_INTERNAL_ERROR;
-		}
-		LCC_DEVICE_RESULT sign_result;
-		{
-			std::lock_guard<std::mutex> lock(identity->signing_mutex);
-			sign_result = identity->provider->sign_digest(digest.value, signature.value);
-		}
-		if (sign_result != LCC_DEVICE_OK) {
-			return sign_result;
-		}
-		if (!verify_p256_p1363(identity->spki, digest.value, signature.value)) {
-			return LCC_DEVICE_SIGN_FAILED;
-		}
-		const std::string encoded = encode_canonical_base64(signature.value.data(), signature.value.size());
-		if (encoded.size() != LCC_DEVICE_SIGNATURE_BASE64_MAX) {
-			return LCC_DEVICE_INTERNAL_ERROR;
-		}
-
-		LccDeviceProof candidate;
-		lcc_init_device_proof(&candidate);
-		candidate.request_signature_version = LCC_DEVICE_PROOF_VERSION;
-		candidate.request_timestamp = input->request_timestamp;
-		if (!copy_output(candidate.device_key_id, identity->device_key_id) ||
-			!copy_output(candidate.request_signature_algorithm, kP256Algorithm) ||
-			!copy_output(candidate.request_signature, encoded)) {
-			return LCC_DEVICE_INTERNAL_ERROR;
-		}
-		std::memcpy(out, &candidate, sizeof(candidate));
-		return LCC_DEVICE_OK;
-	} catch (...) {
-		return LCC_DEVICE_INTERNAL_ERROR;
-	}
 }
 
 LCC_DEVICE_RESULT lcc_device_identity_delete_key(const LccDeviceIdentityOptions* options,

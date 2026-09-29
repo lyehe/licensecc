@@ -1,10 +1,11 @@
-Device identity and request proofs
-==================================
+Device identity
+================
 
-The device-identity API creates or opens a provider-backed P-256 key and signs
-the canonical request-proof payload accepted by online verification, lease,
-and seat operations. It is an optional C runtime feature; building the core
-library does not automatically enable a platform provider.
+The device-identity API creates or opens a provider-backed P-256 key and
+exposes its public SPKI and canonical device-key identifier. It is an
+optional C runtime feature; building the core library does not automatically
+enable a platform provider. Protected clients sign server-bound proofs
+through the additive ``licensecc/device_bound.h`` API described below.
 
 Lifecycle
 ---------
@@ -14,9 +15,7 @@ Lifecycle
    :c:func:`lcc_device_identity_open`.
 2. Read :c:struct:`LccDeviceIdentityMetadata` and export the public SPKI when
    registering the key with the licensing service.
-3. Initialize :c:struct:`LccDeviceProofInput` for each server challenge and
-   call :c:func:`lcc_device_identity_build_request_proof_v1`.
-4. Close the process-local handle with
+3. Close the process-local handle with
    :c:func:`lcc_device_identity_close`. Delete a persisted key only with the
    exact expected key id and application-level owner coordination.
 

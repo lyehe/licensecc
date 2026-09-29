@@ -42,18 +42,13 @@ static_assert(LCC_DEVICE_SCOPE_UNSPECIFIED == 0 && LCC_DEVICE_SCOPE_USER == 1 &&
 static_assert(LCC_DEVICE_ASSURANCE_UNKNOWN == 0 && LCC_DEVICE_ASSURANCE_SOFTWARE == 1 &&
 				  LCC_DEVICE_ASSURANCE_REPORTED_HARDWARE == 2,
 			  "assurance ABI drift");
-static_assert(LCC_DEVICE_PROOF_AUDIENCE_UNSPECIFIED == 0 && LCC_DEVICE_PROOF_AUDIENCE_VERIFY == 1 &&
-				  LCC_DEVICE_PROOF_AUDIENCE_LEASE == 2 && LCC_DEVICE_PROOF_AUDIENCE_SEAT == 3,
-			  "audience ABI drift");
 static_assert(LCC_DEVICE_IDENTITY_VERSION == 1U, "identity version ABI drift");
-static_assert(LCC_DEVICE_PROOF_VERSION == 1U, "proof version ABI drift");
 static_assert(LCC_DEVICE_OPEN_CREATE_IF_MISSING == 0x00000001U, "open flag ABI drift");
 static_assert(LCC_DEVICE_DELETE_ALLOW_UI == 0x00000002U, "delete flag ABI drift");
 static_assert(LCC_DEVICE_APPLICATION_ID_MAX == 128U, "application-id maximum ABI drift");
 static_assert(LCC_DEVICE_PROVIDER_NAME_MAX == 63U, "provider-name maximum ABI drift");
 static_assert(LCC_DEVICE_ALGORITHM_MAX == 31U, "algorithm maximum ABI drift");
 static_assert(LCC_DEVICE_KEY_ID_MAX == 71U, "key-id maximum ABI drift");
-static_assert(LCC_DEVICE_SIGNATURE_BASE64_MAX == 88U, "signature maximum ABI drift");
 
 static_assert(std::is_standard_layout<LccDeviceIdentityOptions>::value, "public ABI must be standard-layout");
 static_assert(alignof(LccDeviceIdentityOptions) == alignof(std::uint32_t), "options alignment drift");
@@ -86,48 +81,6 @@ static_assert(offsetof(LccDeviceIdentityMetadata, algorithm) == 24U + LCC_DEVICE
 static_assert(offsetof(LccDeviceIdentityMetadata, device_key_id) ==
 				  24U + LCC_DEVICE_PROVIDER_NAME_MAX + 1U + LCC_DEVICE_ALGORITHM_MAX + 1U,
 			  "metadata.device key id offset drift");
-
-static_assert(std::is_standard_layout<LccDeviceProofInput>::value, "public ABI must be standard-layout");
-static_assert(alignof(LccDeviceProofInput) ==
-				  (alignof(std::uint64_t) > alignof(std::uint32_t) ? alignof(std::uint64_t) : alignof(std::uint32_t)),
-			  "proof input alignment drift");
-static_assert(offsetof(LccDeviceProofInput, size) == 0U, "proof input.size offset drift");
-static_assert(offsetof(LccDeviceProofInput, version) == 4U, "proof input.version offset drift");
-static_assert(offsetof(LccDeviceProofInput, audience) == 8U, "proof input.audience offset drift");
-static_assert(offsetof(LccDeviceProofInput, client_hardening) == 12U, "proof input.hardening offset drift");
-static_assert(offsetof(LccDeviceProofInput, request_timestamp) == align_up(16U, alignof(std::uint64_t)),
-			  "proof input.timestamp offset drift");
-static_assert(offsetof(LccDeviceProofInput, project) == offsetof(LccDeviceProofInput, request_timestamp) + 8U,
-			  "proof input.project offset drift");
-static_assert(offsetof(LccDeviceProofInput, feature) ==
-				  offsetof(LccDeviceProofInput, project) + LCC_API_ONLINE_PROJECT_SIZE + 1U,
-			  "proof input.feature offset drift");
-static_assert(offsetof(LccDeviceProofInput, license_fingerprint) ==
-				  offsetof(LccDeviceProofInput, feature) + LCC_API_FEATURE_NAME_SIZE + 1U,
-			  "proof input.license fingerprint offset drift");
-static_assert(offsetof(LccDeviceProofInput, device_hash) == offsetof(LccDeviceProofInput, license_fingerprint) + 65U,
-			  "proof input.device hash offset drift");
-static_assert(offsetof(LccDeviceProofInput, nonce) == offsetof(LccDeviceProofInput, device_hash) + 65U,
-			  "proof input.nonce offset drift");
-
-static_assert(std::is_standard_layout<LccDeviceProof>::value, "public ABI must be standard-layout");
-static_assert(alignof(LccDeviceProof) ==
-				  (alignof(std::uint64_t) > alignof(std::uint32_t) ? alignof(std::uint64_t) : alignof(std::uint32_t)),
-			  "proof alignment drift");
-static_assert(offsetof(LccDeviceProof, size) == 0U, "proof.size offset drift");
-static_assert(offsetof(LccDeviceProof, version) == 4U, "proof.version offset drift");
-static_assert(offsetof(LccDeviceProof, request_signature_version) == 8U, "proof signature version offset drift");
-static_assert(offsetof(LccDeviceProof, reserved) == 12U, "proof.reserved offset drift");
-static_assert(offsetof(LccDeviceProof, request_timestamp) == align_up(16U, alignof(std::uint64_t)),
-			  "proof.timestamp offset drift");
-static_assert(offsetof(LccDeviceProof, device_key_id) == offsetof(LccDeviceProof, request_timestamp) + 8U,
-			  "proof.device key id offset drift");
-static_assert(offsetof(LccDeviceProof, request_signature_algorithm) ==
-				  offsetof(LccDeviceProof, device_key_id) + LCC_DEVICE_KEY_ID_MAX + 1U,
-			  "proof.signature algorithm offset drift");
-static_assert(offsetof(LccDeviceProof, request_signature) ==
-				  offsetof(LccDeviceProof, request_signature_algorithm) + LCC_DEVICE_ALGORITHM_MAX + 1U,
-			  "proof.signature offset drift");
 
 template <std::size_t N>
 void set_field(char (&field)[N], const char* value) {
@@ -200,36 +153,8 @@ BOOST_AUTO_TEST_CASE(initializers_write_only_the_v1_prefix_and_secure_defaults) 
 		BOOST_TEST(value == 0xa5U);
 	}
 
-	struct ExtendedProofInput {
-		LccDeviceProofInput value;
-		unsigned char trailing[13];
-	} extended_input;
-	std::memset(&extended_input, 0xa5, sizeof(extended_input));
-	lcc_init_device_proof_input(&extended_input.value);
-	BOOST_TEST(extended_input.value.size == sizeof(extended_input.value));
-	BOOST_TEST(extended_input.value.version == LCC_DEVICE_PROOF_VERSION);
-	BOOST_TEST(extended_input.value.audience == LCC_DEVICE_PROOF_AUDIENCE_UNSPECIFIED);
-	for (const unsigned char value : extended_input.trailing) {
-		BOOST_TEST(value == 0xa5U);
-	}
-
-	struct ExtendedProof {
-		LccDeviceProof value;
-		unsigned char trailing[17];
-	} extended_proof;
-	std::memset(&extended_proof, 0xa5, sizeof(extended_proof));
-	lcc_init_device_proof(&extended_proof.value);
-	BOOST_TEST(extended_proof.value.size == sizeof(extended_proof.value));
-	BOOST_TEST(extended_proof.value.version == LCC_DEVICE_PROOF_VERSION);
-	BOOST_TEST(extended_proof.value.reserved == 0U);
-	for (const unsigned char value : extended_proof.trailing) {
-		BOOST_TEST(value == 0xa5U);
-	}
-
 	lcc_init_device_identity_options(nullptr);
 	lcc_init_device_identity_metadata(nullptr);
-	lcc_init_device_proof_input(nullptr);
-	lcc_init_device_proof(nullptr);
 }
 
 BOOST_AUTO_TEST_CASE(size_version_and_two_call_spki_contract) {

@@ -74,6 +74,8 @@ if(LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER)
     target_compile_definitions(device_identity_policy_test PRIVATE
         LCC_TEST_WINDOWS_TPM_BUILT=$<BOOL:${LCC_ENABLE_WINDOWS_TPM}>
         LCC_TEST_TPM2_OPENSSL_BUILT=$<BOOL:${LCC_ENABLE_TPM2_OPENSSL}>)
+    target_compile_definitions(device_identity_concurrency_test
+        PRIVATE LCC_DEVICE_IDENTITY_VECTOR_ROOT="${CMAKE_SOURCE_DIR}/test/vectors")
     if(WIN32)
         target_link_libraries(device_bound_session_test PRIVATE bcrypt)
         target_link_libraries(device_bound_client_test PRIVATE bcrypt)

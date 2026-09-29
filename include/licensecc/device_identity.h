@@ -10,11 +10,11 @@
 #include "datatypes.h"
 
 /**
- * \defgroup deviceidentity Device identity and request proofs
- * \brief Process-local device-key handles and signed request-proof creation.
+ * \defgroup deviceidentity Device identity
+ * \brief Process-local device-key handles backed by a provider-managed P-256 key.
  *
- * The device-identity API owns a provider-backed P-256 signing key and produces
- * request proofs for the online licensing service. Call the ``lcc_init_*``
+ * The device-identity API owns a provider-backed P-256 signing key and derives
+ * a stable device identity from it. Call the ``lcc_init_*``
  * helper for every versioned structure before filling its fields. Handles are
  * process-local and must be closed with ::lcc_device_identity_close.
  * @{
@@ -102,20 +102,7 @@ typedef enum LCC_DEVICE_ASSURANCE {
 	LCC_DEVICE_ASSURANCE_REPORTED_HARDWARE = 2
 } LCC_DEVICE_ASSURANCE;
 
-/** Server operation to which a request proof is bound. */
-typedef enum LCC_DEVICE_PROOF_AUDIENCE {
-	/** No valid audience was supplied. */
-	LCC_DEVICE_PROOF_AUDIENCE_UNSPECIFIED = 0,
-	/** Bind the proof to online verification. */
-	LCC_DEVICE_PROOF_AUDIENCE_VERIFY = 1,
-	/** Bind the proof to lease activation or renewal. */
-	LCC_DEVICE_PROOF_AUDIENCE_LEASE = 2,
-	/** Bind the proof to floating-seat operations. */
-	LCC_DEVICE_PROOF_AUDIENCE_SEAT = 3
-} LCC_DEVICE_PROOF_AUDIENCE;
-
 #define LCC_DEVICE_IDENTITY_VERSION 1u
-#define LCC_DEVICE_PROOF_VERSION 1u
 #define LCC_DEVICE_OPEN_CREATE_IF_MISSING 0x00000001u
 /** Permit Windows provider UI only during explicit key deletion. */
 #define LCC_DEVICE_DELETE_ALLOW_UI 0x00000002u
@@ -123,7 +110,6 @@ typedef enum LCC_DEVICE_PROOF_AUDIENCE {
 #define LCC_DEVICE_PROVIDER_NAME_MAX 63u
 #define LCC_DEVICE_ALGORITHM_MAX 31u
 #define LCC_DEVICE_KEY_ID_MAX 71u
-#define LCC_DEVICE_SIGNATURE_BASE64_MAX 88u
 
 /** Versioned input used to select, create, and open a device key. */
 typedef struct LccDeviceIdentityOptions {
@@ -173,58 +159,10 @@ typedef struct LccDeviceIdentityMetadata {
 	char device_key_id[LCC_DEVICE_KEY_ID_MAX + 1];
 } LccDeviceIdentityMetadata;
 
-/** Canonical fields signed into a version-1 request proof. */
-typedef struct LccDeviceProofInput {
-	/** Structure size; initialized by ::lcc_init_device_proof_input. */
-	uint32_t size;
-	/** Structure version; set to ::LCC_DEVICE_PROOF_VERSION. */
-	uint32_t version;
-	/** One of ::LCC_DEVICE_PROOF_AUDIENCE. */
-	uint32_t audience; /* LCC_DEVICE_PROOF_AUDIENCE */
-	/** Client-hardening bitset reported to the server. */
-	uint32_t client_hardening;
-	/** Request creation time as Unix seconds. */
-	uint64_t request_timestamp;
-	/** Licensing project expected by the target operation. */
-	char project[LCC_API_ONLINE_PROJECT_SIZE + 1];
-	/** Feature name expected by the target operation. */
-	char feature[LCC_API_FEATURE_NAME_SIZE + 1];
-	/** Lowercase 64-hex license fingerprint. */
-	char license_fingerprint[65];
-	/** Optional lowercase 64-hex device hash, or an empty string. */
-	char device_hash[65];
-	/** Lowercase 64-hex single-use server challenge. */
-	char nonce[65];
-} LccDeviceProofInput;
-
-/** Provider-produced proof fields sent with an online request. */
-typedef struct LccDeviceProof {
-	/** Structure size; initialized by ::lcc_init_device_proof. */
-	uint32_t size;
-	/** Structure version; set to ::LCC_DEVICE_PROOF_VERSION. */
-	uint32_t version;
-	/** Canonical request-signature payload version. */
-	uint32_t request_signature_version;
-	/** Reserved for future versions; leave zero. */
-	uint32_t reserved;
-	/** Request timestamp copied from ::LccDeviceProofInput. */
-	uint64_t request_timestamp;
-	/** Canonical ``sha256:<hex>`` signing-key identifier. */
-	char device_key_id[LCC_DEVICE_KEY_ID_MAX + 1];
-	/** Request-signature algorithm identifier. */
-	char request_signature_algorithm[LCC_DEVICE_ALGORITHM_MAX + 1];
-	/** Canonical Base64 P1363 signature. */
-	char request_signature[LCC_DEVICE_SIGNATURE_BASE64_MAX + 1];
-} LccDeviceProof;
-
 /** Initialize device-key options to versioned, fail-closed defaults. */
 void lcc_init_device_identity_options(LccDeviceIdentityOptions*);
 /** Initialize a metadata output structure. */
 void lcc_init_device_identity_metadata(LccDeviceIdentityMetadata*);
-/** Initialize a request-proof input structure. */
-void lcc_init_device_proof_input(LccDeviceProofInput*);
-/** Initialize a request-proof output structure. */
-void lcc_init_device_proof(LccDeviceProof*);
 
 /** Open or create a provider key according to ``options``. */
 LCC_DEVICE_RESULT lcc_device_identity_open(const LccDeviceIdentityOptions*, LccDeviceIdentity** out);
@@ -232,9 +170,6 @@ LCC_DEVICE_RESULT lcc_device_identity_open(const LccDeviceIdentityOptions*, LccD
 LCC_DEVICE_RESULT lcc_device_identity_get_metadata(LccDeviceIdentity*, LccDeviceIdentityMetadata* out);
 /** Export the exact DER SubjectPublicKeyInfo for the provider key. */
 LCC_DEVICE_RESULT lcc_device_identity_get_public_spki(LccDeviceIdentity*, uint8_t* out, size_t* inout_size);
-/** Sign the canonical version-1 request-proof payload. */
-LCC_DEVICE_RESULT lcc_device_identity_build_request_proof_v1(LccDeviceIdentity*, const LccDeviceProofInput*,
-															 LccDeviceProof* out);
 /**
  * Delete the exact key identified by ``expected_device_key_id``.
  * Defaults to noninteractive deletion. Windows

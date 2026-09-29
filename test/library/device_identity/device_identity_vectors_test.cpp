@@ -11,9 +11,6 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <cstring>
-#include <fstream>
-#include <iterator>
 #include <new>
 #include <string>
 #include <type_traits>
@@ -40,38 +37,13 @@ static_assert(!std::is_move_constructible<SensitiveVector>::value,
 			  "sensitive vectors must not move without wiping their source");
 static_assert(!std::is_trivially_destructible<SensitiveVector>::value, "sensitive vectors require a wiping destructor");
 
-std::string read_binary(const std::string& relative_path) {
-	const std::string path = std::string(LCC_DEVICE_IDENTITY_VECTOR_ROOT) + "/" + relative_path;
-	std::ifstream input(path.c_str(), std::ios::binary);
-	BOOST_REQUIRE_MESSAGE(input.is_open(), "can open vector " + path);
-	return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-}
-
-std::string strip_line_endings(std::string value) {
-	while (!value.empty() && (value.back() == '\r' || value.back() == '\n')) {
-		value.pop_back();
-	}
-	return value;
-}
-
-template <std::size_t N>
-void set_field(char (&field)[N], const std::string& value) {
-	BOOST_REQUIRE(value.size() < N);
-	std::memcpy(field, value.c_str(), value.size() + 1U);
-}
-
-LccDeviceProofInput input_from_manifest(const boost::property_tree::ptree& manifest, std::uint32_t audience) {
-	LccDeviceProofInput input;
-	lcc_init_device_proof_input(&input);
-	input.audience = audience;
-	input.request_timestamp = manifest.get<std::uint64_t>("request_timestamp");
-	input.client_hardening = manifest.get<std::uint32_t>("client_hardening");
-	set_field(input.project, manifest.get<std::string>("project"));
-	set_field(input.feature, manifest.get<std::string>("feature"));
-	set_field(input.license_fingerprint, manifest.get<std::string>("license_fingerprint"));
-	set_field(input.device_hash, manifest.get<std::string>("device_hash"));
-	set_field(input.nonce, manifest.get<std::string>("nonce"));
-	return input;
+std::vector<std::uint8_t> base64url_bytes(std::string value) {
+	std::replace(value.begin(), value.end(), '-', '+');
+	std::replace(value.begin(), value.end(), '_', '/');
+	while (value.size() % 4) value.push_back('=');
+	std::vector<std::uint8_t> result;
+	BOOST_REQUIRE(license::device_identity::decode_canonical_base64(value, result));
+	return result;
 }
 
 }  // namespace
@@ -167,66 +139,20 @@ BOOST_AUTO_TEST_CASE(namespace_v1_table_matches_normative_bytes_and_names) {
 	BOOST_TEST(count == 2U);
 }
 
-BOOST_AUTO_TEST_CASE(task1_request_proof_fixture_builds_and_verifies) {
-	boost::property_tree::ptree manifest;
-	boost::property_tree::read_json(std::string(LCC_DEVICE_IDENTITY_VECTOR_ROOT) + "/device_proof/v1/manifest.json",
-									manifest);
-
-	std::vector<std::uint8_t> spki_bytes;
-	BOOST_REQUIRE(license::device_identity::parse_lowercase_hex(
-		strip_line_endings(read_binary("device_proof/v1/public_key.spki.der.hex")), spki_bytes));
-	P256Spki spki{};
-	BOOST_REQUIRE(license::device_identity::canonicalize_p256_spki(spki_bytes.data(), spki_bytes.size(), spki));
-	BOOST_TEST(license::device_identity::device_key_id(spki) == manifest.get<std::string>("device_key_id"));
-
-	std::vector<std::uint8_t> signature_bytes;
-	BOOST_REQUIRE(license::device_identity::parse_lowercase_hex(
-		strip_line_endings(read_binary("device_proof/v1/signature.p1363.hex")), signature_bytes));
-	BOOST_REQUIRE(signature_bytes.size() == 64U);
-	P256Signature signature{};
-	std::copy(signature_bytes.begin(), signature_bytes.end(), signature.begin());
-
-	struct AudienceVector {
-		std::uint32_t audience;
-		const char* fixture;
-	};
-	const AudienceVector vectors[] = {
-		{LCC_DEVICE_PROOF_AUDIENCE_VERIFY, "online.payload"},
-		{LCC_DEVICE_PROOF_AUDIENCE_LEASE, "lease.payload"},
-		{LCC_DEVICE_PROOF_AUDIENCE_SEAT, "seat.payload"},
-	};
-	for (const AudienceVector& vector : vectors) {
-		const LccDeviceProofInput input = input_from_manifest(manifest, vector.audience);
-		std::vector<std::uint8_t> payload;
-		BOOST_REQUIRE(license::device_identity::build_request_proof_payload_v1(
-						  input, manifest.get<std::string>("device_key_id"), payload) == LCC_DEVICE_OK);
-		const std::string expected = read_binary(std::string("device_proof/v1/") + vector.fixture);
-		BOOST_TEST(std::string(payload.begin(), payload.end()) == expected);
-		P256Digest digest{};
-		BOOST_REQUIRE(license::device_identity::sha256(payload.data(), payload.size(), digest));
-		const bool expected_valid = vector.audience == LCC_DEVICE_PROOF_AUDIENCE_VERIFY;
-		BOOST_TEST(license::device_identity::verify_p256_p1363(spki, digest, signature) == expected_valid);
-	}
-
-	std::vector<std::uint8_t> decoded;
-	BOOST_REQUIRE(license::device_identity::decode_canonical_base64(
-		strip_line_endings(read_binary("device_proof/v1/signature.p1363.b64")), decoded));
-	BOOST_TEST(decoded == signature_bytes);
-}
-
 BOOST_AUTO_TEST_CASE(strict_p256_negative_corpus_fails_closed) {
-	std::vector<std::uint8_t> spki_bytes;
-	BOOST_REQUIRE(license::device_identity::parse_lowercase_hex(
-		strip_line_endings(read_binary("device_proof/v1/public_key.spki.der.hex")), spki_bytes));
+	boost::property_tree::ptree vector;
+	boost::property_tree::read_json(std::string(LCC_DEVICE_IDENTITY_VECTOR_ROOT) + "/device_bound/v1/protocol.json",
+									vector);
+	const auto spki_bytes = base64url_bytes(vector.get<std::string>("device_spki"));
 	P256Spki spki{};
 	BOOST_REQUIRE(license::device_identity::canonicalize_p256_spki(spki_bytes.data(), spki_bytes.size(), spki));
-	const std::string payload_text = read_binary("device_proof/v1/online.payload");
+	std::vector<std::uint8_t> proof_bytes;
+	BOOST_REQUIRE(license::device_identity::parse_lowercase_hex(vector.get<std::string>("proof_input_hex"),
+																 proof_bytes));
 	P256Digest digest{};
-	BOOST_REQUIRE(license::device_identity::sha256(reinterpret_cast<const std::uint8_t*>(payload_text.data()),
-												   payload_text.size(), digest));
-	std::vector<std::uint8_t> signature_bytes;
-	BOOST_REQUIRE(license::device_identity::parse_lowercase_hex(
-		strip_line_endings(read_binary("device_proof/v1/signature.p1363.hex")), signature_bytes));
+	BOOST_REQUIRE(license::device_identity::sha256(proof_bytes.data(), proof_bytes.size(), digest));
+	const auto signature_bytes = base64url_bytes(vector.get<std::string>("proof_signature"));
+	BOOST_REQUIRE(signature_bytes.size() == 64U);
 	P256Signature signature{};
 	std::copy(signature_bytes.begin(), signature_bytes.end(), signature.begin());
 	BOOST_REQUIRE(license::device_identity::verify_p256_p1363(spki, digest, signature));
@@ -319,47 +245,3 @@ BOOST_AUTO_TEST_CASE(strict_p256_negative_corpus_fails_closed) {
 	BOOST_TEST(!license::device_identity::decode_canonical_base64("A===", decoded));
 	BOOST_TEST(!license::device_identity::decode_canonical_base64("AA_-", decoded));
 }
-
-#if LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER
-BOOST_AUTO_TEST_CASE(software_provider_builds_a_valid_randomized_proof) {
-	boost::property_tree::ptree manifest;
-	boost::property_tree::read_json(std::string(LCC_DEVICE_IDENTITY_VECTOR_ROOT) + "/device_proof/v1/manifest.json",
-									manifest);
-	LccDeviceIdentityOptions options;
-	lcc_init_device_identity_options(&options);
-	options.backend = LCC_DEVICE_BACKEND_SOFTWARE_TEST;
-	options.policy = LCC_DEVICE_POLICY_SOFTWARE_EXPLICIT;
-	options.flags = LCC_DEVICE_OPEN_CREATE_IF_MISSING;
-	set_field(options.application_id, "licensecc.test.vectors");
-	set_field(options.project, "DEFAULT");
-	LccDeviceIdentity* handle = nullptr;
-	BOOST_REQUIRE(lcc_device_identity_open(&options, &handle) == LCC_DEVICE_OK);
-
-	LccDeviceIdentityMetadata metadata;
-	lcc_init_device_identity_metadata(&metadata);
-	BOOST_REQUIRE(lcc_device_identity_get_metadata(handle, &metadata) == LCC_DEVICE_OK);
-	P256Spki spki{};
-	std::size_t spki_size = spki.size();
-	BOOST_REQUIRE(lcc_device_identity_get_public_spki(handle, spki.data(), &spki_size) == LCC_DEVICE_OK);
-
-	LccDeviceProofInput input = input_from_manifest(manifest, LCC_DEVICE_PROOF_AUDIENCE_VERIFY);
-	LccDeviceProof proof;
-	lcc_init_device_proof(&proof);
-	BOOST_REQUIRE(lcc_device_identity_build_request_proof_v1(handle, &input, &proof) == LCC_DEVICE_OK);
-	std::vector<std::uint8_t> signature_bytes;
-	BOOST_REQUIRE(license::device_identity::decode_canonical_base64(proof.request_signature, signature_bytes));
-	BOOST_REQUIRE(signature_bytes.size() == 64U);
-	P256Signature signature{};
-	std::copy(signature_bytes.begin(), signature_bytes.end(), signature.begin());
-	std::vector<std::uint8_t> payload;
-	BOOST_REQUIRE(license::device_identity::build_request_proof_payload_v1(input, proof.device_key_id, payload) ==
-				  LCC_DEVICE_OK);
-	P256Digest digest{};
-	BOOST_REQUIRE(license::device_identity::sha256(payload.data(), payload.size(), digest));
-	BOOST_TEST(license::device_identity::verify_p256_p1363(spki, digest, signature));
-
-	lcc_device_identity_close(handle);
-	options.flags = 0U;
-	BOOST_TEST(lcc_device_identity_delete_key(&options, metadata.device_key_id) == LCC_DEVICE_OK);
-}
-#endif

@@ -1,11 +1,14 @@
 #define BOOST_TEST_MODULE device_identity_concurrency_test
 
+#include <boost/property_tree/json_parser.hpp>
 #include <boost/test/unit_test.hpp>
+#include "bound_protocol.hpp"
 #include <licensecc/device_identity.h>
 
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -16,6 +19,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
+
+using namespace license::device_identity;
 
 namespace {
 
@@ -38,17 +43,22 @@ LccDeviceIdentityOptions options_for(const char* application_id) {
 	return options;
 }
 
-LccDeviceProofInput proof_input() {
-	LccDeviceProofInput input;
-	lcc_init_device_proof_input(&input);
-	input.audience = LCC_DEVICE_PROOF_AUDIENCE_VERIFY;
-	input.request_timestamp = 1700000000ULL;
-	set_field(input.project, "DEFAULT");
-	set_field(input.feature, "EXPORT");
-	set_field(input.license_fingerprint, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
-	set_field(input.device_hash, "");
-	set_field(input.nonce, "f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687");
-	return input;
+boost::property_tree::ptree protocol_fixture() {
+	std::ifstream stream(std::string(LCC_DEVICE_IDENTITY_VECTOR_ROOT) + "/device_bound/v1/protocol.json");
+	BOOST_REQUIRE(stream.good());
+	boost::property_tree::ptree value;
+	boost::property_tree::read_json(stream, value);
+	return value;
+}
+
+BoundRenewInput renew_input_from(const boost::property_tree::ptree& body) {
+	return {body.get<std::string>("binding_id"), body.get<std::uint64_t>("generation"),
+			body.get<std::string>("operation_id")};
+}
+
+BoundChallenge challenge_from(const boost::property_tree::ptree& proof) {
+	return {proof.get<std::string>("challenge_id"), proof.get<std::string>("nonce"),
+			proof.get<std::uint64_t>("expires_at")};
 }
 
 }  // namespace
@@ -140,7 +150,10 @@ BOOST_AUTO_TEST_CASE(shared_handle_serializes_signing_and_keeps_getters_safe) {
 	LccDeviceIdentityMetadata metadata;
 	lcc_init_device_identity_metadata(&metadata);
 	BOOST_REQUIRE(lcc_device_identity_get_metadata(handle, &metadata) == LCC_DEVICE_OK);
-	const LccDeviceProofInput input = proof_input();
+	const auto vector = protocol_fixture();
+	const BoundRenewInput input = renew_input_from(vector.get_child("body"));
+	const BoundChallenge challenge = challenge_from(vector.get_child("proof"));
+	const BoundLocalContext context{"DEFAULT", vector.get_child("proof").get<std::string>("audience")};
 	constexpr std::size_t thread_count = 16U;
 	constexpr std::size_t iterations = 25U;
 	std::atomic<bool> start(false);
@@ -152,16 +165,15 @@ BOOST_AUTO_TEST_CASE(shared_handle_serializes_signing_and_keeps_getters_safe) {
 				std::this_thread::yield();
 			}
 			for (std::size_t iteration = 0; iteration < iterations; ++iteration) {
-				LccDeviceProof proof;
-				lcc_init_device_proof(&proof);
+				BoundSignedProof proof;
 				LccDeviceIdentityMetadata current;
 				lcc_init_device_identity_metadata(&current);
 				std::size_t spki_size = 0U;
 				if (lcc_device_identity_get_metadata(handle, &current) != LCC_DEVICE_OK ||
 					lcc_device_identity_get_public_spki(handle, nullptr, &spki_size) != LCC_DEVICE_BUFFER_TOO_SMALL ||
 					spki_size != 91U ||
-					lcc_device_identity_build_request_proof_v1(handle, &input, &proof) != LCC_DEVICE_OK ||
-					std::strlen(proof.request_signature) != LCC_DEVICE_SIGNATURE_BASE64_MAX ||
+					sign_bound_proof_v2(handle, context, input, challenge, proof) != LCC_DEVICE_OK ||
+					proof.signature.size() != 86U ||
 					std::strcmp(current.device_key_id, metadata.device_key_id) != 0) {
 					failures.fetch_add(1U, std::memory_order_relaxed);
 				}

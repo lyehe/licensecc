@@ -237,7 +237,7 @@
     },
     {
       "id": "tpm-request-proof-provider",
-      "title": "TPM-backed request-proof provider",
+      "title": "TPM device-key provider",
       "status": "platform_limited",
       "owner": "C++ ABI and core maintainer",
       "surfaces": ["Windows Platform KSP device-identity provider", "Ubuntu TPM2/OpenSSL device-identity provider"],

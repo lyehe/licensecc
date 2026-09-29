@@ -1,3 +1,4 @@
+#include "bound_protocol.hpp"
 #include "providers/windows_cng_api.hpp"
 
 #include <licensecc/device_identity.h>
@@ -20,6 +21,10 @@
 
 namespace {
 
+using license::device_identity::BoundChallenge;
+using license::device_identity::BoundLocalContext;
+using license::device_identity::BoundRenewInput;
+using license::device_identity::BoundSignedProof;
 using license::device_identity::DeviceNamespace;
 using license::device_identity::P256Digest;
 using license::device_identity::P256Signature;
@@ -28,6 +33,7 @@ using license::device_identity::ProviderMetadata;
 using license::device_identity::ProviderOpenRequest;
 using license::device_identity::WindowsCngApi;
 using license::device_identity::WindowsCngOperation;
+using license::device_identity::sign_bound_proof_v2;
 
 constexpr NCRYPT_PROV_HANDLE kProviderHandle = static_cast<NCRYPT_PROV_HANDLE>(0x1100U);
 constexpr NCRYPT_KEY_HANDLE kExistingKeyHandle = static_cast<NCRYPT_KEY_HANDLE>(0x2200U);
@@ -1237,15 +1243,13 @@ void require_private_export_denied(const ProviderOpenRequest& request) {
 	}
 }
 
-void fill_real_proof_input(LccDeviceProofInput& input) {
-	lcc_init_device_proof_input(&input);
-	input.audience = LCC_DEVICE_PROOF_AUDIENCE_VERIFY;
-	input.request_timestamp = 1700000000ULL;
-	set_field(input.project, "DEFAULT");
-	set_field(input.feature, "EXPORT");
-	set_field(input.license_fingerprint, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
-	set_field(input.device_hash, "");
-	set_field(input.nonce, "f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687");
+void fill_real_bound_input(BoundRenewInput& input, BoundChallenge& challenge) {
+	input.binding_id.assign(22, 'A');
+	input.generation = 1;
+	input.operation_id.assign(43, 'A');
+	challenge.challenge_id.assign(22, 'B');
+	challenge.nonce.assign(43, 'B');
+	challenge.expires_at = 9007199254740991ULL;
 }
 
 int run_real(bool check_private_export = true) {
@@ -1279,11 +1283,12 @@ int run_real(bool check_private_export = true) {
 		key_id = metadata.device_key_id;
 		require_equal(std::string(metadata.provider), std::string("windows-platform-ksp"), "real provider");
 		require_equal(std::string(metadata.algorithm), std::string("ecdsa-p256-sha256"), "real algorithm");
-		LccDeviceProofInput input;
-		fill_real_proof_input(input);
-		LccDeviceProof proof;
-		lcc_init_device_proof(&proof);
-		require_equal(lcc_device_identity_build_request_proof_v1(identity, &input, &proof), LCC_DEVICE_OK,
+		BoundRenewInput input;
+		BoundChallenge challenge;
+		fill_real_bound_input(input, challenge);
+		const BoundLocalContext context{"DEFAULT", "https://license.example.test"};
+		BoundSignedProof proof;
+		require_equal(sign_bound_proof_v2(identity, context, input, challenge, proof), LCC_DEVICE_OK,
 					  "real sign after create");
 		lcc_device_identity_close(identity);
 		identity = nullptr;
@@ -1295,8 +1300,7 @@ int run_real(bool check_private_export = true) {
 		require_equal(lcc_device_identity_get_metadata(identity, &reopened_metadata), LCC_DEVICE_OK,
 					  "real reopened metadata");
 		require_equal(std::string(reopened_metadata.device_key_id), key_id, "real stable key id");
-		lcc_init_device_proof(&proof);
-		require_equal(lcc_device_identity_build_request_proof_v1(identity, &input, &proof), LCC_DEVICE_OK,
+		require_equal(sign_bound_proof_v2(identity, context, input, challenge, proof), LCC_DEVICE_OK,
 					  "real sign after reopen");
 		lcc_device_identity_close(identity);
 		identity = nullptr;

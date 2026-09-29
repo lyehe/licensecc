@@ -37,20 +37,6 @@ LccDeviceIdentityOptions options_for(const char* suffix, bool create = false) {
 	return options;
 }
 
-LccDeviceProofInput valid_input() {
-	LccDeviceProofInput input;
-	lcc_init_device_proof_input(&input);
-	input.audience = LCC_DEVICE_PROOF_AUDIENCE_VERIFY;
-	input.client_hardening = 5U;
-	input.request_timestamp = 1700000000ULL;
-	set_field(input.project, "DEFAULT");
-	set_field(input.feature, "EXPORT");
-	set_field(input.license_fingerprint, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
-	set_field(input.device_hash, "");
-	set_field(input.nonce, "f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687");
-	return input;
-}
-
 }  // namespace
 
 BOOST_AUTO_TEST_CASE(provider_policy_matrix_fails_closed_without_fallback) {
@@ -192,69 +178,13 @@ BOOST_AUTO_TEST_CASE(expected_id_nontermination_is_bounded_at_max_plus_one) {
 #endif
 }
 
-BOOST_AUTO_TEST_CASE(proof_inputs_and_outputs_are_strict_and_transactional) {
+BOOST_AUTO_TEST_CASE(metadata_output_size_is_strict) {
 	LccDeviceIdentityOptions options = options_for("proof", true);
 	LccDeviceIdentity* handle = nullptr;
 	BOOST_REQUIRE(lcc_device_identity_open(&options, &handle) == LCC_DEVICE_OK);
 	LccDeviceIdentityMetadata metadata;
 	lcc_init_device_identity_metadata(&metadata);
 	BOOST_REQUIRE(lcc_device_identity_get_metadata(handle, &metadata) == LCC_DEVICE_OK);
-
-	LccDeviceProofInput input = valid_input();
-	std::fill(input.feature + std::strlen(input.feature) + 1U, input.feature + sizeof(input.feature), 'x');
-	std::fill(input.license_fingerprint + std::strlen(input.license_fingerprint) + 1U,
-			  input.license_fingerprint + sizeof(input.license_fingerprint), 'y');
-	LccDeviceProof output;
-	lcc_init_device_proof(&output);
-	BOOST_REQUIRE(lcc_device_identity_build_request_proof_v1(handle, &input, &output) == LCC_DEVICE_OK);
-	BOOST_TEST(output.request_signature_version == LCC_DEVICE_PROOF_VERSION);
-	BOOST_TEST(output.request_timestamp == input.request_timestamp);
-	BOOST_TEST(std::string(output.device_key_id) == metadata.device_key_id);
-	BOOST_TEST(std::string(output.request_signature_algorithm) == "ecdsa-p256-sha256");
-	BOOST_TEST(std::string(output.request_signature).size() == LCC_DEVICE_SIGNATURE_BASE64_MAX);
-
-	auto expect_failure_unchanged = [&](LccDeviceProofInput invalid, LCC_DEVICE_RESULT expected) {
-		LccDeviceProof sentinel;
-		lcc_init_device_proof(&sentinel);
-		std::memset(sentinel.request_signature, 'x', sizeof(sentinel.request_signature) - 1U);
-		sentinel.request_signature[sizeof(sentinel.request_signature) - 1U] = '\0';
-		const LccDeviceProof before = sentinel;
-		BOOST_TEST(lcc_device_identity_build_request_proof_v1(handle, &invalid, &sentinel) == expected);
-		BOOST_TEST(std::memcmp(&sentinel, &before, sizeof(sentinel)) == 0);
-	};
-
-	LccDeviceProofInput invalid = input;
-	invalid.audience = LCC_DEVICE_PROOF_AUDIENCE_UNSPECIFIED;
-	expect_failure_unchanged(invalid, LCC_DEVICE_INVALID_ARGUMENT);
-	invalid = input;
-	invalid.client_hardening = 0x10000U;
-	expect_failure_unchanged(invalid, LCC_DEVICE_INVALID_ARGUMENT);
-	invalid = input;
-	invalid.request_timestamp = 9007199254740992ULL;
-	expect_failure_unchanged(invalid, LCC_DEVICE_INVALID_ARGUMENT);
-	invalid = input;
-	set_field(invalid.project, "OTHER");
-	expect_failure_unchanged(invalid, LCC_DEVICE_POLICY_VIOLATION);
-	invalid = input;
-	invalid.license_fingerprint[0] = 'A';
-	expect_failure_unchanged(invalid, LCC_DEVICE_INVALID_ARGUMENT);
-	invalid = input;
-	std::memset(invalid.nonce, 'a', sizeof(invalid.nonce));
-	expect_failure_unchanged(invalid, LCC_DEVICE_INVALID_ARGUMENT);
-	invalid = input;
-	invalid.size = sizeof(invalid) - 1U;
-	expect_failure_unchanged(invalid, LCC_DEVICE_INVALID_ARGUMENT);
-	invalid = input;
-	invalid.version = LCC_DEVICE_PROOF_VERSION + 1U;
-	expect_failure_unchanged(invalid, LCC_DEVICE_UNSUPPORTED_VERSION);
-
-	LccDeviceProof invalid_output;
-	lcc_init_device_proof(&invalid_output);
-	invalid_output.reserved = 1U;
-	const LccDeviceProof before = invalid_output;
-	BOOST_TEST(lcc_device_identity_build_request_proof_v1(handle, &input, &invalid_output) ==
-			   LCC_DEVICE_INVALID_ARGUMENT);
-	BOOST_TEST(std::memcmp(&invalid_output, &before, sizeof(before)) == 0);
 
 	LccDeviceIdentityMetadata invalid_metadata;
 	lcc_init_device_identity_metadata(&invalid_metadata);
