@@ -1528,6 +1528,50 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 	BOOST_CHECK_EQUAL(read_binary_file(noncanonical_license), noncanonical_original);
 }
 
+// A file tagged with any version other than 201 must be rejected with a
+// message that says so specifically, not the generic "non-license section"
+// wording reserved for a v201-shaped section that is merely missing its
+// signature. The tag value itself is not v200-specific -- the check is a
+// plain "!= 201" -- so an arbitrary other value proves the general rule.
+BOOST_AUTO_TEST_CASE(product_issue_license_rejects_appending_to_a_non_v201_existing_file) {
+	const string project_name("TEST");
+	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
+	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_non_v201_existing");
+	const fs::path expected_project_folder(projects_folder / project_name);
+	const fs::path expectedPrivateKey(projects_folder / project_name / PRIVATE_KEY_FNAME);
+	const fs::path expected_public_key(projects_folder / project_name / "include" / "licensecc" / project_name /
+									   PUBLIC_KEY_INC_FNAME);
+	create_project(projects_folder, expectedPrivateKey, expected_public_key, mock_source_folder, project_name);
+	const string private_key_str = expectedPrivateKey.string();
+	const string project_folder_str = expected_project_folder.string();
+
+	const fs::path non_v201_license("non_v201_existing_license.lic");
+	const string non_v201_license_str = non_v201_license.string();
+	const string non_v201_original = "[TEST]\nlic_ver = 199\nsig = QUJDRA==\n";
+	write_binary_file(non_v201_license, non_v201_original);
+
+	int argc = 9;
+	const char* argv[] = {"lcc",
+						  "license",
+						  "issue",
+						  "--" PARAM_PRIMARY_KEY,
+						  private_key_str.c_str(),
+						  "--" PARAM_LICENSE_OUTPUT,
+						  non_v201_license_str.c_str(),
+						  "--" PARAM_PROJECT_FOLDER,
+						  project_folder_str.c_str()};
+	boost::test_tools::output_test_stream errors;
+	int result = 0;
+	{
+		cerr_redirect guard(errors.rdbuf());
+		result = CommandLineParser::parseCommandLine(argc, argv);
+	}
+	BOOST_CHECK_EQUAL(result, 1);
+	BOOST_CHECK_MESSAGE(errors.str().find("is not a v201 license and cannot be extended") != string::npos,
+						"non-v201 existing file is rejected specifically: " + errors.str());
+	BOOST_CHECK_EQUAL(read_binary_file(non_v201_license), non_v201_original);
+}
+
 #if BOOST_VERSION > 106500
 BOOST_AUTO_TEST_CASE(product_initialize_issue_license_multi_feature) {
 	const string project_name("TEST");
