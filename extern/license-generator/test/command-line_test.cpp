@@ -195,6 +195,55 @@ BOOST_AUTO_TEST_CASE(product_initialize_issue_license) {
 	BOOST_CHECK_MESSAGE(ini.GetSectionSize(project_name.c_str()) == 6, "Section [" + project_name + "] has 6 elements");
 }
 
+BOOST_AUTO_TEST_CASE(issue_writes_v201_by_default_and_rejects_license_version_option) {
+	const string project_name("TEST_V201_DEFAULT");
+	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
+	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_v201_default");
+	const fs::path expected_project_folder(projects_folder / project_name);
+	const fs::path expected_private_key(expected_project_folder / PRIVATE_KEY_FNAME);
+	const fs::path expected_public_key(expected_project_folder / "include" / "licensecc" / project_name /
+									   PUBLIC_KEY_INC_FNAME);
+	create_project(projects_folder, expected_private_key, expected_public_key, mock_source_folder, project_name);
+	const string private_key_str = expected_private_key.string();
+	const string project_folder_str = expected_project_folder.string();
+
+	const fs::path default_license("v201_default.lic");
+	fs::remove(default_license);
+	const string default_license_str = default_license.string();
+	int default_argc = 9;
+	const char* default_argv[] = {"lcc",
+								  "license",
+								  "issue",
+								  "--" PARAM_PRIMARY_KEY,
+								  private_key_str.c_str(),
+								  "--" PARAM_LICENSE_OUTPUT,
+								  default_license_str.c_str(),
+								  "--" PARAM_PROJECT_FOLDER,
+								  project_folder_str.c_str()};
+	BOOST_CHECK_EQUAL(CommandLineParser::parseCommandLine(default_argc, default_argv), 0);
+	CSimpleIniA ini;
+	BOOST_REQUIRE_EQUAL(ini.LoadFile(default_license.c_str()), SI_Error::SI_OK);
+	BOOST_CHECK_EQUAL(string(ini.GetValue(project_name.c_str(), LICENSE_VERSION, "")), "201");
+
+	const fs::path rejected_license("v201_default_rejected.lic");
+	fs::remove(rejected_license);
+	const string rejected_license_str = rejected_license.string();
+	int rejected_argc = 11;
+	const char* rejected_argv[] = {"lcc",
+								   "license",
+								   "issue",
+								   "--" PARAM_PRIMARY_KEY,
+								   private_key_str.c_str(),
+								   "--" PARAM_LICENSE_OUTPUT,
+								   rejected_license_str.c_str(),
+								   "--" PARAM_PROJECT_FOLDER,
+								   project_folder_str.c_str(),
+								   "--license-version",
+								   "200"};
+	BOOST_CHECK_EQUAL(CommandLineParser::parseCommandLine(rejected_argc, rejected_argv), 1);
+	BOOST_CHECK_MESSAGE(!fs::exists(rejected_license), "the removed --license-version option must not create a license");
+}
+
 BOOST_AUTO_TEST_CASE(product_validate_keypair_and_v201_issue_reject_mismatch) {
 	const string project_name("TEST_KEYPAIR");
 	const string other_project_name("TEST_KEYPAIR_OTHER");
