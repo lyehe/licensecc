@@ -77,8 +77,8 @@ test("real SQLite json_object emits exactly the audit contract keys with preserv
   db.exec(
     "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, " +
       "assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, " +
-      "customer_id, license_id, created_at, updated_at) VALUES " +
-      "('DEFAULT', 'DEFAULT', 'fp', 'dev', 'active', 321, 999, 5, NULL, NULL, 'note', NULL, NULL, 1000, 2000)",
+      "customer_id, license_id, created_at, updated_at, enforcement_mode) VALUES " +
+      "('DEFAULT', 'DEFAULT', 'fp', 'dev', 'active', 321, 999, 5, NULL, NULL, 'note', NULL, NULL, 1000, 2000, 'device_bound_v1')",
   );
   const expr = productionJsonObjectExpression();
   const { next_json: nextJson } = db
@@ -89,7 +89,7 @@ test("real SQLite json_object emits exactly the audit contract keys with preserv
   const next = JSON.parse(nextJson);
 
   assert.deepEqual(Object.keys(next).sort(), [...NEXT_JSON_KEYS].sort());
-  assert.equal(next.enforcement_mode, "legacy");
+  assert.equal(next.enforcement_mode, "device_bound_v1");
   // Numbers must stay numbers (not stringified) so audit consumers and idempotency replay see the real types.
   assert.equal(typeof next.assertion_ttl_seconds, "number");
   assert.equal(next.assertion_ttl_seconds, 321);

@@ -1,6 +1,6 @@
 import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
+import { fillProtectedOwner, makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 // An operator brings a protected application's customer online without SQL -- Add user,
 // create that customer's license for the app's project, then grant protected access. This is the
@@ -194,6 +194,7 @@ test("a create without a policy sends its device limit, and a chosen policy show
   await expect(inherited).toHaveValue("3");
   await expect(inherited).toHaveAttribute("readonly", "");
   await expect(own).toHaveCount(0);
+  await fillProtectedOwner(form);
   await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   expect(writes).toHaveLength(1);
@@ -206,6 +207,7 @@ test("a create without a policy sends its device limit, and a chosen policy show
   await form.getByLabel("Feature", { exact: true }).fill("PLUS");
   await form.getByLabel("License fingerprint", { exact: true }).fill("b".repeat(64));
   await form.getByLabel("Device limit", { exact: true }).fill("0");
+  await fillProtectedOwner(form);
   await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
   await expect(form.getByText("Enter a whole number of devices from 1 to 1,000,000.", { exact: true })).toBeVisible();
   await expect(form.getByLabel("Device limit", { exact: true })).toBeFocused();
@@ -221,6 +223,7 @@ test("a create without a policy sends its device limit, and a chosen policy show
   await form.getByLabel("Project", { exact: true }).fill("APP");
   await form.getByLabel("Feature", { exact: true }).fill("BASIC");
   await form.getByLabel("License fingerprint", { exact: true }).fill("c".repeat(64));
+  await fillProtectedOwner(form);
   await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
   await expect.poll(() => writes.length).toBe(3);
   expect(writes[2]).toMatchObject({ project: "APP", feature: "BASIC" });

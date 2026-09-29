@@ -53,7 +53,7 @@ export interface EntitlementEditState {
 }
 
 export const emptyEntitlementForm: EntitlementFormState = {
-  enforcement_mode: "legacy",
+  enforcement_mode: "device_bound_v1",
   policy_id: "",
   project: "DEFAULT",
   feature: "DEFAULT",

@@ -284,6 +284,7 @@ test("admin UI keeps a batch selection and its row visible through a filter relo
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("selection-context");
   await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
   await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();
@@ -397,6 +398,7 @@ test("admin UI entitlement list renders exactly one of table rows or cards at an
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("layout-check");
   await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
   await createForm.getByLabel("License fingerprint").fill("b".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();
@@ -521,6 +523,7 @@ test("admin UI fences ordinary device and meter reads across an ABA selection", 
     if (!await createForm.isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
     await createForm.getByLabel("Project").fill(project);
     await createForm.getByLabel("Feature").fill("float");
+    await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
     await expect(page.getByText("License (entitlement) created.")).toBeVisible();
@@ -612,6 +615,7 @@ test("admin UI treats accepted mutation plus aborted refresh as success with man
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("refresh-abort");
   await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
   await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();
@@ -647,6 +651,7 @@ test("admin UI treats malformed post-success refresh as success with manual reco
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("refresh-malformed");
   await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
   await createForm.getByLabel("License fingerprint").fill("b".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();
@@ -681,6 +686,7 @@ for (const refreshFailure of ["truncated", "wrong-enum"]) {
     const createForm = await newEntitlementForm(page);
     await createForm.getByLabel("Project").fill(`refresh-${refreshFailure}`);
     await createForm.getByLabel("Feature").fill("float");
+    await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
     await createForm.getByLabel("License fingerprint").fill((refreshFailure === "truncated" ? "a" : "b").repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
     await expect(page.getByText("License (entitlement) created.")).toBeVisible();
@@ -735,6 +741,7 @@ test("admin UI rejects a non-2xx refresh carrying an ok response", async ({ page
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("refresh-http-status");
   await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
   await createForm.getByLabel("License fingerprint").fill("e".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();
@@ -762,6 +769,7 @@ test("admin UI keeps the success warning after a parsed refresh error and clears
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("refresh-error");
   await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
   await createForm.getByLabel("License fingerprint").fill("c".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();
@@ -802,6 +810,7 @@ test("admin UI treats missing refresh data as success with manual recovery", asy
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("refresh-missing-data");
   await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
   await createForm.getByLabel("License fingerprint").fill("d".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();
@@ -836,6 +845,7 @@ test("admin UI falls back to a stable section when a successful row disappears",
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("missing-focus-row");
   await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
   await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();

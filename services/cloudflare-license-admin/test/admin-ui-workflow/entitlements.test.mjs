@@ -55,8 +55,9 @@ test("admin UI workflow normalizes create form payloads", async () => {
     license_id: "lic_123",
   });
 
+  // The untouched form is protected, so the body carries that mode by default.
   assert.deepEqual(body, {
-    enforcement_mode: "legacy",
+    enforcement_mode: "device_bound_v1",
     project: "DEFAULT",
     feature: "DEFAULT",
     license_fingerprint: "a".repeat(64),

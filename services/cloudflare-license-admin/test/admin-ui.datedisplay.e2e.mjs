@@ -1,6 +1,6 @@
 import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, test } from "./admin-ui.fixture.mjs";
+import { fillProtectedOwner, makeAdminApiFixture, test } from "./admin-ui.fixture.mjs";
 
 // The whole file runs in a non-UTC browser time zone so a validity date's displayed value can only
 // match what the operator typed (or the server enforces) if it is built from UTC, not local time.
@@ -18,6 +18,7 @@ test("an operator-typed validity date shows the same UTC day in the list and the
   await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
   // Valid until is a plain <input type="date">; New York vs UTC only matters for what renders next.
   await createForm.getByLabel("Valid until").fill("2026-12-31");
+  await fillProtectedOwner(createForm);
   await createForm.getByRole("button", { name: "Create entitlement", exact: true }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.locator(".desktopRecords tbody tr").filter({ hasText: "utc-validity" });

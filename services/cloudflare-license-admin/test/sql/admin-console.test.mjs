@@ -197,18 +197,34 @@ async function body(response) {
 }
 
 // Seed an entitlement through the worker so createEntitlement owns the full column set (no drift).
+// Every create is protected: the grant takes its project from the named licence, or else from a
+// fresh DEFAULT licence of this customer (a licence pairs with one fingerprint per project).
 async function createEntitlementFor(env, customerId, fingerprint, licenseId) {
+  const db = env.DB.db;
+  const license = licenseId ?? `lic_${customerId}_${fingerprint.slice(-8)}`;
+  if (licenseId === undefined) {
+    db.prepare("INSERT INTO licenses (id, customer_id, project, label, created_at, updated_at) VALUES (?,?,?,?,?,?)").run(license, customerId, "DEFAULT", "", NOW, NOW);
+  }
+  const { project } = db.prepare("SELECT project FROM licenses WHERE id = ?").get(license);
   const res = await worker.fetch(devReq("/api/admin/entitlements", {
     method: "POST",
     body: JSON.stringify({
-      project: "DEFAULT",
+      project,
       feature: "DEFAULT",
       license_fingerprint: fingerprint,
       customer_id: customerId,
-      ...(licenseId === undefined ? {} : { license_id: licenseId }),
+      license_id: license,
+      enforcement_mode: "device_bound_v1",
     }),
   }), env);
   assert.equal(res.status, 200, "seed entitlement");
+}
+
+// Legacy node and session rows need a legacy grant (triggers refuse them on a protected one), and
+// the admin API creates only protected grants, so these tests insert their legacy grants directly.
+function seedLegacyGrant(db, customerId, fingerprint) {
+  db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, enforcement_mode, created_at, updated_at) VALUES ('DEFAULT','DEFAULT',?,'active',?,'legacy',?,?)")
+    .run(fingerprint, customerId, NOW, NOW);
 }
 
 test("console: admin creates an isolated password user atomically with safe same-key replay", async () => {
@@ -331,8 +347,8 @@ test("console: customer access pagination exceeds legacy detail cap and cannot c
 
 test("console: complete app summaries and paginated resources stay within customer ownership", async () => {
   const db = freshDb(); seed(db); const env = devEnv(db);
-  for (let i = 1; i <= 105; i++) await createEntitlementFor(env, "cus_a", i.toString(16).padStart(64, "0"));
-  await createEntitlementFor(env, "cus_b", FP_B);
+  for (let i = 1; i <= 105; i++) seedLegacyGrant(db, "cus_a", i.toString(16).padStart(64, "0"));
+  seedLegacyGrant(db, "cus_b", FP_B);
   const fp = (1).toString(16).padStart(64, "0");
   db.prepare("INSERT INTO entitlements (project,feature,license_fingerprint,status,customer_id,created_at,updated_at) VALUES ('Z_EXTRA','base',?,'active','cus_a',?,?)").run(FP_A, NOW, NOW);
   db.exec("UPDATE customers SET status='disabled' WHERE id='cus_a'");
@@ -370,7 +386,7 @@ test("console: complete app summaries and paginated resources stay within custom
 
 test("console: exact grant selection and optional owner/revision preconditions reject stale writes", async () => {
   const db = freshDb(); seed(db); const env = devEnv(db);
-  await createEntitlementFor(env, "cus_a", FP_A); await createEntitlementFor(env, "cus_b", FP_B);
+  await createEntitlementFor(env, "cus_a", FP_A, "lic_a1"); await createEntitlementFor(env, "cus_b", FP_B, "lic_b1");
   const observed = (await body(await worker.fetch(devReq("/api/admin/customers/cus_a/access"), env))).data.items[0];
   const query = new URLSearchParams({ id: observed.id, customer_id: "cus_a" });
   assert.equal((await body(await worker.fetch(devReq(`/api/admin/entitlements?${query}`), env))).data.items.length, 1);
@@ -437,7 +453,7 @@ test("console: workspace query plans and bounded responses at 20000 grants", asy
 
 test("console: summary and report share stored-state counts using one entitlement query", async () => {
   const db = freshDb(); seed(db); const env = devEnv(db);
-  await createEntitlementFor(env, "cus_a", FP_A);
+  await createEntitlementFor(env, "cus_a", FP_A, "lic_a1");
   db.prepare("UPDATE entitlements SET valid_until = ? WHERE customer_id = 'cus_a'").run(NOW - 1);
   const queries = [];
   const prepare = env.DB.prepare.bind(env.DB);
@@ -470,7 +486,7 @@ test("console: customers list returns seeded rows with entitlement counts + filt
   const db = freshDb();
   seed(db);
   const env = devEnv(db);
-  await createEntitlementFor(env, "cus_a", FP_A);
+  await createEntitlementFor(env, "cus_a", FP_A, "lic_a1");
 
   const all = await worker.fetch(devReq("/api/admin/customers"), env);
   assert.equal(all.status, 200);
@@ -493,7 +509,7 @@ test("console: customer detail aggregates and NEVER leaks token_hmac", async () 
   const db = freshDb();
   seed(db);
   const env = devEnv(db);
-  await createEntitlementFor(env, "cus_a", FP_A);
+  await createEntitlementFor(env, "cus_a", FP_A, "lic_a1");
 
   const res = await worker.fetch(devReq("/api/admin/customers/cus_a"), env);
   assert.equal(res.status, 200);
@@ -551,8 +567,8 @@ test("console: report aggregates entitlements / customers / tokens / fulfillment
   const db = freshDb();
   seed(db);
   const env = devEnv(db);
-  await createEntitlementFor(env, "cus_a", FP_A);
-  await createEntitlementFor(env, "cus_b", FP_B);
+  await createEntitlementFor(env, "cus_a", FP_A, "lic_a1");
+  await createEntitlementFor(env, "cus_b", FP_B, "lic_b1");
 
   const res = await worker.fetch(devReq("/api/admin/report"), env);
   assert.equal(res.status, 200);

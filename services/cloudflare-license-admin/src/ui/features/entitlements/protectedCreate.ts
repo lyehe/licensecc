@@ -10,7 +10,6 @@ const REASON_SENTENCES: Readonly<Record<ProtectedCreateReason, string>> = {
   license_customer_mismatch: "The chosen license belongs to another customer or project; choose this customer's license for this project.",
   fingerprint_in_use: "This fingerprint or license is already used by another license (entitlement); generate a new fingerprint or choose another license.",
   plan_assignment_conflict: "This license is assigned to a plan under a different fingerprint; use that fingerprint or choose another license.",
-  lease_history_exists: "This fingerprint already has activation or audit history for this feature; generate a new fingerprint.",
   policy_mismatch: "The policy isn't an active policy for this project, or it changed while you were saving; choose an active policy for this project and try again.",
   invalid_trial: "This license's trial settings can't be used: a trial from issue needs an end date in the future, and other trials need a length.",
   devices_connected: "This license (entitlement) still has connected devices; disconnect them before moving it to another customer.",

@@ -5,6 +5,13 @@ import worker, { adminInternalsForTests } from "../../dist-worker/worker/index.j
 
 const fingerprint = "a".repeat(64);
 
+// Every MockD1 seeds one owner a protected grant can name: active customer cus_1 holding licence
+// lic_1 for project APP.
+const PROTECTED_OWNER = { customer_id: "cus_1", license_id: "lic_1" };
+const PROTECTED_PROJECT = "APP";
+// The body of a create the admin API accepts: every create is protected and names that owner.
+const protectedGrant = { project: PROTECTED_PROJECT, feature: "PRO", license_fingerprint: fingerprint, ...PROTECTED_OWNER, enforcement_mode: "device_bound_v1" };
+
 // The exact field set the production json_object emits into entitlement_events.next_json
 // (eventFromCurrentStatement, now in the shared @licensecc/cloudflare-runtime
 // entitlement_mutation core). cache_ttl_seconds is present here even though withId() strips
@@ -133,7 +140,7 @@ function effectiveLicenseMode(row) {
 
 function entitlementDefaults(overrides = {}) {
   const row = {
-    enforcement_mode: "legacy",
+    enforcement_mode: "device_bound_v1",
     policy_id: null,
     is_trial: 0,
     trial_expiration_basis: null,
@@ -243,11 +250,6 @@ class MockStatement {
   }
 }
 
-// Every MockD1 seeds one owner a protected grant can name: active customer cus_1 holding licence
-// lic_1 for project APP.
-const PROTECTED_OWNER = { customer_id: "cus_1", license_id: "lic_1" };
-const PROTECTED_PROJECT = "APP";
-
 class MockD1 {
   constructor() {
     this.customers = new Map([[PROTECTED_OWNER.customer_id, { id: PROTECTED_OWNER.customer_id, status: "active" }]]);
@@ -274,9 +276,16 @@ class MockD1 {
         if (statement.sql.startsWith("INSERT INTO entitlements") || statement.sql.startsWith("UPDATE entitlements SET")) {
           const row = this.first(statement.sql, statement.values);
           results.push({ results: row === null ? [] : [row], meta: { changes: row === null ? 0 : 1 } });
-        } else if (statement.sql.startsWith("SELECT response_json FROM mutation_idempotency")) {
+        } else if (statement.sql.startsWith("SELECT response_json FROM mutation_idempotency")
+          || statement.sql.startsWith("SELECT project, feature, license_fingerprint")) {
+          // The replay-claim read, or (without an idempotency key) the in-batch final snapshot.
           const row = this.first(statement.sql, statement.values);
           results.push({ results: row === null ? [] : [row], meta: { changes: 0 } });
+        } else if (statement.sql.startsWith("SELECT CASE WHEN changes()=1 AND EXISTS")) {
+          // The protected-create assertion. D1 reports its refusal as malformed JSON, which rolls
+          // the whole batch back.
+          if (!this.protectedGrantHolds(statement.values)) throw new Error("malformed JSON");
+          results.push({ results: [{ ok: 1 }], meta: { changes: 0 } });
         } else {
           results.push(this.run(statement.sql, statement.values));
         }
@@ -288,6 +297,16 @@ class MockD1 {
       this.idempotency = idempotencySnapshot;
       throw error;
     }
+  }
+
+  // Models the core protected-create rules only; the SQL suite runs the real assertion. The written
+  // row is protected, owned by an active seeded customer through that customer's licence for its
+  // project, and has no device hash and no pool.
+  protectedGrantHolds([project, feature, licenseFingerprint]) {
+    const row = this.entitlements.get(keyOf(project, feature, licenseFingerprint));
+    const license = row === undefined ? undefined : this.licenses.get(row.license_id);
+    return row !== undefined && row.enforcement_mode === "device_bound_v1" && this.customers.get(row.customer_id)?.status === "active"
+      && license?.customer_id === row.customer_id && license.project === row.project && row.device_hash === "" && row.pool_size === 0;
   }
 
   maxEventSeq(project, feature, licenseFingerprint) {
@@ -536,6 +555,7 @@ export {
   json,
   keyOf,
   protectedCreateFixture,
+  protectedGrant,
   rotatableAccessFixture,
   syncAuthed,
   syncEnv,

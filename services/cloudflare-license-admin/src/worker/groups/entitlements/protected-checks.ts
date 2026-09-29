@@ -34,8 +34,6 @@ export const STAMP_COLUMN_DEFAULTS = {
 } as const;
 type StampColumn = keyof typeof STAMP_COLUMN_DEFAULTS;
 
-// Pre-protection history: legacy activations, leases, seats, and usage for this exact key.
-const HISTORY_TABLES = ["lease_issuance", "entitlement_devices", "seat_checkouts", "usage_events"] as const;
 const sameKey = (alias: string): string => `${alias}.project=e.project AND ${alias}.feature=e.feature AND ${alias}.license_fingerprint=e.license_fingerprint`;
 
 /**
@@ -63,11 +61,6 @@ export function protectedCreateChecks(input: CreateInput, policy?: Policy): read
         AND ((other.license_id=e.license_id AND other.license_fingerprint<>e.license_fingerprint)
           OR (other.license_fingerprint=e.license_fingerprint AND (other.license_id IS NOT e.license_id OR other.customer_id IS NOT e.customer_id))))`, binds: [] },
     { reason: "plan_assignment_conflict", sql: "NOT EXISTS (SELECT 1 FROM license_plan_assignments a WHERE a.project=e.project AND a.license_id=e.license_id AND a.license_fingerprint<>e.license_fingerprint)", binds: [] },
-    { reason: "lease_history_exists", sql: [
-      ...HISTORY_TABLES.map((table) => `NOT EXISTS (SELECT 1 FROM ${table} h WHERE ${sameKey("h")})`),
-      `NOT EXISTS (SELECT 1 FROM entitlement_events h WHERE ${sameKey("h")}
-        AND CASE WHEN json_valid(h.next_json) THEN json_extract(h.next_json,'$.enforcement_mode') IS NOT 'device_bound_v1' ELSE 1 END)`,
-    ].join("\n      AND "), binds: [] },
     // The policy is unchanged since it was read, and the stamp wrote exactly its values.
     { reason: "policy_mismatch", sql: policy === undefined ? "1" : `EXISTS (SELECT 1 FROM entitlement_policies p WHERE ${POLICY_FIELDS.map((field) => `p.${field} IS ?`).join(" AND ")} AND p.status='active' AND p.project=e.project)
       AND ${expected.map(([column]) => `e.${column} IS ?`).join(" AND ")}`,

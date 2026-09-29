@@ -118,12 +118,18 @@ const POLICY_ID = "policy-idempotency-race";
 const POLICY_SCOPE = "POST:/api/admin/entitlements:dev";
 const FP_A = "a".repeat(64);
 const FP_B = "b".repeat(64);
+// Every create is protected: each fingerprint is paired with its own licence of one active customer.
+const LICENSE_FOR = { [FP_A]: "lic_race_a", [FP_B]: "lic_race_b" };
 
 function seedPolicy(db) {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
     "INSERT INTO entitlement_policies (id, project, name, type, status, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-  ).run(POLICY_ID, "DEFAULT", "Idempotency race policy", "floating", "active", 600, 7, 4, 900, now, now);
+  ).run(POLICY_ID, "DEFAULT", "Idempotency race policy", "node_locked", "active", 600, 0, 4, 0, now, now);
+  db.prepare("INSERT INTO customers (id, name, created_at, updated_at) VALUES ('cus_race', 'Race owner', ?, ?)").run(now, now);
+  for (const license of Object.values(LICENSE_FOR)) {
+    db.prepare("INSERT INTO licenses (id, customer_id, project, created_at, updated_at) VALUES (?, 'cus_race', 'DEFAULT', ?, ?)").run(license, now, now);
+  }
 }
 
 function policyCreate(env, fingerprint, key, requestId, notes = "before-commit") {
@@ -132,6 +138,9 @@ function policyCreate(env, fingerprint, key, requestId, notes = "before-commit")
       project: "DEFAULT",
       feature: "POLICY_RACE",
       license_fingerprint: fingerprint,
+      customer_id: "cus_race",
+      license_id: LICENSE_FOR[fingerprint],
+      enforcement_mode: "device_bound_v1",
       policy_id: POLICY_ID,
       notes,
     },
@@ -140,7 +149,9 @@ function policyCreate(env, fingerprint, key, requestId, notes = "before-commit")
   }), env);
 }
 
-test("policy create: a strict collection idempotency claim rolls back a losing tuple and replays the winner", async () => {
+// A replay is conclusive only for the tuple that won the key, so the losing tuple is refused, never
+// handed the winner's grant.
+test("policy create: a strict collection idempotency claim rolls back a losing tuple and replays the winner only to its own tuple", async () => {
   const db = freshDb();
   seedPolicy(db);
   const key = "same-collection-key";
@@ -159,26 +170,27 @@ test("policy create: a strict collection idempotency claim rolls back a losing t
   const outer = await policyCreate(devEnv(db, outerD1), FP_A, key, "loser-request");
   const outerRaw = await outer.text();
 
-  assert.equal(outer.status, 200, outerRaw);
-  assert.equal(outer.headers.get("x-idempotent-replay"), "1");
-  assert.equal(outerRaw, winnerRaw, "the losing tuple must return the winner's exact cached body");
+  assert.equal(outer.status, 409, outerRaw);
+  assert.equal(JSON.parse(outerRaw).code, "idempotency_request_conflict", "the losing tuple is never handed the winner's grant");
 
-  const replay = await policyCreate(devEnv(db), FP_A, key, "later-replay");
+  const loserRetry = await policyCreate(devEnv(db), FP_A, key, "later-loser-retry");
+  assert.equal(loserRetry.status, 409);
+  assert.equal((await loserRetry.json()).code, "idempotency_request_conflict");
+  const replay = await policyCreate(devEnv(db), FP_B, key, "later-replay");
   const replayRaw = await replay.text();
   assert.equal(replay.status, 200, replayRaw);
   assert.equal(replay.headers.get("x-idempotent-replay"), "1");
-  assert.equal(replayRaw, winnerRaw);
+  assert.equal(replayRaw, winnerRaw, "the winning tuple replays its exact cached body");
 
   // One winning tuple, one policy stamp, one audit, one cache record.  A
   // conflict must roll the whole losing batch back, including the policy extra
   // statement that sits between the entitlement write and audit projection.
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM entitlements").get().count, 1);
-  const entitlement = db.prepare("SELECT license_fingerprint, policy_id, pool_size, max_active_devices, max_borrow_sec FROM entitlements").get();
+  const entitlement = db.prepare("SELECT license_fingerprint, policy_id, pool_size, max_active_devices FROM entitlements").get();
   assert.equal(entitlement.license_fingerprint, FP_B);
   assert.equal(entitlement.policy_id, POLICY_ID);
-  assert.equal(entitlement.pool_size, 7);
+  assert.equal(entitlement.pool_size, 0);
   assert.equal(entitlement.max_active_devices, 4);
-  assert.equal(entitlement.max_borrow_sec, 900);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM entitlement_events").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM mutation_idempotency WHERE scope = ? AND idempotency_key = ?").get(POLICY_SCOPE, key).count, 1);
   const audit = db.prepare("SELECT request_id, next_json FROM entitlement_events").get();

@@ -18,6 +18,7 @@ import {
   json,
   keyOf,
   protectedCreateFixture,
+  protectedGrant,
   rotatableAccessFixture,
   syncAuthed,
   syncEnv,
@@ -55,7 +56,7 @@ test("cloudflare access reader can read but cannot mutate", async (t) => {
 
   const mutate = await worker.fetch(accessAuthed("/api/admin/entitlements", token, {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint }),
+    body: JSON.stringify(protectedGrant),
   }), env);
   assert.equal(mutate.status, 403);
   assert.equal((await json(mutate)).code, "admin_role_required");
@@ -68,7 +69,7 @@ test("cloudflare access admin can mutate entitlements", async (t) => {
   const token = await accessToken(fixture, "admin@example.com");
   const response = await worker.fetch(accessAuthed("/api/admin/entitlements", token, {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint }),
+    body: JSON.stringify(protectedGrant),
   }), env);
   assert.equal(response.status, 200);
   const body = await json(response);
@@ -84,9 +85,7 @@ test("admin create is audited and idempotent", async () => {
   const db = new MockD1();
   const env = baseEnv(db);
   const body = {
-    project: "DEFAULT",
-    feature: "DEFAULT",
-    license_fingerprint: fingerprint,
+    ...protectedGrant,
     assertion_ttl_seconds: 300,
     cache_ttl_seconds: 3600,
     notes: "first",
@@ -101,12 +100,12 @@ test("admin create is audited and idempotent", async () => {
   const firstBody = await json(first);
   assert.equal(firstBody.data.revocation_seq, 1);
   assert.equal(firstBody.data.cache_ttl_seconds, undefined);
-  assert.equal(db.entitlements.get(keyOf("DEFAULT", "DEFAULT", fingerprint)).cache_ttl_seconds, 300);
+  assert.equal(db.entitlements.get(keyOf("APP", "PRO", fingerprint)).cache_ttl_seconds, 300);
   assert.equal(db.events.length, 1);
   assert.equal(db.events[0].event_type, "create");
   assert.equal(JSON.parse(db.events[0].next_json).id, firstBody.data.id);
-  // write + audit + strict replay claim + in-batch cache snapshot
-  assert.equal(db.lastBatchSize, 4);
+  // write + protected assertion + audit + strict replay claim + in-batch cache snapshot
+  assert.equal(db.lastBatchSize, 5);
   assert.equal(db.idempotency.size, 1);
 
   const replay = await worker.fetch(authed("/api/admin/entitlements", {
@@ -127,11 +126,11 @@ test("admin mutation rolls back entitlement write when audit insert fails", asyn
   const response = await worker.fetch(authed("/api/admin/entitlements", {
     method: "POST",
     headers: { "idempotency-key": "rollback-1" },
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint }),
+    body: JSON.stringify(protectedGrant),
   }), env);
   assert.equal(response.status, 500);
   assert.equal((await json(response)).code, "mutation_failed");
-  assert.equal(db.lastBatchSize, 4);
+  assert.equal(db.lastBatchSize, 5);
   assert.equal(db.entitlements.size, 0);
   assert.equal(db.events.length, 0);
   assert.equal(db.idempotency.size, 0);
@@ -143,7 +142,7 @@ test("admin mutation fails closed when D1 batch is unavailable", async () => {
   const env = baseEnv(db);
   const response = await worker.fetch(authed("/api/admin/entitlements", {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint }),
+    body: JSON.stringify(protectedGrant),
   }), env);
   assert.equal(response.status, 500);
   assert.equal((await json(response)).code, "mutation_failed");
@@ -154,10 +153,11 @@ test("admin mutation fails closed when D1 batch is unavailable", async () => {
 test("admin upsert increments the stored revocation sequence", async () => {
   const db = new MockD1();
   const env = baseEnv(db);
-  const key = keyOf("DEFAULT", "DEFAULT", fingerprint);
+  const key = keyOf("APP", "PRO", fingerprint);
   db.entitlements.set(key, {
-    project: "DEFAULT",
-    feature: "DEFAULT",
+    enforcement_mode: "device_bound_v1",
+    project: "APP",
+    feature: "PRO",
     license_fingerprint: fingerprint,
     device_hash: "",
     status: "active",
@@ -167,15 +167,15 @@ test("admin upsert increments the stored revocation sequence", async () => {
     valid_from: null,
     valid_until: null,
     notes: "existing",
-    customer_id: null,
-    license_id: null,
+    customer_id: "cus_1",
+    license_id: "lic_1",
     created_at: 100,
     updated_at: 100,
   });
 
   const response = await worker.fetch(authed("/api/admin/entitlements", {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint, notes: "changed" }),
+    body: JSON.stringify({ ...protectedGrant, notes: "changed" }),
   }), env);
 
   assert.equal(response.status, 200);
@@ -191,8 +191,8 @@ test("admin upsert preserves historical revocation floor when row is recreated",
   const env = baseEnv(db);
   db.events.push({
     id: 1,
-    project: "DEFAULT",
-    feature: "DEFAULT",
+    project: "APP",
+    feature: "PRO",
     license_fingerprint: fingerprint,
     device_hash: "",
     event_type: "revoke",
@@ -213,7 +213,7 @@ test("admin upsert preserves historical revocation floor when row is recreated",
 
   const response = await worker.fetch(authed("/api/admin/entitlements", {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint }),
+    body: JSON.stringify(protectedGrant),
   }), env);
 
   assert.equal(response.status, 200);
@@ -227,10 +227,10 @@ test("admin patch and transitions increment from stored row state", async () => 
   const env = baseEnv(db);
   const create = await worker.fetch(authed("/api/admin/entitlements", {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint }),
+    body: JSON.stringify(protectedGrant),
   }), env);
   const id = (await json(create)).data.id;
-  const key = keyOf("DEFAULT", "DEFAULT", fingerprint);
+  const key = keyOf("APP", "PRO", fingerprint);
   db.entitlements.get(key).revocation_seq = 11;
 
   const patched = await worker.fetch(authed(`/api/admin/entitlements/${id}`, {
@@ -252,20 +252,13 @@ test("admin create and patch accept explicit empty notes from UI payloads", asyn
   const env = baseEnv(db);
   const create = await worker.fetch(authed("/api/admin/entitlements", {
     method: "POST",
-    body: JSON.stringify({
-      project: "DEFAULT",
-      feature: "DEFAULT",
-      license_fingerprint: fingerprint,
-      notes: "",
-      customer_id: null,
-      license_id: null,
-    }),
+    body: JSON.stringify({ ...protectedGrant, notes: "" }),
   }), env);
   assert.equal(create.status, 200);
   const created = await json(create);
   assert.equal(created.data.notes, "");
-  assert.equal(created.data.customer_id, null);
-  assert.equal(created.data.license_id, null);
+  assert.equal(created.data.customer_id, "cus_1");
+  assert.equal(created.data.license_id, "lic_1");
 
   const patched = await worker.fetch(authed(`/api/admin/entitlements/${created.data.id}`, {
     method: "PATCH",
@@ -288,7 +281,7 @@ test("admin transitions require reason and revoked is terminal", async () => {
   const create = await worker.fetch(authed("/api/admin/entitlements", {
     method: "POST",
     headers: { "idempotency-key": "create-2" },
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint }),
+    body: JSON.stringify(protectedGrant),
   }), env);
   const id = (await json(create)).data.id;
 
@@ -337,16 +330,11 @@ test("audit next_json carries the full production json_object field set", async 
   const res = await worker.fetch(authed("/api/admin/entitlements", {
     method: "POST",
     body: JSON.stringify({
-      project: "DEFAULT",
-      feature: "DEFAULT",
-      license_fingerprint: fingerprint,
-      device_hash: "d".repeat(64),
+      ...protectedGrant,
       assertion_ttl_seconds: 321,
       valid_from: 1000,
       valid_until: 2000,
       notes: "shape probe",
-      customer_id: "cus-1",
-      license_id: "lic-1",
       status: "active",
     }),
   }), env);
@@ -358,8 +346,9 @@ test("audit next_json carries the full production json_object field set", async 
   assert.ok("cache_ttl_seconds" in next);
   assert.equal(saved.cache_ttl_seconds, undefined);
   assert.equal(next.id, saved.id);
-  assert.equal(next.customer_id, "cus-1");
-  assert.equal(next.license_id, "lic-1");
+  assert.equal(next.enforcement_mode, "device_bound_v1");
+  assert.equal(next.customer_id, "cus_1");
+  assert.equal(next.license_id, "lic_1");
   assert.equal(db.events[0].prev_json, ""); // prev was null on create
 });
 
@@ -378,7 +367,7 @@ test("canonical D1-safe next_json key set matches the audit contract (drift guar
 test("audit prev_json is the prior API record on update", async () => {
   const db = new MockD1();
   const env = baseEnv(db);
-  const base = { project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint, notes: "v1" };
+  const base = { ...protectedGrant, notes: "v1" };
   const first = await worker.fetch(authed("/api/admin/entitlements", { method: "POST", body: JSON.stringify(base) }), env);
   const firstData = (await json(first)).data;
   const second = await worker.fetch(
@@ -402,7 +391,7 @@ test("cloudflare access admin can patch and transition entitlements end to end",
   const token = await accessToken(fixture, "admin@example.com");
   const create = await worker.fetch(accessAuthed("/api/admin/entitlements", token, {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint }),
+    body: JSON.stringify(protectedGrant),
   }), env);
   const id = (await json(create)).data.id;
 
@@ -452,7 +441,7 @@ test("cloudflare access reader cannot patch or transition", async (t) => {
   const env = accessEnv(db, fixture);
   const create = await worker.fetch(accessAuthed("/api/admin/entitlements", await accessToken(fixture, "admin@example.com"), {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint }),
+    body: JSON.stringify(protectedGrant),
   }), env);
   const id = (await json(create)).data.id;
   const eventsAfterCreate = db.events.length;

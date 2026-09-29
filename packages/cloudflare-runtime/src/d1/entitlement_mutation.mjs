@@ -339,15 +339,12 @@ export async function createEntitlement(
   idempotency = null,
   extraStatements = [],
 ) {
-  const mode = input.enforcement_mode;
-  if (mode !== undefined && mode !== "legacy" && mode !== "device_bound_v1") throw new Error("invalid_patch");
+  // Every grant this writer creates or updates is protected. A caller may name that mode, and no other.
+  if (input.enforcement_mode !== undefined && input.enforcement_mode !== "device_bound_v1") throw new Error("invalid_patch");
   const now = Math.floor(Date.now() / 1000);
   const prev = await findEntitlement(env, input);
-  if (mode !== undefined && prev !== null && prev.enforcement_mode !== mode) throw new Error("enforcement_mode_conflict");
-  // Interpolated values are the two validated literals above, never request SQL.
-  const modeColumn = mode === undefined ? "" : ", enforcement_mode";
-  const modeValue = mode === undefined ? "" : `, '${mode}'`;
-  const modeGuard = mode === undefined ? "" : ` AND entitlements.enforcement_mode = '${mode}'`;
+  // A row of another mode is never converted in place; the conflict update is guarded the same way.
+  if (prev !== null && prev.enforcement_mode !== "device_bound_v1") throw new Error("enforcement_mode_conflict");
   if (prev?.status === "revoked") {
     throw new Error("revoked_terminal");
   }
@@ -357,7 +354,7 @@ export async function createEntitlement(
     // landed between findEntitlement() and this batch.  When the observation was
     // "missing", a concurrent insert instead returns no row (never an implicit
     // update of an unknown newer entitlement).
-    `INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at${modeColumn}) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?${modeValue}) ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, updated_at = excluded.updated_at WHERE ? IS NOT NULL AND entitlements.status = ? AND entitlements.revocation_seq = ?${modeGuard} RETURNING ${ENTITLEMENT_COLUMNS}`,
+    `INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at, enforcement_mode) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?, 'device_bound_v1') ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, updated_at = excluded.updated_at WHERE ? IS NOT NULL AND entitlements.status = ? AND entitlements.revocation_seq = ? AND entitlements.enforcement_mode = 'device_bound_v1' RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     input.project,
     input.feature,

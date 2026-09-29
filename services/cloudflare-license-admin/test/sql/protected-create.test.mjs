@@ -52,27 +52,31 @@ test("admin creates a fresh protected grant and exactly replays it without alloc
   const before = f.snapshot(); assert.deepEqual(before.slice(3), [[], [], []]);
   const retry = await f.send(); assert.equal(retry.status, 200); assert.equal(await retry.text(), text);
   assert.equal(retry.headers.get("x-idempotent-replay"), "1");
-  assert.equal((await f.send({ ...input, enforcement_mode: "legacy" })).status, 409);
+  assert.equal((await f.send({ ...input, enforcement_mode: "legacy" })).status, 400);
   assert.equal((await f.send({ ...input, feature: "OTHER" })).status, 409);
   assert.deepEqual(f.snapshot(), before);
 });
 
-test("omission stays legacy, explicit mismatches cannot convert either mode, and historical replay is not protected success", async t => {
-  const f = fixture(t), { enforcement_mode, ...legacy } = input;
-  const first = await f.send(legacy); assert.equal((await first.json()).data.enforcement_mode, "legacy");
+test("an omitted or legacy mode is refused, a legacy grant is never converted, and a cached reply without the mode is not protected success", async t => {
+  const f = fixture(t), { enforcement_mode, ...omitted } = input;
+  // Only a direct insert can still hold a legacy grant; the admin API never writes one.
+  f.sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,enforcement_mode,created_at,updated_at) VALUES('APP','PRO',?,'active','owner','license','legacy',1,1)").run(input.license_fingerprint);
   const before = f.snapshot();
-  assert.equal((await f.send(input, "convert")).status, 409);
-  assert.equal((await f.send(input)).status, 409);
+  const convert = await f.send(input, "convert");
+  assert.equal(convert.status, 409); assert.equal((await convert.json()).code, "enforcement_mode_conflict");
+  for (const [body, key] of [[omitted, "omitted"], [{ ...input, enforcement_mode: "legacy" }, "legacy"]]) {
+    const refused = await f.send(body, key);
+    assert.equal(refused.status, 400); assert.equal((await refused.json()).code, "invalid_request");
+  }
   assert.deepEqual(f.snapshot(), before);
-  const record = f.sql.prepare("SELECT response_json FROM mutation_idempotency").get();
-  const historic = JSON.parse(record.response_json); delete historic.data.enforcement_mode;
-  f.sql.prepare("UPDATE mutation_idempotency SET response_json=?").run(JSON.stringify(historic));
-  assert.equal((await f.send(input)).status, 409);
-  assert.equal((await f.send(legacy)).status, 200);
   const other = { ...input, license_fingerprint: "b".repeat(64), license_id: "second" };
   f.sql.exec("INSERT INTO licenses(id,customer_id,project,created_at,updated_at) VALUES('second','owner','APP',1,1)");
   assert.equal((await f.send(other, "second")).status, 200);
-  assert.equal((await f.send({ ...other, enforcement_mode: "legacy" }, "downgrade")).status, 409);
+  const record = f.sql.prepare("SELECT response_json FROM mutation_idempotency WHERE idempotency_key='second'").get();
+  const historic = JSON.parse(record.response_json); delete historic.data.enforcement_mode;
+  f.sql.prepare("UPDATE mutation_idempotency SET response_json=? WHERE idempotency_key='second'").run(JSON.stringify(historic));
+  const replay = await f.send(other, "second");
+  assert.equal(replay.status, 409); assert.equal((await replay.json()).code, "idempotency_request_conflict");
 });
 
 for (const [change, reason] of [[{ customer_id: "other" }, "license_customer_mismatch"], [{ license_id: null }, "license_missing"], [{ device_hash: "d".repeat(64) }, "unknown"]]) {
@@ -146,16 +150,12 @@ test("a missing or incorrect policy side-write rolls back the preceding upsert",
   }
 });
 
-test("retained legacy history and a competing legacy insertion cannot become protected", async t => {
-  for (const race of [false, true]) {
-    const f = fixture(t);
-    const insert = () => f.sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,created_at,updated_at) VALUES('APP','PRO',?,'active',1,1)").run(input.license_fingerprint);
-    if (race) f.race(insert);
-    else f.sql.prepare("INSERT INTO entitlement_events(project,feature,license_fingerprint,event_type,status,revocation_seq,created_at) VALUES('APP','PRO',?,'create','active',1,1)").run(input.license_fingerprint);
-    await refusedFor(await f.send(), race ? "fingerprint_in_use" : "lease_history_exists");
-    assert.equal(f.sql.prepare("SELECT count(*) AS n FROM entitlements WHERE enforcement_mode='device_bound_v1'").get().n, 0);
-    assert.equal(f.sql.prepare("SELECT count(*) AS n FROM mutation_idempotency").get().n, 0);
-  }
+test("a competing legacy insertion cannot become protected", async t => {
+  const f = fixture(t);
+  f.race(() => f.sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,enforcement_mode,created_at,updated_at) VALUES('APP','PRO',?,'active','legacy',1,1)").run(input.license_fingerprint));
+  await refusedFor(await f.send(), "fingerprint_in_use");
+  assert.equal(f.sql.prepare("SELECT count(*) AS n FROM entitlements WHERE enforcement_mode='device_bound_v1'").get().n, 0);
+  assert.equal(f.sql.prepare("SELECT count(*) AS n FROM mutation_idempotency").get().n, 0);
 });
 
 test("a protected denial does not block re-creating the same grant", async t => {
@@ -204,8 +204,8 @@ test("occupied active or retiring capacity returns a conflict without changing a
   }
 });
 
-test("a same-key winner is replayed only when its tuple and explicit mode match", async t => {
-  for (const change of [{}, { enforcement_mode: "legacy" }, { feature: "OTHER" }]) {
+test("a same-key winner is replayed only when its tuple matches", async t => {
+  for (const change of [{}, { feature: "OTHER" }]) {
     const f = fixture(t); let winnerText, winnerSnapshot;
     f.race(async () => {
       const winner = await f.send({ ...input, ...change }); assert.equal(winner.status, 200);
@@ -214,18 +214,6 @@ test("a same-key winner is replayed only when its tuple and explicit mode match"
     const loser = await f.send();
     if (Object.keys(change).length === 0) { assert.equal(loser.status, 200); assert.equal(await loser.text(), winnerText); }
     else { assert.equal(loser.status, 409); assert.equal((await loser.json()).code, "idempotency_request_conflict"); }
-    assert.deepEqual(f.snapshot(), winnerSnapshot);
-  }
-});
-
-test("an explicit legacy create cannot overwrite or claim a competing protected winner", async t => {
-  for (const winnerKey of ["create", "other-key"]) {
-    const f = fixture(t); let winnerSnapshot;
-    f.race(async () => {
-      assert.equal((await f.send(input, winnerKey)).status, 200); winnerSnapshot = f.snapshot();
-    });
-    const response = await f.send({ ...input, enforcement_mode: "legacy" });
-    assert.equal(response.status, 409);
     assert.deepEqual(f.snapshot(), winnerSnapshot);
   }
 });
@@ -248,7 +236,6 @@ const REASON_CASES = [
     setup: `INSERT INTO catalog_plans(id,project,plan_key,name,created_at,updated_at) VALUES('plan','APP','basic','Basic',1,1);
       INSERT INTO license_plan_assignments(license_id,project,plan_id,license_fingerprint,customer_id,created_at,updated_at) VALUES('license','APP','plan','${otherFp}','owner',1,1)`,
     fix: `UPDATE license_plan_assignments SET license_fingerprint='${fp}'` },
-  { reason: "lease_history_exists", setup: `INSERT INTO usage_events(project,feature,license_fingerprint,event_type,ts) VALUES('APP','PRO','${fp}','checkout',1)`, fix: "DELETE FROM usage_events" },
   { reason: "policy_mismatch", body: { policy_id: "policy" }, race: "UPDATE entitlement_policies SET max_borrow_sec=60" },
   // The likeliest trigger: an active policy of another project, which the create never re-checks
   // against the grant's project before the batch guard refuses it.

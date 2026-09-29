@@ -18,7 +18,8 @@ test("an untouched device limit is not sent; a typed one is; a policy create lea
   const { MAX_DEVICE_LIMIT } = await loadWorkflowModule("../shared/api.ts");
   assert.equal(MAX_DEVICE_LIMIT, 1_000_000);
   assert.equal(workflow.emptyEntitlementForm.max_active_devices, "");
-  const form = { ...workflow.emptyEntitlementForm, license_fingerprint: "a".repeat(64) };
+  // The untouched form is protected, so it names its owner.
+  const form = { ...workflow.emptyEntitlementForm, license_fingerprint: "a".repeat(64), customer_id: "owner", license_id: "license" };
   assert.equal(Object.hasOwn(workflow.normalizeEntitlementForm(form), "max_active_devices"), false);
   assert.deepEqual(workflow.entitlementFormErrors(form), {});
   const typed = { ...form, max_active_devices: 3 };

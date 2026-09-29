@@ -63,14 +63,16 @@ class D1Like {
   }
 }
 
-function freshDb({ entitlementStatus = "active", revocationSeq = 0 } = {}) {
+// Legacy device rows need a legacy grant (triggers refuse them on a protected one), so the seeded
+// grant is legacy unless a test asks for a protected one.
+function freshDb({ entitlementStatus = "active", revocationSeq = 0, enforcementMode = "legacy" } = {}) {
   const db = new DatabaseSync(":memory:");
   for (const f of readdirSync(migrationsDir).filter((x) => x.endsWith(".sql")).sort()) {
     db.exec(readFileSync(join(migrationsDir, f), "utf8"));
   }
   db.exec(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, created_at, updated_at) " +
-      `VALUES ('DEFAULT', 'DEFAULT', '${FP}', '', '${entitlementStatus}', 300, 300, ${revocationSeq}, ${NOW}, ${NOW})`,
+    "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, enforcement_mode, created_at, updated_at) " +
+      `VALUES ('DEFAULT', 'DEFAULT', '${FP}', '', '${entitlementStatus}', 300, 300, ${revocationSeq}, '${enforcementMode}', ${NOW}, ${NOW})`,
   );
   return db;
 }
@@ -547,7 +549,8 @@ test("real SQLite guards every other pre-read entitlement writer against a concu
   ];
 
   for (const writer of writers) {
-    const db = freshDb();
+    // createEntitlement writes only protected grants, so the row every writer pre-reads is protected.
+    const db = freshDb({ enforcementMode: "device_bound_v1" });
     const idempotencyKey = `writer-loser-${writer.name}`;
     const idempotency = { scope: "test:writer-race", responseCode: writer.responseCode };
     const env = {

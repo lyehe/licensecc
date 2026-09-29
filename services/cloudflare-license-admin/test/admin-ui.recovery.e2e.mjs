@@ -1,6 +1,6 @@
 import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
+import { fillProtectedOwner, makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 // These scenarios deliberately leave unsent drafts; custom consequence dialogs
 // remain under each test's explicit control.
@@ -164,6 +164,7 @@ test("admin UI keeps a same-key replay conflict indeterminate after a post-commi
   await createForm.getByLabel("Project").fill("replay-conflict");
   await createForm.getByLabel("Feature").fill("pro");
   await createForm.getByLabel("License fingerprint").fill("1".repeat(64));
+  await fillProtectedOwner(createForm);
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
@@ -207,6 +208,7 @@ test("admin UI reconciles release seats through the exact entitlement GET even w
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("release-page-two");
   await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
   await createForm.getByLabel("License fingerprint").fill("2".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();
@@ -234,6 +236,7 @@ test("admin UI keeps a release-seat result unknown when same-key replay evidence
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("release-evidence");
   await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
   await createForm.getByLabel("License fingerprint").fill("3".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();
@@ -261,6 +264,7 @@ test("admin UI keeps an undocumented release-seat 4xx indeterminate", async ({ p
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("release-wrong-route");
   await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
   await createForm.getByLabel("License fingerprint").fill("4".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();

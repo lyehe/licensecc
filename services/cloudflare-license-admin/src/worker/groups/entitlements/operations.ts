@@ -213,7 +213,7 @@ export async function createFromPolicy(request: Request, env: Env, ctx: Mutation
     if (licenseId !== undefined) overrides.license_id = licenseId;
     const stamp = stampFromPolicy(policy as never, overrides as never, now);
     const key = { project, feature, license_fingerprint: licenseFingerprint };
-    return createWithEnforcement(env, { ...stamp.input, ...(selected.enforcement_mode === undefined ? {} : { enforcement_mode: selected.enforcement_mode }) }, ctx, idempotency, [
+    return createWithEnforcement(env, { ...stamp.input, enforcement_mode: selected.enforcement_mode }, ctx, idempotency, [
         buildPolicyStampStatement(env as never, key, policy.id, stamp.capacity, stamp.trial),
       ], policy);
   }, admitReplay);

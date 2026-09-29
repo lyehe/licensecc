@@ -12,7 +12,7 @@ import { worker, baseEnv, authed } from "../worker/fixtures.mjs";
 // protected grant refuses a limit below its connected devices and says how many there are (ADR 0006).
 const path = "/api/admin/entitlements";
 const protectedGrant = { project: "APP", feature: "PRO", license_fingerprint: "a".repeat(64), customer_id: "owner", license_id: "license", enforcement_mode: "device_bound_v1" };
-const legacyGrant = { project: "APP", feature: "LEGACY", license_fingerprint: "b".repeat(64), enforcement_mode: "legacy" };
+const legacyGrant = { project: "APP", feature: "LEGACY", license_fingerprint: "b".repeat(64) };
 const HOUR = 3600;
 
 function fixture(t) {
@@ -43,6 +43,12 @@ function fixture(t) {
     clock(value) { now = value; },
     race(fn) { beforeBatch = fn; },
     snapshot: () => ["entitlements", "entitlement_events", "mutation_idempotency"].map((table) => sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()),
+    // The admin API creates only protected grants; a legacy grant is inserted directly.
+    seedLegacy(grant = legacyGrant) {
+      sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,enforcement_mode,created_at,updated_at) VALUES(?,?,?,'active','legacy',1,1)")
+        .run(grant.project, grant.feature, grant.license_fingerprint);
+      return entitlementId(grant.project, grant.feature, grant.license_fingerprint);
+    },
     send(body, key = crypto.randomUUID(), url = path, method = "POST") {
       const headers = key === null ? {} : { "idempotency-key": key };
       return worker.fetch(authed(url, { method, headers, body: JSON.stringify(body) }), env);
@@ -74,23 +80,20 @@ async function refused(response, status, code, data) {
   assert.deepEqual(body.data, data);
 }
 
-test("a create without a policy stores its own device limit in either mode, and a replay returns the same grant", async t => {
-  for (const grant of [protectedGrant, legacyGrant]) {
-    const f = fixture(t);
-    const first = await f.send({ ...grant, max_active_devices: 3 }, "create");
-    assert.equal(first.status, 200);
-    const text = await first.text();
-    assert.equal(JSON.parse(text).data.max_active_devices, 3);
-    assert.equal(f.stored(grant), 3);
-    assert.equal(JSON.parse(f.sql.prepare("SELECT next_json FROM entitlement_events").get().next_json).max_active_devices, 3, "the audit event records the limit");
-    const replay = await f.send({ ...grant, max_active_devices: 3 }, "create");
-    assert.equal(await replay.text(), text);
-    // Without a replay key, the answer is the row the batch committed, not the pre-limit upsert.
-    const other = { ...grant, feature: `${grant.feature.slice(0, 10)}2`, license_fingerprint: "c".repeat(64) };
-    if (grant === protectedGrant) f.sql.exec("INSERT INTO licenses(id,customer_id,project,created_at,updated_at) VALUES('license-2','owner','APP',1,1)");
-    const unkeyed = await created(await f.send({ ...other, ...(grant === protectedGrant ? { license_id: "license-2" } : {}), max_active_devices: 7 }, null));
-    assert.equal(unkeyed.max_active_devices, 7);
-  }
+test("a create without a policy stores its own device limit, and a replay returns the same grant", async t => {
+  const f = fixture(t);
+  const first = await f.send({ ...protectedGrant, max_active_devices: 3 }, "create");
+  assert.equal(first.status, 200);
+  const text = await first.text();
+  assert.equal(JSON.parse(text).data.max_active_devices, 3);
+  assert.equal(f.stored(protectedGrant), 3);
+  assert.equal(JSON.parse(f.sql.prepare("SELECT next_json FROM entitlement_events").get().next_json).max_active_devices, 3, "the audit event records the limit");
+  const replay = await f.send({ ...protectedGrant, max_active_devices: 3 }, "create");
+  assert.equal(await replay.text(), text);
+  // Without a replay key, the answer is the row the batch committed, not the pre-limit upsert.
+  f.sql.exec("INSERT INTO licenses(id,customer_id,project,created_at,updated_at) VALUES('license-2','owner','APP',1,1)");
+  const unkeyed = await created(await f.send({ ...protectedGrant, feature: "PRO2", license_fingerprint: "c".repeat(64), license_id: "license-2", max_active_devices: 7 }, null));
+  assert.equal(unkeyed.max_active_devices, 7);
 });
 
 test("a create that selects a policy cannot also set a device limit; the policy owns it", async t => {
@@ -106,16 +109,15 @@ test("a create that selects a policy cannot also set a device limit; the policy 
 
 test("a device limit outside 1 to 1,000,000 is refused before any write", async t => {
   const f = fixture(t);
-  const grant = await created(await f.send(legacyGrant));
+  const id = f.seedLegacy();
   const before = f.snapshot();
   for (const value of [0, -1, 1_000_001, 2.5, "3", null, true, [3], 1e21]) {
     await refused(await f.send({ ...protectedGrant, max_active_devices: value }), 400, "invalid_request", undefined);
-    await refused(await f.send({ ...legacyGrant, max_active_devices: value }), 400, "invalid_request", undefined);
-    await refused(await f.patch(grant.id, { max_active_devices: value }), 400, "invalid_request", undefined);
+    await refused(await f.patch(id, { max_active_devices: value }), 400, "invalid_request", undefined);
   }
   assert.deepEqual(f.snapshot(), before);
   for (const value of [1, 1_000_000]) {
-    assert.equal((await created(await f.patch(grant.id, { max_active_devices: value }))).max_active_devices, value);
+    assert.equal((await created(await f.patch(id, { max_active_devices: value }))).max_active_devices, value);
   }
 });
 
@@ -204,9 +206,9 @@ test("a console re-create of an existing key keeps its stored device limit", asy
   });
   assert.equal(Object.hasOwn(consoleBody(protectedGrant), "max_active_devices"), false);
   const cases = [
-    { name: "a legacy grant", grant: legacyGrant, create: { ...legacyGrant, max_active_devices: 5 }, devices: 0, limit: 5 },
+    { name: "a protected grant", grant: protectedGrant, create: { ...protectedGrant, max_active_devices: 5 }, devices: 0, limit: 5 },
     { name: "a protected grant with two connected devices", grant: protectedGrant, create: { ...protectedGrant, max_active_devices: 5 }, devices: 2, limit: 5 },
-    { name: "a legacy grant stamped from a policy", grant: legacyGrant, create: { ...legacyGrant, policy_id: "policy" }, devices: 0, limit: 3 },
+    { name: "a protected grant stamped from a policy", grant: protectedGrant, create: { ...protectedGrant, policy_id: "policy" }, devices: 0, limit: 3 },
   ];
   for (const { name, grant, create, devices, limit } of cases) {
     const f = fixture(t);

@@ -1,6 +1,6 @@
 import { expect } from "@playwright/test";
 
-import { expectNoRawResultCodes, makeAdminApiFixture, test } from "./admin-ui.fixture.mjs";
+import { expectNoRawResultCodes, fillProtectedOwner, makeAdminApiFixture, test } from "./admin-ui.fixture.mjs";
 
 // Operator feedback is readable, local and fresh: a sentence instead of a code (the code and
 // request id wait under Technical details), page messages that do not follow the operator to
@@ -249,6 +249,7 @@ test("creating a record opens it: policy, webhook, plan, feature and entitlement
   form = page.getByRole("form", { name: "New entitlement", exact: true });
   await form.getByLabel("Feature").fill("opened");
   await form.getByLabel("License fingerprint").fill("d".repeat(64));
+  await fillProtectedOwner(form);
   await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
   await expect(page.locator(".activityMessage")).toContainText("License (entitlement) created.");
   await expect(page.getByRole("form", { name: "New entitlement", exact: true })).toHaveCount(0);
@@ -353,6 +354,7 @@ test("a device limit cleared after unreadable text creates with the default limi
   await limit.pressSequentially("5e");
   // Clearing unreadable text leaves the value blank both before and after, so no change event fires.
   await limit.fill("");
+  await fillProtectedOwner(form);
   await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
   await expect(page.locator(".activityMessage")).toContainText("License (entitlement) created.");
   expect(writes).toHaveLength(1);
@@ -370,6 +372,7 @@ test("a created entitlement outside the current filter opens alone, and its id s
   const form = page.getByRole("form", { name: "New entitlement", exact: true });
   await form.getByLabel("Feature").fill("alone");
   await form.getByLabel("License fingerprint").fill(fingerprint);
+  await fillProtectedOwner(form);
   await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
   await expect(page.locator(".activityMessage")).toContainText("License (entitlement) created.");
   // Active, so not in the suspended list: the list shows the new record on its own.
@@ -405,6 +408,7 @@ test("a created entitlement opens in the list read after its save, even when an 
   const form = page.getByRole("form", { name: "New entitlement", exact: true });
   await form.getByLabel("Feature").fill("revealed");
   await form.getByLabel("License fingerprint").fill("e".repeat(64));
+  await fillProtectedOwner(form);
   await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
   // That older read, sent before the save, lands while the save is still unanswered; then the save lands.
   const olderRead = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/admin/entitlements" && response.request().method() === "GET");
@@ -430,6 +434,7 @@ test("a create that settles after the operator changes the filter leaves that fi
   await form.getByLabel("License fingerprint").fill("d".repeat(64));
   // The write lands, but the list read that should show it fails.
   api.behavior.refreshFailure = "response-error";
+  await fillProtectedOwner(form);
   await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
   const notice = page.locator(".operatorNotice");
   await expect(notice).toContainText("The change was applied, but its status could not be refreshed.");

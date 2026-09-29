@@ -188,7 +188,7 @@ function insertOrderEvent(db, eventId, receivedAt, status = "accepted") {
 function insertEntitlement(db, fp, {
   status = "active", validUntil = null, customerId = null, now = 1000,
   isTrial = 0, trialBasis = "from_issue", trialDurationSec = 0, trialStartedAt = null,
-  enforcementMode = "legacy",
+  enforcementMode = "device_bound_v1",
 } = {}) {
   db.prepare(
     `INSERT INTO entitlements (project, feature, license_fingerprint, status, valid_until, customer_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_started_at, enforcement_mode, created_at, updated_at)
@@ -415,11 +415,13 @@ test("expiring: an activated activation-basis trial is included via its trial de
   insertEntitlement(db, FP_A, {
     validUntil: null, now,
     isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 5 * DAY, trialStartedAt: now,
+    enforcementMode: "legacy",
   });
   // Not yet activated: no known deadline yet, so it cannot be "expiring soon".
   insertEntitlement(db, FP_B, {
     validUntil: null, now,
     isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 5 * DAY, trialStartedAt: null,
+    enforcementMode: "legacy",
   });
   // from_issue trial: unchanged behavior, still keyed off the stamped valid_until.
   insertEntitlement(db, FP_C, {
@@ -446,6 +448,7 @@ test("expiring: an unstarted activation-basis trial is listed by its stamped val
   insertEntitlement(db, FP_A, {
     validUntil: now + 2 * DAY, now,
     isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 20 * DAY, trialStartedAt: null,
+    enforcementMode: "legacy",
   });
   // The same shape for a protected (device_bound_v1) grant, whose clock rule has its own SQL twin.
   insertEntitlement(db, FP_B, {
@@ -457,6 +460,7 @@ test("expiring: an unstarted activation-basis trial is listed by its stamped val
   insertEntitlement(db, FP_C, {
     validUntil: null, now,
     isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 2 * DAY, trialStartedAt: null,
+    enforcementMode: "legacy",
   });
 
   const data = (await body(await worker.fetch(devReq("/api/admin/report/expiring"), env))).data;
@@ -483,12 +487,14 @@ test("expiring: an activated trial clamps to an EARLIER valid_until, exactly lik
   insertEntitlement(db, FP_A, {
     validUntil: now + 2 * DAY, now,
     isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 20 * DAY, trialStartedAt: now,
+    enforcementMode: "legacy",
   });
   // Same shape, but the operator's valid_until is already in the past: the row is fully expired by
   // the license itself and must be excluded even though the trial clock alone still has 20 days left.
   insertEntitlement(db, FP_B, {
     validUntil: now - DAY, now,
     isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 20 * DAY, trialStartedAt: now,
+    enforcementMode: "legacy",
   });
   // The same clamp, for a protected (device_bound_v1) grant using its own enforcing rule's twin.
   insertEntitlement(db, FP_C, {
@@ -513,7 +519,7 @@ test("force-release helper: reclaims live seats and emits balanced reclaim event
   const db = freshDb();
   const env = devEnv(db);
   const now = Math.floor(Date.now() / 1000);
-  insertEntitlement(db, FP_A, { now });
+  insertEntitlement(db, FP_A, { now, enforcementMode: "legacy" });
   insertSeat(db, FP_A, "seat_live_2", now + 1200, { now });
   insertSeat(db, FP_A, "seat_live_1", now + 600, { now });
   insertSeat(db, FP_A, "seat_dead", now - 60, { now });
@@ -543,13 +549,13 @@ test("force-release: reclaims ONLY live seats and writes a 'reclaim' usage_event
   const db = freshDb();
   const env = devEnv(db);
   const now = Math.floor(Date.now() / 1000);
-  insertEntitlement(db, FP_A, { now });
+  insertEntitlement(db, FP_A, { now, enforcementMode: "legacy" });
   // Two LIVE seats (deadline in the future) + one DEAD seat (deadline in the past).
   insertSeat(db, FP_A, "seat_live_1", now + 600, { now });
   insertSeat(db, FP_A, "seat_live_2", now + 1200, { now });
   insertSeat(db, FP_A, "seat_dead", now - 60, { now });
   // A seat on a DIFFERENT entitlement must be untouched.
-  insertEntitlement(db, FP_B, { now });
+  insertEntitlement(db, FP_B, { now, enforcementMode: "legacy" });
   insertSeat(db, FP_B, "other_live", now + 600, { now });
 
   const id = entitlementId("DEFAULT", "DEFAULT", FP_A);
@@ -585,7 +591,7 @@ test("force-release: 0 released is a valid idempotent {ok:true}", async () => {
   const db = freshDb();
   const env = devEnv(db);
   const now = Math.floor(Date.now() / 1000);
-  insertEntitlement(db, FP_A, { now });
+  insertEntitlement(db, FP_A, { now, enforcementMode: "legacy" });
   // Only a DEAD seat exists -> nothing live to reclaim.
   insertSeat(db, FP_A, "seat_dead", now - 60, { now });
 
@@ -606,7 +612,7 @@ test("force-release: replaying the same Idempotency-Key returns the cached resul
   const db = freshDb();
   const env = devEnv(db);
   const now = Math.floor(Date.now() / 1000);
-  insertEntitlement(db, FP_A, { now });
+  insertEntitlement(db, FP_A, { now, enforcementMode: "legacy" });
   insertSeat(db, FP_A, "seat_live_1", now + 600, { now });
 
   const id = entitlementId("DEFAULT", "DEFAULT", FP_A);
@@ -625,7 +631,7 @@ test("force-release: reason is required (400 reason_required)", async () => {
   const db = freshDb();
   const env = devEnv(db);
   const now = Math.floor(Date.now() / 1000);
-  insertEntitlement(db, FP_A, { now });
+  insertEntitlement(db, FP_A, { now, enforcementMode: "legacy" });
   insertSeat(db, FP_A, "seat_live_1", now + 600, { now });
   const id = entitlementId("DEFAULT", "DEFAULT", FP_A);
   for (const payload of ["{}", JSON.stringify({ reason: "" })]) {
@@ -652,7 +658,7 @@ test("force-release: reader RBAC is blocked; reports + reads stay reader+admin",
   const admin = await accessToken(fixture, "admin@example.com");
   const reader = await accessToken(fixture, "reader@example.com");
   const now = Math.floor(Date.now() / 1000);
-  insertEntitlement(db, FP_A, { validUntil: now + 5 * 86400, now });
+  insertEntitlement(db, FP_A, { validUntil: now + 5 * 86400, now, enforcementMode: "legacy" });
   insertSeat(db, FP_A, "seat_live_1", now + 600, { now });
   const id = entitlementId("DEFAULT", "DEFAULT", FP_A);
 

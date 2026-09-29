@@ -1644,81 +1644,65 @@
               "$ref": "#/components/schemas/EntitlementInput"
             },
             {
-              "if": {
-                "properties": {
-                  "enforcement_mode": {
-                    "const": "device_bound_v1"
-                  }
-                },
-                "required": [
-                  "enforcement_mode"
-                ]
-              },
               "properties": {
+                "customer_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "device_hash": {
+                  "const": ""
+                },
                 "enforcement_mode": {
-                  "description": "Create-only selection. Omission inserts legacy or preserves existing mode. Explicit mode must match an existing row; no in-place conversion. Protected grants require an active customer, matching license/project, zero pool, no legacy device hash/history, and usable policy. Explicit retries require the same tuple and mode; historical missing-mode replies conflict.",
-                  "enum": [
-                    "legacy",
-                    "device_bound_v1"
-                  ],
+                  "const": "device_bound_v1",
+                  "description": "Required. Every create is protected; an omitted or any other mode returns 400 invalid_request. A protected grant requires an active customer, that customer's license for this project, zero pool, an empty device hash, and a usable policy. An existing row of another mode is never converted in place (409 enforcement_mode_conflict). Retries must repeat the same tuple.",
+                  "type": "string"
+                },
+                "feature": {
+                  "pattern": "^[A-Za-z0-9_.:-]{1,15}(?![\\s\\S])",
+                  "type": "string"
+                },
+                "license_fingerprint": {
+                  "maxLength": 64,
+                  "minLength": 64,
+                  "pattern": "^[a-f0-9]{64}$",
+                  "type": "string"
+                },
+                "license_id": {
+                  "minLength": 1,
                   "type": "string"
                 },
                 "max_active_devices": {
-                  "description": "Device limit for a create that selects no policy; omitted, the create keeps the stored limit (1 for a new grant). It is written in the create's own batch. A selected policy stamps its own limit, so sending both returns 400 invalid_request. On a protected grant, a limit below the devices already connected is refused as protected_creation_conflict with data.reason invalid_capacity.",
+                  "description": "Device limit for a create that selects no policy; omitted, the create keeps the stored limit (1 for a new grant). It is written in the create's own batch. A selected policy stamps its own limit, so sending both returns 400 invalid_request. A limit below the devices already connected is refused as protected_creation_conflict with data.reason invalid_capacity.",
                   "maximum": 1000000,
                   "minimum": 1,
                   "type": "integer"
+                },
+                "project": {
+                  "pattern": "^[A-Za-z0-9_.:-]{1,127}(?![\\s\\S])",
+                  "type": "string"
+                },
+                "valid_from": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "valid_until": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
                 }
               },
-              "then": {
-                "properties": {
-                  "customer_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "device_hash": {
-                    "const": ""
-                  },
-                  "feature": {
-                    "pattern": "^[A-Za-z0-9_.:-]{1,15}(?![\\s\\S])",
-                    "type": "string"
-                  },
-                  "license_fingerprint": {
-                    "maxLength": 64,
-                    "minLength": 64,
-                    "pattern": "^[a-f0-9]{64}$",
-                    "type": "string"
-                  },
-                  "license_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "project": {
-                    "pattern": "^[A-Za-z0-9_.:-]{1,127}(?![\\s\\S])",
-                    "type": "string"
-                  },
-                  "valid_from": {
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": [
-                      "integer",
-                      "null"
-                    ]
-                  },
-                  "valid_until": {
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": [
-                      "integer",
-                      "null"
-                    ]
-                  }
-                },
-                "required": [
-                  "customer_id",
-                  "license_id"
-                ]
-              },
+              "required": [
+                "enforcement_mode",
+                "customer_id",
+                "license_id"
+              ],
               "type": "object"
             },
             {
@@ -3214,7 +3198,6 @@
                 "license_customer_mismatch",
                 "fingerprint_in_use",
                 "plan_assignment_conflict",
-                "lease_history_exists",
                 "policy_mismatch",
                 "invalid_trial",
                 "devices_connected",
@@ -11566,7 +11549,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / id / idempotency key (including max_active_devices outside 1-1,000,000 or sent with a policy_id), or a policy_id was supplied while POLICY_STAMP_MODE is off."
+              "description": "Invalid request / json / id / idempotency key (including an omitted or non-protected enforcement_mode, and max_active_devices outside 1-1,000,000 or sent with a policy_id), or a policy_id was supplied while POLICY_STAMP_MODE is off."
             },
             "401": {
               "content": {
@@ -11728,7 +11711,7 @@
                   }
                 }
               },
-              "description": "Terminal or concurrent state, enforcement mismatch, protected eligibility failure (data.reason names the failed rule), or an idempotency key already used for another tuple/mode."
+              "description": "Terminal or concurrent state, enforcement mismatch, protected eligibility failure (data.reason names the failed rule), or an idempotency key already used for another tuple."
             },
             "413": {
               "content": {

@@ -273,7 +273,6 @@ export const PROTECTED_CREATE_REASONS = [
   "license_customer_mismatch",
   "fingerprint_in_use",
   "plan_assignment_conflict",
-  "lease_history_exists",
   "policy_mismatch",
   "invalid_trial",
   "devices_connected",

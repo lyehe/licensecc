@@ -64,6 +64,18 @@ export function makeEnvelope(code, data) {
 }
 makeEnvelope.nextRequestId = 0;
 
+/**
+ * The create form defaults to a protected grant, which needs its owner: type the customer and
+ * license IDs by hand (opening each disclosure only when it is still closed).
+ */
+export async function fillProtectedOwner(form, { customerId = "cus_e2e", licenseId = "lic_e2e" } = {}) {
+  for (const [kind, id] of [["customer", customerId], ["license", licenseId]]) {
+    const disclosure = form.getByText(`Enter ${kind} ID manually`, { exact: true });
+    if (await disclosure.locator("..").getAttribute("open") === null) await disclosure.click();
+    await form.getByLabel(`${kind === "customer" ? "Customer" : "License"} ID`, { exact: true }).fill(id);
+  }
+}
+
 export function makeAdminApiFixture() {
   let nextEntitlementId = 1;
   let nextEventId = 1;
@@ -586,6 +598,7 @@ export function makeAdminApiFixture() {
     const poolSize = overrides.pool_size ?? 0;
     const row = {
       id: `ent-${index}`,
+      enforcement_mode: "device_bound_v1",
       project: "DEFAULT",
       feature: `seed-${index}`,
       license_fingerprint: index.toString(16).padStart(64, "0"),
@@ -1815,7 +1828,7 @@ export function makeAdminApiFixture() {
       const floating = body.feature === "float" || (body.pool_size ?? 0) > 0;
       const row = {
         id: `ent-${nextEntitlementId}`,
-        enforcement_mode: body.enforcement_mode ?? "legacy",
+        enforcement_mode: body.enforcement_mode ?? "device_bound_v1",
         project: body.project,
         feature: body.feature,
         license_fingerprint: body.license_fingerprint,

@@ -15,12 +15,13 @@ import {
 import { handleDeviceTransition, handleReleaseSeats } from "../../dist-worker/worker/groups/devices/operations.js";
 import { handleBatchTransition, handleMutation } from "../../dist-worker/worker/groups/entitlements/operations.js";
 import { handleWebhookMutation } from "../../dist-worker/worker/webhooks.js";
-import { MockD1, fingerprint } from "./fixtures.mjs";
+import { MockD1, fingerprint, protectedGrant } from "./fixtures.mjs";
 
 const ACTOR = { subject: "transition-contract-test", email: "admin@example.com", role: "admin", actorType: "dev" };
 const REQUEST_ID = "transition-contract-request";
-const PROJECT = "DEFAULT";
-const FEATURE = "DEFAULT";
+// Every admin create is protected, so the grant belongs to the owner MockD1 seeds.
+const PROJECT = protectedGrant.project;
+const FEATURE = protectedGrant.feature;
 const ENTITLEMENT_ID = entitlementId(PROJECT, FEATURE, fingerprint);
 const DEVICE_KEY_ID = `sha256:${"d".repeat(64)}`;
 
@@ -313,7 +314,7 @@ async function invokeEntitlementTransition(action, sourceStatus) {
   const db = new MockD1();
   const env = { DB: db };
   const created = await handleMutation(
-    post("/api/admin/entitlements", { project: PROJECT, feature: FEATURE, license_fingerprint: fingerprint, status: sourceStatus }),
+    post("/api/admin/entitlements", { ...protectedGrant, status: sourceStatus }),
     env,
     ACTOR,
     REQUEST_ID,
@@ -435,7 +436,7 @@ const TRANSITION_CONTRACTS = [
     invoke: async () => {
       const db = new MockD1();
       const env = { DB: db };
-      const created = await handleMutation(post("/api/admin/entitlements", { project: PROJECT, feature: FEATURE, license_fingerprint: fingerprint }), env, ACTOR, REQUEST_ID);
+      const created = await handleMutation(post("/api/admin/entitlements", protectedGrant), env, ACTOR, REQUEST_ID);
       const id = (await created.json()).data.id;
       return handleMutation(post(`/api/admin/entitlements/${id}/disable`, { reason: "support" }), env, ACTOR, REQUEST_ID);
     },
@@ -450,7 +451,7 @@ const TRANSITION_CONTRACTS = [
     invoke: async () => {
       const db = new MockD1();
       const env = { DB: db };
-      const created = await handleMutation(post("/api/admin/entitlements", { project: PROJECT, feature: FEATURE, license_fingerprint: fingerprint, status: "disabled" }), env, ACTOR, REQUEST_ID);
+      const created = await handleMutation(post("/api/admin/entitlements", { ...protectedGrant, status: "disabled" }), env, ACTOR, REQUEST_ID);
       const id = (await created.json()).data.id;
       return handleMutation(post(`/api/admin/entitlements/${id}/reenable`), env, ACTOR, REQUEST_ID);
     },
@@ -465,7 +466,7 @@ const TRANSITION_CONTRACTS = [
     invoke: async () => {
       const db = new MockD1();
       const env = { DB: db };
-      const created = await handleMutation(post("/api/admin/entitlements", { project: PROJECT, feature: FEATURE, license_fingerprint: fingerprint }), env, ACTOR, REQUEST_ID);
+      const created = await handleMutation(post("/api/admin/entitlements", protectedGrant), env, ACTOR, REQUEST_ID);
       const id = (await created.json()).data.id;
       return handleMutation(post(`/api/admin/entitlements/${id}/revoke`, { reason: "support" }), env, ACTOR, REQUEST_ID);
     },
@@ -547,7 +548,7 @@ const TRANSITION_CONTRACTS = [
     invoke: async () => {
       const db = new MockD1();
       const env = { DB: db };
-      const created = await handleMutation(post("/api/admin/entitlements", { project: PROJECT, feature: FEATURE, license_fingerprint: fingerprint }), env, ACTOR, REQUEST_ID);
+      const created = await handleMutation(post("/api/admin/entitlements", protectedGrant), env, ACTOR, REQUEST_ID);
       const id = (await created.json()).data.id;
       return handleBatchTransition(post("/api/admin/entitlements/batch", { action: "disable", reason: "support", ids: [id] }), env, ACTOR, REQUEST_ID);
     },
@@ -726,7 +727,7 @@ test("compiled entitlement handler serves the winner cache for a same-key guarde
 test("compiled batch transition preserves duplicate input identity and per-row outcome evidence", async () => {
   const db = new MockD1();
   const env = { DB: db };
-  const created = await handleMutation(post("/api/admin/entitlements", { project: PROJECT, feature: FEATURE, license_fingerprint: fingerprint }), env, ACTOR, REQUEST_ID);
+  const created = await handleMutation(post("/api/admin/entitlements", protectedGrant), env, ACTOR, REQUEST_ID);
   const id = (await created.json()).data.id;
   const response = await handleBatchTransition(
     post("/api/admin/entitlements/batch", { action: "disable", reason: "support", ids: [id, id] }),

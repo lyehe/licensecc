@@ -1,6 +1,6 @@
 import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
+import { fillProtectedOwner, makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 for (const mode of [undefined, "legacy"]) {
   test(`protected creation does not accept a ${mode ?? "missing"} response mode`, async ({ page }) => {
@@ -57,10 +57,10 @@ test("protected creation requires ownership and preserves mode and key through r
   expect(attempts[1]).toEqual(attempts[0]);
   expect(attempts[0].body.enforcement_mode).toBe("device_bound_v1");
   await expect(page.getByRole("status").filter({ hasText: "Status reconciled." })).toBeVisible();
-  // The reconciled create opens its record: the form closes, and a new one starts over as legacy.
+  // The reconciled create opens its record: the form closes, and a new one starts over as protected.
   await expect(form).toHaveCount(0);
   await page.getByRole("button", { name: "New entitlement", exact: true }).click();
-  await expect(form.getByLabel("Protection", { exact: true })).toHaveValue("legacy");
+  await expect(form.getByLabel("Protection", { exact: true })).toHaveValue("device_bound_v1");
 });
 
 async function openActionMenu(button) {
@@ -213,6 +213,7 @@ test("admin UI runs bulk transitions, global search deep-link, and CSV export", 
     const createForm = page.locator("section.editorLayout form");
     await createForm.getByLabel("Feature").fill(feature);
     await createForm.getByLabel("License fingerprint").fill(fingerprint);
+    await fillProtectedOwner(createForm);
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
     await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   }
@@ -268,6 +269,7 @@ test("admin UI retains the server-owned four-entitlement batch limit", async ({ 
     if (!await createForm.isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
     await createForm.getByLabel("Feature").fill(`batch-${index}`);
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
+    await fillProtectedOwner(createForm);
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
     await expect.poll(() => api.requests.creates).toBe(index + 1);
   }
@@ -298,6 +300,7 @@ test("admin UI gates a batch revoke behind an exact typed REVOKE phrase", async 
     if (!await createForm.isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
     await createForm.getByLabel("Feature").fill(`revoke-batch-${index}`);
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
+    await fillProtectedOwner(createForm);
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
     await expect.poll(() => api.requests.creates).toBe(index + 1);
   }

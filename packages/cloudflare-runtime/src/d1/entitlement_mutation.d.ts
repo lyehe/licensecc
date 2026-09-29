@@ -4,7 +4,6 @@ import type {
   EntitlementDeviceRecord,
   EntitlementEventType,
   EntitlementInput,
-  EntitlementCreateInput,
   EntitlementKey,
   EntitlementPatch,
   EntitlementRecord,
@@ -107,9 +106,10 @@ export function writeEntitlementWithAudit(
   options?: { allowNoWrite?: boolean },
 ): Promise<MutationResult<EntitlementRecord> | null>;
 
+/** Writes only protected grants; a caller may name that mode and no other (`invalid_patch`). */
 export function createEntitlement(
   env: MutationEnv,
-  input: EntitlementCreateInput,
+  input: EntitlementInput & { enforcement_mode?: "device_bound_v1" },
   ctx: MutationContext,
   reason?: string,
   eventTypeOverride?: EntitlementEventType,

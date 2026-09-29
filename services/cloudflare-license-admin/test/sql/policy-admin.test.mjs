@@ -93,6 +93,18 @@ function freshDb() {
 
 const FP_A = "a".repeat(64);
 const FP_B = "b".repeat(64);
+const LICENSE_FOR = { [FP_A]: "lic_a", [FP_B]: "lic_b" };
+
+// Every entitlement create is protected: an active customer holds one DEFAULT licence per fingerprint.
+function seedOwner(db) {
+  db.exec(`INSERT INTO customers (id, name, created_at, updated_at) VALUES ('cus_x', 'Owner', 1, 1);
+    INSERT INTO licenses (id, customer_id, project, created_at, updated_at) VALUES ('lic_a', 'cus_x', 'DEFAULT', 1, 1), ('lic_b', 'cus_x', 'DEFAULT', 1, 1);`);
+}
+
+function grantBody(fingerprint, fields = {}) {
+  return JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint, customer_id: "cus_x",
+    license_id: LICENSE_FOR[fingerprint], enforcement_mode: "device_bound_v1", ...fields });
+}
 
 // --- Cloudflare Access fixture (reader vs admin RBAC) ------------------------
 async function accessFixture(t) {
@@ -427,13 +439,13 @@ test("policy: list filters by project/type/status with cursor pagination; detail
 });
 
 test("stamp: POLICY_STAMP_MODE off rejects a policy_id create (400 policy_stamping_disabled)", async () => {
-  const db = freshDb();
+  const db = freshDb(); seedOwner(db);
   const env = devEnv(db); // no POLICY_STAMP_MODE -> off
   const policy = await createPolicy(env, { project: "DEFAULT", name: "TrialOff", type: "trial", trial_duration_sec: 1209600 });
 
   const res = await worker.fetch(devReq("/api/admin/entitlements", {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: FP_A, policy_id: policy.id }),
+    body: grantBody(FP_A, { policy_id: policy.id }),
   }), env);
   assert.equal(res.status, 400);
   assert.equal((await body(res)).code, "policy_stamping_disabled");
@@ -443,13 +455,13 @@ test("stamp: POLICY_STAMP_MODE off rejects a policy_id create (400 policy_stampi
   // Without a policy_id, the exact current behavior still works even in off mode.
   const plain = await worker.fetch(devReq("/api/admin/entitlements", {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: FP_B }),
+    body: grantBody(FP_B),
   }), env);
   assert.equal(plain.status, 200);
 });
 
 test("stamp: POLICY_STAMP_MODE on stamps the policy window/ttl + capacity/trial columns", async () => {
-  const db = freshDb();
+  const db = freshDb(); seedOwner(db);
   const env = devEnv(db, { POLICY_STAMP_MODE: "on" });
   const policy = await createPolicy(env, {
     project: "DEFAULT",
@@ -459,14 +471,12 @@ test("stamp: POLICY_STAMP_MODE on stamps the policy window/ttl + capacity/trial 
     trial_duration_sec: 1209600, // 14 days
     trial_one_per_device: 1,
     trial_require_device_proof: 1,
-    pool_size: 4,
     max_active_devices: 2,
-    max_borrow_sec: 7200,
   });
 
   const res = await worker.fetch(devReq("/api/admin/entitlements", {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: FP_A, policy_id: policy.id, customer_id: "cus_x" }),
+    body: grantBody(FP_A, { policy_id: policy.id }),
   }), env);
   assert.equal(res.status, 200, await res.clone().text());
   const data = (await body(res)).data;
@@ -478,16 +488,15 @@ test("stamp: POLICY_STAMP_MODE on stamps the policy window/ttl + capacity/trial 
   assert.ok(Math.abs(data.valid_until - (stampNow + 1209600)) <= 5, `valid_until ~ now+trial_duration, got ${data.valid_until}`);
 
   // The capacity + frozen-trial side-state landed on the SAME row (atomic with the INSERT).
-  const row = db.prepare("SELECT policy_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, pool_size, max_active_devices, max_borrow_sec, assertion_ttl_seconds FROM entitlements WHERE project='DEFAULT' AND feature='DEFAULT' AND license_fingerprint=?").get(FP_A);
+  const row = db.prepare("SELECT policy_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, pool_size, max_active_devices, assertion_ttl_seconds FROM entitlements WHERE project='DEFAULT' AND feature='DEFAULT' AND license_fingerprint=?").get(FP_A);
   assert.equal(row.policy_id, policy.id);
   assert.equal(row.is_trial, 1);
   assert.equal(row.trial_expiration_basis, "from_issue");
   assert.equal(row.trial_duration_sec, 1209600);
   assert.equal(row.trial_one_per_device, 1);
   assert.equal(row.trial_require_device_proof, 1);
-  assert.equal(row.pool_size, 4);
+  assert.equal(row.pool_size, 0);
   assert.equal(row.max_active_devices, 2);
-  assert.equal(row.max_borrow_sec, 7200);
   assert.equal(row.assertion_ttl_seconds, 900);
 
   // The stamp produced exactly one entitlement audit event (create), proving the side-write rode the same batch.
@@ -495,7 +504,7 @@ test("stamp: POLICY_STAMP_MODE on stamps the policy window/ttl + capacity/trial 
 });
 
 test("stamp: a non-trial policy freezes is_trial=0 and applies its duration window", async () => {
-  const db = freshDb();
+  const db = freshDb(); seedOwner(db);
   const env = devEnv(db, { POLICY_STAMP_MODE: "on" });
   const policy = await createPolicy(env, {
     project: "DEFAULT",
@@ -506,7 +515,7 @@ test("stamp: a non-trial policy freezes is_trial=0 and applies its duration wind
   });
   const res = await worker.fetch(devReq("/api/admin/entitlements", {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: FP_A, policy_id: policy.id }),
+    body: grantBody(FP_A, { policy_id: policy.id }),
   }), env);
   assert.equal(res.status, 200);
   const data = (await body(res)).data;
@@ -522,12 +531,12 @@ test("stamp: a non-trial policy freezes is_trial=0 and applies its duration wind
 });
 
 test("stamp: unknown or disabled policy_id is 404 policy_not_found", async () => {
-  const db = freshDb();
+  const db = freshDb(); seedOwner(db);
   const env = devEnv(db, { POLICY_STAMP_MODE: "on" });
 
   const unknown = await worker.fetch(devReq("/api/admin/entitlements", {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: FP_A, policy_id: "does-not-exist" }),
+    body: grantBody(FP_A, { policy_id: "does-not-exist" }),
   }), env);
   assert.equal(unknown.status, 404);
   assert.equal((await body(unknown)).code, "policy_not_found");
@@ -537,7 +546,7 @@ test("stamp: unknown or disabled policy_id is 404 policy_not_found", async () =>
   await worker.fetch(devReq(`/api/admin/policies/${policy.id}/disable`, { method: "POST", body: JSON.stringify({ reason: "eol" }) }), env);
   const disabled = await worker.fetch(devReq("/api/admin/entitlements", {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: FP_A, policy_id: policy.id }),
+    body: grantBody(FP_A, { policy_id: policy.id }),
   }), env);
   assert.equal(disabled.status, 404);
   assert.equal((await body(disabled)).code, "policy_not_found");

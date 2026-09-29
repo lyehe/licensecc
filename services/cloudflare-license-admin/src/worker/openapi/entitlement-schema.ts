@@ -34,23 +34,18 @@ export const entitlementRecordSchema = {
 export const entitlementCreateSchema = {
   allOf: [{ $ref: "#/components/schemas/EntitlementInput" }, {
     type: "object",
+    required: ["enforcement_mode", "customer_id", "license_id"],
     properties: {
-      enforcement_mode: { type: "string", enum: ["legacy", "device_bound_v1"], description: "Create-only selection. Omission inserts legacy or preserves existing mode. Explicit mode must match an existing row; no in-place conversion. Protected grants require an active customer, matching license/project, zero pool, no legacy device hash/history, and usable policy. Explicit retries require the same tuple and mode; historical missing-mode replies conflict." },
-      max_active_devices: { type: "integer", minimum: 1, maximum: MAX_DEVICE_LIMIT, description: "Device limit for a create that selects no policy; omitted, the create keeps the stored limit (1 for a new grant). It is written in the create's own batch. A selected policy stamps its own limit, so sending both returns 400 invalid_request. On a protected grant, a limit below the devices already connected is refused as protected_creation_conflict with data.reason invalid_capacity." },
-    },
-    if: { required: ["enforcement_mode"], properties: { enforcement_mode: { const: "device_bound_v1" } } },
-    then: {
-      required: ["customer_id", "license_id"],
-      properties: {
-        project: { type: "string", pattern: "^[A-Za-z0-9_.:-]{1,127}(?![\\s\\S])" },
-        feature: { type: "string", pattern: "^[A-Za-z0-9_.:-]{1,15}(?![\\s\\S])" },
-        license_fingerprint: { type: "string", minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$" },
-        device_hash: { const: "" },
-        customer_id: { type: "string", minLength: 1 },
-        license_id: { type: "string", minLength: 1 },
-        valid_from: { type: ["integer", "null"], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
-        valid_until: { type: ["integer", "null"], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
-      },
+      enforcement_mode: { type: "string", const: "device_bound_v1", description: "Required. Every create is protected; an omitted or any other mode returns 400 invalid_request. A protected grant requires an active customer, that customer's license for this project, zero pool, an empty device hash, and a usable policy. An existing row of another mode is never converted in place (409 enforcement_mode_conflict). Retries must repeat the same tuple." },
+      max_active_devices: { type: "integer", minimum: 1, maximum: MAX_DEVICE_LIMIT, description: "Device limit for a create that selects no policy; omitted, the create keeps the stored limit (1 for a new grant). It is written in the create's own batch. A selected policy stamps its own limit, so sending both returns 400 invalid_request. A limit below the devices already connected is refused as protected_creation_conflict with data.reason invalid_capacity." },
+      project: { type: "string", pattern: "^[A-Za-z0-9_.:-]{1,127}(?![\\s\\S])" },
+      feature: { type: "string", pattern: "^[A-Za-z0-9_.:-]{1,15}(?![\\s\\S])" },
+      license_fingerprint: { type: "string", minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$" },
+      device_hash: { const: "" },
+      customer_id: { type: "string", minLength: 1 },
+      license_id: { type: "string", minLength: 1 },
+      valid_from: { type: ["integer", "null"], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+      valid_until: { type: ["integer", "null"], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
     },
   }, {
     // A selected policy owns the device limit.

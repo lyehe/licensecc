@@ -279,11 +279,20 @@ async function body(response) {
   return response.json();
 }
 
+// Every create is protected: the grant belongs to an active customer through its own licence (a
+// licence pairs with one fingerprint per project). Seeds that owner and returns the create body.
+function grantBody(db, fingerprint, extra = {}) {
+  const license = `lic_grant_${fingerprint.slice(0, 8)}`;
+  db.prepare("INSERT OR IGNORE INTO customers (id, name, created_at, updated_at) VALUES ('cus_grants', 'Grant owner', ?, ?)").run(NOW, NOW);
+  db.prepare("INSERT OR IGNORE INTO licenses (id, customer_id, project, label, created_at, updated_at) VALUES (?, 'cus_grants', 'DEFAULT', '', ?, ?)").run(license, NOW, NOW);
+  return { project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint, customer_id: "cus_grants", license_id: license, enforcement_mode: "device_bound_v1", ...extra };
+}
+
 // Seed an entitlement through the worker so createEntitlement owns the full column set (no drift).
 async function createEntitlementFor(env, fingerprint, extra = {}) {
   const res = await worker.fetch(devReq("/api/admin/entitlements", {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint, ...extra }),
+    body: JSON.stringify(grantBody(env.DB.db, fingerprint, extra)),
   }), env);
   assert.equal(res.status, 200, `seed entitlement ${fingerprint}: ${await res.clone().text()}`);
   return (await body(res)).data;
@@ -534,10 +543,10 @@ test("batch: reader RBAC is blocked; createEntitlement remains byte-identical (u
 
   // Admin seeds two entitlements; capture the create audit count to prove batch never touches create.
   const a = (await body(await worker.fetch(accessReq("/api/admin/entitlements", admin, {
-    method: "POST", body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: FP_A }),
+    method: "POST", body: JSON.stringify(grantBody(db, FP_A)),
   }), env))).data;
   const b = (await body(await worker.fetch(accessReq("/api/admin/entitlements", admin, {
-    method: "POST", body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: FP_B }),
+    method: "POST", body: JSON.stringify(grantBody(db, FP_B)),
   }), env))).data;
   const createEvents = db.prepare("SELECT COUNT(*) AS c FROM entitlement_events WHERE event_type='create'").get().c;
   assert.equal(createEvents, 2);

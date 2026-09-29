@@ -8,7 +8,7 @@ const failure = (code, data, requestId = "req-7") => ({ kind: "failure", code, r
 test("every protected-create reason reads as one actionable sentence, never its code", async () => {
   const onboarding = await loadWorkflowModule("features/entitlements/protectedCreate.ts");
   const { PROTECTED_CREATE_REASONS } = await loadWorkflowModule("../shared/api.ts");
-  assert.equal(PROTECTED_CREATE_REASONS.length, 11);
+  assert.equal(PROTECTED_CREATE_REASONS.length, 10);
   const sentences = new Set();
   for (const reason of PROTECTED_CREATE_REASONS) {
     const message = onboarding.protectedCreateFailureMessage(failure("protected_creation_conflict", { reason }));

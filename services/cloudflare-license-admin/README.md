@@ -56,7 +56,7 @@ use **Reconcile status** to recover the original creation safely.
 The whole path runs in the console; no SQL is needed.
 
 1. Create the customer with **Customers → Add user** (above).
-2. Open **License access → New entitlement** and choose **Protected devices**.
+2. Open **License access → New entitlement**; **Protected devices** is the default.
    Set the application's project and feature, then choose the customer: the
    customer list shows the first 20 matches, and typing part of a name, email,
    or ID narrows it. The license list shows only that customer's licenses for
@@ -95,7 +95,6 @@ as a sentence with the request reference:
 | `license_customer_mismatch` | The license belongs to another customer or project. |
 | `fingerprint_in_use` | Another license (entitlement) already pairs this fingerprint or license differently, or a concurrent create took this exact grant. |
 | `plan_assignment_conflict` | The license's plan assignment uses another fingerprint. |
-| `lease_history_exists` | The fingerprint has legacy device, lease, seat, usage, or non-protected audit history for this feature. |
 | `policy_mismatch` | The policy is not an active policy of this project, or it changed or was disabled after it was read. |
 | `invalid_trial` | The trial settings cannot start a protected trial. |
 | `devices_connected` | The create would move the grant to another customer while devices are still connected; disconnect them first. |
@@ -108,19 +107,19 @@ during application enrollment. The backend checks key possession and allocates
 the device binding. This setting does not certify hardware attestation or backend
 deployment readiness.
 
-Protection is create-only: existing legacy grants cannot be converted in place.
-The API accepts `enforcement_mode: "device_bound_v1"` or `"legacy"` on admin
-creation only. Omission retains compatibility (legacy insert or existing-mode
-upsert); sync and PATCH reject the field. Explicit retries must use the same tuple
-and mode. Historical responses without mode cannot establish protected success.
-The UI preserves the original request/key through **Reconcile status**.
+Every admin create is protected. `POST /api/admin/entitlements` requires
+`enforcement_mode: "device_bound_v1"`; an omitted or `"legacy"` mode returns
+`400 invalid_request`. Sync and PATCH reject the field. An existing legacy grant is
+never converted in place (`409 enforcement_mode_conflict`). Retries must use the
+same tuple, and a stored reply that does not show the protected mode cannot
+establish success. The UI preserves the original request/key through **Reconcile
+status**.
 
 Eligibility and copied policy state are checked in the mutation batch. Conflicts
-leave no partial grant, audit event or replay record. Retained legacy history
-blocks protected creation; empty history does not prove that external or pruned
-legacy grants never existed. Production still requires the issuer/cohort inventory
-and cutover gates in ADR 0006. The complete deployment requires the backend's
-baseline schema.
+leave no partial grant, audit event or replay record. Earlier activity for the same
+fingerprint, such as a refused device connection, does not block re-creating the
+grant. Production still requires the issuer/cohort inventory and cutover gates in
+ADR 0006. The complete deployment requires the backend's baseline schema.
 
 ### Device limit
 

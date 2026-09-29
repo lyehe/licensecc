@@ -17,6 +17,7 @@ import {
   fingerprint,
   json,
   keyOf,
+  protectedGrant,
   rotatableAccessFixture,
   syncAuthed,
   syncEnv,
@@ -71,7 +72,7 @@ async function assertMutationBlockedBeforeAuthOrPersistence(fixture, token, head
       "content-type": "text/plain;charset=UTF-8",
       ...headers,
     },
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint }),
+    body: JSON.stringify(protectedGrant),
   }), accessEnv(tracked.db, fixture));
   assert.equal(response.status, 403, options.label ?? "cross-site mutation is rejected");
   const responseBody = await json(response);
@@ -157,7 +158,7 @@ test("unsafe mutation method handling is centralized for current and future rout
 test("same-origin browser JSON, canonical origins, and non-browser Access clients remain compatible", async (t) => {
   const fixture = await accessFixture(t);
   const token = await accessToken(fixture, "admin@example.com");
-  const body = JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint });
+  const body = JSON.stringify(protectedGrant);
 
   const browserDb = new MockD1();
   await assertMutationAccepted(accessRequest("/api/admin/entitlements", token, {
