@@ -38,15 +38,6 @@ updates:
         patterns:
           - "*"
 
-  - package-ecosystem: uv
-    directory: "/services/cloudflare-licensing-backend/scripts/pg-parity"
-    schedule:
-      interval: weekly
-    groups:
-      postgres-parity:
-        patterns:
-          - "*"
-
   - package-ecosystem: nuget
     directory: "/sdks/dotnet"
     schedule:

@@ -22,8 +22,8 @@ const ZERO_TRIAL = Object.freeze({
 export const PLAN_PROJECTION_PREVIEW_ID_PATTERN = /^ppv_[A-Za-z0-9_-]{1,124}$/;
 
 // 9999-12-31T23:59:59Z. This is safely representable by JavaScript and the
-// INTEGER/BIGINT storage used by the D1 and PostgreSQL schema ports, while
-// keeping an externally supplied support window within a practical epoch.
+// INTEGER storage used by the D1 schema, while keeping an externally
+// supplied support window within a practical epoch.
 export const MAX_SUPPORT_UNTIL_EPOCH_SECONDS = 253_402_300_799;
 
 export function isPlanProjectionPreviewId(value) {

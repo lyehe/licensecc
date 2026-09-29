@@ -36,8 +36,7 @@ For normal work in this repository, target `main` unless an issue or maintainer 
 Before opening a pull request:
 
 Install Python 3.12, uv 0.12.5 (as pinned by `uv.toml`), Node.js 22, npm
-10.9.8, and the native prerequisites listed in the README. The PostgreSQL
-schema checker resolves `sqlglot` only from its checked-in lock.
+10.9.8, and the native prerequisites listed in the README.
 
 ```powershell
 npm ci

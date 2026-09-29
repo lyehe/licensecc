@@ -195,7 +195,6 @@ try {
     if ($IncludeBackend -or $IncludeServices) {
         Invoke-NpmScript "Backend" $backendDir "test"
         Invoke-NpmScript "Backend" $backendDir "test:sql"
-        Invoke-NpmScript "Backend" $backendDir "test:pg"
     }
 
     if ($IncludeServices) {
@@ -214,7 +213,6 @@ try {
 
     if ($IncludeSchemaParity) {
         Invoke-NpmScript "Backend" $backendDir "schema:parity"
-        Invoke-NpmScript "Backend" $backendDir "schema:parity:pg"
     }
 
     if ($IncludeE2E) {
@@ -257,7 +255,7 @@ try {
     }
 
     if ($IncludeServices -and -not $IncludeSchemaParity) {
-        Write-Host "==> Service checks exclude schema parity by default. Add -IncludeSchemaParity for D1/PostgreSQL parity gates."
+        Write-Host "==> Service checks exclude schema parity by default. Add -IncludeSchemaParity for D1 schema parity."
     }
 
     if ($IncludeDryRun) {

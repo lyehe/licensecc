@@ -61,7 +61,6 @@ test("Dependabot covers every maintained dependency root without auto-merge", ()
     "nuget:/sdks/dotnet",
     "pip:/doc",
     "uv:/sdks/python",
-    "uv:/services/cloudflare-licensing-backend/scripts/pg-parity",
   ].sort();
 
   assert.deepEqual(actual, expected);
@@ -75,7 +74,6 @@ test("Dependabot covers every maintained dependency root without auto-merge", ()
   for (const relativePath of [
     "package-lock.json",
     "sdks/python/uv.lock",
-    "services/cloudflare-licensing-backend/scripts/pg-parity/uv.lock",
     "sdks/dotnet/src/Licensecc.Client/packages.lock.json",
     "doc/requirements.txt",
   ]) {

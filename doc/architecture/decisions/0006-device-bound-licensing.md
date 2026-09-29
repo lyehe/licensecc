@@ -83,9 +83,8 @@ Future conversion needs reviewed issuer fencing and durable cutover evidence,
 including externally issued and pruned grants. Development uses fresh synthetic
 protected cohorts. Rollback must preserve mode, generations, identities and holds.
 
-PostgreSQL remains a fenced v1 verification adapter. Its disposable bootstrap
-mirrors schema and row guards, with static parity and real-engine conformance
-tests; protected issuance remains D1-only.
+D1 is the only store for protected state; the repository has no PostgreSQL
+adapter.
 
 ## Consequences and release evidence
 

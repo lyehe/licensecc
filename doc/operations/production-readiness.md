@@ -47,11 +47,6 @@ The initial hosted production scope is:
 - the Windows and Linux native validation matrix documented by the release
   evidence.
 
-PostgreSQL/Supabase remains a fenced partial adapter. A failing conformance
-test must be fixed, but the adapter is not a production runtime target until it
-passes every promotion requirement in
-the {doc}`database backend promotion rule <database-backends>`.
-
 ## Accountable roles
 
 Named people or teams are configured outside the source tree. Every release
@@ -121,8 +116,8 @@ The scheduled/manual network link check is recorded separately with
 
 ### PRD-02: repository and environment protection
 
-- `main` requires the reviewed Linux, Windows, service, contract, release, and
-  applicable PostgreSQL checks.
+- `main` requires the reviewed Linux, Windows, service, contract, and release
+  checks.
 - Force-push and branch deletion are disabled, and review requirements apply
   to release-sensitive paths.
 - The `production`, `pypi`, `nuget`, and `github-release` environments are
@@ -301,7 +296,7 @@ their own.
 - **Objective:** turn the working tree and launch assumptions into one
   reviewable candidate definition before expensive or stateful verification.
 - **Deliverables:** exact full commit SHA and version, classified checkout,
-  declared `P`, launch-scope and PostgreSQL-fence confirmation, named actor for
+  declared `P`, launch-scope confirmation, named actor for
   every accountable role, open-risk ledger, evidence index, protected archive
   owner, and a retention-until date at least 12 months after the final go/no-go
   decision.
@@ -340,7 +335,7 @@ their own.
   evidence and neither replaces nor is replaced by the deterministic local
   `npm run check:docs` build.
 - **Protected verification/evidence:** retain Linux, Windows, services,
-  contracts, PostgreSQL conformance, security, and release required-check URLs
+  contracts, security, and release required-check URLs
   for the same SHA, plus the separate network-link run and its UTC result.
 - **Binary exit criterion:** pass only when every applicable command and
   required check exits successfully with no skip, waiver, or SHA mismatch and

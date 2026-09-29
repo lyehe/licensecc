@@ -30,7 +30,6 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   byte-for-byte C++ parity pinned by shared golden vectors, plus thin HTTP clients.
 - Native Linux ARM64 CI/purity coverage, Azure-aware environment classification, and signed
   host-defined v201 `custom-limit` policies with fail-closed runtime evaluators.
-- Fenced PostgreSQL/Supabase adapter for the public verifier path, with D1↔PG schema-parity gates.
 - CI: Linux/Windows C++ matrices, C/C++ formatting gate, and a services workflow covering
   per-service lint, unit/API tests, SQL suites, Vite UI workflow tests, and schema parity.
 - Protected platform publication and manual production-deployment workflows with exact tag,

@@ -393,59 +393,6 @@ function assertExactCriticalRun(step, expected, label) {
   assert.equal(run.value, expected, `${label}: critical step command drifted`);
 }
 
-function assertPostgresWorkflowContract(workflow, relativePath = ".github/workflows/postgres-conformance.yml") {
-  assertNoTopLevelWorkflowDefaults(workflow, relativePath);
-  assert.deepEqual(
-    workflowTriggerNames(workflow).sort(),
-    ["pull_request", "schedule", "workflow_dispatch"],
-    `${relativePath}: workflow triggers must be pull_request, schedule, and workflow_dispatch only`,
-  );
-  assert.deepEqual(
-    workflowTriggerPaths(workflow, "pull_request"),
-    [
-      ".github/workflows/postgres-conformance.yml",
-      "package.json",
-      "package-lock.json",
-      "packages/cloudflare-runtime/**",
-      "packages/licensing-domain/**",
-      "scripts/generate-wrangler-types.mjs",
-      "services/cloudflare-licensing-backend/**",
-    ],
-    `${relativePath}: pull_request paths must cover every input to live PostgreSQL conformance`,
-  );
-  assert.match(
-    workflow,
-    /^\s*image:\s*postgres:16-alpine@sha256:[0-9a-f]{64}\s*$/mu,
-    "PostgreSQL service image must be immutable",
-  );
-
-  const job = workflowJobLinesFromSource(workflow, "postgres-conformance");
-  assert.deepEqual(activeWorkflowDirectives(job), [], `${relativePath}: postgres-conformance must not use execution controls`);
-
-  const install = namedWorkflowStep(job, "Install locked workspace", relativePath);
-  assertExactCriticalRun(install, "npm ci", "Install locked workspace");
-
-  const schema = namedWorkflowStep(job, "Apply fresh disposable PostgreSQL schema", relativePath);
-  assertExactCriticalRun(
-    schema,
-    'docker exec -i "${{ job.services.postgres.id }}" psql --username postgres --dbname licensecc --set ON_ERROR_STOP=on < services/cloudflare-licensing-backend/supabase-postgres/schema.pg.sql',
-    "Apply fresh disposable PostgreSQL schema",
-  );
-
-  const conformance = namedWorkflowStep(job, "Run actual Worker, adapter, nonce, CLI, and transaction conformance", relativePath);
-  assertExactCriticalRun(
-    conformance,
-    "npm run test:pg:real --workspace @licensecc/cloudflare-licensing-backend",
-    "PostgreSQL conformance",
-  );
-  const environment = conformance.children.get("env");
-  assert.ok(environment, "PostgreSQL conformance requires a direct env mapping");
-  assert.deepEqual(
-    Object.fromEntries([...environment].map(([key, property]) => [key, property.value])),
-    { DATABASE_URL: "postgresql://postgres:conformance-only@127.0.0.1:5432/licensecc" },
-  );
-}
-
 function workflowReferences() {
   return trackedWorkflowPaths().flatMap((path) => {
     const content = source(path);
@@ -1049,63 +996,15 @@ test("capability evidence remains a PR gate locally and in repository-quality", 
   );
 });
 
-test("change-aware and scheduled PostgreSQL 16 conformance runs the real fenced implementations", () => {
-  const workflow = source(".github/workflows/postgres-conformance.yml");
-  assertPostgresWorkflowContract(workflow);
-});
-
-test("PostgreSQL workflow commands cannot be replaced by inactive or bypassed YAML", () => {
-  const workflow = source(".github/workflows/postgres-conformance.yml");
-  const decoys = [
-    workflow.replace("  pull_request:\n", "  # pull_request:\n"),
-    workflow.replace('      - "services/cloudflare-licensing-backend/**"\n', ""),
-    workflow.replace("run: npm ci", "run: '# npm ci'"),
-    workflow.replace(
-      'docker exec -i "${{ job.services.postgres.id }}"',
-      '# docker exec -i "${{ job.services.postgres.id }}"',
-    ),
-    workflow.replace(
-      "run: npm run test:pg:real --workspace @licensecc/cloudflare-licensing-backend",
-      "run: echo 'npm run test:pg:real --workspace @licensecc/cloudflare-licensing-backend'",
-    ),
-    workflow.replace(
-      "DATABASE_URL: postgresql://postgres:conformance-only@127.0.0.1:5432/licensecc",
-      "# DATABASE_URL: postgresql://postgres:conformance-only@127.0.0.1:5432/licensecc",
-    ),
-    workflow.replace(
-      "- name: Run actual Worker, adapter, nonce, CLI, and transaction conformance",
-      "- name: Run actual Worker, adapter, nonce, CLI, and transaction conformance\n        if: ${{ false }}",
-    ),
-    workflow.replace(
-      "- name: Run actual Worker, adapter, nonce, CLI, and transaction conformance",
-      "- name: Run actual Worker, adapter, nonce, CLI, and transaction conformance\n        continue-on-error: true",
-    ),
-    workflow.replace(
-      "  postgres-conformance:\n    runs-on:",
-      "  postgres-conformance:\n    if: ${{ false }}\n    runs-on:",
-    ),
-    workflow.replace(
-      "  postgres-conformance:\n    runs-on:",
-      "  postgres-conformance:\n    continue-on-error: true\n    runs-on:",
-    ),
-    workflow.replace(
-      "- name: Run actual Worker, adapter, nonce, CLI, and transaction conformance",
-      '- name: Run actual Worker, adapter, nonce, CLI, and transaction conformance\n        "if" : false',
-    ),
-    workflow.replace(
-      "  postgres-conformance:\n    runs-on:",
-      "  postgres-conformance:\n    'continue-on-error' : true\n    runs-on:",
-    ),
-    workflow.replace(
-      "jobs:",
-      "'defaults' :\n  run:\n    shell: bash -c 'exit 0' {0}\n\njobs:",
-    ),
-  ];
-  for (const [index, decoy] of decoys.entries()) {
-    assert.throws(
-      () => assertPostgresWorkflowContract(decoy, `postgres-decoy-${index}.yml`),
-      /critical step|direct env mapping|execution controls|top-level defaults|strictly deep-equal|workflow triggers|pull_request paths/u,
-      `PostgreSQL workflow decoy ${index} must fail closed`,
-    );
+test("schema parity and SDK checks share one pinned uv and Python 3.12 contract", () => {
+  assert.equal(source("uv.toml"), 'required-version = "==0.12.5"\n');
+  const backend = JSON.parse(source("services/cloudflare-licensing-backend/package.json"));
+  assert.equal(backend.scripts["schema:parity"], "uv run --no-project python scripts/check-schema-parity.py");
+  const root = JSON.parse(source("package.json"));
+  assert.equal(root.scripts["check:schema-parity"], "npm run schema:parity --workspace @licensecc/cloudflare-licensing-backend");
+  for (const path of ["AGENTS.md", "CONTRIBUTING.md", "README.md"]) {
+    assert.match(source(path), /Python 3\.12/u, path);
+    assert.match(source(path), /uv 0\.12\.5/u, path);
   }
+  assert.ok((source(".github/workflows/services.yml").match(/uses: astral-sh\/setup-uv@/gu) ?? []).length > 0);
 });

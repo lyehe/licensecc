@@ -1,7 +1,7 @@
 // host-common.mjs
 //
-// Shared SECURITY helpers for the off-Cloudflare node:http hosts (local-host/server.mjs and
-// supabase-postgres/server.mjs). Running /v1/verify off Cloudflare removes the edge that the
+// Shared SECURITY helpers for the off-Cloudflare node:http host (local-host/server.mjs).
+// Running /v1/verify off Cloudflare removes the edge that the
 // Worker assumes: the WAF, the per-client rate limiter, and — critically — a TRUSTWORTHY
 // `cf-connecting-ip`. Off Cloudflare that header is attacker-supplied, so a client could send
 // a random `Cf-Connecting-Ip` per request and land each one in a fresh rate-limit bucket

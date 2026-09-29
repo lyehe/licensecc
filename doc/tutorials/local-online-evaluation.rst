@@ -57,7 +57,7 @@ usually means the seeded project, feature, or fingerprint differs from the
 request; use the service runbook's exact seed values.
 
 After the local path succeeds, review :doc:`../operations/database-backends`
-before choosing D1 or the fenced PostgreSQL work, then use
+before choosing D1, then use
 :doc:`../operations/production-readiness` before any hosted mutation.
 
 Verification

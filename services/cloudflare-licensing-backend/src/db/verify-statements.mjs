@@ -1,6 +1,6 @@
-// The complete SQL inventory used by the PostgreSQL-fenced /v1/verify path.
+// The complete SQL inventory used by the /v1/verify path.
 // Keep these D1/SQLite statements single-sourced: the Worker executes them
-// directly and the PostgreSQL adapter translates this exact closed set.
+// directly.
 
 export const VERIFY_SQL = Object.freeze({
   rateLimitUpsert:

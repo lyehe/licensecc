@@ -7,7 +7,7 @@ platform. Native users who only need offline `.lic` files do not need this
 service.
 
 **Status:** Cloudflare D1 is the production target. The local SQLite host is
-the supported evaluation path; PostgreSQL/Supabase remains fenced and partial.
+the supported evaluation path.
 See the [database backend status](../../doc/operations/database-backends.md).
 
 | Goal | Start here | Side effects |
@@ -731,8 +731,8 @@ its partial index to avoid scanning retained consumed recovery history. Missing
 required indexes fail visibly rather than falling back to a history scan. All
 six probes use one statement with database time and fetch only the earliest
 eligible deadline; they do not count all records, inspect account status or
-change authority. PostgreSQL schema and backup restore inventories include the
-same index; protected cleanup remains owned by the D1 backend.
+change authority. Backup restore inventories include the same index;
+protected cleanup remains owned by the D1 backend.
 
 Sources are `approval`, `ephemera`, `recovery` and `lease`; targets distinguish
 responses, challenges, attempts and leases. Logs contain no row identifiers,
@@ -765,9 +765,7 @@ does not authorize enabling protection for existing customers.
 
 `npm run test:sql` includes deterministic SQLite boundary tests and the local
 Miniflare D1 binding tests for concurrent allocation and complete batch rollback.
-The PostgreSQL bootstrap mirrors schema and trigger guards but remains a fenced
-v1 verifier adapter; protected issuance is D1-only. Schema parity checks do not
-replace execution against a real PostgreSQL server or deployed D1.
+Schema parity checks do not replace execution against a deployed D1.
 
 The v2 routes fail closed without `BOUND_DEVICE_CONFIG`. Its non-secret JSON
 configuration has this shape (these example hosts do not identify a deployment):
@@ -847,7 +845,7 @@ batches, up to 10,000 rows per scheduled run. Logical expiry does not depend on
 the sweep. Outages and backlog can delay erasure, and historical backups require
 their own retention policy.
 
-Node HTTP tests and the local SQLite/PostgreSQL hosts import `dist/app.js`.
+Node HTTP tests and the local SQLite host import `dist/app.js`.
 The deployed `src/index.ts` additionally loads the Cloudflare-native RPC runtime;
 local workerd tests verify that entrypoint and its service-binding isolation.
 

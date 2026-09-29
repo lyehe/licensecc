@@ -14,12 +14,12 @@
 // for an already-admitted in-flight request -- harmless billing drift, never an access decision.
 //
 // QUOTA enforcement is atomic: upsert the period row at 0 (INSERT ... ON CONFLICT DO NOTHING, portable
-// to SQLite/D1 AND Postgres), then a CONDITIONAL increment that only applies when
+// to SQLite/D1), then a CONDITIONAL increment that only applies when
 // (quota = 0 OR units_consumed + units <= quota). A rejected increment records nothing, so the counter
 // never crosses the quota (no over-count under D1's per-object serialization).
 
 // A single call may not report an absurd unit count: cap it well below 2^53 so units_consumed stays a
-// safe integer (SQLite INTEGER / PG BIGINT are int64; JS Number loses precision above 2^53).
+// safe integer (SQLite INTEGER is int64; JS Number loses precision above 2^53).
 const MAX_METER_UNITS = 1_000_000_000;
 
 function entitlementValid(row, now) {
@@ -63,8 +63,8 @@ export async function meterUsage(env, body, isolation, units, now) {
   const periodStart = Math.floor(now / periodSec) * periodSec;
   const periodEnd = periodStart + periodSec;
 
-  // Portable upsert of the period row at 0 (SQLite/D1 AND Postgres both accept ON CONFLICT DO NOTHING;
-  // SQLite-only INSERT OR IGNORE would break under the Postgres adapter, which the pg schema advertises).
+  // Upsert of the period row at 0 (SQLite/D1 both accept ON CONFLICT DO NOTHING;
+  // INSERT OR IGNORE is SQLite-only syntax and would not be portable).
   await env.DB.prepare(
     "INSERT INTO usage_meters (project, feature, license_fingerprint, period_start, units_consumed, updated_at) " +
       "VALUES (?, ?, ?, ?, 0, ?) ON CONFLICT (project, feature, license_fingerprint, period_start) DO NOTHING",
