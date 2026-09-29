@@ -202,16 +202,12 @@ test("admin UI accepts a legitimate empty customer name in a transition RETURNIN
 
 test("admin UI reconciles release seats through the exact entitlement GET even when the target is off page one", async ({ page }) => {
   const api = makeAdminApiFixture();
+  // Seeded directly: this scenario needs a legacy grant with a Release seats verb, which the create
+  // form can no longer produce now that every create it sends is protected.
+  api.seed.entitlement({ project: "release-page-two", feature: "float", enforcement_mode: "legacy", pool_size: 5, license_fingerprint: "2".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
-  const createForm = await newEntitlementForm(page);
-  await createForm.getByLabel("Project").fill("release-page-two");
-  await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
-  await createForm.getByLabel("License fingerprint").fill("2".repeat(64));
-  await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   api.behavior.releaseSeatTargetOnSecondPage = true;
   await clickAction(row.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first());
@@ -230,16 +226,12 @@ test("admin UI keeps a release-seat result unknown when same-key replay evidence
     { status: 200, body: makeEnvelope("seats_released", { released: 2, seat_ids: ["seat_1", "seat_2"] }) },
     { status: 200, body: makeEnvelope("seats_released", { released: 2, seat_ids: ["seat_2", "seat_1"] }) },
   );
+  // Seeded directly: this scenario needs a legacy grant with a Release seats verb, which the create
+  // form can no longer produce now that every create it sends is protected.
+  api.seed.entitlement({ project: "release-evidence", feature: "float", enforcement_mode: "legacy", pool_size: 5, license_fingerprint: "3".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
-  const createForm = await newEntitlementForm(page);
-  await createForm.getByLabel("Project").fill("release-evidence");
-  await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
-  await createForm.getByLabel("License fingerprint").fill("3".repeat(64));
-  await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
@@ -258,16 +250,12 @@ test("admin UI keeps an undocumented release-seat 4xx indeterminate", async ({ p
     status: 400,
     body: { ok: false, code: "invalid_request", request_id: "ui-e2e-release-wrong-route-400" },
   });
+  // Seeded directly: this scenario needs a legacy grant with a Release seats verb, which the create
+  // form can no longer produce now that every create it sends is protected.
+  api.seed.entitlement({ project: "release-wrong-route", feature: "float", enforcement_mode: "legacy", pool_size: 5, license_fingerprint: "4".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
-  const createForm = await newEntitlementForm(page);
-  await createForm.getByLabel("Project").fill("release-wrong-route");
-  await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
-  await createForm.getByLabel("License fingerprint").fill("4".repeat(64));
-  await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");

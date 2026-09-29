@@ -33,7 +33,7 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
   const isCreate = "license_fingerprint" in form;
   const title = isCreate ? "New entitlement" : "Edit entitlement";
   const inheritsDates = isCreate && form.policy_id !== "";
-  const protectedCreate = isCreate && form.enforcement_mode === "device_bound_v1";
+  const protectedCreate = isCreate;
   // Only this project's policies can stamp its grant; the chosen one owns the device limit.
   const projectPolicies = isCreate ? policiesForProject(policies, form.project) : [];
   const chosenPolicy = isCreate ? projectPolicies.find((policy) => policy.id === form.policy_id) : undefined;
@@ -76,7 +76,7 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
     <form aria-label={title} noValidate onSubmit={submit}><fieldset disabled={locked}>
       <legend className="srOnly">Entitlement details</legend>
       {isCreate && <>
-        <label className="wide">Protection<select aria-label="Protection" name="enforcement_mode" value={form.enforcement_mode} onChange={(event) => change("enforcement_mode", event.target.value)}><option value="legacy">Legacy application</option><option value="device_bound_v1">Protected devices</option></select><span className="muted">{form.enforcement_mode === "device_bound_v1" ? "Requires a customer, license, and an application using protected device enrollment. Each enrolled device occupies a slot." : "For existing applications using the legacy licensing protocol."} Protection cannot be changed after creation.</span>{errorFor("enforcement_mode")}</label>
+        <p className="wide muted">Protection: Protected devices. Requires a customer, license, and an application using protected device enrollment; each enrolled device occupies a slot.</p>
         <label>Project (required)<input aria-label="Project" name="project" required aria-invalid={!!errors.project} aria-describedby={describedBy("project")} value={form.project} onChange={(event) => change("project", event.target.value)} />{errorFor("project")}</label>
         <label>Feature (required)<input aria-label="Feature" name="feature" required aria-invalid={!!errors.feature} aria-describedby={describedBy("feature")} value={form.feature} onChange={(event) => change("feature", event.target.value)} />{errorFor("feature")}</label>
         <label className="wide">License fingerprint (required)<input aria-label="License fingerprint" name="license_fingerprint" required aria-invalid={!!errors.license_fingerprint} aria-describedby={describedBy("license_fingerprint")} value={form.license_fingerprint} onChange={(event) => change("license_fingerprint", event.target.value)} />{errorFor("license_fingerprint")}<span className="muted">{protectedCreate ? "The exact 64-character lowercase hexadecimal fingerprint. A new protected license can use a generated one." : "The full 64-character hexadecimal fingerprint."}</span></label>
@@ -92,7 +92,7 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
       <p id="entitlement-date-rules" className="wide muted">Dates are UTC. Expiry is at the start of the selected day; choose the following date to include a whole day. Untouched timestamps stay unchanged.</p>
       {item && <p className="wide muted">Stored start: {item.valid_from === null ? "Starts immediately" : formatUtcDate(item.valid_from)}. Stored expiry: {item.valid_until === null ? "No expiry" : formatUtcDate(item.valid_until)}.</p>}
       <EntitlementRelationships required={protectedCreate} protectedProject={protectedCreate && isProtectedProject(form.project) ? form.project : ""} customerId={form.customer_id} licenseId={form.license_id} onCustomerChange={(value) => { change("customer_id", value); if (isCreate) change("license_id", ""); }} onLicenseChange={(value) => change("license_id", value)} />
-      {!isCreate && <p className="wide muted">Protection: {item?.enforcement_mode === "device_bound_v1" ? "Protected devices" : item?.enforcement_mode === "legacy" ? "Legacy application" : "Unknown — refresh the entitlement to confirm."}</p>}
+      {!isCreate && <p className="wide muted">Protection: Protected devices</p>}
       {(errors.customer_id || errors.license_id) && <p className="wide" role="alert">{errors.customer_id || errors.license_id}</p>}
       <label className="wide">Notes<textarea aria-label="Notes" name="notes" maxLength={1000} value={form.notes} aria-invalid={!!errors.notes} aria-describedby={describedBy("notes")} onChange={(event) => change("notes", event.target.value)} />{errorFor("notes")}</label>
       <details><summary>Advanced settings</summary><div className="summaryCards">

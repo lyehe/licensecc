@@ -44,7 +44,6 @@ test("an operator onboards a protected application from Add user to a protected 
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const form = page.getByRole("form", { name: "New entitlement", exact: true });
-  await form.getByLabel("Protection", { exact: true }).selectOption("device_bound_v1");
   await form.getByLabel("Project", { exact: true }).fill("APP");
   await form.getByLabel("Feature", { exact: true }).fill("PRO");
   await form.getByRole("button", { name: "Generate fingerprint", exact: true }).click();
@@ -79,7 +78,6 @@ test("a refused protected grant names the broken rule in words, never as a code"
   await page.goto("/#/entitlements");
   await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const form = page.getByRole("form", { name: "New entitlement", exact: true });
-  await form.getByLabel("Protection", { exact: true }).selectOption("device_bound_v1");
   await form.getByRole("button", { name: "Generate fingerprint", exact: true }).click();
   await form.getByText("Enter customer ID manually", { exact: true }).click();
   await form.getByLabel("Customer ID", { exact: true }).fill("cus_acme");
@@ -94,14 +92,13 @@ test("a refused protected grant names the broken rule in words, never as a code"
   await expect(alert.locator(".feedbackText")).toHaveText("This protected license (entitlement) can't be created with these settings.");
   await expect(alert.locator(".feedbackDetails code")).toHaveText("protected_creation_conflict · req-2");
   await expect(page.getByText(/protected_creation_conflict|customer_inactive|rule_this_console_predates/)).toBeHidden();
-  await expect(form.getByLabel("Protection", { exact: true })).toHaveValue("device_bound_v1");
+  await expect(form.getByText("Protected devices", { exact: false })).toBeVisible();
 });
 
 async function openProtectedCreate(page, project = "APP") {
   await page.goto("/#/entitlements");
   await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const form = page.getByRole("form", { name: "New entitlement", exact: true });
-  await form.getByLabel("Protection", { exact: true }).selectOption("device_bound_v1");
   await form.getByLabel("Project", { exact: true }).fill(project);
   await relationship(form, "Customer").selectOption("cus_acme");
   return form;
@@ -126,10 +123,6 @@ test("the protected license picker hides other projects' licenses and offers cre
   await lookup.getByLabel("Search licenses", { exact: true }).fill("");
   await lookup.getByRole("button", { name: "Find licenses", exact: true }).click();
   await expect(offer).toBeVisible();
-  // A legacy grant is neither narrowed to its project nor offered a new license.
-  await form.getByLabel("Protection", { exact: true }).selectOption("legacy");
-  await expect(relationship(form, "License").locator("option")).toHaveText(["No license", "Other app · lic_other_app"]);
-  await expect(form.getByRole("button", { name: /^Create license for/ })).toHaveCount(0);
 });
 
 test("the protected license picker offers no creation when this project already has a license", async ({ page }) => {
@@ -177,17 +170,15 @@ test("a create without a policy sends its device limit, and a chosen policy show
   await form.getByLabel("Feature", { exact: true }).fill("PRO");
   await form.getByLabel("License fingerprint", { exact: true }).fill("a".repeat(64));
   const policy = form.getByLabel("Policy (optional)", { exact: true });
-  // Only this project's policies are offered, each with what it grants.
-  await expect(policy.locator("option")).toHaveText(["No policy · use fields below", "Pro · 3 devices · APP", "Team · 5 seats · APP"]);
+  // Only this project's policies are offered, each with what it grants; a floating policy grants
+  // seats, which a protected create never offers, so "Team" is excluded even though it is APP's.
+  await expect(policy.locator("option")).toHaveText(["No policy · use fields below", "Pro · 3 devices · APP"]);
   // Blank sends nothing, so a new grant gets 1 and an existing one keeps the limit it already has.
   const own = form.getByLabel("Device limit", { exact: true });
   await expect(own).toHaveValue("");
   await expect(own).toHaveAttribute("placeholder", "1");
   await expect(form.getByText("Blank: a new license (entitlement) gets 1; an existing one keeps its limit.", { exact: true })).toBeVisible();
   await own.fill("4");
-  // A floating policy grants seats, and says so in the read-only field too.
-  await policy.selectOption("pol_team");
-  await expect(form.getByLabel("Seats (from policy Team)", { exact: true })).toHaveValue("5");
   await policy.selectOption("pol_pro");
   await expect(policy.locator("option:checked")).toHaveText("Pro · 3 devices · APP");
   const inherited = form.getByLabel("Device limit (from policy Pro)", { exact: true });
@@ -268,7 +259,6 @@ test("Create policy… opens the policy form for the draft's project and returns
   const dialogs = [];
   page.on("dialog", async (dialog) => { dialogs.push(dialog.message()); await dialog.dismiss(); });
   const form = await newEntitlement(page);
-  await form.getByLabel("Protection", { exact: true }).selectOption("device_bound_v1");
   await form.getByLabel("Project", { exact: true }).fill("APP");
   await form.getByLabel("Feature", { exact: true }).fill("PRO");
   await form.getByLabel("Notes", { exact: true }).fill("kept across the policy detour");
@@ -294,7 +284,7 @@ test("Create policy… opens the policy form for the draft's project and returns
   await expect(page.locator(".activityMessage")).toContainText("Policy created.");
   await expect(policy.locator("option:checked")).toHaveText("Pro · 3 devices · APP");
   await expect(form.getByLabel("Device limit (from policy Pro)", { exact: true })).toHaveValue("3");
-  await expect(form.getByLabel("Protection", { exact: true })).toHaveValue("device_bound_v1");
+  await expect(form.getByText("Protected devices", { exact: false })).toBeVisible();
   await expect(form.getByLabel("Feature", { exact: true })).toHaveValue("PRO");
   await expect(form.getByLabel("Notes", { exact: true })).toHaveValue("kept across the policy detour");
   expect(api.requests.policyCreates).toEqual([expect.objectContaining({ project: "APP", name: "Pro", type: "node_locked", max_active_devices: 3 })]);

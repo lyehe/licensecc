@@ -15,7 +15,6 @@ for (const mode of [undefined, "legacy"]) {
     await page.goto("/#/entitlements");
     await page.getByRole("button", { name: "New entitlement", exact: true }).click();
     const form = page.getByRole("form", { name: "New entitlement" });
-    await form.getByLabel("Protection", { exact: true }).selectOption("device_bound_v1");
     await form.getByLabel("License fingerprint", { exact: true }).fill("a".repeat(64));
     await form.getByText("Enter customer ID manually", { exact: true }).click();
     await form.getByLabel("Customer ID", { exact: true }).fill("cus_acme");
@@ -23,10 +22,20 @@ for (const mode of [undefined, "legacy"]) {
     await form.getByLabel("License ID", { exact: true }).fill("lic_acme");
     await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
     await expect(page.getByRole("button", { name: "Reconcile status", exact: true })).toBeVisible();
-    await expect(form.getByLabel("Protection", { exact: true })).toHaveValue("device_bound_v1");
-    await expect(form.getByLabel("Protection", { exact: true })).toBeDisabled();
+    // The form stays open with its fields locked until the ambiguous create is reconciled.
+    await expect(form.getByLabel("License fingerprint", { exact: true })).toBeDisabled();
   });
 }
+
+test("the create form has no protection choice", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/entitlements");
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  const form = page.getByRole("form", { name: "New entitlement" });
+  await expect(form.getByLabel("Protection", { exact: true })).toHaveCount(0);
+  await expect(form.getByText("Protected devices", { exact: false })).toBeVisible();
+});
 
 test("protected creation requires ownership and preserves mode and key through response recovery", async ({ page }) => {
   const api = makeAdminApiFixture(), attempts = [];
@@ -40,7 +49,6 @@ test("protected creation requires ownership and preserves mode and key through r
   await page.goto("/#/entitlements");
   await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const form = page.getByRole("form", { name: "New entitlement" });
-  await form.getByLabel("Protection", { exact: true }).selectOption("device_bound_v1");
   await form.getByLabel("License fingerprint", { exact: true }).fill("a".repeat(64));
   await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
   await expect(form.getByText("Choose the customer who owns this license.", { exact: true })).toBeVisible();
@@ -60,7 +68,7 @@ test("protected creation requires ownership and preserves mode and key through r
   // The reconciled create opens its record: the form closes, and a new one starts over as protected.
   await expect(form).toHaveCount(0);
   await page.getByRole("button", { name: "New entitlement", exact: true }).click();
-  await expect(form.getByLabel("Protection", { exact: true })).toHaveValue("device_bound_v1");
+  await expect(form.getByText("Protected devices", { exact: false })).toBeVisible();
 });
 
 async function openActionMenu(button) {

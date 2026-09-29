@@ -36,14 +36,15 @@ test("an untouched device limit is not sent; a typed one is; a policy create lea
 
 test("policy options name what they grant and the project, and list only the draft's project", async () => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
-  const policy = (id, project, extra = {}) => ({ id, name: `Policy ${id}`, project, pool_size: 0, max_active_devices: 3, ...extra });
+  const policy = (id, project, extra = {}) => ({ id, name: `Policy ${id}`, project, type: "node_locked", pool_size: 0, max_active_devices: 3, ...extra });
   assert.equal(workflow.policyOptionLabel(policy("pro", "APP")), "Policy pro · 3 devices · APP");
   assert.equal(workflow.policyOptionLabel(policy("solo", "APP", { max_active_devices: 1 })), "Policy solo · 1 device · APP");
-  // A floating policy grants a seat pool, not a device limit; the read-only field says the same.
+  // A floating policy grants a seat pool, not a device limit; the read-only field says the same, but
+  // a protected create's picker never offers one (checked below).
   assert.equal(workflow.policyOptionLabel(policy("team", "APP", { pool_size: 5 })), "Policy team · 5 seats · APP");
   assert.deepEqual(workflow.policyGrant(policy("pro", "APP")), { label: "Device limit", count: 3 });
   assert.deepEqual(workflow.policyGrant(policy("team", "APP", { pool_size: 5, max_active_devices: 9 })), { label: "Seats", count: 5 });
-  const policies = [policy("a", "APP"), policy("b", "OTHER"), policy("c", "APP")];
+  const policies = [policy("a", "APP"), policy("b", "OTHER"), policy("c", "APP"), policy("d", "APP", { type: "floating", pool_size: 5 })];
   assert.deepEqual(workflow.policiesForProject(policies, "APP").map((item) => item.id), ["a", "c"]);
   assert.deepEqual(workflow.policiesForProject(policies, "NONE"), []);
 });

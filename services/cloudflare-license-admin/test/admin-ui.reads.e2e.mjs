@@ -278,16 +278,12 @@ test("admin UI keeps 5xx null and scalar append cursors retryable", async ({ pag
 
 test("admin UI keeps a batch selection and its row visible through a filter reload, then clears it once the row is confirmed gone", async ({ page }) => {
   const api = makeAdminApiFixture();
+  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
+  // sends is protected.
+  api.seed.entitlement({ project: "selection-context", feature: "float", enforcement_mode: "legacy", license_fingerprint: "a".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
-  const createForm = await newEntitlementForm(page);
-  await createForm.getByLabel("Project").fill("selection-context");
-  await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
-  await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
-  await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const region = page.getByRole("region", { name: "Entitlement records", exact: true });
   const row = region.locator("tbody tr").first();
   const selectRow = row.getByLabel("Select selection-context/float");
@@ -392,16 +388,12 @@ test("admin UI keeps Load More working across a tab switch and still sends zero 
 
 test("admin UI entitlement list renders exactly one of table rows or cards at any viewport", async ({ page }) => {
   const api = makeAdminApiFixture();
+  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
+  // sends is protected.
+  api.seed.entitlement({ project: "layout-check", feature: "float", enforcement_mode: "legacy", license_fingerprint: "b".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
-  const createForm = await newEntitlementForm(page);
-  await createForm.getByLabel("Project").fill("layout-check");
-  await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
-  await createForm.getByLabel("License fingerprint").fill("b".repeat(64));
-  await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   await expect(page.locator(".tablePane table tbody tr")).toHaveCount(1);
   await expect(page.locator(".tablePane .recordCards .recordCard")).toHaveCount(0);
@@ -515,19 +507,14 @@ test("admin UI debounces policy and webhook filter reloads to one request each",
 
 test("admin UI fences ordinary device and meter reads across an ABA selection", async ({ page }) => {
   const api = makeAdminApiFixture();
+  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
+  // sends is protected.
+  for (const [project, fingerprint] of [["fence-device-one", "a"], ["fence-device-two", "b"]]) {
+    api.seed.entitlement({ project, feature: "float", enforcement_mode: "legacy", license_fingerprint: fingerprint.repeat(64) });
+  }
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
-  const createForm = await newEntitlementForm(page);
-  for (const [project, fingerprint] of [["fence-device-one", "a"], ["fence-device-two", "b"]]) {
-    if (!await createForm.isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
-    await createForm.getByLabel("Project").fill(project);
-    await createForm.getByLabel("Feature").fill("float");
-    await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
-    await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
-    await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
-  }
 
   // Excludes the inline inspector's own <tr>, which sits between two entitlement rows once open.
   const rows = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr[data-focus-row]");
@@ -609,17 +596,12 @@ test("admin UI fences webhook deliveries and report reads after a superseded con
 
 test("admin UI treats accepted mutation plus aborted refresh as success with manual recovery", async ({ page }) => {
   const api = makeAdminApiFixture();
+  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
+  // sends is protected.
+  api.seed.entitlement({ project: "refresh-abort", feature: "float", enforcement_mode: "legacy", license_fingerprint: "a".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
-  const createForm = await newEntitlementForm(page);
-  await createForm.getByLabel("Project").fill("refresh-abort");
-  await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
-  await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
-  await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
@@ -645,17 +627,12 @@ test("admin UI treats accepted mutation plus aborted refresh as success with man
 
 test("admin UI treats malformed post-success refresh as success with manual recovery", async ({ page }) => {
   const api = makeAdminApiFixture();
+  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
+  // sends is protected.
+  api.seed.entitlement({ project: "refresh-malformed", feature: "float", enforcement_mode: "legacy", license_fingerprint: "b".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
-  const createForm = await newEntitlementForm(page);
-  await createForm.getByLabel("Project").fill("refresh-malformed");
-  await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
-  await createForm.getByLabel("License fingerprint").fill("b".repeat(64));
-  await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
@@ -680,16 +657,12 @@ test("admin UI treats malformed post-success refresh as success with manual reco
 for (const refreshFailure of ["truncated", "wrong-enum"]) {
   test(`admin UI rejects a ${refreshFailure} entitlement refresh before clearing a successful consequence`, async ({ page }) => {
     const api = makeAdminApiFixture();
+    // Seeded directly: the create form can no longer produce a legacy grant now that every create it
+    // sends is protected.
+    api.seed.entitlement({ project: `refresh-${refreshFailure}`, feature: "float", enforcement_mode: "legacy", license_fingerprint: (refreshFailure === "truncated" ? "a" : "b").repeat(64) });
     await page.route("**/api/admin/**", api.route);
     await page.goto("/");
     await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
-    const createForm = await newEntitlementForm(page);
-    await createForm.getByLabel("Project").fill(`refresh-${refreshFailure}`);
-    await createForm.getByLabel("Feature").fill("float");
-    await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
-    await createForm.getByLabel("License fingerprint").fill((refreshFailure === "truncated" ? "a" : "b").repeat(64));
-    await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
     const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
     await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -735,17 +708,12 @@ test("admin UI rejects a nested-null customer detail refresh before clearing a s
 
 test("admin UI rejects a non-2xx refresh carrying an ok response", async ({ page }) => {
   const api = makeAdminApiFixture();
+  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
+  // sends is protected.
+  api.seed.entitlement({ project: "refresh-http-status", feature: "float", enforcement_mode: "legacy", license_fingerprint: "e".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
-  const createForm = await newEntitlementForm(page);
-  await createForm.getByLabel("Project").fill("refresh-http-status");
-  await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
-  await createForm.getByLabel("License fingerprint").fill("e".repeat(64));
-  await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -763,17 +731,12 @@ test("admin UI rejects a non-2xx refresh carrying an ok response", async ({ page
 
 test("admin UI keeps the success warning after a parsed refresh error and clears it after recovery", async ({ page }) => {
   const api = makeAdminApiFixture();
+  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
+  // sends is protected.
+  api.seed.entitlement({ project: "refresh-error", feature: "float", enforcement_mode: "legacy", license_fingerprint: "c".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
-  const createForm = await newEntitlementForm(page);
-  await createForm.getByLabel("Project").fill("refresh-error");
-  await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
-  await createForm.getByLabel("License fingerprint").fill("c".repeat(64));
-  await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
@@ -804,17 +767,12 @@ test("admin UI keeps the success warning after a parsed refresh error and clears
 
 test("admin UI treats missing refresh data as success with manual recovery", async ({ page }) => {
   const api = makeAdminApiFixture();
+  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
+  // sends is protected.
+  api.seed.entitlement({ project: "refresh-missing-data", feature: "float", enforcement_mode: "legacy", license_fingerprint: "d".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
-  const createForm = await newEntitlementForm(page);
-  await createForm.getByLabel("Project").fill("refresh-missing-data");
-  await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
-  await createForm.getByLabel("License fingerprint").fill("d".repeat(64));
-  await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
@@ -839,17 +797,12 @@ test("admin UI treats missing refresh data as success with manual recovery", asy
 test("admin UI falls back to a stable section when a successful row disappears", async ({ page }) => {
   const api = makeAdminApiFixture();
   api.behavior.dropTransitionRow = true;
+  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
+  // sends is protected.
+  api.seed.entitlement({ project: "missing-focus-row", feature: "float", enforcement_mode: "legacy", license_fingerprint: "f".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
-  const createForm = await newEntitlementForm(page);
-  await createForm.getByLabel("Project").fill("missing-focus-row");
-  await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("Protection", { exact: true }).selectOption("legacy");
-  await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
-  await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
-  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
   await clickAction(trigger);

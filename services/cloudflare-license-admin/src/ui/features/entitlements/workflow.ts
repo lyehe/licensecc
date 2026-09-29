@@ -22,7 +22,7 @@ export interface EntitlementFilter {
 }
 
 export interface EntitlementFormState {
-  enforcement_mode: "legacy" | "device_bound_v1";
+  enforcement_mode: "device_bound_v1";
   policy_id: string;
   project: string;
   feature: string;
@@ -143,9 +143,10 @@ export function policyOptionLabel(policy: Pick<Policy, "name" | "project" | "poo
   return `${policy.name} · ${grant.count} ${unit}${grant.count === 1 ? "" : "s"} · ${policy.project}`;
 }
 
-/** A grant can only be stamped from a policy of its own project, so only those are offered. */
-export function policiesForProject<T extends Pick<Policy, "project">>(policies: readonly T[], project: string): T[] {
-  return policies.filter((policy) => policy.project === project);
+/** A grant can only be stamped from a policy of its own project; a floating policy grants seats,
+ * which a protected create never offers, so it is excluded too. */
+export function policiesForProject<T extends Pick<Policy, "project" | "type">>(policies: readonly T[], project: string): T[] {
+  return policies.filter((policy) => policy.project === project && policy.type !== "floating");
 }
 
 export function normalizeCreateFromPolicy(form: EntitlementFormState): EntitlementCreateInput & { policy_id: string } {
@@ -363,15 +364,13 @@ export function entitlementFormErrors(form: EntitlementEditState | EntitlementFo
   }
   try { parseNotes(form.notes); } catch { errors.notes = "Use one line of notes, at most 1000 characters."; }
   if ("enforcement_mode" in form) {
-    if (!["legacy", "device_bound_v1"].includes(form.enforcement_mode)) errors.enforcement_mode = "Choose a protection mode.";
-    if (form.enforcement_mode === "device_bound_v1") {
-      if (!/^[A-Za-z0-9_.:-]{1,127}(?![\s\S])/.test(form.project)) errors.project = "Protected project IDs use ASCII letters, numbers, _, ., :, or -.";
-      if (!/^[A-Za-z0-9_.:-]{1,15}(?![\s\S])/.test(form.feature)) errors.feature = "Protected feature IDs use 1–15 ASCII letters, numbers, _, ., :, or -.";
-      if (form.license_fingerprint.length !== 64 || !/^[a-f0-9]{64}$/.test(form.license_fingerprint)) errors.license_fingerprint = "Protected licenses require the exact 64-character lowercase hexadecimal fingerprint.";
-      if (!form.customer_id.trim()) errors.customer_id = "Choose the customer who owns this license.";
-      if (!form.license_id.trim()) errors.license_id = "Choose a license for this customer and project.";
-      if (form.device_hash !== "") errors.device_hash = "Protected enrollment establishes the device identity. Leave this field empty.";
-    }
+    // Every create is protected, so these rules always apply.
+    if (!/^[A-Za-z0-9_.:-]{1,127}(?![\s\S])/.test(form.project)) errors.project = "Protected project IDs use ASCII letters, numbers, _, ., :, or -.";
+    if (!/^[A-Za-z0-9_.:-]{1,15}(?![\s\S])/.test(form.feature)) errors.feature = "Protected feature IDs use 1–15 ASCII letters, numbers, _, ., :, or -.";
+    if (form.license_fingerprint.length !== 64 || !/^[a-f0-9]{64}$/.test(form.license_fingerprint)) errors.license_fingerprint = "Protected licenses require the exact 64-character lowercase hexadecimal fingerprint.";
+    if (!form.customer_id.trim()) errors.customer_id = "Choose the customer who owns this license.";
+    if (!form.license_id.trim()) errors.license_id = "Choose a license for this customer and project.";
+    if (form.device_hash !== "") errors.device_hash = "Protected enrollment establishes the device identity. Leave this field empty.";
   }
   return errors;
 }
