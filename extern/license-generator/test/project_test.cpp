@@ -171,7 +171,8 @@ BOOST_AUTO_TEST_CASE(project_initialize_rejects_invalid_project_names) {
 	const vector<string> invalid_names = {"", ".", "..", "1TEST", "TEST.", "TEST/NAME", "TEST\\NAME",
 										  "TEST[NAME]", "TEST NAME", "TEST:NAME", "TEST*NAME", "TEST?NAME",
 										  "TEST<NAME", "TEST>NAME", "TEST|NAME", "TEST\"NAME", "CON", "nul.h",
-										  "COM1", "lpt9.generated", string("TEST\nNAME")};
+										  "COM1", "lpt9.generated", string("TEST\nNAME"),
+										  "my-product", "legacy.product-1"};
 
 	for (const string &project_name : invalid_names) {
 		BOOST_CHECK_THROW(Project(project_name, project_folder.string(), mock_source_folder.string(), false),
@@ -179,8 +180,33 @@ BOOST_AUTO_TEST_CASE(project_initialize_rejects_invalid_project_names) {
 	}
 
 	BOOST_CHECK_NO_THROW(Project("TEST_NAME_1", project_folder.string(), mock_source_folder.string(), false));
-	BOOST_CHECK_NO_THROW(Project("my-product", project_folder.string(), mock_source_folder.string(), false));
-	BOOST_CHECK_NO_THROW(Project("legacy.product-1", project_folder.string(), mock_source_folder.string(), false));
+}
+
+// v201's signed "project" canonical-payload field only accepts an ASCII
+// alpha/underscore start followed by alnum/underscore
+// (license::v201::valid_project_name). A project folder name Project used to
+// allow "for portable generated paths" but that v201 cannot carry -- a
+// hyphen or a dot -- must be refused up front, before any directory or key
+// is created, not merely fail later at license issuance.
+BOOST_AUTO_TEST_CASE(project_initialize_refuses_a_name_v201_cannot_carry) {
+	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
+	const fs::path project_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "product_initialize_v201_incompatible_names");
+	fs::remove_all(project_folder);
+
+	for (const string &project_name : {string("has-hyphen"), string("has.dot")}) {
+		const fs::path expected_project_folder(project_folder / project_name);
+		BOOST_CHECK_THROW(Project(project_name, project_folder.string(), mock_source_folder.string(), false),
+						  invalid_argument);
+		BOOST_CHECK_MESSAGE(!fs::exists(expected_project_folder),
+							"a name the v201 canonical payload cannot carry must not create " +
+								expected_project_folder.string());
+	}
+
+	const string valid_project_name("has_underscore_1");
+	const fs::path expected_private_key(project_folder / valid_project_name / PRIVATE_KEY_FNAME);
+	Project valid(valid_project_name, project_folder.string(), mock_source_folder.string(), false);
+	BOOST_CHECK_NO_THROW(valid.initialize());
+	BOOST_CHECK_MESSAGE(fs::exists(expected_private_key), "a v201-compatible name still initializes a project");
 }
 
 BOOST_AUTO_TEST_CASE(project_initialize_does_not_overwrite_existing_private_key_without_force) {
