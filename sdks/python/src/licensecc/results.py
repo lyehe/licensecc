@@ -37,37 +37,11 @@ class RejectionCode(str, enum.Enum):
 
     # Claim validation
     METADATA_MISMATCH = "metadata_mismatch"
-    STATUS_UNSUPPORTED = "status_unsupported"
-    STATUS_DENIED = "status_denied"
     BINDING_MISMATCH = "binding_mismatch"
-    HEX_FIELD_MALFORMED = "hex_field_malformed"
-    TIME_WINDOW_MALFORMED = "time_window_malformed"
-    CACHE_WINDOW_EXCEEDED = "cache_window_exceeded"
     EXPIRED = "expired"
-    REVOCATION_BELOW_FLOOR = "revocation_below_floor"
     ROLLBACK_BELOW_FLOOR = "rollback_below_floor"
     CONFIG_HASH_MISMATCH = "config_hash_mismatch"
     NO_EXPIRY = "no_expiry"
-
-
-@dataclass(frozen=True)
-class OnlineAssertionClaims:
-    """Parsed claims of an ``lccoa1`` online-assertion token."""
-
-    purpose: str
-    version: str
-    algorithm: str
-    key_id: str
-    project: str
-    feature: str
-    license_fingerprint: str
-    device_hash: str
-    nonce: str
-    status: str
-    issued_at: int
-    expires_at: int
-    cache_until: int
-    revocation_seq: int
 
 
 @dataclass(frozen=True)
@@ -93,8 +67,7 @@ class ConfigAttestationClaims:
 class VerificationResult:
     """Outcome of verifying a token.
 
-    On success ``ok`` is True and ``claims`` is populated; ``used_cache`` is set
-    for online assertions accepted via the cache window. On failure ``ok`` is
+    On success ``ok`` is True and ``claims`` is populated. On failure ``ok`` is
     False, ``code`` is a :class:`RejectionCode`, and ``detail`` carries a
     human-readable reason. Truthiness mirrors ``ok``.
     """
@@ -102,8 +75,7 @@ class VerificationResult:
     ok: bool
     code: RejectionCode | None = None
     detail: str = ""
-    claims: object | None = None  # OnlineAssertionClaims | ConfigAttestationClaims
-    used_cache: bool = False
+    claims: object | None = None  # ConfigAttestationClaims
 
     def __bool__(self) -> bool:
         return self.ok
@@ -113,7 +85,5 @@ class VerificationResult:
         return cls(ok=False, code=code, detail=detail or code.value)
 
     @classmethod
-    def accept(
-        cls, claims: object, used_cache: bool = False
-    ) -> "VerificationResult":
-        return cls(ok=True, claims=claims, used_cache=used_cache)
+    def accept(cls, claims: object) -> "VerificationResult":
+        return cls(ok=True, claims=claims)

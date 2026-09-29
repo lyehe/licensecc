@@ -173,18 +173,16 @@
     },
     {
       "id": "python-sdk",
-      "title": "Python SDK token verification and HTTP client",
+      "title": "Python SDK token verification",
       "status": "shipped",
       "owner": "SDK maintainer",
-      "surfaces": ["Python token verifier", "Python HTTP client"],
+      "surfaces": ["Python token verifier"],
       "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Python"], "limitations": ["The package is repository-installable and not published to PyPI; it does not provide C++ binary enforcement."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "sdks/python/README.md"],
       "evidence": [
-        {"kind": "implementation", "surface": "Python token verifier", "path": "sdks/python/src/licensecc/online_assertion.py", "selector": "def verify_online_assertion(", "assertion": "The Python SDK implements online-assertion verification."},
-        {"kind": "automated_test", "surface": "Python token verifier", "path": "sdks/python/tests/test_online_assertion.py", "selector": "def test_golden_assertion_verifies", "assertion": "Python golden-vector verification is automated."},
-        {"kind": "implementation", "surface": "Python HTTP client", "path": "sdks/python/src/licensecc/http_client.py", "selector": "class HttpClient:", "assertion": "The Python SDK implements a backend HTTP client."},
-        {"kind": "automated_test", "surface": "Python HTTP client", "path": "sdks/python/tests/test_http_client.py", "selector": "def test_verify_builds_body_and_parses_envelope", "assertion": "The Python HTTP client has an automated request test."}
+        {"kind": "implementation", "surface": "Python token verifier", "path": "sdks/python/src/licensecc/config_attestation.py", "selector": "def verify_config_token(", "assertion": "The Python SDK implements config-attestation verification."},
+        {"kind": "automated_test", "surface": "Python token verifier", "path": "sdks/python/tests/test_config_attestation.py", "selector": "def test_golden_config_token_verifies", "assertion": "Python golden-vector verification is automated."}
       ]
     },
     {

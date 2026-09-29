@@ -65,7 +65,6 @@ const requiredVersionPaths = [
   "sdks/python/pyproject.toml",
   "sdks/python/uv.lock",
   "sdks/python/src/licensecc/__init__.py",
-  "sdks/python/src/licensecc/http_client.py",
   "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj",
   "sdks/java/MANIFEST.MF",
   "sdks/java/src/main/java/io/licensecc/client/LicensingBackendClient.java",
@@ -532,9 +531,6 @@ export function checkVersionContract({ root = repositoryRoot, trackedPaths = tra
   mismatch(errors, uvLockPath, pythonVersion, pythonLockVersion(sourceAt(root, uvLockPath)));
   const pythonRuntimePath = "sdks/python/src/licensecc/__init__.py";
   mismatch(errors, pythonRuntimePath, pythonVersion, assignment(sourceAt(root, pythonRuntimePath), "__version__"));
-  const userAgentPath = "sdks/python/src/licensecc/http_client.py";
-  const userAgent = /user_agent:\s*str\s*=\s*["']licensecc-python-sdk\/([^"']+)["']/u.exec(sourceAt(root, userAgentPath))?.[1] ?? null;
-  mismatch(errors, userAgentPath, pythonVersion, userAgent);
 
   const dotnetPath = "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj";
   const dotnetVersion = /<Version>([^<]+)<\/Version>/u.exec(sourceAt(root, dotnetPath))?.[1] ?? null;

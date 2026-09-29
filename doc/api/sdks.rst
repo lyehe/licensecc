@@ -14,8 +14,8 @@ repository; public registry publication is a separate release operation.
      - Scope
      - Detailed reference
    * - Python 3.9+
-     - ``verify_online_assertion``, ``verify_config_token``, ``HttpClient``
-     - Offline signed-token verification and backend HTTP calls.
+     - ``verify_config_token``
+     - Offline signed-token verification.
      - :doc:`Generated Python API <python>` and
        `SDK guide <https://github.com/lyehe/licensecc/tree/main/sdks/python>`_
    * - .NET 8

@@ -1,7 +1,6 @@
 """Shared signed-token core — a port of ``src/library/signed_token/SignedToken.cpp``.
 
-Both the ``lccoa1`` online-assertion and ``lcccfg1`` config-attestation tokens
-share this plumbing:
+The ``lcccfg1`` config-attestation token uses this plumbing:
 
   * ``split_envelope`` — ``<prefix>.<b64-payload>.<b64-sig>`` with EXACTLY two
     dots (a third dot is malformed), canonical standard base64 on both parts.

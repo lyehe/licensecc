@@ -117,7 +117,7 @@ failure signals, and next integration steps.
 | `licensecc` and `lccinspector` | Native enforcement, machine identity, and support diagnostics | [Capability registry](doc/capabilities/index.rst) |
 | `lccgen` | Project initialization and signed local-license issuance | [License issuance](doc/usage/issue-licenses.md) |
 | `services/` | Online verification, administration, customer self-service, and backup | [Operations](doc/operations/index.rst) |
-| `sdks/` | Signed-token verification and selected backend HTTP calls | [SDK reference](doc/api/sdks.rst) |
+| `sdks/` | Signed-token verification, plus backend HTTP calls in the .NET and Java SDKs | [SDK reference](doc/api/sdks.rst) |
 
 **Versioning:** no namespaced release has been tagged yet. The C++ library is
 `2.1.0` in CMake. Platform services, SDKs, and Node packages are `0.1.0-rc.2`

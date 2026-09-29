@@ -152,39 +152,13 @@ def test_config_rollback_below_floor_rejected(config_golden, trusted):
     assert result.code == RejectionCode.ROLLBACK_BELOW_FLOOR
 
 
-def test_config_unknown_key_id_rejected(config_golden, online_golden):
-    other = [TrustedPublicKey(public_key_der=online_golden.public_key_der)]
+def test_config_unknown_key_id_rejected(config_golden, embedded_config_golden):
+    # The embedded golden uses a different key ring than the standalone golden,
+    # so it is an "unknown key" relative to config_golden's token.
+    other = [TrustedPublicKey(public_key_der=embedded_config_golden.public_key_der)]
     result = verify_config_token(config_golden.token, _expected(config_golden), other)
     assert not result.ok
     assert result.code == RejectionCode.UNKNOWN_KEY_ID
-
-
-def test_config_wrong_purpose_rejected(config_golden, online_golden, trusted):
-    # Cross-protocol confusion: feed the ONLINE assertion (wrong purpose) to the
-    # config verifier with the online prefix swapped to lcccfg1. The online key
-    # is the one that signed it, so verify with the online key; the purpose
-    # claim then fails.
-    _, payload_b64, sig_b64 = online_golden.token.split(".")
-    swapped = f"lcccfg1.{payload_b64}.{sig_b64}"
-    online_trusted = [TrustedPublicKey(public_key_der=online_golden.public_key_der)]
-    expected = ConfigAttestationExpected(
-        config_bytes=config_golden.config_bytes,
-        project="DEFAULT",
-        feature="EXPORT",
-        license_fingerprint=GOLDEN_FP,
-        now=GOLDEN_NOW,
-    )
-    result = verify_config_token(swapped, expected, online_trusted)
-    assert not result.ok
-    # The online assertion's canonical payload has a different field set than the
-    # config payload, so it is rejected before/at metadata. Either an unexpected
-    # field, trailing fields, or a purpose metadata mismatch is acceptable here.
-    assert result.code in (
-        RejectionCode.METADATA_MISMATCH,
-        RejectionCode.FIELD_UNEXPECTED,
-        RejectionCode.TRAILING_FIELDS,
-        RejectionCode.FIELD_MISSING,
-    )
 
 
 @pytest.mark.parametrize(

@@ -1,8 +1,8 @@
 """Shared fixtures: load the golden vectors via a relative path to test/vectors.
 
 The golden vectors are the parity oracle. They live in the repo at
-``<repo>/test/vectors/{online_assertion,config_attestation}/`` — four levels up
-from this file (``sdks/python/tests`` -> repo root).
+``<repo>/test/vectors/config_attestation/`` — four levels up from this file
+(``sdks/python/tests`` -> repo root).
 """
 
 from __future__ import annotations
@@ -15,20 +15,11 @@ import pytest
 # tests/ -> python/ -> sdks/ -> repo root
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _VECTORS = _REPO_ROOT / "test" / "vectors"
-ONLINE_DIR = _VECTORS / "online_assertion"
 CONFIG_DIR = _VECTORS / "config_attestation"
 
 
 def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
-
-
-@dataclass(frozen=True)
-class OnlineGolden:
-    token: str
-    payload: str  # exact canonical payload bytes (as text)
-    key_id: str
-    public_key_der: bytes
 
 
 @dataclass(frozen=True)
@@ -43,18 +34,6 @@ class ConfigGolden:
 def vectors_dir() -> Path:
     assert _VECTORS.is_dir(), f"golden vectors not found at {_VECTORS}"
     return _VECTORS
-
-
-@pytest.fixture(scope="session")
-def online_golden() -> OnlineGolden:
-    return OnlineGolden(
-        token=_read_text(ONLINE_DIR / "golden.assertion").strip(),
-        payload=_read_text(ONLINE_DIR / "golden.payload"),
-        key_id=_read_text(ONLINE_DIR / "golden.key_id").strip(),
-        public_key_der=bytes.fromhex(
-            _read_text(ONLINE_DIR / "golden.public_key.pkcs1.der.hex").strip()
-        ),
-    )
 
 
 @pytest.fixture(scope="session")

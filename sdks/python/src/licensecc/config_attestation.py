@@ -1,8 +1,9 @@
 """Verify ``lcccfg1`` config-attestation tokens — a port of ``ConfigAttestation.cpp``.
 
-Same envelope/canonical-payload discipline as the online assertion, with a
-config-attestation purpose and a ``config-hash`` claim that binds the token to
-the exact config bytes. Fail-closed: typed rejection, never a raw exception.
+Uses the shared envelope/canonical-payload discipline in ``_signed_token``,
+with a config-attestation purpose and a ``config-hash`` claim that binds the
+token to the exact config bytes. Fail-closed: typed rejection, never a raw
+exception.
 """
 
 from __future__ import annotations

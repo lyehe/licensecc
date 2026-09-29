@@ -1,7 +1,7 @@
 [project]
 name = "licensecc"
 version = "0.1.0rc2"
-description = "Python client SDK for licensecc: offline verification of lccoa1 online-assertion and lcccfg1 config-attestation tokens, plus a thin HTTP client for the licensing-backend Worker."
+description = "Python client SDK for licensecc: offline verification of lcccfg1 config-attestation tokens."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "AGPL-3.0-or-later" }
@@ -14,17 +14,12 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 
-# Zero hard dependencies beyond `cryptography`. The HTTP client uses the
-# standard-library `urllib` so no `requests`/`httpx` is required at runtime.
+# Zero hard dependencies beyond `cryptography`.
 dependencies = [
     "cryptography>=41.0.0",
 ]
 
 [project.optional-dependencies]
-# Optional async/ergonomic HTTP transport. Not required: the default HttpClient
-# uses std-lib urllib. Not on PyPI yet — install from a checkout with
-# `pip install './sdks/python[httpx]'` to opt in.
-httpx = ["httpx>=0.27.0"]
 test = ["pytest>=7.0"]
 
 [project.urls]

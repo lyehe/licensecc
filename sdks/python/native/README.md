@@ -11,7 +11,7 @@ This optional 64-bit Windows/Linux library exposes the existing native device-bo
 to `licensecc.device_bound`. It owns enrollment, HTTP, TPM signing, lease
 verification, clocks and checkpoint recovery in C++. Python does not receive
 raw leases, enrollment secrets or private-key handles. The bridge adds no
-software-provider fallback and does not change the legacy HTTP client.
+software-provider fallback and does not change the config-token verifier.
 
 Build against an **installed** Licensecc package built with device identity and
 Windows TPM enabled, using the same MSVC architecture/configuration/runtime:

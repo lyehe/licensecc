@@ -121,7 +121,7 @@ function wheelArtifact({ version = PYTHON_VERSION, name = "licensecc", metadataN
     { name: `${distInfo}/WHEEL`, contents: "Wheel-Version: 1.0\nGenerator: fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n" },
     { name: `${distInfo}/licenses/LICENSE`, contents: "AGPL\n" },
     { name: `${name}/__init__.py`, contents: `__version__ = "${version}"\n` },
-    { name: `${name}/http_client.py`, contents: `user_agent: str = "licensecc-python-sdk/${version}"\n` },
+    { name: `${name}/config_attestation.py`, contents: "def verify_config_token(): ...\n" },
     ...extraEntries,
   ];
   const generatedRecord = [...entries]
@@ -146,8 +146,8 @@ function sdistArtifact({ version = PYTHON_VERSION, name = "licensecc", metadataN
     { name: `${root}/pyproject.toml`, contents: `[project]\nname = "${name}"\nversion = "${version}"\n\n[build-system]\nrequires = ["hatchling==1.27.0"]\nbuild-backend = "hatchling.build"\n\n[tool.hatch.build.targets.sdist]\nartifacts = ["uv.lock"]\n` },
     { name: `${root}/uv.lock`, contents: `version = 1\n\n[[package]]\nname = "${name}"\nversion = "${version}"\n` },
     { name: `${root}/src/${name}/__init__.py`, contents: `__version__ = "${version}"\n` },
-    { name: `${root}/src/${name}/http_client.py`, contents: `user_agent: str = "licensecc-python-sdk/${version}"\n` },
-    { name: `${root}/tests/test_http_client.py`, contents: "def test_fixture():\n    assert True\n" },
+    { name: `${root}/src/${name}/config_attestation.py`, contents: "def verify_config_token(): ...\n" },
+    { name: `${root}/tests/test_config_attestation.py`, contents: "def test_fixture():\n    assert True\n" },
     { name: `${root}/native/CMakeLists.txt`, contents: "# optional native bridge build\n" },
     { name: `${root}/native/README.md`, contents: "# Build the optional native bridge separately\n" },
     { name: `${root}/native/bridge.cpp`, contents: nativeBridgeSource },
@@ -319,7 +319,7 @@ function releaseFixture({ contractDrift = false, omitDotnetLock = false } = {}) 
     ["CMakeLists.txt", `cmake_minimum_required(VERSION 3.16)\nproject(licensecc VERSION ${CPP_VERSION} LANGUAGES CXX)\n`],
     ["LICENSE", "AGPL"], ["cmake/config.cmake", "# cmake"], ["include/licensecc/licensecc.h", `#define LCC_VERSION_MAJOR 2\n#define LCC_VERSION_MINOR 1\n#define LCC_VERSION_PATCH 0\n#define LCC_VERSION_STRING "${CPP_VERSION}"\n`], ["src/library/runtime.cpp", "// committed runtime"],
     ["extern/license-generator/CMakeLists.txt", "cmake_minimum_required(VERSION 3.16)\nproject(lccgen)\n"], ["extern/license-generator/LICENSE", "BSD 3-Clause License"], ["extern/license-generator/PROVENANCE.md", "reviewed vendor provenance"], ["extern/license-generator/cmake/lccgen-config.cmake", "# config"], ["extern/license-generator/src/license_generator/main.cpp", "// generator"],
-    ["sdks/python/.gitignore", "\n"], ["sdks/python/LICENSE", "AGPL\n"], ["sdks/python/README.md", "# fixture\n"], ["sdks/python/pyproject.toml", `[project]\nname = "licensecc"\nversion = "${PYTHON_VERSION}"\n\n[build-system]\nrequires = ["hatchling==1.27.0"]\nbuild-backend = "hatchling.build"\n\n[tool.hatch.build.targets.sdist]\nartifacts = ["uv.lock"]\n`], ["sdks/python/build-constraints.txt", "hatchling==1.27.0 --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000\n"], ["sdks/python/uv.lock", `version = 1\n\n[[package]]\nname = "licensecc"\nversion = "${PYTHON_VERSION}"\n`], ["sdks/python/src/licensecc/__init__.py", `__version__ = "${PYTHON_VERSION}"\n`], ["sdks/python/src/licensecc/http_client.py", `user_agent: str = "licensecc-python-sdk/${PYTHON_VERSION}"\n`], ["sdks/python/tests/test_http_client.py", "def test_fixture():\n    assert True\n"],
+    ["sdks/python/.gitignore", "\n"], ["sdks/python/LICENSE", "AGPL\n"], ["sdks/python/README.md", "# fixture\n"], ["sdks/python/pyproject.toml", `[project]\nname = "licensecc"\nversion = "${PYTHON_VERSION}"\n\n[build-system]\nrequires = ["hatchling==1.27.0"]\nbuild-backend = "hatchling.build"\n\n[tool.hatch.build.targets.sdist]\nartifacts = ["uv.lock"]\n`], ["sdks/python/build-constraints.txt", "hatchling==1.27.0 --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000\n"], ["sdks/python/uv.lock", `version = 1\n\n[[package]]\nname = "licensecc"\nversion = "${PYTHON_VERSION}"\n`], ["sdks/python/src/licensecc/__init__.py", `__version__ = "${PYTHON_VERSION}"\n`], ["sdks/python/src/licensecc/config_attestation.py", "def verify_config_token(): ...\n"], ["sdks/python/tests/test_config_attestation.py", "def test_fixture():\n    assert True\n"],
     ["sdks/dotnet/src/Licensecc.Client/LICENSE", "AGPL"], ["sdks/dotnet/Licensecc.Client.sln", "solution"], ["sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj", `<Project><PropertyGroup><PackageId>Licensecc.Client</PackageId><Version>${PLATFORM_VERSION}</Version><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>`], ...(omitDotnetLock ? [] : [["sdks/dotnet/src/Licensecc.Client/packages.lock.json", JSON.stringify({ version: 1, dependencies: { "net8.0": {} } })]]),
     ["sdks/java/MANIFEST.MF", `Manifest-Version: 1.0\nImplementation-Title: Licensecc Java Client\nImplementation-Version: ${PLATFORM_VERSION}\nAutomatic-Module-Name: io.licensecc.client\n`],
     ["sdks/java/README.md", `The repository builds licensecc-client-${PLATFORM_VERSION}.jar.\n`],

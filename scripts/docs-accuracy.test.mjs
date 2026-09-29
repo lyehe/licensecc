@@ -549,8 +549,8 @@ test("the API reference is generated from authoritative interfaces", () => {
   }
   assert.doesNotMatch(services, /\/v1\/verify\s+POST/u, "Worker routes must not be copied into prose tables");
 
-  assert.match(python, /autofunction:: verify_online_assertion/);
-  assert.match(python, /autoclass:: HttpClient/);
+  assert.match(python, /autofunction:: verify_config_token/);
+  assert.doesNotMatch(python, /autoclass:: HttpClient/);
   assert.match(docsScript, /--with\s+\$pythonSdk/u);
   assert.match(readTheDocs, /path:\s+sdks\/python/u);
 
