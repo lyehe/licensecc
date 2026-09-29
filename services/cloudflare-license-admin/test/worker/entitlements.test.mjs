@@ -17,6 +17,7 @@ import {
   fingerprint,
   json,
   keyOf,
+  protectedCreateFixture,
   rotatableAccessFixture,
   syncAuthed,
   syncEnv,
@@ -26,6 +27,22 @@ import { assertRouteGroup, assertRouteGroupRejectsUnauthenticated } from "./rout
 test("entitlement routes have direct owners and reject anonymous access", async () => {
   assertRouteGroup("entitlements", 9);
   await assertRouteGroupRejectsUnauthenticated("entitlements");
+});
+
+test("admin create without enforcement_mode is refused", async () => {
+  const { env, request } = protectedCreateFixture();
+  const body = { project: "APP", feature: "PRO", license_fingerprint: "c".repeat(64), customer_id: "cus_1", license_id: "lic_1" };
+  const response = await request("/api/admin/entitlements", body);
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).code, "invalid_request");
+  assert.equal(env.DB.entitlements.size, 0);
+});
+
+test("admin create with enforcement_mode legacy is refused", async () => {
+  const { request } = protectedCreateFixture();
+  const response = await request("/api/admin/entitlements", { project: "APP", feature: "PRO", license_fingerprint: "c".repeat(64),
+    customer_id: "cus_1", license_id: "lic_1", enforcement_mode: "legacy" });
+  assert.equal(response.status, 400);
 });
 
 test("cloudflare access reader can read but cannot mutate", async (t) => {

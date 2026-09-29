@@ -243,8 +243,15 @@ class MockStatement {
   }
 }
 
+// Every MockD1 seeds one owner a protected grant can name: active customer cus_1 holding licence
+// lic_1 for project APP.
+const PROTECTED_OWNER = { customer_id: "cus_1", license_id: "lic_1" };
+const PROTECTED_PROJECT = "APP";
+
 class MockD1 {
   constructor() {
+    this.customers = new Map([[PROTECTED_OWNER.customer_id, { id: PROTECTED_OWNER.customer_id, status: "active" }]]);
+    this.licenses = new Map([[PROTECTED_OWNER.license_id, { id: PROTECTED_OWNER.license_id, customer_id: PROTECTED_OWNER.customer_id, project: PROTECTED_PROJECT }]]);
     this.entitlements = new Map();
     this.events = [];
     this.idempotency = new Map();
@@ -500,6 +507,18 @@ MockD1.prototype.first = function first(sql, values) {
   throw new Error(`unexpected first SQL: ${sql}`);
 };
 
+// A seeded MockD1 and a request() that POSTs as the dev bearer under a fresh idempotency key.
+function protectedCreateFixture() {
+  const db = new MockD1();
+  const env = baseEnv(db);
+  const request = (path, body) => worker.fetch(authed(path, {
+    method: "POST",
+    headers: { "idempotency-key": crypto.randomUUID() },
+    body: JSON.stringify(body),
+  }), env);
+  return { env, db, request };
+}
+
 export {
   NEXT_JSON_KEYS,
   MockD1,
@@ -516,6 +535,7 @@ export {
   fingerprint,
   json,
   keyOf,
+  protectedCreateFixture,
   rotatableAccessFixture,
   syncAuthed,
   syncEnv,

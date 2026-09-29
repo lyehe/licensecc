@@ -158,6 +158,16 @@ test("retained legacy history and a competing legacy insertion cannot become pro
   }
 });
 
+test("a protected denial does not block re-creating the same grant", async t => {
+  const f = fixture(t);
+  assert.equal((await f.send()).status, 200);
+  // The protected issuer records a refused connection against the grant's key.
+  f.sql.prepare("INSERT INTO usage_events(project,feature,license_fingerprint,event_type,device_key_id,reason,ts) VALUES(?,?,?,'denied','key','device_limit_reached',1)")
+    .run(input.project, input.feature, input.license_fingerprint);
+  const again = await f.send(input, "again");
+  assert.equal(again.status, 200, JSON.stringify(await again.clone().json()));
+});
+
 test("malformed modes and attempts to patch mode are rejected", async t => {
   const f = fixture(t);
   for (const mode of [null, [], "", " device_bound_v1", "floating"]) assert.equal((await f.send({ ...input, enforcement_mode: mode })).status, 400);
