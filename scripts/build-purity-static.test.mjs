@@ -476,3 +476,12 @@ test("Ubuntu TPM2 production integration is explicit and remains opt-in", () => 
   assert.match(productionTest, /LCC_RUN_REAL_TPM2_TESTS/u);
   assert.match(source("test/library/device_identity/CMakeLists.txt"), /device_identity_tpm2_openssl_real/u);
 });
+
+test("root CMake requires OpenSSL 3.0 and the public-key template carries its own metadata defines", () => {
+  const root = source("CMakeLists.txt");
+  const template = source("src/templates/public_key.inja");
+
+  assert.match(root, /find_package\(OpenSSL 3\.0 COMPONENTS Crypto QUIET\)/u);
+  assert.doesNotMatch(root, /VERSION_LESS_EQUAL 1\.0\.2/u);
+  assert.match(template, /#define LCC_PUBLIC_KEY_ID/u);
+});
