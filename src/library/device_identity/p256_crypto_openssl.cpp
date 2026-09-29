@@ -5,9 +5,7 @@
 #include <openssl/obj_mac.h>
 #include <openssl/opensslv.h>
 #include <openssl/x509.h>
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
 #include <openssl/core_names.h>
-#endif
 
 #include <cstring>
 #include <memory>
@@ -33,7 +31,6 @@ PkeyPtr parse_public_key(const P256Spki& spki) {
 }
 
 bool has_p256_group(EVP_PKEY* key) {
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
 	char group_name[64]{};
 	std::size_t written = 0U;
 	if (EVP_PKEY_get_utf8_string_param(key, OSSL_PKEY_PARAM_GROUP_NAME, group_name, sizeof(group_name), &written) !=
@@ -42,16 +39,6 @@ bool has_p256_group(EVP_PKEY* key) {
 	}
 	const std::string group(group_name, written);
 	return group == "prime256v1" || group == "secp256r1" || group == "P-256";
-#else
-	EC_KEY* ec = EVP_PKEY_get1_EC_KEY(key);
-	if (ec == nullptr) {
-		return false;
-	}
-	const EC_GROUP* group = EC_KEY_get0_group(ec);
-	const bool result = group != nullptr && EC_GROUP_get_curve_name(group) == NID_X9_62_prime256v1;
-	EC_KEY_free(ec);
-	return result;
-#endif
 }
 
 }  // namespace

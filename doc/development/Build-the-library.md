@@ -8,9 +8,9 @@ a claim that binaries are published, remote CI is current, or an Ubuntu release
 has been attested. The root `README.md` and `AGENTS.md` are the current command
 authority.
 
-Install CMake 3.21 or later, a C++17 compiler, OpenSSL, Zlib where required,
-and the Boost development components used by the generator/tests. Package names
-vary by distribution; use the root README as the maintained dependency list.
+Install CMake 3.21 or later, a C++17 compiler, OpenSSL 3.0 or later, and the
+Boost development components used by the generator/tests. Package names vary
+by distribution; use the root README as the maintained dependency list.
 
 Before configuring, validate the vendored generator without changing it:
 

@@ -1,10 +1,10 @@
 # Dependencies
 
 Licensecc’s maintained source-build contract is a C++17 compiler, CMake 3.21
-or later, OpenSSL, Zlib where required by the selected OpenSSL configuration,
-and the Boost development components used by the vendored generator and tests.
-The C++ runtime keeps downstream link requirements minimal; the generator and
-test suite require their configured Boost components.
+or later, OpenSSL 3.0 or later, and the Boost development components used by
+the vendored generator and tests. The C++ runtime keeps downstream link
+requirements minimal; the generator and test suite require their configured
+Boost components.
 
 Use a current supported Linux distribution or Visual Studio 2022 on Windows,
 then follow the root `README.md` and `AGENTS.md` for current prerequisite and

@@ -15,8 +15,8 @@ Prerequisites
 -------------
 
 You need Git, CMake 3.21 or newer, a C++17 compiler, and the Boost development
-libraries used by the bundled generator. Linux also needs OpenSSL development
-headers and Zlib where required by the installed OpenSSL version. On Windows,
+libraries used by the bundled generator. Linux also needs OpenSSL 3.0 or later
+development headers. On Windows,
 the copyable sequence below uses Visual Studio 2022 x64; other supported
 toolchains produce different generator-specific executable paths. Set
 ``BOOST_ROOT`` if Boost is not in a default CMake search path.

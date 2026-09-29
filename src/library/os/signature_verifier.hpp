@@ -112,17 +112,7 @@ inline std::string public_key_id_from_der(const std::vector<uint8_t>& public_key
 }
 
 inline std::string embedded_public_key_id() {
-#ifdef LCC_PUBLIC_KEY_ID
 	return LCC_PUBLIC_KEY_ID;
-#else
-	// Main's long-lived public_key.inja predates the metadata macros introduced
-	// by the online/v201 baseline.  Do not silently retain its legacy label:
-	// the verification policy binds every key id to the DER bytes.  Deriving the
-	// same sha256:<digest> identifier here keeps an existing generated header
-	// usable while preserving that binding.
-	const uint8_t public_key[] = PUBLIC_KEY;
-	return public_key_id_from_der(std::vector<uint8_t>(public_key, public_key + sizeof(public_key)));
-#endif
 }
 
 struct SignaturePublicKey {

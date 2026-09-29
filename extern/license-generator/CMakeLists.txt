@@ -39,7 +39,7 @@ IF( ( CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" ) AND CMAKE_CROSSCOMPILING AND NOT
 ENDIF()
 
 SET ( OPENSSL_USE_STATIC_LIBS ON )
-find_package(OpenSSL COMPONENTS Crypto QUIET)
+find_package(OpenSSL 3.0 COMPONENTS Crypto QUIET)
 IF(OPENSSL_FOUND)
 	add_definitions(-DHAS_OPENSSL)
 	include_directories(${OPENSSL_INCLUDE_DIR})
@@ -65,14 +65,6 @@ if(UNIX) #this is true for all the linux systems but not for cross compiling "li
 		endif()
 	endif(THREADS_HAVE_PTHREAD_ARG)
 	
-	#Zlib required when openssl version < 1.0.2k (centos 7)
-	IF(OPENSSL_VERSION VERSION_LESS_EQUAL 1.0.2)
-		SET ( ZLIB_USE_STATIC_LIBS ON ) 
-		find_package(ZLIB REQUIRED)
-		list(APPEND EXTERNAL_LIBS ${ZLIB_LIBRARIES})
-		MESSAGE(STATUS "Found zlib version ${ZLIB_VERSION_STRING} - generator")
-	ENDIF(OPENSSL_VERSION VERSION_LESS_EQUAL 1.0.2)
-
 	find_program( MEMORYCHECK_COMMAND valgrind )
 	set( MEMORYCHECK_COMMAND_OPTIONS "--trace-children=yes --leak-check=full" ) 
 	set(pkg_config_dest "lib/cmake/${PROJECT_NAME}")

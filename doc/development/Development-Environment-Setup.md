@@ -14,8 +14,8 @@ Install the platform prerequisites listed in {doc}`Dependencies`, plus:
 - `clang-format` for C and C++ formatting.
 
 Visual Studio 2022 is the supported Windows C++ environment. On Linux, a C++17
-compiler, CMake, Ninja, OpenSSL, Zlib, and the required Boost development
-packages provide the equivalent command-line environment.
+compiler, CMake, Ninja, OpenSSL 3.0 or later, and the required Boost
+development packages provide the equivalent command-line environment.
 
 ## First checkout
 

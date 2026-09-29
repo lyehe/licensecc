@@ -260,7 +260,10 @@ ENDIF(${STATIC_RUNTIME})
 if(LCC_ENABLE_TPM2_OPENSSL OR LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST)
 	find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 else()
-	find_package(OpenSSL COMPONENTS Crypto QUIET)
+	find_package(OpenSSL 3.0 COMPONENTS Crypto QUIET)
+	if(NOT OPENSSL_FOUND AND OPENSSL_VERSION)
+		message(FATAL_ERROR "licensecc requires OpenSSL >= 3.0")
+	endif()
 endif()
 IF(OPENSSL_FOUND)
 	MESSAGE(STATUS "Found openssl version ${OPENSSL_VERSION} -licensecc")
@@ -288,16 +291,6 @@ if(UNIX) #this is true for all the linux systems but not for cross compiling "li
 		endif()
 	endif(THREADS_HAVE_PTHREAD_ARG)
 
-	#Zlib required with old openssl version < 1.0.1f in centos 7
-	IF(OPENSSL_VERSION VERSION_LESS_EQUAL 1.0.2)
-		SET ( ZLIB_USE_STATIC_LIBS ON ) 
-		find_package(ZLIB REQUIRED)
-		list(APPEND EXTERNAL_LIBS "${ZLIB_LIBRARIES}")
-		MESSAGE(STATUS "Found zlib version ${ZLIB_VERSION_STRING} - licensecc")
-	ELSE(OPENSSL_VERSION VERSION_LESS_EQUAL 1.0.2)
-	    MESSAGE(STATUS "openssl ${OPENSSL_VERSION} zlib not required - licensecc")
-	ENDIF(OPENSSL_VERSION VERSION_LESS_EQUAL 1.0.2)
-	
 	find_program( MEMORYCHECK_COMMAND valgrind )
 	set( MEMORYCHECK_COMMAND_OPTIONS "--trace-children=yes --leak-check=full" )
 	set(main_lib_dest "lib/${PROJECT_NAME}")
@@ -341,31 +334,6 @@ set(LCC_PROJECT_PUBLIC_KEY "${LCC_INCLUDE_DIR}/public_key.h" )
 set(LCC_PROJECT_PRIVATE_KEY "${LCC_PROJECTS_BASE_DIR}/${LCC_PROJECT_NAME}/private_key.rsa")
 file(MAKE_DIRECTORY "${LCC_INCLUDE_DIR}")
 
-# The authoritative main template deliberately remains byte-compatible with
-# older generated projects.  The reconciled v201 issuer additionally needs
-# key identity metadata, so create a build-tree overlay for lccgen rather than
-# editing that source template or any existing generated project header.
-set(LCC_PROJECT_TEMPLATE_DIR "${CMAKE_BINARY_DIR}/generated-project-templates")
-file(MAKE_DIRECTORY "${LCC_PROJECT_TEMPLATE_DIR}")
-configure_file("${PROJECT_SOURCE_DIR}/src/templates/public_key.inja"
-	"${LCC_PROJECT_TEMPLATE_DIR}/public_key.inja" COPYONLY)
-file(APPEND "${LCC_PROJECT_TEMPLATE_DIR}/public_key.inja"
-	"\n#ifndef LCC_PUBLIC_KEY_ALGORITHM\n"
-	"#define LCC_PUBLIC_KEY_ALGORITHM \"{{ public_key_algorithm }}\"\n"
-	"#endif\n"
-	"#ifndef LCC_PUBLIC_KEY_BITS\n"
-	"#define LCC_PUBLIC_KEY_BITS {{ public_key_bits }}\n"
-	"#endif\n"
-	"#ifndef LCC_PUBLIC_KEY_SHA256\n"
-	"#define LCC_PUBLIC_KEY_SHA256 \"{{ public_key_sha256 }}\"\n"
-	"#endif\n"
-	"#ifndef LCC_PUBLIC_KEY_ID\n"
-	"#define LCC_PUBLIC_KEY_ID \"sha256:{{ public_key_sha256 }}\"\n"
-	"#endif\n"
-	"#ifndef LCC_SIGNATURE_ALGORITHM\n"
-	"#define LCC_SIGNATURE_ALGORITHM \"{{ signature_algorithm }}\"\n"
-	"#endif\n")
-
 add_compile_definitions(
 	"LCC_PROJECT_CONFIG_HEADER=\"${LCC_PROJECT_CONFIG_HEADER}\""
 	"LCC_PROJECT_PUBLIC_KEY_HEADER=\"${LCC_PROJECT_PUBLIC_KEY_HEADER}\"")
@@ -373,8 +341,8 @@ add_compile_definitions(
 add_custom_command(
 	OUTPUT "${LCC_PROJECT_PUBLIC_KEY}"
 	COMMAND "${CMAKE_COMMAND}" -E make_directory "${LCC_INCLUDE_DIR}"
-	COMMAND license_generator::lccgen project initialize -t "${LCC_PROJECT_TEMPLATE_DIR}" -n "${LCC_PROJECT_NAME}" -p "${LCC_PROJECTS_BASE_DIR}"
-	DEPENDS license_generator::lccgen "${LCC_PROJECT_TEMPLATE_DIR}/public_key.inja"
+	COMMAND license_generator::lccgen project initialize -t "${PROJECT_SOURCE_DIR}/src/templates" -n "${LCC_PROJECT_NAME}" -p "${LCC_PROJECTS_BASE_DIR}"
+	DEPENDS license_generator::lccgen "${PROJECT_SOURCE_DIR}/src/templates/public_key.inja"
 	COMMENT "Generating ${LCC_PROJECT_PUBLIC_KEY}"
 	VERBATIM)
 add_custom_target(project_public_header DEPENDS "${LCC_PROJECT_PUBLIC_KEY}")

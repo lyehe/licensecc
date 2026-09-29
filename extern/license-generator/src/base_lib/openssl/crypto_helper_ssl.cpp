@@ -10,7 +10,6 @@
 #include <openssl/evp.h>
 #include <openssl/bio.h>
 #include <openssl/pem.h>
-#include <openssl/err.h>
 #include <openssl/rsa.h>
 #include <stdexcept>
 #include <string>
@@ -22,15 +21,7 @@
 namespace license {
 using namespace std;
 
-CryptoHelperLinux::CryptoHelperLinux() : m_pktmp(nullptr) {
-	static int initialized = 0;
-	if (initialized == 0) {
-		initialized = 1;
-		ERR_load_ERR_strings();
-		ERR_load_crypto_strings();
-		OpenSSL_add_all_algorithms();
-	}
-}
+CryptoHelperLinux::CryptoHelperLinux() : m_pktmp(nullptr) {}
 void CryptoHelperLinux::generateKeyPair() {
 	generateKeyPair(kBits);
 }
@@ -120,7 +111,7 @@ const string CryptoHelperLinux::signString(const string &license) const {
 	size_t slen;
 	unsigned char *signature = nullptr;
 	/* Create the Message Digest Context */
-	EVP_MD_CTX *mdctx = EVP_MD_CTX_create();
+	EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
 	if (!mdctx) {
 		throw logic_error("Message digest creation context");
 	}
@@ -128,37 +119,37 @@ const string CryptoHelperLinux::signString(const string &license) const {
 	/*Initialise the DigestSign operation - SHA-256 has been selected
 	 * as the message digest function */
 	if (1 != EVP_DigestSignInit(mdctx, NULL, EVP_sha256(), NULL, m_pktmp)) {
-		EVP_MD_CTX_destroy(mdctx);
+		EVP_MD_CTX_free(mdctx);
 		throw logic_error("Message signing init exception");
 	}
 	/* Call update with the message */
 	if (EVP_DigestSignUpdate(mdctx, (const void *)license.c_str(), (size_t)license.length()) != 1) {
-		EVP_MD_CTX_destroy(mdctx);
+		EVP_MD_CTX_free(mdctx);
 		throw logic_error("Message signing exception");
 	}
 	/* Finalise the DigestSign operation */
 	/* First call EVP_DigestSignFinal with a NULL sig parameter to obtain the length of the
 	 * signature. Length is returned in slen */
 	if (EVP_DigestSignFinal(mdctx, NULL, &slen) != 1) {
-		EVP_MD_CTX_destroy(mdctx);
+		EVP_MD_CTX_free(mdctx);
 		throw logic_error("Message signature finalization exception");
 	}
 	/* Allocate memory for the signature based on size in slen */
 	if (!(signature = (unsigned char *)OPENSSL_malloc(sizeof(unsigned char) * slen))) {
-		EVP_MD_CTX_destroy(mdctx);
+		EVP_MD_CTX_free(mdctx);
 		throw logic_error("Message signature memory allocation exception");
 	}
 	/* Obtain the signature */
 	if (1 != EVP_DigestSignFinal(mdctx, signature, &slen)) {
 		OPENSSL_free(signature);
-		EVP_MD_CTX_destroy(mdctx);
+		EVP_MD_CTX_free(mdctx);
 		throw logic_error("Message signature exception");
 	}
 
 	string signatureStr = Opensslb64Encode(slen, signature);
 
 	if (signature) OPENSSL_free(signature);
-	EVP_MD_CTX_destroy(mdctx);
+	EVP_MD_CTX_free(mdctx);
 	return signatureStr;
 }
 void CryptoHelperLinux::loadPrivateKey(const std::string &privateKey) {

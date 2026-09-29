@@ -6,7 +6,6 @@
  */
 
 #include <openssl/pem.h>
-#include <openssl/err.h>
 #include <stdlib.h>
 #include <errno.h>
 
@@ -15,7 +14,6 @@
 //#endif
 
 #include <cstdint>
-#include <mutex>
 #include <vector>
 
 #include <public_key.h>
@@ -31,20 +29,8 @@ static void free_resources(EVP_PKEY* pkey, EVP_MD_CTX* mdctx) {
 		EVP_PKEY_free(pkey);
 	}
 	if (mdctx) {
-		EVP_MD_CTX_destroy(mdctx);
+		EVP_MD_CTX_free(mdctx);
 	}
-}
-
-static void initialize() {
-	// Thread-safe one-time OpenSSL global init. The legacy ERR_load_*/add_all_algorithms
-	// calls are not re-entrant and the old non-atomic flag raced on the first concurrent
-	// verify.
-	static std::once_flag init_flag;
-	std::call_once(init_flag, []() {
-		ERR_load_ERR_strings();
-		ERR_load_crypto_strings();
-		OpenSSL_add_all_algorithms();
-	});
 }
 
 static FUNCTION_RETURN verify_signature_bytes(const std::vector<uint8_t>& payload,
@@ -57,7 +43,6 @@ static FUNCTION_RETURN verify_signature_bytes(const std::vector<uint8_t>& payloa
 	}
 	const std::vector<uint8_t>& selected_public_key = public_key_der;
 	int func_ret = 0;
-	initialize();
 
 	BIO* bio = BIO_new_mem_buf((void*)selected_public_key.data(), selected_public_key.size());
 	RSA* rsa = d2i_RSAPublicKey_bio(bio, NULL);
@@ -78,7 +63,7 @@ static FUNCTION_RETURN verify_signature_bytes(const std::vector<uint8_t>& payloa
 	// RSA* rsa = EVP_PKEY_get1_RSA( key );
 	// RSA * pubKey = d2i_RSA_PUBKEY(NULL, <der encoded byte stream pointer>, <num bytes>);
 	/* Create the Message Digest Context */
-	if (!(mdctx = EVP_MD_CTX_create())) {
+	if (!(mdctx = EVP_MD_CTX_new())) {
 		free_resources(pkey, mdctx);
 		LOG_ERROR("Error creating context");
 		return FUNC_RET_ERROR;

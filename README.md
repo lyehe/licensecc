@@ -47,8 +47,7 @@ Cloudflare credentials, or a deployment.
 Prerequisites for this path:
 
 - Git, CMake 3.21 or newer, a C++17 compiler, and Boost development libraries.
-- On Linux, OpenSSL development headers and Zlib where required by the installed
-  OpenSSL version.
+- On Linux, OpenSSL 3.0 or later development headers.
 - On Windows, the copyable sequence below uses Visual Studio 2022 x64. Other
   supported C++ toolchains can build Licensecc, but their generator-specific
   executable paths differ. Set `BOOST_ROOT` when Boost is not in CMake's
