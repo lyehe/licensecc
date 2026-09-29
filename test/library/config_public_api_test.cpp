@@ -103,6 +103,30 @@ BOOST_AUTO_TEST_CASE(config_verify_options_with_old_size_are_rejected) {
 	BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
 }
 
+BOOST_AUTO_TEST_CASE(config_verify_options_with_nonzero_reserved_are_rejected) {
+	CallerInformations caller;
+	lcc_init_caller_informations(&caller);
+	LicenseInfo info{};
+	LccConfigDecision decision;
+	lcc_init_config_decision(&decision);
+
+	LccConfigInput input;
+	lcc_init_config_input(&input);
+	input.token = "lcccfg1.x.y";
+	const unsigned char bytes[] = {1, 2, 3};
+	input.config_bytes = bytes;
+	input.config_len = sizeof(bytes);
+
+	// The current size and version are otherwise valid; only the reserved field
+	// is poisoned. A non-zero reserved field must still be rejected.
+	LccConfigVerifyOptions options;
+	lcc_init_config_verify_options(&options);
+	options.reserved = 1;
+
+	BOOST_CHECK_EQUAL(lcc_verify_config(&caller, nullptr, &info, &input, &decision, &options), LICENSE_MALFORMED);
+	BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
+}
+
 static const char* const kConfigFeature = "CONFIG";
 
 static std::string issue_config_license(const std::string& name) {
