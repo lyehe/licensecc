@@ -4,7 +4,7 @@ namespace Licensecc.Client
 {
     /// <summary>
     /// Machine-readable rejection codes for token verification. Mirrors the fail-closed decision
-    /// points of the C++ verifier (src/library/signed_token, online_verification, config_attestation).
+    /// points of the C++ verifier (src/library/signed_token, config_attestation).
     /// A bad token NEVER throws; it returns <see cref="VerifyResult{TClaims}"/> with <c>Ok == false</c>
     /// and one of these codes.
     /// </summary>

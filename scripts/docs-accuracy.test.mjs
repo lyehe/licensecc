@@ -379,27 +379,16 @@ test("ownership, task packets, and validation status have one evidence contract"
   }
 });
 
-test("backend documentation tracks the accepted C++ online API", () => {
+test("native public API documents offline licences and protected sessions only", () => {
   const backendReadme = source("services/cloudflare-licensing-backend/README.md");
   const publicHeader = source("include/licensecc/licensecc.h");
   const dataTypes = source("include/licensecc/datatypes.h");
-  const implementation = source("src/library/licensecc.cpp");
-
-  assert.match(publicHeader, /LCC_EVENT_TYPE\s+acquire_license_ex\s*\(/);
-  assert.match(publicHeader, /LCC_EVENT_TYPE\s+lcc_acquire_license_decision\s*\(/);
-  assert.match(dataTypes, /typedef\s+LCC_ONLINE_CALLBACK_STATUS\s+\(\*LCC_ONLINE_CHECK\)\s*\(/);
-  assert.match(implementation, /LCC_EVENT_TYPE\s+acquire_license_ex\s*\(/);
-  assert.match(implementation, /LCC_EVENT_TYPE\s+lcc_acquire_license_decision\s*\(/);
-
-  assert.doesNotMatch(backendReadme, /not yet .*C\+\+|C\+\+.*not yet/i);
-  assert.match(backendReadme, /For production C\+\+ hosts, use `lcc_acquire_license_decision\(\)`/);
-  assert.match(backendReadme, /persisted revocation sequence/i);
-  assert.match(
-    backendReadme,
-    /C\+\+ client runtime\s+provides conditional Windows Platform KSP and Ubuntu TPM2\/OpenSSL provider\s+surfaces/is,
-  );
-  assert.doesNotMatch(backendReadme, /TPM-provider\/request-proof\s+integration remains\s+plan-only/is);
-  assert.match(backendReadme, /does not\s+claim\s+TPM\s+support/i);
+  assert.match(publicHeader, /LCC_EVENT_TYPE\s+acquire_license_ex\s*\(/u);
+  assert.doesNotMatch(publicHeader, /lcc_acquire_license_decision|lcc_confirm_license|lcc_release_license|revocation_floor/u);
+  assert.doesNotMatch(dataTypes, /LCC_ONLINE_CHECK|LccOnlineRequest|LCC_ONLINE_FLAG_/u);
+  assert.doesNotMatch(backendReadme, /lcc_acquire_license_decision|persisted revocation sequence/iu);
+  assert.match(backendReadme, /C\+\+ client runtime\s+provides conditional Windows Platform KSP and Ubuntu TPM2\/OpenSSL provider\s+surfaces/isu);
+  assert.match(backendReadme, /does not\s+claim\s+TPM\s+support/iu);
 });
 
 test("organization evidence tracks the repository-owned generator snapshot", () => {

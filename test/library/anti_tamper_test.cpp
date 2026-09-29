@@ -57,12 +57,6 @@ static const AuditEvent* find_status_event(const LicenseInfo& info, LCC_EVENT_TY
 	return nullptr;
 }
 
-static LCC_CUSTOM_LIMIT_RESULT counting_custom_limit_callback(void* user_data, const char*, size_t) {
-	int* calls = static_cast<int*>(user_data);
-	++(*calls);
-	return LCC_CUSTOM_LIMIT_ALLOW;
-}
-
 static string issue_license_file(const string& license_name, const string& extra_args) {
 	std::filesystem::create_directories(LCC_LICENSES_BASE);
 	const string file_path = string(LCC_LICENSES_BASE) + "/" + license_name + ".lic";
@@ -270,64 +264,34 @@ BOOST_AUTO_TEST_CASE(invalid_options_fail_closed_with_malformed) {
 	LicenseInfo version_info{};
 	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, nullptr, &version_info, &options), LICENSE_MALFORMED);
 	BOOST_CHECK(has_status_event(version_info, LICENSE_MALFORMED));
-
-	lcc_init_license_check_options(&options);
-	memset(options.online_device_hash, 'a', sizeof(options.online_device_hash));
-	LicenseInfo unterminated_device_hash_info{};
-	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, nullptr, &unterminated_device_hash_info, &options),
-					  LICENSE_MALFORMED);
-	BOOST_CHECK(has_status_event(unterminated_device_hash_info, LICENSE_MALFORMED));
 }
 
-BOOST_AUTO_TEST_CASE(v1_options_size_remains_accepted_and_ignores_online_tail) {
+BOOST_AUTO_TEST_CASE(options_with_a_different_size_or_version_are_rejected) {
 	RuntimePolicyGuard guard;
-	const string valid_path = issue_valid_license_file("anti-tamper-v1-options-valid");
+	const string valid_path = issue_valid_license_file("anti-tamper-options-size-version-valid");
 	LicenseLocation location = license_path_location(valid_path);
 	CallerInformations caller = default_caller();
 
 	LicenseCheckOptions options;
 	lcc_init_license_check_options(&options);
-	options.size = static_cast<uint32_t>(offsetof(LicenseCheckOptions, online_policy));
-	options.version = 1;
-	options.tamper_policy = LCC_TAMPER_DISABLED;
-	int calls = 0;
-	options.host_integrity_check = failing_integrity_callback;
-	options.host_integrity_user_data = &calls;
-	options.online_policy = LCC_ONLINE_REQUIRE;
-	options.online_check = nullptr;
+	options.size = static_cast<uint32_t>(sizeof(LicenseCheckOptions) - 1);
+	LicenseInfo size_info{};
+	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &size_info, &options), LICENSE_MALFORMED);
+	BOOST_CHECK(has_status_event(size_info, LICENSE_MALFORMED));
 
-	LicenseInfo info{};
-	const LCC_EVENT_TYPE result = acquire_license_ex(&caller, &location, &info, &options);
-	BOOST_CHECK_EQUAL(result, LICENSE_OK);
-	BOOST_CHECK_EQUAL(calls, 0);
-	BOOST_CHECK(!has_status_event(info, LICENSE_TAMPER_DETECTED));
-	BOOST_CHECK(!has_status_event(info, LICENSE_ONLINE_REQUIRED));
+	lcc_init_license_check_options(&options);
+	options.version = 2;
+	LicenseInfo version_info{};
+	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &version_info, &options), LICENSE_MALFORMED);
+	BOOST_CHECK(has_status_event(version_info, LICENSE_MALFORMED));
+
+	// The same licence verifies with the exact current size and version, so the
+	// rejections above come from the options, not from the licence.
+	lcc_init_license_check_options(&options);
+	LicenseInfo current_info{};
+	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &current_info, &options), LICENSE_OK);
 
 	std::remove(valid_path.c_str());
-}
-
-BOOST_AUTO_TEST_CASE(v2_options_size_remains_accepted_and_ignores_custom_limit_tail) {
-	RuntimePolicyGuard guard;
-	const string license_path =
-		issue_license_file("anti-tamper-v2-options-custom-limit",
-						   "--license-version 201 --target-license-format-max 201 --custom-limit cpu-max-8");
-	LicenseLocation location = license_path_location(license_path);
-	CallerInformations caller = default_caller();
-
-	LicenseCheckOptions options;
-	lcc_init_license_check_options(&options);
-	options.size = static_cast<uint32_t>(offsetof(LicenseCheckOptions, custom_limit_check));
-	options.version = 2;
-	int calls = 0;
-	options.custom_limit_check = counting_custom_limit_callback;
-	options.custom_limit_user_data = &calls;
-
-	LicenseInfo info{};
-	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &info, &options), LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED);
-	BOOST_CHECK_EQUAL(calls, 0);
-	BOOST_CHECK(has_status_event(info, LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED));
-
-	std::remove(license_path.c_str());
 }
 
 BOOST_AUTO_TEST_CASE(invalid_license_result_is_not_masked_by_tamper_callback) {

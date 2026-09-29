@@ -60,23 +60,6 @@
       ]
     },
     {
-      "id": "online-verification",
-      "title": "Fail-closed online verification",
-      "status": "shipped",
-      "owner": "Backend deployable maintainer",
-      "surfaces": ["C++ callback contract", "licensing backend"],
-      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Cloudflare Workers", "C++ hosts"], "limitations": ["The repository proves implementation and automated coverage only; remote deployment and Ubuntu release evidence are not asserted here."]},
-      "replaces": [],
-      "public_docs": ["doc/capabilities/index.rst", "sdks/dotnet/README.md"],
-      "evidence": [
-        {"kind": "implementation", "surface": "C++ callback contract", "path": "include/licensecc/licensecc.h", "selector": "LCC_EVENT_TYPE lcc_acquire_license_decision(", "assertion": "The accepted C++ API contains the fail-closed decision entry point."},
-        {"kind": "automated_test", "surface": "C++ callback contract", "path": "test/library/online_verification_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(verifier_accepts_valid_assertion)", "assertion": "The accepted C++ online-verification suite is automated."},
-        {"kind": "implementation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/src/routes/verify.ts", "selector": "export async function handleVerify", "assertion": "The backend implements the verification handler."},
-        {"kind": "automated_test", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/test/contexts/entitlement.test.mjs", "selector": "test(\"unknown entitlement returns unsigned denial by default\"", "assertion": "Backend verification decisions have automated coverage."},
-        {"kind": "route_contract", "surface": "licensing backend", "path": "test/contracts/backend.json", "selector": "POST /v1/verify", "assertion": "The canonical backend contract exposes verification."}
-      ]
-    },
-    {
       "id": "config-attestation",
       "title": "Signed configuration attestation",
       "status": "shipped",
@@ -92,41 +75,6 @@
         {"kind": "automated_test", "surface": "Python config verifier", "path": "sdks/python/tests/test_config_attestation.py", "selector": "def test_golden_config_token_verifies", "assertion": "The Python config-token verifier has golden-vector tests."},
         {"kind": "implementation", "surface": ".NET config verifier", "path": "sdks/dotnet/src/Licensecc.Client/ConfigToken.cs", "selector": "public static VerifyResult<ConfigTokenClaims> Verify", "assertion": "The .NET SDK implements config-token verification."},
         {"kind": "automated_test", "surface": ".NET config verifier", "path": "sdks/dotnet/test/Licensecc.Client.Tests/ConfigTokenTests.cs", "selector": "public void Positive_GoldenConfigTokenVerifies()", "assertion": "The .NET config-token verifier has golden-vector tests."}
-      ]
-    },
-    {
-      "id": "floating-seats",
-      "title": "Floating-seat lifecycle",
-      "status": "shipped",
-      "owner": "Backend deployable maintainer",
-      "surfaces": ["C++ callback contract", "licensing backend", "Python HTTP client", ".NET HTTP client"],
-      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Cloudflare Workers", "C++ hosts", "Python", ".NET 8"], "limitations": ["A host owns HTTP transport and seat identifiers; no remote deployment claim is made."]},
-      "replaces": ["legacy-remote-license-type"],
-      "public_docs": ["doc/capabilities/index.rst", "sdks/dotnet/README.md"],
-      "evidence": [
-        {"kind": "implementation", "surface": "C++ callback contract", "path": "include/licensecc/datatypes.h", "selector": "#define LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT 0x00000001u", "assertion": "The C++ callback contract carries the heartbeat lifecycle purpose."},
-        {"kind": "automated_test", "surface": "C++ callback contract", "path": "test/library/public_api_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(public_abi_enum_values_are_stable)", "assertion": "The C++ lifecycle callback flags have automated ABI coverage."},
-        {"kind": "implementation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/src/routes/seats.ts", "selector": "export async function handleSeatCheckout", "assertion": "The backend implements seat checkout."},
-        {"kind": "automated_test", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/test/device-proof.test.mjs", "selector": "test(\"seat checkout with a valid device proof is granted\"", "assertion": "The backend seat checkout has an automated test."},
-        {"kind": "route_contract", "surface": "licensing backend", "path": "test/contracts/backend.json", "selector": "POST /v1/checkout", "assertion": "The canonical backend contract includes checkout."},
-        {"kind": "implementation", "surface": "Python HTTP client", "path": "sdks/python/src/licensecc/http_client.py", "selector": "    def checkout(self, body: Mapping[str, Any]) -> ApiResponse:", "assertion": "The Python HTTP client implements seat checkout."},
-        {"kind": "automated_test", "surface": "Python HTTP client", "path": "sdks/python/tests/test_http_client.py", "selector": "def test_seat_endpoints_paths(capture):", "assertion": "The Python HTTP client tests seat endpoint paths."},
-        {"kind": "implementation", "surface": ".NET HTTP client", "path": "sdks/dotnet/src/Licensecc.Client/LicensingBackendClient.cs", "selector": "public Task<BackendResponse> CheckoutAsync(IReadOnlyDictionary<string, object?> body, CancellationToken ct = default) =>", "assertion": "The .NET HTTP client implements seat checkout."},
-        {"kind": "automated_test", "surface": ".NET HTTP client", "path": "sdks/dotnet/test/Licensecc.Client.Tests/HttpClientTests.cs", "selector": "public async Task AllSeatEndpoints_RouteToDocumentedPaths()", "assertion": "The .NET HTTP client tests all documented seat endpoint paths."}
-      ]
-    },
-    {
-      "id": "legacy-remote-license-type",
-      "title": "Legacy LCC_REMOTE license type",
-      "status": "deprecated",
-      "owner": "C++ ABI and core maintainer",
-      "surfaces": ["C++ compatibility enum"],
-      "availability": {"release": "C++ 2.1.0 lineage", "platforms": ["Windows", "Linux"], "limitations": ["This legacy enum value is retained for compatibility and is explicitly unsupported; use the online callback and backend lifecycle instead."]},
-      "replaces": [],
-      "public_docs": ["doc/capabilities/index.rst"],
-      "evidence": [
-        {"kind": "limitation", "surface": "C++ compatibility enum", "path": "include/licensecc/datatypes.h", "selector": "LCC_REMOTE\t// remote licenses are not supported now.", "assertion": "The legacy remote license type is explicitly unsupported."},
-        {"kind": "automated_test", "surface": "C++ compatibility enum", "path": "test/library/public_api_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(public_abi_enum_values_are_stable)", "assertion": "The compatibility enum remains covered by the public-API test."}
       ]
     },
     {

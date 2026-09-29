@@ -1,7 +1,6 @@
 add_subdirectory("signed_token")
 add_subdirectory("base")
 add_subdirectory("anti_tamper")
-add_subdirectory("online_verification")
 add_subdirectory("config_attestation")
 add_subdirectory("activation")
 add_subdirectory("os")
@@ -19,7 +18,7 @@ if(LCC_ENABLE_DEVICE_IDENTITY)
     set(_lcc_device_identity_objects $<TARGET_OBJECTS:device_identity>)
 endif()
 
-foreach(_lcc_generated_metadata_target IN ITEMS signed_token base anti_tamper online_verification config_attestation activation os locate hw_identifier)
+foreach(_lcc_generated_metadata_target IN ITEMS signed_token base anti_tamper config_attestation activation os locate hw_identifier)
     if(TARGET ${_lcc_generated_metadata_target})
         add_dependencies(${_lcc_generated_metadata_target} project_public_header)
     endif()
@@ -36,7 +35,6 @@ ADD_LIBRARY(licensecc_static STATIC
     $<TARGET_OBJECTS:base>
     $<TARGET_OBJECTS:anti_tamper>
     $<TARGET_OBJECTS:signed_token>
-    $<TARGET_OBJECTS:online_verification>
     $<TARGET_OBJECTS:config_attestation>
     $<TARGET_OBJECTS:activation>
     ${_lcc_device_identity_objects}
@@ -92,32 +90,6 @@ target_compile_definitions(licensecc_static
         LCC_ENABLE_TPM2_OPENSSL=$<BOOL:${LCC_ENABLE_TPM2_OPENSSL}>
         LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER=$<BOOL:${LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER}>
 )
-
-if(NOT "${LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS}" STREQUAL "")
-    if(TARGET online_verification)
-        target_compile_definitions(online_verification
-            PRIVATE
-                "LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS=${LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS}"
-        )
-    endif()
-    target_compile_definitions(licensecc_static
-        PUBLIC
-            "LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS=${LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS}"
-    )
-endif()
-
-if(NOT "${LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS}" STREQUAL "")
-    if(TARGET online_verification)
-        target_compile_definitions(online_verification
-            PRIVATE
-                "LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS=${LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS}"
-        )
-    endif()
-    target_compile_definitions(licensecc_static
-        PUBLIC
-            "LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS=${LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS}"
-    )
-endif()
 
 if(NOT "${LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS}" STREQUAL "")
     if(TARGET config_attestation)

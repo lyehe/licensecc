@@ -4,11 +4,10 @@ C runtime API
 =============
 
 The primary C API is declared in ``include/licensecc/licensecc.h``. Include it
-for local license acquisition, fail-closed decisions, online verification,
-configuration attestation, hardware identifiers, and compatibility entry
-points. Device-key operations are a separate optional header documented in
-:doc:`device_identity`; public structures and callbacks are indexed in
-:doc:`types`.
+for local license acquisition, runtime tamper checks, configuration
+attestation, and hardware identifiers. Device-key operations are a separate
+optional header documented in :doc:`device_identity`; public structures and
+callbacks are indexed in :doc:`types`.
 
 Safe calling pattern
 --------------------

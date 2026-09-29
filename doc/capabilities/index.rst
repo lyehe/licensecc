@@ -45,8 +45,6 @@ Local C++ runtime
 * **License version limits** and **signed configuration attestation** — shipped.
 * **Signed host-defined execution limits** — shipped for v201 licenses. The
   runtime fails closed unless the host evaluates the signed opaque policy.
-* **Legacy ``LCC_REMOTE`` license type** — deprecated and unsupported; use the
-  online callback and backend lifecycle rather than this compatibility enum.
 
 Online platform
 ---------------
@@ -83,9 +81,8 @@ status source.
 
 Registry identifiers: ``cpp-local-verification``, ``hardware-binding``,
 ``environment-aware-identification``, ``license-version-limits``,
-``online-verification``, ``config-attestation``, ``floating-seats``,
-``legacy-remote-license-type``, ``backend-request-proof``,
-``backend-metering``, ``backend-order-fulfillment``, ``admin-control-plane``,
+``config-attestation``, ``backend-request-proof``, ``backend-metering``,
+``backend-order-fulfillment``, ``admin-control-plane``,
 ``portal-self-service``, ``d1-backup-and-restore-drill``, ``python-sdk``,
 ``dotnet-sdk``, ``arm-support``, ``custom-execution-limits``,
 ``tpm-request-proof-provider``, ``windows-device-bound-client``, and ``java-sdk``.

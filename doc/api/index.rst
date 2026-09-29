@@ -9,8 +9,8 @@ operations; they do not replace the C runtime's local enforcement.
 Runtime library
 ---------------
 
-* :doc:`public_api` — license acquisition, decisions, online verification,
-  configuration attestation, and compatibility entry points.
+* :doc:`public_api` — license acquisition, runtime tamper checks, and
+  configuration attestation.
 * :doc:`types` — public structures, enums, callbacks, limits, and result data.
 * :doc:`device_identity` — provider-backed P-256 keys and signed request
   proofs.

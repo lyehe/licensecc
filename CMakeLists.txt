@@ -5,23 +5,22 @@ SET(LICENSECC_SHORT_LICENSE "GNU Affero General Public License v3.0 or later")
 SET(CMAKE_DISABLE_SOURCE_CHANGES ON)
 SET(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
 
-# Task 0 source-baseline guard: public declarations must never survive a merge
-# that drops the real online/v201 implementation objects. Keep this list in
-# source control, not under the build tree, so configure fails before it can
-# create a misleading partial library.
-set(LCC_REQUIRED_ONLINE_V201_SOURCES
+# Source-baseline guard: public declarations must never survive a merge that
+# drops the real v201 implementation objects. Keep this list in source control,
+# not under the build tree, so configure fails before it can create a
+# misleading partial library.
+set(LCC_REQUIRED_CORE_SOURCES
 	"include/licensecc/licensecc.h"
-	"src/library/online_verification/OnlineVerification.cpp"
 	"src/library/signed_token/SignedToken.cpp"
 	"src/library/base/v201_canonical_payload.cpp"
 	"src/library/activation/ActivationRequest.cpp")
-foreach(_lcc_required_online_v201_source IN LISTS LCC_REQUIRED_ONLINE_V201_SOURCES)
-	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_lcc_required_online_v201_source}")
+foreach(_lcc_required_core_source IN LISTS LCC_REQUIRED_CORE_SOURCES)
+	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_lcc_required_core_source}")
 		message(FATAL_ERROR
-			"licensecc online/v201 source baseline is incomplete: missing ${_lcc_required_online_v201_source}")
+			"licensecc core source baseline is incomplete: missing ${_lcc_required_core_source}")
 	endif()
 endforeach()
-unset(_lcc_required_online_v201_source)
+unset(_lcc_required_core_source)
 
 IF(NOT LCC_PROJECT_NAME)
 	message(STATUS "You should define a variable LCC_PROJECT_NAME containing the name of the software you want to add a license to."
@@ -41,10 +40,6 @@ set(LCC_SUPPORTED_LICENSE_FORMAT_MAX 201 CACHE STRING
 if(NOT DEFINED LCC_PROJECT_MAGIC_NUM OR "${LCC_PROJECT_MAGIC_NUM}" STREQUAL "")
 	set(LCC_PROJECT_MAGIC_NUM 0 CACHE STRING "Project magic number embedded in generated project metadata")
 endif()
-set(LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS "" CACHE STRING
-	"Optional C++ expressions for trusted online assertion public keys.")
-set(LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS "" CACHE STRING
-	"Optional C string literals for retired online assertion key ids.")
 set(LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS "" CACHE STRING
 	"Optional C++ expressions for trusted config-attestation public keys.")
 set(LCC_CONFIG_ATTESTATION_RETIRED_KEY_IDS "" CACHE STRING

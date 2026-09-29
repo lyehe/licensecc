@@ -11,8 +11,8 @@ rewrite.
 
 | Area | Responsibility | Deployable/public output |
 | --- | --- | --- |
-| `include/licensecc/` | Stable C/C++-linkage public ABI: license acquisition, device identification, online decision/seat lifecycle, and configuration-token verification types. | Installed public headers `licensecc.h` and `datatypes.h`; CMake target `licensecc::licensecc_static`. |
-| `src/library/` | C++ licensing implementation, parsing, hardware identification, online verification, anti-tamper, and configuration attestation. | Static runtime library. |
+| `include/licensecc/` | Stable C/C++-linkage public ABI: license acquisition, device identification, and configuration-token verification types. | Installed public headers `licensecc.h` and `datatypes.h`; CMake target `licensecc::licensecc_static`. |
+| `src/library/` | C++ licensing implementation, parsing, hardware identification, anti-tamper, and configuration attestation. | Static runtime library. |
 | `cmake/`, root `CMakeLists.txt`, `CMakePresets.json` | CMake configuration, project/key generation, install/export configuration, and build presets. | Build-tree generated project material and install tree. |
 | `services/cloudflare-licensing-backend/` | Licensing API Worker and D1-backed entitlement, lease, fulfillment, audit, and webhook behavior. | Cloudflare licensing backend Worker. |
 | `services/cloudflare-license-admin/` | Administrative Worker API and its React/Vite operator UI. | Cloudflare license-admin Worker plus static UI assets. |
@@ -102,7 +102,7 @@ repository-owned third-party `src/library/ini/` sources are excluded.
 
 | Path | Lines | Responsibility audit |
 | --- | ---: | --- |
-| `src/library/licensecc.cpp` | 1,486 | C++ public API orchestration; changes pair with public ABI tests and CMake packaging. |
+| `src/library/licensecc.cpp` | 919 | C++ public API orchestration; changes pair with public ABI tests and CMake packaging. |
 | `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 1,266 | Admin contract components; API-contract ownership stays with the admin deployable. |
 | `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,147 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
 | `services/cloudflare-licensing-backend/src/routes/verify.ts` | 933 | Backend verification route and abuse controls; it is not a shared package concern. |

@@ -25,7 +25,6 @@
 
 #include "anti_tamper/AntiTamper.hpp"
 #include "config_attestation/ConfigAttestation.hpp"
-#include "online_verification/OnlineVerification.hpp"
 #include "base/base64.h"
 #include "base/logger.h"
 #include "base/string_utils.h"
@@ -52,20 +51,6 @@ struct VerifiedLicenseCandidate {
 	AcquiredLicenseContext context;
 };
 
-struct RevocationFloorCallbacks {
-	LCC_REVOCATION_FLOOR_LOAD load = nullptr;
-	LCC_REVOCATION_FLOOR_STORE store = nullptr;
-	void* user_data = nullptr;
-};
-
-struct RuntimeHardeningStatus {
-	bool online_verified = false;
-	bool revocation_floor_loaded = false;
-	bool revocation_floor_stored = false;
-	bool tamper_enforced = false;
-	LccRevocationFloorRecord revocation_floor{};
-};
-
 const char* lcc_strerror(LCC_EVENT_TYPE event_type) {
 	switch (event_type) {
 		case LICENSE_OK:
@@ -90,14 +75,6 @@ const char* lcc_strerror(LCC_EVENT_TYPE event_type) {
 			return "the calculated hardware identifier and the one in the license didn't match";
 		case LICENSE_TAMPER_DETECTED:
 			return "runtime tamper signal detected";
-		case LICENSE_ONLINE_REQUIRED:
-			return "online license verification required";
-		case LICENSE_ONLINE_VERIFICATION_FAILED:
-			return "online license verification failed";
-		case LICENSE_ONLINE_ASSERTION_INVALID:
-			return "online license assertion invalid";
-		case LICENSE_ONLINE_CACHE_EXPIRED:
-			return "online license verification cache expired (reserved)";
 		case LICENSE_CUSTOM_LIMIT_DENIED:
 			return "signed custom execution limit denied this environment";
 		case LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED:
@@ -136,71 +113,6 @@ static bool is_public_hex_string(const char* value, const size_t size) {
 		if (!std::isxdigit(static_cast<unsigned char>(value[i]))) {
 			return false;
 		}
-	}
-	return true;
-}
-
-static bool fixed_public_field_to_string(const char* value, const size_t capacity, const bool allow_empty,
-										 string& out, string& error, const char* field_name) {
-	const size_t size = license::mstrnlen_s(value, capacity);
-	if (size == capacity) {
-		error = string(field_name) + " is not NUL-terminated";
-		return false;
-	}
-	if (!allow_empty && size == 0) {
-		error = string(field_name) + " is empty";
-		return false;
-	}
-	out.assign(value, size);
-	return true;
-}
-
-static bool floor_record_key_to_strings(const LccRevocationFloorRecord* record, string& project, string& feature,
-										string& license_fingerprint, string& error) {
-	if (record == nullptr) {
-		error = "revocation floor record is null";
-		return false;
-	}
-	if (record->size != sizeof(LccRevocationFloorRecord)) {
-		error = "invalid revocation floor record size";
-		return false;
-	}
-	if (record->version != LCC_LICENSE_DECISION_VERSION) {
-		error = "invalid revocation floor record version";
-		return false;
-	}
-	if (!fixed_public_field_to_string(record->project, sizeof(record->project), false, project, error, "project") ||
-		!fixed_public_field_to_string(record->feature, sizeof(record->feature), false, feature, error, "feature") ||
-		!fixed_public_field_to_string(record->license_fingerprint, sizeof(record->license_fingerprint), false,
-									  license_fingerprint, error, "license_fingerprint")) {
-		return false;
-	}
-	if (license_fingerprint.size() != LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE ||
-		!is_public_hex_string(license_fingerprint.c_str(), license_fingerprint.size())) {
-		error = "license_fingerprint is not 64 hex characters";
-		return false;
-	}
-	return true;
-}
-
-static bool floor_record_from_context(const AcquiredLicenseContext& context, const uint64_t revocation_seq,
-									  LccRevocationFloorRecord& record, string& error) {
-	record = LccRevocationFloorRecord{};
-	record.size = sizeof(LccRevocationFloorRecord);
-	record.version = LCC_LICENSE_DECISION_VERSION;
-	record.revocation_seq = revocation_seq;
-	if (!lcc_copy_public_string(record.project, sizeof(record.project), context.project.c_str())) {
-		error = "project exceeds revocation floor record buffer";
-		return false;
-	}
-	if (!lcc_copy_public_string(record.feature, sizeof(record.feature), context.feature.c_str())) {
-		error = "feature exceeds revocation floor record buffer";
-		return false;
-	}
-	if (!lcc_copy_public_string(record.license_fingerprint, sizeof(record.license_fingerprint),
-								context.license_fingerprint.c_str())) {
-		error = "license fingerprint exceeds revocation floor record buffer";
-		return false;
 	}
 	return true;
 }
@@ -261,40 +173,6 @@ void lcc_init_license_check_options(LicenseCheckOptions* options) {
 	options->version = LCC_LICENSE_CHECK_OPTIONS_VERSION;
 	options->tamper_policy = LCC_TAMPER_ENFORCE;
 	options->tamper_flags = LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING;
-	options->online_policy = LCC_ONLINE_DISABLED;
-	options->online_flags = LCC_ONLINE_FLAG_NONE;
-	options->online_timeout_ms = LCC_ONLINE_DEFAULT_TIMEOUT_MS;
-}
-
-void lcc_init_revocation_floor_record(LccRevocationFloorRecord* record) {
-	if (record == nullptr) {
-		return;
-	}
-	*record = LccRevocationFloorRecord{};
-	record->size = sizeof(LccRevocationFloorRecord);
-	record->version = LCC_LICENSE_DECISION_VERSION;
-}
-
-void lcc_init_license_decision_options(LccLicenseDecisionOptions* options) {
-	if (options == nullptr) {
-		return;
-	}
-	*options = LccLicenseDecisionOptions{};
-	options->size = sizeof(LccLicenseDecisionOptions);
-	options->version = LCC_LICENSE_DECISION_OPTIONS_VERSION;
-	options->online_timeout_ms = LCC_ONLINE_DEFAULT_TIMEOUT_MS;
-}
-
-void lcc_init_license_decision(LccLicenseDecision* decision) {
-	if (decision == nullptr) {
-		return;
-	}
-	*decision = LccLicenseDecision{};
-	decision->size = sizeof(LccLicenseDecision);
-	decision->version = LCC_LICENSE_DECISION_VERSION;
-	decision->decision = LCC_LICENSE_DECISION_DENY;
-	decision->event_type = PRODUCT_NOT_LICENSED;
-	lcc_init_revocation_floor_record(&decision->revocation_floor);
 }
 
 void lcc_init_config_input(LccConfigInput* input) {
@@ -507,50 +385,6 @@ static LCC_EVENT_TYPE add_runtime_security_failure_event(license::EventRegistry&
 	return event_type;
 }
 
-static bool normalize_decision_options(const LccLicenseDecisionOptions* options,
-									   LccLicenseDecisionOptions& normalized, string& error) {
-	lcc_init_license_decision_options(&normalized);
-	if (options == nullptr) {
-		return true;
-	}
-	const size_t v1_size = offsetof(LccLicenseDecisionOptions, custom_limit_check);
-	const bool is_v1 = options->version == 1U && options->size == v1_size;
-	const bool is_current = options->version == LCC_LICENSE_DECISION_OPTIONS_VERSION &&
-		options->size == sizeof(LccLicenseDecisionOptions);
-	if (!is_v1 && !is_current) {
-		error = "invalid LccLicenseDecisionOptions size";
-		return false;
-	}
-	if (options->reserved != 0) {
-		error = "reserved fields must be zero";
-		return false;
-	}
-	if (is_v1) {
-		memcpy(&normalized, options, v1_size);
-	} else {
-		normalized = *options;
-	}
-	normalized.size = sizeof(LccLicenseDecisionOptions);
-	normalized.version = LCC_LICENSE_DECISION_OPTIONS_VERSION;
-	if (normalized.online_timeout_ms == 0 || normalized.online_timeout_ms > LCC_ONLINE_MAX_TIMEOUT_MS) {
-		error = "invalid online timeout";
-		return false;
-	}
-	const size_t device_hash_size =
-		license::mstrnlen_s(normalized.online_device_hash, sizeof(normalized.online_device_hash));
-	if (device_hash_size == sizeof(normalized.online_device_hash)) {
-		error = "online device hash is not NUL-terminated";
-		return false;
-	}
-	if (device_hash_size != 0 &&
-		(device_hash_size != LCC_API_ONLINE_DEVICE_HASH_SIZE ||
-		 !is_public_hex_string(normalized.online_device_hash, device_hash_size))) {
-		error = "invalid online device hash";
-		return false;
-	}
-	return true;
-}
-
 static bool validate_config_input(const LccConfigInput* input, std::string& error) {
 	if (input == nullptr || input->size != sizeof(LccConfigInput) || input->version != LCC_CONFIG_INPUT_VERSION) {
 		error = "invalid LccConfigInput size or version";
@@ -603,74 +437,6 @@ static bool normalize_config_verify_options(const LccConfigVerifyOptions* option
 	}
 	normalized.size = sizeof(LccConfigVerifyOptions);
 	normalized.version = LCC_CONFIG_VERIFY_OPTIONS_VERSION;
-	return true;
-}
-
-static LicenseCheckOptions secure_decision_check_options(const LccLicenseDecisionOptions& options) {
-	LicenseCheckOptions check_options;
-	lcc_init_license_check_options(&check_options);
-	check_options.tamper_policy = LCC_TAMPER_ENFORCE;
-	check_options.tamper_flags = LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING;
-	check_options.host_integrity_check = options.host_integrity_check;
-	check_options.host_integrity_user_data = options.host_integrity_user_data;
-	check_options.online_policy = LCC_ONLINE_REQUIRE;
-	check_options.online_flags = LCC_ONLINE_FLAG_NONE;
-	check_options.online_timeout_ms = options.online_timeout_ms;
-	check_options.online_check = options.online_check;
-	check_options.online_user_data = options.online_user_data;
-	license::mstrlcpy(check_options.online_device_hash, options.online_device_hash,
-					   sizeof(check_options.online_device_hash));
-	check_options.custom_limit_check = options.custom_limit_check;
-	check_options.custom_limit_user_data = options.custom_limit_user_data;
-	return check_options;
-}
-
-static bool call_revocation_floor_load(const RevocationFloorCallbacks& callbacks,
-									   const LccRevocationFloorRecord& key, uint64_t& revocation_seq,
-									   string& detail) {
-	if (callbacks.load == nullptr) {
-		detail = "revocation floor load callback is not configured";
-		return false;
-	}
-	uint64_t loaded = 0;
-	bool ok = false;
-	try {
-		ok = callbacks.load(callbacks.user_data, &key, &loaded);
-	} catch (const std::exception& ex) {
-		detail = ex.what();
-		return false;
-	} catch (...) {
-		detail = "revocation floor load callback threw";
-		return false;
-	}
-	if (!ok) {
-		detail = "revocation floor load callback failed";
-		return false;
-	}
-	revocation_seq = loaded;
-	return true;
-}
-
-static bool call_revocation_floor_store(const RevocationFloorCallbacks& callbacks,
-										const LccRevocationFloorRecord& record, string& detail) {
-	if (callbacks.store == nullptr) {
-		detail = "revocation floor store callback is not configured";
-		return false;
-	}
-	bool ok = false;
-	try {
-		ok = callbacks.store(callbacks.user_data, &record);
-	} catch (const std::exception& ex) {
-		detail = ex.what();
-		return false;
-	} catch (...) {
-		detail = "revocation floor store callback threw";
-		return false;
-	}
-	if (!ok) {
-		detail = "revocation floor store callback failed";
-		return false;
-	}
 	return true;
 }
 
@@ -881,28 +647,20 @@ LCC_EVENT_TYPE acquire_license(const CallerInformations* callerInformation, cons
 static LCC_EVENT_TYPE acquire_license_with_runtime_checks(const CallerInformations* callerInformation,
 														  const LicenseLocation* licenseLocation,
 														  LicenseInfo* license_out,
-														  const LicenseCheckOptions& normalized_options,
-														  const RevocationFloorCallbacks* floor_callbacks,
-														  RuntimeHardeningStatus* hardening_out) {
+														  const LicenseCheckOptions& normalized_options) {
 	if (license_out != nullptr) {
 		*license_out = LicenseInfo{};
 	}
-	if (hardening_out != nullptr) {
-		*hardening_out = RuntimeHardeningStatus{};
-		lcc_init_revocation_floor_record(&hardening_out->revocation_floor);
-		hardening_out->tamper_enforced = normalized_options.tamper_policy == LCC_TAMPER_ENFORCE;
-	}
 
 	license::EventRegistry er;
-	AcquiredLicenseContext license_context;
 	LCC_EVENT_TYPE result =
-		acquire_license_internal(callerInformation, licenseLocation, license_out, false, er, &license_context,
+		acquire_license_internal(callerInformation, licenseLocation, license_out, false, er, nullptr,
 								 normalized_options.custom_limit_check,
 								 normalized_options.custom_limit_user_data);
 	// INVARIANT: runtime checks run ONLY after the base license returns LICENSE_OK, so an ordinary
 	// license failure (expired/mismatch/malformed) is never masked or overwritten. Tamper under ENFORCE
-	// and a failed required online check both fail closed (clear license_out, return the failure code).
-	// Do not reorder these so a runtime check can run before the base verdict, or hide a base failure.
+	// fails closed (clear license_out, return the failure code). Do not reorder these so a runtime
+	// check can run before the base verdict, or hide a base failure.
 	if (result == LICENSE_OK) {
 		license::anti_tamper::AntiTamperRequest request;
 		request.policy = license::anti_tamper::to_internal_policy(normalized_options.tamper_policy);
@@ -916,101 +674,6 @@ static LCC_EVENT_TYPE acquire_license_with_runtime_checks(const CallerInformatio
 			license::anti_tamper::append_audit_events(tamper_result, er);
 			if (tamper_result.policy == license::anti_tamper::AntiTamperPolicy::Enforce) {
 				result = LICENSE_TAMPER_DETECTED;
-			}
-		}
-	}
-	if (result == LICENSE_OK) {
-		const license::online_verification::OnlinePolicy online_policy =
-			license::online_verification::to_internal_policy(normalized_options.online_policy);
-		uint64_t minimum_revocation_seq = 0;
-		LccRevocationFloorRecord loaded_floor{};
-		bool loaded_floor_available = false;
-		if (online_policy != license::online_verification::OnlinePolicy::Disabled &&
-			floor_callbacks != nullptr) {
-			string floor_error;
-			if (!floor_record_from_context(license_context, 0, loaded_floor, floor_error)) {
-				result = add_malformed_api_input_event(er, "RevocationFloor", floor_error.c_str());
-			} else if (floor_callbacks->load == nullptr || floor_callbacks->store == nullptr) {
-				result = add_runtime_security_failure_event(
-					er, LICENSE_ONLINE_REQUIRED, "RevocationFloor",
-					"revocation floor load/store callbacks are required");
-			} else {
-				string detail;
-				if (!call_revocation_floor_load(*floor_callbacks, loaded_floor, minimum_revocation_seq, detail)) {
-					result = add_runtime_security_failure_event(er, LICENSE_ONLINE_VERIFICATION_FAILED,
-																"RevocationFloorLoad", detail.c_str());
-				} else {
-					loaded_floor_available = true;
-					loaded_floor.revocation_seq = minimum_revocation_seq;
-					if (hardening_out != nullptr) {
-						hardening_out->revocation_floor_loaded = true;
-						hardening_out->revocation_floor = loaded_floor;
-					}
-				}
-			}
-		}
-		if (result != LICENSE_OK) {
-			if (license_out != nullptr) {
-				*license_out = LicenseInfo{};
-			}
-			export_license_status(er, license_out);
-			return result;
-		}
-		license::online_verification::OnlineVerificationRequest request;
-		request.policy = online_policy;
-		request.flags = normalized_options.online_flags;
-		request.timeout_ms = normalized_options.online_timeout_ms;
-		request.online_check = normalized_options.online_check;
-		request.online_user_data = normalized_options.online_user_data;
-		request.project = license_context.project;
-		request.feature = license_context.feature;
-		request.license_fingerprint = license_context.license_fingerprint;
-		request.device_hash = normalized_options.online_device_hash;
-		if (loaded_floor_available) {
-			request.minimum_revocation_seq = minimum_revocation_seq;
-		}
-		uint32_t client_hardening = LCC_CLIENT_HARDENING_NONE;
-		if (normalized_options.tamper_policy == LCC_TAMPER_ENFORCE) {
-			client_hardening |= LCC_CLIENT_HARDENING_TAMPER_ENFORCE;
-		}
-		if (normalized_options.host_integrity_check != nullptr) {
-			client_hardening |= LCC_CLIENT_HARDENING_HOST_INTEGRITY;
-		}
-		if ((normalized_options.tamper_flags & LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING) != 0) {
-			client_hardening |= LCC_CLIENT_HARDENING_SOURCE_SHADOWING;
-		}
-		if (online_policy == license::online_verification::OnlinePolicy::Require) {
-			client_hardening |= LCC_CLIENT_HARDENING_ONLINE_REQUIRED;
-		}
-		request.client_hardening = client_hardening;
-
-		const license::online_verification::OnlineVerificationResult online_result =
-			license::online_verification::evaluate(request);
-		if (online_result.failed()) {
-			license::online_verification::append_audit_event(online_result, er);
-			if (!online_result.accepted) {
-				result = online_result.event_type;
-			}
-		} else if (request.policy != license::online_verification::OnlinePolicy::Disabled) {
-			if (hardening_out != nullptr) {
-				hardening_out->online_verified = true;
-			}
-			if (floor_callbacks != nullptr) {
-				LccRevocationFloorRecord accepted_floor{};
-				string floor_error;
-				if (!floor_record_from_context(license_context, online_result.accepted_revocation_seq,
-											   accepted_floor, floor_error)) {
-					result = add_malformed_api_input_event(er, "RevocationFloor", floor_error.c_str());
-				} else {
-					string detail;
-					if (!call_revocation_floor_store(*floor_callbacks, accepted_floor, detail)) {
-						result = add_runtime_security_failure_event(er, LICENSE_ONLINE_VERIFICATION_FAILED,
-																	"RevocationFloorStore", detail.c_str());
-					} else if (hardening_out != nullptr) {
-						hardening_out->revocation_floor_stored = true;
-						hardening_out->revocation_floor = accepted_floor;
-					}
-				}
 			}
 		}
 	}
@@ -1037,8 +700,7 @@ static LCC_EVENT_TYPE acquire_license_ex_impl(const CallerInformations* callerIn
 		export_license_status(er, license_out);
 		return LICENSE_MALFORMED;
 	}
-	return acquire_license_with_runtime_checks(callerInformation, licenseLocation, license_out, normalized_options,
-											   nullptr, nullptr);
+	return acquire_license_with_runtime_checks(callerInformation, licenseLocation, license_out, normalized_options);
 }
 
 LCC_EVENT_TYPE acquire_license_ex(const CallerInformations* callerInformation, const LicenseLocation* licenseLocation,
@@ -1052,223 +714,6 @@ LCC_EVENT_TYPE acquire_license_ex(const CallerInformations* callerInformation, c
 		}
 		return LICENSE_MALFORMED;
 	}
-}
-
-static void populate_license_decision(LccLicenseDecision* decision_out, const LCC_EVENT_TYPE result,
-									  const RuntimeHardeningStatus* hardening) {
-	if (decision_out == nullptr) {
-		return;
-	}
-	decision_out->decision = result == LICENSE_OK ? LCC_LICENSE_DECISION_ALLOW : LCC_LICENSE_DECISION_DENY;
-	decision_out->event_type = result;
-	if (hardening != nullptr) {
-		decision_out->online_verified = hardening->online_verified;
-		decision_out->revocation_floor_loaded = hardening->revocation_floor_loaded;
-		decision_out->revocation_floor_stored = hardening->revocation_floor_stored;
-		decision_out->tamper_enforced = hardening->tamper_enforced;
-		decision_out->revocation_floor = hardening->revocation_floor;
-	}
-}
-
-static LCC_EVENT_TYPE lcc_acquire_license_decision_impl(const CallerInformations* callerInformation,
-														const LicenseLocation* licenseLocation,
-														LicenseInfo* license_out, LccLicenseDecision* decision_out,
-														const LccLicenseDecisionOptions* options,
-														uint32_t online_purpose_flags) {
-	if (license_out != nullptr) {
-		*license_out = LicenseInfo{};
-	}
-	if (decision_out != nullptr) {
-		lcc_init_license_decision(decision_out);
-		decision_out->tamper_enforced = true;
-	}
-
-	LccLicenseDecisionOptions normalized_decision_options;
-	string decision_options_error;
-	license::EventRegistry er;
-	if (!normalize_decision_options(options, normalized_decision_options, decision_options_error)) {
-		const LCC_EVENT_TYPE result =
-			add_malformed_api_input_event(er, "LccLicenseDecisionOptions", decision_options_error.c_str());
-		export_license_status(er, license_out);
-		populate_license_decision(decision_out, result, nullptr);
-		return result;
-	}
-	if (normalized_decision_options.online_check == nullptr) {
-		const LCC_EVENT_TYPE result = add_runtime_security_failure_event(
-			er, LICENSE_ONLINE_REQUIRED, "LccLicenseDecisionOptions", "online callback is required");
-		export_license_status(er, license_out);
-		populate_license_decision(decision_out, result, nullptr);
-		return result;
-	}
-	if (normalized_decision_options.revocation_floor_load == nullptr ||
-		normalized_decision_options.revocation_floor_store == nullptr) {
-		const LCC_EVENT_TYPE result = add_runtime_security_failure_event(
-			er, LICENSE_ONLINE_REQUIRED, "LccLicenseDecisionOptions",
-			"revocation floor load/store callbacks are required");
-		export_license_status(er, license_out);
-		populate_license_decision(decision_out, result, nullptr);
-		return result;
-	}
-
-	LicenseCheckOptions check_options = secure_decision_check_options(normalized_decision_options);
-	// Lifecycle purpose hint (heartbeat) for the host callback; verify path passes LCC_ONLINE_FLAG_NONE.
-	check_options.online_flags |= online_purpose_flags;
-	LicenseCheckOptions normalized_check_options;
-	string check_options_error;
-	if (!license::anti_tamper::normalize_options(&check_options, normalized_check_options, check_options_error)) {
-		const LCC_EVENT_TYPE result =
-			add_malformed_api_input_event(er, "LccLicenseDecisionOptions", check_options_error.c_str());
-		export_license_status(er, license_out);
-		populate_license_decision(decision_out, result, nullptr);
-		return result;
-	}
-
-	RevocationFloorCallbacks floor_callbacks;
-	floor_callbacks.load = normalized_decision_options.revocation_floor_load;
-	floor_callbacks.store = normalized_decision_options.revocation_floor_store;
-	floor_callbacks.user_data = normalized_decision_options.revocation_floor_user_data;
-
-	RuntimeHardeningStatus hardening;
-	const LCC_EVENT_TYPE result = acquire_license_with_runtime_checks(callerInformation, licenseLocation, license_out,
-																	  normalized_check_options, &floor_callbacks,
-																	  &hardening);
-	populate_license_decision(decision_out, result, &hardening);
-	return result;
-}
-
-LCC_EVENT_TYPE lcc_acquire_license_decision(const CallerInformations* callerInformation,
-											const LicenseLocation* licenseLocation, LicenseInfo* license_out,
-											LccLicenseDecision* decision_out,
-											const LccLicenseDecisionOptions* options) {
-	// Top-level no-throw guard: no C++ exception may cross the C ABI boundary.
-	try {
-		return lcc_acquire_license_decision_impl(callerInformation, licenseLocation, license_out, decision_out,
-												 options, LCC_ONLINE_FLAG_NONE);
-	} catch (...) {
-		if (license_out != nullptr) {
-			*license_out = LicenseInfo{};
-		}
-		if (decision_out != nullptr) {
-			lcc_init_license_decision(decision_out);
-		}
-		return LICENSE_MALFORMED;
-	}
-}
-
-LCC_EVENT_TYPE lcc_confirm_license(const CallerInformations* callerInformation,
-								   const LicenseLocation* licenseLocation, LicenseInfo* license_out,
-								   LccLicenseDecision* decision_out, const LccLicenseDecisionOptions* options) {
-	// A confirm (heartbeat) is the same secure decision flow as acquire, only with the heartbeat
-	// purpose hinted to the host callback so it POSTs the keepalive endpoint and threads its seat id.
-	try {
-		return lcc_acquire_license_decision_impl(callerInformation, licenseLocation, license_out, decision_out,
-												 options, LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT);
-	} catch (...) {
-		if (license_out != nullptr) {
-			*license_out = LicenseInfo{};
-		}
-		if (decision_out != nullptr) {
-			lcc_init_license_decision(decision_out);
-		}
-		return LICENSE_MALFORMED;
-	}
-}
-
-static LCC_EVENT_TYPE lcc_release_license_impl(const CallerInformations* callerInformation,
-											   const LicenseLocation* licenseLocation, LicenseInfo* license_out,
-											   const LccLicenseDecisionOptions* options) {
-	if (license_out != nullptr) {
-		*license_out = LicenseInfo{};
-	}
-	license::EventRegistry er;
-	LccLicenseDecisionOptions normalized_decision_options;
-	string decision_options_error;
-	if (!normalize_decision_options(options, normalized_decision_options, decision_options_error)) {
-		const LCC_EVENT_TYPE result =
-			add_malformed_api_input_event(er, "LccLicenseDecisionOptions", decision_options_error.c_str());
-		export_license_status(er, license_out);
-		return result;
-	}
-	if (normalized_decision_options.online_check == nullptr) {
-		const LCC_EVENT_TYPE result = add_runtime_security_failure_event(
-			er, LICENSE_ONLINE_REQUIRED, "LccLicenseDecisionOptions", "online callback is required");
-		export_license_status(er, license_out);
-		return result;
-	}
-
-	// Release needs the binding (project/feature/fingerprint) to name the seat. Read the local
-	// license to recover it; if the license can no longer be read there is nothing to release.
-	const bool strict_source_fatal = strict_source_fatal_enabled.load(std::memory_order_relaxed);
-	AcquiredLicenseContext license_context;
-	const LCC_EVENT_TYPE read_result =
-		acquire_license_internal(callerInformation, licenseLocation, license_out, strict_source_fatal, er,
-								 &license_context, normalized_decision_options.custom_limit_check,
-								 normalized_decision_options.custom_limit_user_data);
-	if (read_result != LICENSE_OK) {
-		export_license_status(er, license_out);
-		return read_result;
-	}
-
-	license::online_verification::OnlineVerificationRequest request;
-	request.policy = license::online_verification::OnlinePolicy::Require;
-	request.flags = LCC_ONLINE_FLAG_PURPOSE_RELEASE;
-	request.timeout_ms = normalized_decision_options.online_timeout_ms;
-	request.online_check = normalized_decision_options.online_check;
-	request.online_user_data = normalized_decision_options.online_user_data;
-	request.project = license_context.project;
-	request.feature = license_context.feature;
-	request.license_fingerprint = license_context.license_fingerprint;
-	request.device_hash = normalized_decision_options.online_device_hash;
-
-	const license::online_verification::OnlineVerificationResult release_result =
-		license::online_verification::notify_release(request);
-	if (release_result.failed()) {
-		// Best-effort teardown: surface the failure as an advisory event but do not deny anything.
-		// The seat lapses server-side on heartbeat timeout regardless.
-		license::online_verification::append_audit_event(release_result, er);
-		export_license_status(er, license_out);
-		return release_result.event_type;
-	}
-	export_license_status(er, license_out);
-	return LICENSE_OK;
-}
-
-LCC_EVENT_TYPE lcc_release_license(const CallerInformations* callerInformation,
-								   const LicenseLocation* licenseLocation, LicenseInfo* license_out,
-								   const LccLicenseDecisionOptions* options) {
-	// Top-level no-throw guard: no C++ exception may cross the C ABI boundary.
-	try {
-		return lcc_release_license_impl(callerInformation, licenseLocation, license_out, options);
-	} catch (...) {
-		if (license_out != nullptr) {
-			*license_out = LicenseInfo{};
-		}
-		return LICENSE_MALFORMED;
-	}
-}
-
-bool lcc_set_online_revocation_floor(const LccRevocationFloorRecord* record) {
-	string project;
-	string feature;
-	string license_fingerprint;
-	string error;
-	if (!floor_record_key_to_strings(record, project, feature, license_fingerprint, error)) {
-		return false;
-	}
-	license::online_verification::set_revocation_floor(project, feature, license_fingerprint, record->revocation_seq);
-	return true;
-}
-
-bool lcc_get_online_revocation_floor(LccRevocationFloorRecord* record) {
-	string project;
-	string feature;
-	string license_fingerprint;
-	string error;
-	if (!floor_record_key_to_strings(record, project, feature, license_fingerprint, error)) {
-		return false;
-	}
-	record->revocation_seq = license::online_verification::revocation_floor(project, feature, license_fingerprint);
-	return true;
 }
 
 void lcc_set_environment_license_sources_enabled(bool enabled) {
@@ -1302,8 +747,8 @@ static LCC_EVENT_TYPE lcc_verify_config_impl(const CallerInformations* callerInf
 	}
 	// Secure entry point: the config-seq rollback floor is MANDATORY. Without a persisted floor a
 	// captured config token is replayable in-window and re-usable out-of-window under a rolled-back
-	// clock, so lcc_verify_config_decision refuses to run floor-blind (mirrors the online decision
-	// wrapper's mandatory revocation floor). normalize guarantees load/store are both-or-neither.
+	// clock, so lcc_verify_config_decision refuses to run floor-blind. normalize guarantees
+	// load/store are both-or-neither.
 	if (require_floor && normalized.config_seq_floor_load == nullptr) {
 		const LCC_EVENT_TYPE result = add_malformed_api_input_event(
 			er, "LccConfigVerifyOptions", "config-seq floor load/store callbacks are required");
@@ -1357,7 +802,7 @@ static LCC_EVENT_TYPE lcc_verify_config_impl(const CallerInformations* callerInf
 		return result;
 	}
 
-	// Durable per-config-id config-seq floor (mirrors the online revocation floor).
+	// Durable per-config-id config-seq floor.
 	// Runs AFTER signature verification so config_id and config_seq are trusted; any
 	// storage failure fails closed. normalize_config_verify_options guarantees that
 	// when load is set, store is set too.
@@ -1471,16 +916,4 @@ LCC_EVENT_TYPE lcc_verify_config_decision(const CallerInformations* callerInform
 		}
 		return LICENSE_MALFORMED;
 	}
-}
-
-LCC_EVENT_TYPE confirm_license(char* featureName, LicenseLocation* licenseLocation) {
-	(void)featureName;
-	(void)licenseLocation;
-	return PRODUCT_NOT_LICENSED;
-}
-
-LCC_EVENT_TYPE release_license(char* featureName, LicenseLocation licenseLocation) {
-	(void)featureName;
-	(void)licenseLocation;
-	return PRODUCT_NOT_LICENSED;
 }

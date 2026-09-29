@@ -2,7 +2,6 @@
 
 #include <licensecc/licensecc.h>
 
-#include <cctype>
 #include <cstddef>
 #include <exception>
 
@@ -14,17 +13,8 @@ namespace anti_tamper {
 namespace {
 
 const uint32_t kSupportedFlags = LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING;
-// Lifecycle purpose hints (set by lcc_confirm_license / lcc_release_license) are valid online flags;
-// they are opaque host hints, not verifier behavior, but must pass option validation.
-const uint32_t kSupportedOnlineFlags =
-	LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT | LCC_ONLINE_FLAG_PURPOSE_RELEASE;
-const uint32_t kOptionsVersionV1 = 1;
-const uint32_t kOptionsVersionV2 = 2;
 const char kHostIntegrityReference[] = "HostIntegrityCheck";
 const char kSourceShadowingPrefix[] = "source-shadowing";
-
-#define LCC_OPTIONS_FIELD_PRESENT(options, field) \
-	((options).size >= offsetof(LicenseCheckOptions, field) + sizeof((options).field))
 
 void init_default_options(LicenseCheckOptions& options) {
 	// Single source of truth for the secure defaults: delegate to the public
@@ -38,15 +28,6 @@ std::string bounded_detail_or_default(const char* detail, const char* fallback) 
 		return fallback;
 	}
 	return std::string(detail);
-}
-
-bool is_hex_string(const char* value, const size_t size) {
-	for (size_t i = 0; i < size; ++i) {
-		if (!std::isxdigit(static_cast<unsigned char>(value[i]))) {
-			return false;
-		}
-	}
-	return true;
 }
 
 void add_host_integrity_signal(const AntiTamperRequest& request, AntiTamperResult& result) {
@@ -117,62 +98,15 @@ bool normalize_options(const LicenseCheckOptions* options, LicenseCheckOptions& 
 		return true;
 	}
 
-	const size_t v1_size = offsetof(LicenseCheckOptions, online_policy);
-	if (options->size < v1_size || options->size > sizeof(LicenseCheckOptions)) {
+	if (options->size != sizeof(LicenseCheckOptions)) {
 		error = "invalid LicenseCheckOptions size";
 		return false;
 	}
-	if (options->version != kOptionsVersionV1 && options->version != kOptionsVersionV2 &&
-		options->version != LCC_LICENSE_CHECK_OPTIONS_VERSION) {
+	if (options->version != LCC_LICENSE_CHECK_OPTIONS_VERSION) {
 		error = "invalid LicenseCheckOptions version";
 		return false;
 	}
-	if (LCC_OPTIONS_FIELD_PRESENT(*options, tamper_policy)) {
-		normalized.tamper_policy = options->tamper_policy;
-	}
-	if (LCC_OPTIONS_FIELD_PRESENT(*options, tamper_flags)) {
-		normalized.tamper_flags = options->tamper_flags;
-	}
-	if (LCC_OPTIONS_FIELD_PRESENT(*options, host_integrity_check)) {
-		normalized.host_integrity_check = options->host_integrity_check;
-	}
-	if (LCC_OPTIONS_FIELD_PRESENT(*options, host_integrity_user_data)) {
-		normalized.host_integrity_user_data = options->host_integrity_user_data;
-	}
-	const bool include_online_fields = options->version >= kOptionsVersionV2;
-	if (include_online_fields && LCC_OPTIONS_FIELD_PRESENT(*options, online_policy)) {
-		normalized.online_policy = options->online_policy;
-	}
-	if (include_online_fields && LCC_OPTIONS_FIELD_PRESENT(*options, online_flags)) {
-		normalized.online_flags = options->online_flags;
-	}
-	if (include_online_fields && LCC_OPTIONS_FIELD_PRESENT(*options, online_timeout_ms)) {
-		normalized.online_timeout_ms = options->online_timeout_ms;
-	}
-	if (include_online_fields && LCC_OPTIONS_FIELD_PRESENT(*options, online_check)) {
-		normalized.online_check = options->online_check;
-	}
-	if (include_online_fields && LCC_OPTIONS_FIELD_PRESENT(*options, online_user_data)) {
-		normalized.online_user_data = options->online_user_data;
-	}
-	if (include_online_fields && LCC_OPTIONS_FIELD_PRESENT(*options, online_device_hash)) {
-		if (license::mstrnlen_s(options->online_device_hash, sizeof(options->online_device_hash)) ==
-			sizeof(options->online_device_hash)) {
-			error = "online device hash is not NUL-terminated";
-			return false;
-		}
-		license::mstrlcpy(normalized.online_device_hash, options->online_device_hash,
-						   sizeof(normalized.online_device_hash));
-	}
-	const bool include_custom_limit_fields = options->version >= LCC_LICENSE_CHECK_OPTIONS_VERSION;
-	if (include_custom_limit_fields && LCC_OPTIONS_FIELD_PRESENT(*options, custom_limit_check)) {
-		normalized.custom_limit_check = options->custom_limit_check;
-	}
-	if (include_custom_limit_fields && LCC_OPTIONS_FIELD_PRESENT(*options, custom_limit_user_data)) {
-		normalized.custom_limit_user_data = options->custom_limit_user_data;
-	}
-	normalized.size = sizeof(LicenseCheckOptions);
-	normalized.version = LCC_LICENSE_CHECK_OPTIONS_VERSION;
+	normalized = *options;
 
 	if (normalized.tamper_policy != LCC_TAMPER_DISABLED && normalized.tamper_policy != LCC_TAMPER_ENFORCE) {
 		error = "invalid tamper policy";
@@ -180,38 +114,6 @@ bool normalize_options(const LicenseCheckOptions* options, LicenseCheckOptions& 
 	}
 	if ((normalized.tamper_flags & ~kSupportedFlags) != 0) {
 		error = "unsupported tamper flags";
-		return false;
-	}
-	if (normalized.online_policy != LCC_ONLINE_DISABLED && normalized.online_policy != LCC_ONLINE_REQUIRE) {
-		error = "invalid online policy";
-		return false;
-	}
-	if (normalized.online_policy == LCC_ONLINE_DISABLED && normalized.online_check != nullptr) {
-		normalized.online_policy = LCC_ONLINE_REQUIRE;
-	}
-	if ((normalized.online_flags & ~kSupportedOnlineFlags) != 0) {
-		error = "unsupported online flags";
-		return false;
-	}
-	if (normalized.online_timeout_ms == 0 || normalized.online_timeout_ms > LCC_ONLINE_MAX_TIMEOUT_MS) {
-		error = "invalid online timeout";
-		return false;
-	}
-	if (normalized.online_policy != LCC_ONLINE_DISABLED && normalized.online_check == nullptr) {
-		error = "online policy requires callback";
-		return false;
-	}
-	if (license::mstrnlen_s(normalized.online_device_hash, sizeof(normalized.online_device_hash)) ==
-		sizeof(normalized.online_device_hash)) {
-		error = "online device hash is not NUL-terminated";
-		return false;
-	}
-	const size_t online_device_hash_size =
-		license::mstrnlen_s(normalized.online_device_hash, sizeof(normalized.online_device_hash));
-	if (online_device_hash_size != 0 &&
-		(online_device_hash_size != LCC_API_ONLINE_DEVICE_HASH_SIZE ||
-		 !is_hex_string(normalized.online_device_hash, online_device_hash_size))) {
-		error = "invalid online device hash";
 		return false;
 	}
 	return true;

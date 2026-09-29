@@ -71,10 +71,9 @@ Host policy callbacks
 ---------------------
 
 The public structures in :doc:`types` expose callbacks for host-integrity
-checks, custom signed execution limits, online verification, revocation-floor
-persistence, and configuration-sequence persistence. Keep each callback
-bounded and deterministic. Return failure when durable state cannot be loaded
-or stored; silently accepting an unavailable anti-rollback floor weakens the
+checks, custom signed execution limits, and configuration-sequence persistence.
+Keep each callback bounded and deterministic. Return failure when durable state
+cannot be loaded or stored; silently accepting an unavailable anti-rollback floor weakens the
 decision contract.
 
 .. toctree::

@@ -47,10 +47,8 @@ void lcc_init_license_location(LicenseLocation* licenseLocation, LCC_LICENSE_DAT
 void lcc_init_license_info(LicenseInfo* licenseInfo);
 /**
  * Initializes ::LicenseCheckOptions for ::acquire_license_ex. Defaults to
- * the secure runtime policy: tamper signals are enforced, strict source
- * shadowing is enabled, and online verification is disabled unless the host
- * supplies online_check. When online_check is set, online verification is
- * required and must return a fresh signed assertion.
+ * the secure runtime policy: tamper signals are enforced and strict source
+ * shadowing is enabled.
  *
  * A v201 license may also contain a signed host-defined `custom-limit`
  * policy. Such a license fails closed unless `custom_limit_check` evaluates
@@ -58,26 +56,6 @@ void lcc_init_license_info(LicenseInfo* licenseInfo);
  * opaque to Licensecc so the host owns its schema and deterministic evidence.
  */
 void lcc_init_license_check_options(LicenseCheckOptions* options);
-/**
- * Initializes the revocation-floor record used by the online decision APIs.
- * Hosts that persist rollback floors fill project, feature, license_fingerprint,
- * and revocation_seq before calling ::lcc_set_online_revocation_floor.
- */
-void lcc_init_revocation_floor_record(LccRevocationFloorRecord* record);
-/**
- * Initializes ::LccLicenseDecisionOptions for ::lcc_acquire_license_decision.
- * This higher-level entry point owns the secure policy choices: tamper
- * enforcement and strict source shadowing are always enabled, online
- * verification is required, and persisted revocation-floor load/store
- * callbacks are required.
- * Signed custom-limit policies use the same fail-closed evaluator contract as
- * ::acquire_license_ex and are forwarded through `custom_limit_check`.
- */
-void lcc_init_license_decision_options(LccLicenseDecisionOptions* options);
-/**
- * Initializes ::LccLicenseDecision output. The default decision is deny.
- */
-void lcc_init_license_decision(LccLicenseDecision* decision);
 
 /** Initializes ::LccConfigInput (null-safe). */
 void lcc_init_config_input(LccConfigInput* input);
@@ -170,99 +148,15 @@ LCC_EVENT_TYPE acquire_license(const CallerInformations* callerInformation, cons
  * Extended license check with per-call runtime tamper evaluation. The normal
  * license verifier runs first. Tamper checks are evaluated only after the
  * license would otherwise return ::LICENSE_OK, so ordinary license failures are
- * not masked by runtime diagnostics. Online verification, when enabled through
- * ::LicenseCheckOptions, also runs only after a local license succeeds and
- * after tamper enforcement has not denied the license.
- *
- * Licensecc core does not perform HTTP. The host callback receives a
- * ::LccOnlineRequest containing project, feature, license fingerprint, device
- * hash, and a core-generated nonce. It writes a signed assertion envelope into
- * the provided output buffer. Online failures return an online failure event.
+ * not masked by runtime diagnostics.
  *
  * A null options pointer uses the same defaults as
- * ::lcc_init_license_check_options. Invalid size/version fields fail closed
- * with ::LICENSE_MALFORMED.
- *
- * Raw-path caveat: when you call ::acquire_license_ex directly with online
- * verification enabled, it enforces only the PROCESS-LOCAL revocation floor (see
- * ::lcc_set_online_revocation_floor / ::lcc_get_online_revocation_floor). It does
- * not accept or invoke any persisted floor callbacks (::LicenseCheckOptions has
- * none), so a process that restarts without restoring the floor can accept a
- * superseded assertion. Restore the persisted floor at startup with
- * ::lcc_set_online_revocation_floor. For persisted load/store wiring on every
- * decision, use ::lcc_acquire_license_decision, which is preferred for production
- * hosts.
+ * ::lcc_init_license_check_options. Options whose `size` is not
+ * `sizeof(LicenseCheckOptions)` or whose `version` is not
+ * ::LCC_LICENSE_CHECK_OPTIONS_VERSION fail closed with ::LICENSE_MALFORMED.
  */
 LCC_EVENT_TYPE acquire_license_ex(const CallerInformations* callerInformation, const LicenseLocation* licenseLocation,
 								  LicenseInfo* license_out, const LicenseCheckOptions* options);
-
-/**
- * Production decision wrapper. It orchestrates the local license check,
- * configures anti-tamper enforcement, requires online verification, and enforces
- * a persisted revocation-sequence rollback floor, collapsing the result to a
- * single ::LICENSE_OK only when the decision is ::LCC_LICENSE_DECISION_ALLOW.
- *
- * What this DOES guarantee: required online verification ran and a signed
- * assertion was accepted; the persisted revocation floor was loaded and the
- * accepted revocation_seq stored; load/store failures fail closed so a restarted
- * process cannot accept an older assertion.
- *
- * What this does NOT guarantee: it cannot prove code ran on an attacker-controlled
- * host. `decision_out->tamper_enforced` means the wrapper *configured* tamper
- * enforcement for the call -- it does not prove every optional host-integrity
- * probe executed, and a local license failure can deny before any runtime
- * callback is evaluated. Treat the server (the online verifier) as authoritative;
- * this wrapper is defense-in-depth, not a guarantee about the client process.
- *
- * The host callbacks in ::LccLicenseDecisionOptions must load and store the
- * strongest revocation_seq seen for the exact project/feature/license
- * fingerprint.
- */
-LCC_EVENT_TYPE lcc_acquire_license_decision(const CallerInformations* callerInformation,
-											const LicenseLocation* licenseLocation, LicenseInfo* license_out,
-											LccLicenseDecision* decision_out,
-											const LccLicenseDecisionOptions* options);
-
-/**
- * Network/floating-license lifecycle: re-confirm a held license online
- * (heartbeat). Call this periodically after ::lcc_acquire_license_decision has
- * granted a seat, on the cadence the server advertised (the host learns it from
- * the verify/checkout response). It runs the same secure decision flow as
- * ::lcc_acquire_license_decision -- local license read, tamper enforcement,
- * required online verification, persisted revocation-floor load/store -- but
- * stamps ::LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT in the ::LccOnlineRequest so the
- * host callback POSTs to the heartbeat endpoint and threads the seat id it
- * holds. The server's heartbeat response is a fresh signed assertion, verified
- * locally exactly like the initial check; a reclaimed/expired seat makes the
- * host callback decline (e.g. ::LCC_ONLINE_CB_HOST_DECLINED), and this returns
- * a denial. Returns ::LICENSE_OK only when the decision is
- * ::LCC_LICENSE_DECISION_ALLOW. Same options/contract as
- * ::lcc_acquire_license_decision (online_check + revocation floor load/store are
- * required); fails closed on any failure. This supersedes the legacy
- * ::confirm_license stub for online hosts.
- */
-LCC_EVENT_TYPE lcc_confirm_license(const CallerInformations* callerInformation,
-								   const LicenseLocation* licenseLocation, LicenseInfo* license_out,
-								   LccLicenseDecision* decision_out, const LccLicenseDecisionOptions* options);
-
-/**
- * Network/floating-license lifecycle: release a held seat (best-effort
- * check-in). Call this at orderly shutdown so the server frees the seat
- * immediately instead of waiting for the heartbeat to lapse. It reads the local
- * license to recover the binding (project/feature/fingerprint), then invokes the
- * host ::LCC_ONLINE_CHECK callback with ::LCC_ONLINE_FLAG_PURPOSE_RELEASE so the
- * host POSTs to the release endpoint with the seat id it holds. The release
- * response carries no assertion, so none is verified and no revocation floor is
- * touched. This is teardown, not an entitlement decision: a transport failure is
- * non-fatal (the seat lapses server-side via heartbeat timeout regardless) and
- * is reported as an advisory online event in `license_out`. Returns
- * ::LICENSE_OK when the release callback succeeded. `options` needs only
- * `online_check` (revocation-floor callbacks are not required here). Supersedes
- * the legacy ::release_license stub for online hosts.
- */
-LCC_EVENT_TYPE lcc_release_license(const CallerInformations* callerInformation,
-								   const LicenseLocation* licenseLocation, LicenseInfo* license_out,
-								   const LccLicenseDecisionOptions* options);
 
 /**
  * Verifies a server-signed configuration token against the bytes the
@@ -284,7 +178,7 @@ LCC_EVENT_TYPE lcc_release_license(const CallerInformations* callerInformation,
  * within its time window and re-usable after expiry under a rolled-back host
  * clock -- the signature/binding/window checks alone do not stop that. Production
  * hosts should prefer ::lcc_verify_config_decision, which REQUIRES a persisted
- * floor, exactly as ::lcc_acquire_license_decision requires the revocation floor.
+ * floor.
  * If the bound v201 license contains a signed custom-limit policy, configure
  * `custom_limit_check`; absence, denial, or evaluator failure denies the
  * combined license/config decision.
@@ -306,16 +200,6 @@ LCC_EVENT_TYPE lcc_verify_config_decision(const CallerInformations* callerInform
 										  const LicenseLocation* licenseLocation, LicenseInfo* license_out,
 										  const LccConfigInput* input, LccConfigDecision* decision_out,
 										  const LccConfigVerifyOptions* options);
-
-/**
- * Process-local online revocation-floor helpers, useful for tests and for hosts
- * that restore a persisted floor at startup before calling ::acquire_license_ex
- * directly (which, used raw, requires the caller to own floor load/store -- see
- * its caveat). The secure decision wrapper above is preferred because it
- * loads/stores the floor on every successful online decision.
- */
-bool lcc_set_online_revocation_floor(const LccRevocationFloorRecord* record);
-bool lcc_get_online_revocation_floor(LccRevocationFloorRecord* record);
 
 /**
  * Enables or disables license lookup through process environment variables
@@ -341,20 +225,6 @@ void lcc_set_environment_license_sources_enabled(bool enabled);
  * license checks.
  */
 void lcc_set_strict_source_fatal_enabled(bool enabled);
-
-/**
- * Legacy network-license placeholder. This signature is unimplemented and fails
- * closed; it must not be used as an entitlement decision. Online hosts should use
- * ::lcc_confirm_license (the heartbeat lifecycle entry point); offline hosts use
- * ::acquire_license for authorization.
- */
-LCC_EVENT_TYPE confirm_license(char* featureName, LicenseLocation* licenseLocation);
-/**
- * Legacy network-license placeholder. This signature is unimplemented and fails
- * closed; it must not be used as an entitlement decision. Online hosts should use
- * ::lcc_release_license (the seat-release lifecycle entry point).
- */
-LCC_EVENT_TYPE release_license(char* featureName, LicenseLocation licenseLocation);
 
 #ifdef __cplusplus
 }

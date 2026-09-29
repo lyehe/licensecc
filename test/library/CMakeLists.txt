@@ -146,20 +146,6 @@ target_link_libraries(
  Boost::system
 )
 
-### Online verification API, assertion, and integration tests
-add_executable(
- test_online_verification
- online_verification_test.cpp
-)
-
-target_link_libraries(
- test_online_verification
- licensecc_static
- ${LCCGEN_TEST_SUPPORT_TARGET}
- Boost::unit_test_framework
- Boost::system
-)
-
 ### Config attestation verification tests
 add_executable(
  test_config_attestation
@@ -174,42 +160,6 @@ target_link_libraries(
  Boost::system
 )
 
-### Clock floor (offline rollback protection) unit tests. Header-only; no library link.
-add_executable(
- test_clock_floor
- clock_floor_test.cpp
-)
-
-target_link_libraries(
- test_clock_floor
- Boost::unit_test_framework
- Boost::system
-)
-
-### Lease client decision logic (state machine + durable-write gate). Header-only.
-add_executable(
- test_lease_client
- lease_client_test.cpp
-)
-
-target_link_libraries(
- test_lease_client
- Boost::unit_test_framework
- Boost::system
-)
-
-### Floating (concurrent-seat) client decision logic. Header-only.
-add_executable(
- test_seat_client
- seat_client_test.cpp
-)
-
-target_link_libraries(
- test_seat_client
- Boost::unit_test_framework
- Boost::system
-)
-
 ADD_TEST(NAME test_license_reader COMMAND test_license_reader)
 ADD_TEST(NAME test_license_locator COMMAND test_license_locator)
 ADD_TEST(NAME test_base64 COMMAND test_base64)
@@ -219,30 +169,11 @@ ADD_TEST(NAME test_event_registry COMMAND test_event_registry)
 ADD_TEST(NAME test_license_verifier COMMAND test_license_verifier)
 ADD_TEST(NAME test_public_api COMMAND test_public_api)
 ADD_TEST(NAME test_anti_tamper COMMAND test_anti_tamper)
-ADD_TEST(NAME test_online_verification COMMAND test_online_verification)
 ADD_TEST(NAME test_config_attestation COMMAND test_config_attestation)
-ADD_TEST(NAME test_clock_floor COMMAND test_clock_floor)
-ADD_TEST(NAME test_lease_client COMMAND test_lease_client)
-ADD_TEST(NAME test_seat_client COMMAND test_seat_client)
 
 set_tests_properties(
  test_license_reader
  PROPERTIES LABELS "security;parser"
-)
-
-set_tests_properties(
- test_clock_floor
- PROPERTIES LABELS "security;verifier"
-)
-
-set_tests_properties(
- test_lease_client
- PROPERTIES LABELS "security;public_api"
-)
-
-set_tests_properties(
- test_seat_client
- PROPERTIES LABELS "security;public_api"
 )
 
 set_tests_properties(
@@ -283,11 +214,6 @@ set_tests_properties(
 set_tests_properties(
  test_anti_tamper
  PROPERTIES LABELS "security;public_api;anti_tamper"
-)
-
-set_tests_properties(
- test_online_verification
- PROPERTIES LABELS "security;public_api;online"
 )
 
 set_tests_properties(

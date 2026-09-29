@@ -17,8 +17,7 @@
     "src/library/device_identity/device_identity.cpp": 575,
     "src/library/device_identity/providers/tpm2_openssl.cpp": 2111,
     "src/library/device_identity/providers/windows_tpm.cpp": 602,
-    "src/library/licensecc.cpp": 1486,
-    "src/library/online_verification/OnlineVerification.cpp": 511,
-    "src/library/os/signature_verifier.hpp": 532
+    "src/library/licensecc.cpp": 919,
+    "src/library/os/signature_verifier.hpp": 494
   }
 }

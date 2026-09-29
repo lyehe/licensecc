@@ -26,7 +26,6 @@ namespace os {
 
 static const char* const LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256 = "rsa-pkcs1-sha256";
 static const char* const LCC_SIGNATURE_KEY_ID_LEGACY_V200 = "legacy-v200-public-key";
-static const unsigned int LCC_ONLINE_ASSERTION_SIGNATURE_VERSION = 9001;
 
 inline uint32_t signature_sha256_rotr(uint32_t value, uint32_t bits) {
 	return (value >> bits) | (value << (32U - bits));
@@ -174,30 +173,6 @@ inline void append_embedded_retired_key_ids(std::vector<std::string>& retired_ke
 #endif
 }
 
-inline std::vector<SignaturePublicKey> online_assertion_public_key_ring() {
-#ifdef LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS
-	std::vector<SignaturePublicKey> keys;
-	const SignaturePublicKey online_public_keys[] = {LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS};
-	const size_t online_count = sizeof(online_public_keys) / sizeof(online_public_keys[0]);
-	for (size_t i = 0; i < online_count; ++i) {
-		keys.push_back(online_public_keys[i]);
-	}
-	return keys;
-#else
-	return std::vector<SignaturePublicKey>();
-#endif
-}
-
-inline void append_online_assertion_retired_key_ids(std::vector<std::string>& retired_key_ids) {
-#ifdef LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS
-	const char* const retired_ids[] = {LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS};
-	const size_t retired_count = sizeof(retired_ids) / sizeof(retired_ids[0]);
-	for (size_t i = 0; i < retired_count; ++i) {
-		retired_key_ids.push_back(retired_ids[i]);
-	}
-#endif
-}
-
 inline std::vector<SignaturePublicKey> config_attestation_public_key_ring() {
 #ifdef LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS
 	std::vector<SignaturePublicKey> keys;
@@ -267,19 +242,6 @@ inline SignatureVerificationPolicy current_v201_signature_policy() {
 		policy.allowed_key_ids.push_back(public_key.key_id);
 	}
 	append_embedded_retired_key_ids(policy.retired_key_ids);
-	policy.min_public_key_bits = 3072;
-	return policy;
-}
-
-inline SignatureVerificationPolicy online_assertion_signature_policy() {
-	SignatureVerificationPolicy policy;
-	policy.license_version = LCC_ONLINE_ASSERTION_SIGNATURE_VERSION;
-	policy.allowed_algorithms.push_back(LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256);
-	policy.public_keys = online_assertion_public_key_ring();
-	for (const SignaturePublicKey& public_key : policy.public_keys) {
-		policy.allowed_key_ids.push_back(public_key.key_id);
-	}
-	append_online_assertion_retired_key_ids(policy.retired_key_ids);
 	policy.min_public_key_bits = 3072;
 	return policy;
 }

@@ -25,19 +25,10 @@ remote resources; copying this README never grants that authority.
 The Worker accepts `POST /v1/verify`, looks up an entitlement in D1, and returns
 a signed `lccoa1.<payload_b64>.<signature_b64>` assertion for active
 entitlements. Unknown, revoked, disabled, expired, or not-yet-valid
-entitlements return a generic unsigned denial by default. The accepted C++
-library exposes `acquire_license_ex()` and the secure
-`lcc_acquire_license_decision()` entry point in its public header/source. Core
-does not perform HTTP: the host implements the `LCC_ONLINE_CHECK` callback,
-calls this Worker from that callback, and returns the assertion to the C++ API.
-
-For production C++ hosts, use `lcc_acquire_license_decision()`. It requires
-online verification and host callbacks that load and store the strongest
-persisted revocation sequence for the exact project/feature/fingerprint tuple;
-it fails closed when those callbacks or the signed assertion are unavailable.
-`acquire_license_ex()` remains available for lower-level integrations, but its
-revocation floor is process-local unless the host restores a persisted floor
-with the public floor helpers.
+entitlements return a generic unsigned denial by default. The C++ library does
+not verify these assertions: native hosts check offline `.lic` licenses with
+`acquire_license_ex()` and use the device-bound API for protected online
+sessions.
 
 The successful hot path is one validated request, rate-limit checks, one D1
 lookup by primary key, one signed assertion, and one JSON response. The Worker
@@ -93,11 +84,8 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
    npm run generate-online-key -- --out-dir .online-key
    ```
 
-   Store `.online-key/online_private_key.pkcs8.pem` as a Worker secret and pass
-   the generated `LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS` CMake value when
-   building the C++ verifier. Production verifier builds fail closed without a
-   configured online assertion public key ring. Do not reuse the license-issuing
-   private key for online assertions.
+   Store `.online-key/online_private_key.pkcs8.pem` as a Worker secret. Do not
+   reuse the license-issuing private key for online assertions.
 
 5. Store signing material as Worker secrets:
 
@@ -107,7 +95,8 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
    ```
 
    The private key must be PKCS#8 PEM. Do not commit it. `ONLINE_SIGNING_KEY_ID`
-   must match a public key id trusted by the C++ online assertion verifier.
+   must match the `key_id` that `generate-online-key` wrote to
+   `.online-key/online_public_key.json`.
 
 6. Insert or update an entitlement:
 
@@ -408,15 +397,6 @@ duplicate check as crash-redrive evidence.
 
 ## Notes
 
-- Licensecc online verification is intentionally fail-closed: once a host
-  supplies `online_check`, the C++ runtime requires a fresh signed assertion.
-- Production C++ hosts should prefer `lcc_acquire_license_decision()`. It
-  requires online verification plus host callbacks that load and store the
-  strongest accepted `revocation_seq` for each project/feature/fingerprint
-  tuple, so normal process restarts cannot silently accept older assertions.
-- Direct `acquire_license_ex()` integrations keep a last-seen `revocation-seq`
-  floor only for the current process. Use the decision wrapper or restore a
-  host-persisted floor with the public floor helpers before checking licenses.
 - Request `client_hardening` is telemetry only. The Worker logs it on allow and
   deny paths for operator visibility, but it is not included in the signed
   assertion payload and must not be treated as proof of host integrity.
