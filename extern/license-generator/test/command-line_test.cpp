@@ -20,6 +20,7 @@
 #include <build_properties.h>
 #include "../src/license_generator/command_line-parser.hpp"
 #include "../src/license_generator/file_publish.hpp"
+#include "../src/license_generator/project.hpp"
 #include "../src/ini/SimpleIni.h"
 #include "../src/base_lib/base.h"
 #include "../src/base_lib/base64.h"
@@ -90,6 +91,14 @@ static void create_project(const fs::path& projects_folder, const fs::path& expe
 	BOOST_REQUIRE_MESSAGE(fs::exists(expectedPrivateKey), "Private key " + expectedPrivateKey.string() + " created.");
 	BOOST_CHECK_MESSAGE(fs::exists(expected_public_key), "Public key " + expected_public_key.string() + " created.");
 }
+
+struct cerr_redirect {
+	explicit cerr_redirect(std::streambuf* new_buffer) : old(std::cerr.rdbuf(new_buffer)) {}
+	~cerr_redirect() { std::cerr.rdbuf(old); }
+
+private:
+	std::streambuf* old;
+};
 
 static string read_binary_file(const fs::path& path) {
 	ifstream in(path.string().c_str(), ios::binary);
@@ -224,6 +233,13 @@ BOOST_AUTO_TEST_CASE(issue_writes_v201_by_default_and_rejects_license_version_op
 	CSimpleIniA ini;
 	BOOST_REQUIRE_EQUAL(ini.LoadFile(default_license.c_str()), SI_Error::SI_OK);
 	BOOST_CHECK_EQUAL(string(ini.GetValue(project_name.c_str(), LICENSE_VERSION, "")), "201");
+	BOOST_CHECK_EQUAL(string(ini.GetValue(project_name.c_str(), LICENSE_CANONICAL_VERSION, "")), "1");
+	BOOST_CHECK_EQUAL(string(ini.GetValue(project_name.c_str(), LICENSE_SIGNATURE_VERSION, "")), "1");
+	BOOST_CHECK_EQUAL(string(ini.GetValue(project_name.c_str(), LICENSE_SIGNATURE_ALGORITHM, "")),
+					  LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256);
+	const string key_id = ini.GetValue(project_name.c_str(), LICENSE_KEY_ID, "");
+	BOOST_CHECK_EQUAL(key_id.substr(0, 7), "sha256:");
+	BOOST_CHECK_EQUAL(key_id.size(), static_cast<size_t>(71));
 
 	const fs::path rejected_license("v201_default_rejected.lic");
 	fs::remove(rejected_license);
@@ -301,6 +317,47 @@ BOOST_AUTO_TEST_CASE(product_validate_keypair_and_v201_issue_reject_mismatch) {
 	BOOST_CHECK_MESSAGE(!fs::exists(mismatched_license), "mismatched v201 issuance must not create a license file");
 }
 
+// The Project class has no key-size floor of its own (only the CLI's project
+// init and License::write_license() enforce one), so a weak project key can
+// still exist -- for example one created directly through the Project API,
+// or carried over from elsewhere -- and `validate-keypair` must still warn
+// about it.
+BOOST_AUTO_TEST_CASE(product_validate_keypair_warns_on_weak_key) {
+	const string project_name("TEST_VALIDATE_WEAK");
+	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
+	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_validate_weak");
+	const fs::path project_folder(projects_folder / project_name);
+	const fs::path private_key(project_folder / PRIVATE_KEY_FNAME);
+	const fs::path public_key(project_folder / "include" / "licensecc" / project_name / PUBLIC_KEY_INC_FNAME);
+	fs::remove_all(projects_folder);
+
+	Project weak_project(project_name, projects_folder.string(), mock_source_folder.string(), false, 1024);
+	BOOST_REQUIRE_NO_THROW(weak_project.initialize());
+	BOOST_REQUIRE_MESSAGE(fs::exists(private_key), "weak project key created directly through the Project API");
+	BOOST_REQUIRE_MESSAGE(fs::exists(public_key),
+						  "weak project public header created directly through the Project API");
+
+	const string private_key_str = private_key.string();
+	const string public_key_str = public_key.string();
+	int validate_argc = 7;
+	const char* validate_argv[] = {"lcc",
+								   "project",
+								   "validate-keypair",
+								   "--private-key",
+								   private_key_str.c_str(),
+								   "--public-key",
+								   public_key_str.c_str()};
+	boost::test_tools::output_test_stream captured;
+	int result = 1;
+	{
+		cerr_redirect guard(captured.rdbuf());
+		result = CommandLineParser::parseCommandLine(validate_argc, validate_argv);
+	}
+	BOOST_CHECK_EQUAL(result, 0);
+	BOOST_CHECK_MESSAGE(captured.str().find("NOT verify") != string::npos,
+						"validate-keypair warns about a weak project key: " + captured.str());
+}
+
 BOOST_AUTO_TEST_CASE(v201_issue_derives_client_signature_source_strength_metadata) {
 	const string project_name("TEST_V201_HW_SOURCE");
 	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
@@ -366,14 +423,6 @@ static void write_binary_file(const fs::path& path, const string& contents) {
 static void fail_file_publish_before_commit(const fs::path&) {
 	throw runtime_error("forced test-sign publication failure");
 }
-
-struct cerr_redirect {
-	explicit cerr_redirect(std::streambuf* new_buffer) : old(std::cerr.rdbuf(new_buffer)) {}
-	~cerr_redirect() { std::cerr.rdbuf(old); }
-
-private:
-	std::streambuf* old;
-};
 
 struct FileSnapshot {
 	string bytes;
@@ -642,7 +691,7 @@ BOOST_AUTO_TEST_CASE(test_sign_rejects_active_private_key_output_aliases_without
 }
 
 BOOST_AUTO_TEST_CASE(product_initialize_accepts_key_bits_at_3072_floor) {
-	// Pins the floor boundary: exactly 3072 bits must be accepted WITHOUT the insecure override.
+	// Pins the floor boundary: exactly 3072 bits is the minimum accepted value.
 	const string project_name("TEST_KEY_BITS_3072");
 	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
 	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_key_bits_3072");
@@ -1382,13 +1431,31 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 	const string corrupt_after((istreambuf_iterator<char>(corrupt_in)), istreambuf_iterator<char>());
 	BOOST_CHECK_EQUAL(corrupt_after, corrupt_original);
 
+	// A tampered signature must be rejected specifically by
+	// validate_existing_license_signatures, not merely because the file
+	// isn't version 201 -- so this starts from a genuinely issued v201 file,
+	// then corrupts only its signature line.
 	const fs::path bad_signature_license("bad_signature_existing_license.lic");
+	fs::remove(bad_signature_license);
 	const string bad_signature_license_str = bad_signature_license.string();
-	const string bad_signature_original = "[TEST]\nlic_ver = 200\nsig = QUJDRA==\n";
-	{
-		ofstream out(bad_signature_license_str.c_str(), ios::binary | ios::trunc);
-		out << bad_signature_original;
-	}
+	int bad_signature_seed_argc = 9;
+	const char* bad_signature_seed_argv[] = {"lcc",
+											 "license",
+											 "issue",
+											 "--" PARAM_PRIMARY_KEY,
+											 private_key_str.c_str(),
+											 "--" PARAM_LICENSE_OUTPUT,
+											 bad_signature_license_str.c_str(),
+											 "--" PARAM_PROJECT_FOLDER,
+											 project_folder_str.c_str()};
+	BOOST_REQUIRE_EQUAL(CommandLineParser::parseCommandLine(bad_signature_seed_argc, bad_signature_seed_argv), 0);
+	const string bad_signature_issued = read_binary_file(bad_signature_license);
+	const size_t bad_signature_sig_pos = bad_signature_issued.find(string(LICENSE_SIGNATURE) + " = ");
+	BOOST_REQUIRE_MESSAGE(bad_signature_sig_pos != string::npos, "issued v201 license has a signature line");
+	const string bad_signature_original =
+		bad_signature_issued.substr(0, bad_signature_sig_pos) + string(LICENSE_SIGNATURE) + " = QUJDRA==\n";
+	write_binary_file(bad_signature_license, bad_signature_original);
+
 	int bad_signature_argc = 9;
 	const char* bad_signature_argv[] = {"lcc",
 										"license",
@@ -1399,17 +1466,45 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 										bad_signature_license_str.c_str(),
 										"--" PARAM_PROJECT_FOLDER,
 										project_folder_str.c_str()};
-	int bad_signature_result = CommandLineParser::parseCommandLine(bad_signature_argc, bad_signature_argv);
+	boost::test_tools::output_test_stream bad_signature_errors;
+	int bad_signature_result = 0;
+	{
+		cerr_redirect guard(bad_signature_errors.rdbuf());
+		bad_signature_result = CommandLineParser::parseCommandLine(bad_signature_argc, bad_signature_argv);
+	}
 	BOOST_CHECK_EQUAL(bad_signature_result, 1);
+	BOOST_CHECK_MESSAGE(bad_signature_errors.str().find("contains an invalid signature in section") != string::npos,
+						"tampered signature is rejected by signature validation: " + bad_signature_errors.str());
 	BOOST_CHECK_EQUAL(read_binary_file(bad_signature_license), bad_signature_original);
 
+	// A non-canonical key in an otherwise v201-shaped file must be rejected
+	// specifically as a non-canonical license key, not merely because the
+	// file isn't version 201 -- so this starts from a genuine v201 file that
+	// carries a valid-to date, then capitalizes that key's name.
 	const fs::path noncanonical_license("noncanonical_existing_license.lic");
+	fs::remove(noncanonical_license);
 	const string noncanonical_license_str = noncanonical_license.string();
-	const string noncanonical_original = "[TEST]\nlic_ver = 200\nValid-to = 2050-10-10\nsig = QUJDRA==\n";
-	{
-		ofstream out(noncanonical_license_str.c_str(), ios::binary | ios::trunc);
-		out << noncanonical_original;
-	}
+	int noncanonical_seed_argc = 11;
+	const char* noncanonical_seed_argv[] = {"lcc",
+											"license",
+											"issue",
+											"--" PARAM_PRIMARY_KEY,
+											private_key_str.c_str(),
+											"--" PARAM_LICENSE_OUTPUT,
+											noncanonical_license_str.c_str(),
+											"--" PARAM_PROJECT_FOLDER,
+											project_folder_str.c_str(),
+											"--" PARAM_EXPIRY_DATE,
+											"2050-10-10"};
+	BOOST_REQUIRE_EQUAL(CommandLineParser::parseCommandLine(noncanonical_seed_argc, noncanonical_seed_argv), 0);
+	const string noncanonical_issued = read_binary_file(noncanonical_license);
+	const string noncanonical_from = string(PARAM_EXPIRY_DATE) + " = ";
+	const size_t noncanonical_pos = noncanonical_issued.find(noncanonical_from);
+	BOOST_REQUIRE_MESSAGE(noncanonical_pos != string::npos, "issued v201 license has a valid-to line");
+	string noncanonical_original = noncanonical_issued;
+	noncanonical_original.replace(noncanonical_pos, 1, "V");
+	write_binary_file(noncanonical_license, noncanonical_original);
+
 	int noncanonical_argc = 9;
 	const char* noncanonical_argv[] = {"lcc",
 									   "license",
@@ -1420,8 +1515,16 @@ BOOST_AUTO_TEST_CASE(product_issue_license_rejects_invalid_cli_and_io_inputs) {
 									   noncanonical_license_str.c_str(),
 									   "--" PARAM_PROJECT_FOLDER,
 									   project_folder_str.c_str()};
-	int noncanonical_result = CommandLineParser::parseCommandLine(noncanonical_argc, noncanonical_argv);
+	boost::test_tools::output_test_stream noncanonical_errors;
+	int noncanonical_result = 0;
+	{
+		cerr_redirect guard(noncanonical_errors.rdbuf());
+		noncanonical_result = CommandLineParser::parseCommandLine(noncanonical_argc, noncanonical_argv);
+	}
 	BOOST_CHECK_EQUAL(noncanonical_result, 1);
+	BOOST_CHECK_MESSAGE(
+		noncanonical_errors.str().find("contains a non-canonical license key [Valid-to]") != string::npos,
+		"non-canonical key is rejected specifically: " + noncanonical_errors.str());
 	BOOST_CHECK_EQUAL(read_binary_file(noncanonical_license), noncanonical_original);
 }
 
