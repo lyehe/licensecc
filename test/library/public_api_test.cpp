@@ -60,9 +60,12 @@ static LicenseInfo prefilled_license_info() {
 	info.days_left = 1234;
 	info.has_expiry = true;
 	info.linked_to_pc = true;
-	// LCC_LOCAL is the only defined value; poison with an out-of-range value so the
-	// reset check below (lcc_init_license_info zeroing the struct) is meaningful.
-	info.license_type = static_cast<LCC_LICENSE_TYPE>(99);
+	// LCC_LOCAL is the only defined enumerator, so there is no other in-range value to
+	// poison with, and converting an out-of-range integer to an unscoped enum without a
+	// fixed underlying type is undefined behavior. Poison the field's raw bytes instead
+	// so the reset check below (lcc_init_license_info zeroing the struct back to
+	// LCC_LOCAL) stays meaningful.
+	std::memset(&info.license_type, 0x7f, sizeof(info.license_type));
 	std::copy(stale_data.begin(), stale_data.end(), info.proprietary_data);
 	info.license_version = 999;
 	return info;
