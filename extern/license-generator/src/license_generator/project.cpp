@@ -19,6 +19,7 @@
 #include "../inja/inja.hpp"
 #include "../base_lib/base.h"
 #include "../base_lib/crypto_helper.hpp"
+#include "../base_lib/v201_canonical_payload.hpp"
 #include "file_publish.hpp"
 #include "project.hpp"
 
@@ -183,37 +184,31 @@ static string sha256_hex(const vector<unsigned char> &data) {
 }
 
 static string validate_project_name(const string &name) {
-	if (name.empty()) {
-		throw invalid_argument("project name must not be empty.");
+	// v201 is the only issuance format, and its signed "project"
+	// canonical-payload field only accepts an ASCII alpha/underscore start
+	// followed by alnum/underscore (v201::valid_project_name). A project
+	// folder name outside that rule -- a hyphen or a dot, which this
+	// generator used to allow "for portable generated paths" -- could
+	// never appear in an issued licence, so it is refused here, before any
+	// directory or key is created, rather than a second, divergent
+	// character-set check.
+	if (!v201::valid_project_name(name)) {
+		throw invalid_argument(
+			"project name must start with an ASCII letter or '_' and contain only ASCII letters, digits, and '_': "
+			"the same rule the v201 license format's signed project field requires.");
 	}
-	const unsigned char first = static_cast<unsigned char>(name[0]);
-	if (!((first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z') || first == '_')) {
-		throw invalid_argument("project name must start with an ASCII letter or '_'.");
-	}
-	for (const unsigned char ch : name) {
-		const bool ascii_alnum = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-								 (ch >= '0' && ch <= '9');
-		if (!ascii_alnum && ch != '_' && ch != '-' && ch != '.') {
-			throw invalid_argument(
-				"project name may contain only ASCII letters, digits, '_', '-', and '.' for portable generated paths.");
-		}
-	}
-	if (name.back() == '.') {
-		throw invalid_argument("project name must not end with '.' because Windows strips trailing dots.");
-	}
-	// Windows treats these device names as special even when an extension is
-	// present (for example, CON.h).  The generated project directory and
-	// public header must therefore reject them on every platform, rather than
-	// allowing a project that later cannot be built or deployed on Windows.
-	const size_t extension_pos = name.find('.');
-	string stem = name.substr(0, extension_pos);
-	transform(stem.begin(), stem.end(), stem.begin(), [](const unsigned char ch) {
+	// Windows treats these device names as special regardless of case. The
+	// generated project directory and public header must therefore reject
+	// them on every platform, rather than allowing a project that later
+	// cannot be built or deployed on Windows.
+	string upper_name = name;
+	transform(upper_name.begin(), upper_name.end(), upper_name.begin(), [](const unsigned char ch) {
 		return static_cast<char>(toupper(ch));
 	});
-	const bool reserved_base = stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL";
-	const bool reserved_numbered = stem.size() == 4U &&
-		((stem.compare(0, 3, "COM") == 0) || (stem.compare(0, 3, "LPT") == 0)) &&
-		stem[3] >= '1' && stem[3] <= '9';
+	const bool reserved_base = upper_name == "CON" || upper_name == "PRN" || upper_name == "AUX" || upper_name == "NUL";
+	const bool reserved_numbered = upper_name.size() == 4U &&
+		((upper_name.compare(0, 3, "COM") == 0) || (upper_name.compare(0, 3, "LPT") == 0)) &&
+		upper_name[3] >= '1' && upper_name[3] <= '9';
 	if (reserved_base || reserved_numbered) {
 		throw invalid_argument("project name must not be a reserved Windows device name.");
 	}

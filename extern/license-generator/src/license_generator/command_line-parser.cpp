@@ -412,7 +412,9 @@ static int initializeProject(const po::parsed_options &parsed, po::variables_map
 	std::string project_folder;
 	std::string templates_folder;
 	project_desc.add_options()  //
-		("project-name,n", po::value<std::string>(&project_name)->required(), "New project name (required).")  //
+		("project-name,n", po::value<std::string>(&project_name)->required(),
+		 "New project name (required). Must start with an ASCII letter or '_', and contain only ASCII letters, "
+		 "digits, and '_' after that -- the same rule the v201 license format's signed project field requires.")  //
 		("projects-folder,p", po::value<std::string>(&project_folder)->default_value("."),  //
 		 "path to where all the projects configurations are stored.")  //
 		("templates,t", po::value<std::string>(&templates_folder)->default_value("."),

@@ -22,6 +22,14 @@ struct CanonicalPayloadResult {
 CanonicalPayloadResult build_canonical_payload(const std::vector<CanonicalField>& fields);
 std::string canonical_payload_hex(const std::vector<uint8_t>& bytes);
 
+// The exact rule the signed "project" canonical-payload field requires: an
+// ASCII alpha/underscore start, then only ASCII alnum/underscore, within the
+// generic canonical field value length limit. A project name that fails this
+// can never appear in a v201 licence, so any project-creation path (the
+// generator's `Project` class, its CLI) must reuse this rule rather than a
+// second, divergent copy of it.
+bool valid_project_name(const std::string& value);
+
 }  // namespace v201
 }  // namespace license
 

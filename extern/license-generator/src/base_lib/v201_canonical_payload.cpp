@@ -81,8 +81,13 @@ bool valid_key_name(const std::string& key) {
 	return true;
 }
 
+}  // namespace
+
+// Declared in the header so project-creation code outside this translation
+// unit (the generator's Project class) can reuse this exact rule instead of
+// a second, divergent copy of it.
 bool valid_project_name(const std::string& value) {
-	if (value.empty()) {
+	if (value.empty() || value.size() > kMaxValueLength) {
 		return false;
 	}
 	const unsigned char first = static_cast<unsigned char>(value[0]);
@@ -96,6 +101,8 @@ bool valid_project_name(const std::string& value) {
 	}
 	return true;
 }
+
+namespace {
 
 bool valid_feature_name(const std::string& value) {
 	if (value.empty()) {

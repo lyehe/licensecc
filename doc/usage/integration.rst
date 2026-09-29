@@ -20,12 +20,12 @@ Starting directory: the Licensecc repository root. Shell: any shell with CMake
 and the native toolchain available.
 
 Choose a stable project name for the product. The example below uses
-``my-product`` and writes generated material only below ``build/my-product``:
+``my_product`` and writes generated material only below ``build/my_product``:
 
 .. code-block:: console
 
-   cmake -S . -B build/my-product -DLCC_PROJECT_NAME=my-product -DCMAKE_INSTALL_PREFIX=build/my-product/install
-   cmake --build build/my-product --target install --config Release
+   cmake -S . -B build/my_product -DLCC_PROJECT_NAME=my_product -DCMAKE_INSTALL_PREFIX=build/my_product/install
+   cmake --build build/my_product --target install --config Release
 
 ``LCC_PROJECT_NAME`` selects the generated key pair, configuration, and
 installed component. Use the same value when issuing a license and configuring
@@ -33,8 +33,8 @@ the consumer. The generated project is:
 
 .. code-block:: text
 
-   build/my-product/projects/my-product/
-   |-- include/licensecc/my-product/
+   build/my_product/projects/my_product/
+   |-- include/licensecc/my_product/
    |-- licenses/
    `-- private_key.rsa
 
@@ -49,7 +49,7 @@ link its imported target:
 
 .. code-block:: cmake
 
-   set(LCC_PROJECT_NAME "my-product" CACHE STRING "Licensecc project component")
+   set(LCC_PROJECT_NAME "my_product" CACHE STRING "Licensecc project component")
    find_package(licensecc CONFIG REQUIRED COMPONENTS "${LCC_PROJECT_NAME}")
 
    add_executable(my_application main.cpp)
@@ -63,9 +63,9 @@ layout is:
 
    $repo = (Resolve-Path ".").Path
    cmake -S path/to/application -B build/my-application `
-     "-DCMAKE_PREFIX_PATH=$repo/build/my-product/install" `
-     "-Dlicensecc_DIR=$repo/build/my-product/install/cmake/licensecc" `
-     -DLCC_PROJECT_NAME=my-product
+     "-DCMAKE_PREFIX_PATH=$repo/build/my_product/install" `
+     "-Dlicensecc_DIR=$repo/build/my_product/install/cmake/licensecc" `
+     -DLCC_PROJECT_NAME=my_product
    cmake --build build/my-application --config Release
 
 The Linux layout differs only in the package-config directory:
@@ -74,9 +74,9 @@ The Linux layout differs only in the package-config directory:
 
    repo="$PWD"
    cmake -S path/to/application -B build/my-application \
-     -DCMAKE_PREFIX_PATH="$repo/build/my-product/install" \
-     -Dlicensecc_DIR="$repo/build/my-product/install/lib/cmake/licensecc" \
-     -DLCC_PROJECT_NAME=my-product
+     -DCMAKE_PREFIX_PATH="$repo/build/my_product/install" \
+     -Dlicensecc_DIR="$repo/build/my_product/install/lib/cmake/licensecc" \
+     -DLCC_PROJECT_NAME=my_product
    cmake --build build/my-application
 
 Passing ``licensecc_DIR`` explicitly is intentional: it makes the different

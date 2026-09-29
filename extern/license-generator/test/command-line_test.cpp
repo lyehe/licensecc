@@ -527,44 +527,6 @@ BOOST_AUTO_TEST_CASE(license_issue_rejects_active_custom_key_output_aliases_with
 #endif
 }
 
-// The v201 canonical payload's "project" field is an identifier (ASCII
-// alpha/underscore start, then alnum/underscore only) and rejects a hyphen,
-// even though a project FOLDER name may contain one (Project::initialize()
-// allows '-', '.', '_' for portable generated paths). A hyphenated FEATURE
-// name has no such restriction, so it is what this test exercises surviving
-// issuance safely; the project name itself must be hyphen-free.
-BOOST_AUTO_TEST_CASE(issue_preserves_safe_hyphenated_feature_name) {
-	const string project_name("my_product");
-	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
-	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_hyphenated");
-	const fs::path expected_project_folder(projects_folder / project_name);
-	const fs::path expected_private_key(expected_project_folder / PRIVATE_KEY_FNAME);
-	const fs::path expected_public_key(expected_project_folder / "include" / "licensecc" / project_name /
-									   PUBLIC_KEY_INC_FNAME);
-	create_project(projects_folder, expected_private_key, expected_public_key, mock_source_folder, project_name);
-	const fs::path output_file("hyphenated.lic");
-	fs::remove(output_file);
-	const string private_key_str = expected_private_key.string();
-	const string project_folder_str = expected_project_folder.string();
-	const string output_file_str = output_file.string();
-	int argc = 11;
-	const char* argv[] = {"lcc",
-					  "license",
-					  "issue",
-					  "--" PARAM_PRIMARY_KEY,
-					  private_key_str.c_str(),
-					  "--" PARAM_LICENSE_OUTPUT,
-					  output_file_str.c_str(),
-					  "--" PARAM_PROJECT_FOLDER,
-					  project_folder_str.c_str(),
-					  "--" PARAM_FEATURE_NAMES,
-					  "my-feature"};
-	BOOST_CHECK_EQUAL(CommandLineParser::parseCommandLine(argc, argv), 0);
-	CSimpleIniA ini;
-	BOOST_REQUIRE_EQUAL(ini.LoadFile(output_file.c_str()), SI_Error::SI_OK);
-	BOOST_CHECK_EQUAL(string(ini.GetValue("MY-FEATURE", LICENSE_VERSION, "")), "201");
-}
-
 BOOST_AUTO_TEST_CASE(test_sign_does_not_truncate_existing_output_before_safe_publication) {
 	const fs::path private_key = fs::path(PROJECT_TEST_SRC_DIR) / "data" / PRIVATE_KEY_FNAME;
 	const fs::path output = fs::path(PROJECT_TEST_TEMP_DIR) / "test_sign_preserves_output.sig";

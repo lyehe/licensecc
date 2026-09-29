@@ -17,6 +17,14 @@ below 3072 bits: `lccgen project init` only ever generates a 3072-bit or
 weaker than that. There is no automated key-rotation command; create a new
 project with `lccgen project init` and reissue licenses from it.
 
+## Project names
+
+A project name must start with an ASCII letter or `_`, and contain only ASCII
+letters, digits, and `_` after that. This is the same rule the v201 license
+format's signed `project` field requires (`license::v201::valid_project_name`);
+`lccgen project init` refuses any other name, including one with a `-` or a
+`.`, so that it never creates a project that can never issue a license.
+
 ## Private-key file ownership
 
 `lccgen project init` creates a signing key for the identity that runs the
