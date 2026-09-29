@@ -563,6 +563,9 @@ BOOST_AUTO_TEST_CASE(test_valid_file_candidate_wins_with_malformed_file_warning)
 	const string malformedLicLocation = string(LCC_LICENSES_BASE) + "/multi_source_malformed_file.lic";
 	write_file(malformedLicLocation, read_license_file(validLicLocation) + "\nunknown-key = value\n");
 
+	// This test exercises the non-default, opt-in lenient mode: a rejected candidate is
+	// merely a warning when another candidate verifies.
+	lcc_set_strict_source_fatal_enabled(false);
 	LicenseInfo license;
 	LicenseLocation location = {LICENSE_PATH};
 	const string pathList = malformedLicLocation + ";" + validLicLocation;
@@ -571,6 +574,7 @@ BOOST_AUTO_TEST_CASE(test_valid_file_candidate_wins_with_malformed_file_warning)
 
 	BOOST_CHECK_EQUAL(result, LICENSE_OK);
 	BOOST_CHECK(has_status_event(license, LICENSE_MALFORMED, SVRT_WARN));
+	lcc_set_strict_source_fatal_enabled(true);
 }
 
 BOOST_AUTO_TEST_CASE(test_valid_external_candidate_wins_with_malformed_environment_warning) {
@@ -582,6 +586,9 @@ BOOST_AUTO_TEST_CASE(test_valid_external_candidate_wins_with_malformed_environme
 	UNSETENV(LCC_LICENSE_LOCATION_ENV_VAR);
 	locate::LocatorFactory::find_license_near_module(false);
 	locate::LocatorFactory::find_license_with_env_var(true);
+	// This test exercises the non-default, opt-in lenient mode: a rejected candidate is
+	// merely a warning when another candidate verifies.
+	lcc_set_strict_source_fatal_enabled(false);
 	LicenseInfo license;
 	LicenseLocation location = {LICENSE_PLAIN_DATA};
 	std::copy(validLicense.begin(), validLicense.end(), location.licenseData);
@@ -589,6 +596,7 @@ BOOST_AUTO_TEST_CASE(test_valid_external_candidate_wins_with_malformed_environme
 
 	BOOST_CHECK_EQUAL(result, LICENSE_OK);
 	BOOST_CHECK(has_status_event(license, LICENSE_MALFORMED, SVRT_WARN));
+	lcc_set_strict_source_fatal_enabled(true);
 	UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
 	locate::LocatorFactory::find_license_near_module(FIND_LICENSE_NEAR_MODULE);
 	locate::LocatorFactory::find_license_with_env_var(FIND_LICENSE_WITH_ENV_VAR);
@@ -603,6 +611,9 @@ BOOST_AUTO_TEST_CASE(test_valid_environment_candidate_wins_with_malformed_extern
 	UNSETENV(LCC_LICENSE_LOCATION_ENV_VAR);
 	locate::LocatorFactory::find_license_near_module(false);
 	locate::LocatorFactory::find_license_with_env_var(true);
+	// This test exercises the non-default, opt-in lenient mode: a rejected candidate is
+	// merely a warning when another candidate verifies.
+	lcc_set_strict_source_fatal_enabled(false);
 	LicenseInfo license;
 	LicenseLocation location = {LICENSE_PLAIN_DATA};
 	const char malformed[] = "not ini";
@@ -611,6 +622,7 @@ BOOST_AUTO_TEST_CASE(test_valid_environment_candidate_wins_with_malformed_extern
 
 	BOOST_CHECK_EQUAL(result, LICENSE_OK);
 	BOOST_CHECK(has_status_event(license, LICENSE_MALFORMED, SVRT_WARN));
+	lcc_set_strict_source_fatal_enabled(true);
 	UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
 	locate::LocatorFactory::find_license_near_module(FIND_LICENSE_NEAR_MODULE);
 	locate::LocatorFactory::find_license_with_env_var(FIND_LICENSE_WITH_ENV_VAR);

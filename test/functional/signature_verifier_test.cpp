@@ -595,6 +595,29 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_duplicate_public_key_ring_e
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
 }
 
+// Models the project verification ring that LCC_ADDITIONAL_PUBLIC_KEY_RECORDS /
+// LCC_RETIRED_PUBLIC_KEY_IDS bake into embedded_public_key_ring(): the embedded
+// project key plus one additional (rotation) key, driven directly through
+// SignatureVerificationPolicy::public_keys and retired_key_ids rather than through
+// build-time defines.
+BOOST_AUTO_TEST_CASE(additional_ring_key_verifies_and_retired_id_is_refused) {
+	license::os::SignatureVerificationRequest request = v201_golden_request("minimal", v201_golden_minimal_fields());
+	const vector<uint8_t> additional_key_der = request.public_key_der;
+
+	request.policy.allow_external_public_key_der = false;
+	request.public_key_der.clear();
+	request.policy.public_keys.push_back(license::os::SignaturePublicKey(
+		license::os::embedded_public_key_id(), license::os::embedded_public_key_der(),
+		license::os::embedded_public_key_bits()));
+	request.policy.public_keys.push_back(
+		license::os::SignaturePublicKey(kGoldenV201KeyId, additional_key_der, 1024));
+
+	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_OK);
+
+	request.policy.retired_key_ids.push_back(kGoldenV201KeyId);
+	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
+}
+
 BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_key_id_public_key_mismatch) {
 	const string test_data("test_data");
 	unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());

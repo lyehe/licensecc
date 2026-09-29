@@ -38,7 +38,7 @@
 
 using namespace std;
 
-static std::atomic_bool strict_source_fatal_enabled{false};
+static std::atomic_bool strict_source_fatal_enabled{true};
 
 struct AcquiredLicenseContext {
 	string project;

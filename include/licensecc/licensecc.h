@@ -213,16 +213,15 @@ LCC_EVENT_TYPE lcc_verify_config_decision(const CallerInformations* callerInform
 void lcc_set_environment_license_sources_enabled(bool enabled);
 
 /**
- * Enables or disables strict source-fatal handling. The default is disabled for
- * compatibility: if one license candidate verifies, rejected candidates are
- * reported as warning audit events. When enabled, suspicious rejected
- * candidates such as malformed, corrupted, expired, identifier-mismatched, or
- * unlicensed-product sources remain fatal even when another candidate verifies
- * successfully. Hosts that treat explicit or environment-provided license
- * sources as authoritative should enable this mode before calling
- * ::acquire_license. This process-global policy is atomic but should be
- * configured once during single-threaded startup before worker threads begin
- * license checks.
+ * Enables or disables strict source-fatal handling. The default is enabled:
+ * a rejected license candidate -- malformed, corrupted, expired,
+ * identifier-mismatched, or unlicensed-product -- is fatal even when another
+ * candidate verifies successfully. Disabling this mode downgrades a rejected
+ * candidate to a warning audit event whenever another candidate verifies.
+ * Hosts that need to tolerate a stray invalid candidate alongside a valid one
+ * can disable this mode before calling ::acquire_license. This process-global
+ * policy is atomic but should be configured once during single-threaded
+ * startup before worker threads begin license checks.
  */
 void lcc_set_strict_source_fatal_enabled(bool enabled);
 

@@ -69,9 +69,9 @@ The example populates `CallerInformations.version` and sets
 optional `--print-id` flag prints a hardware identifier only for support or
 license enrollment; it is not used as proof of entitlement.
 
-At startup the example disables environment-sourced license lookup and enables
-strict source-fatal handling. That means a malformed colocated license file
-cannot be silently demoted by a later valid explicit license path.
+At startup the example disables environment-sourced license lookup. Strict
+source-fatal handling is enabled by default, so a malformed colocated license
+file cannot be silently demoted by a later valid explicit license path.
 
 For new hosts that need per-call tamper checks, prefer `acquire_license_ex()`
 with `LicenseCheckOptions`. The initializer uses the secure defaults:

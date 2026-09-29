@@ -25,7 +25,7 @@ struct RuntimePolicyGuard {
 	RuntimePolicyGuard() {
 		locate::LocatorFactory::find_license_near_module(false);
 		lcc_set_environment_license_sources_enabled(false);
-		lcc_set_strict_source_fatal_enabled(false);
+		lcc_set_strict_source_fatal_enabled(true);
 		UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
 		UNSETENV(LCC_LICENSE_LOCATION_ENV_VAR);
 	}
@@ -33,7 +33,7 @@ struct RuntimePolicyGuard {
 	~RuntimePolicyGuard() {
 		UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
 		UNSETENV(LCC_LICENSE_LOCATION_ENV_VAR);
-		lcc_set_strict_source_fatal_enabled(false);
+		lcc_set_strict_source_fatal_enabled(true);
 		lcc_set_environment_license_sources_enabled(FIND_LICENSE_WITH_ENV_VAR);
 		locate::LocatorFactory::find_license_near_module(FIND_LICENSE_NEAR_MODULE);
 	}
@@ -433,6 +433,10 @@ BOOST_AUTO_TEST_CASE(legacy_acquire_license_does_not_emit_tamper_signal) {
 	LicenseLocation location = license_path_location(valid_path);
 	CallerInformations caller = default_caller();
 	lcc_set_environment_license_sources_enabled(true);
+	// This test is about the absence of a tamper signal from the legacy entry point, not
+	// about source-fatal strictness, so it opts into the lenient mode: the malformed
+	// environment candidate is a warning because the explicit candidate verifies.
+	lcc_set_strict_source_fatal_enabled(false);
 	SETENV(LCC_LICENSE_DATA_ENV_VAR, "!!!!");
 	UNSETENV(LCC_LICENSE_LOCATION_ENV_VAR);
 

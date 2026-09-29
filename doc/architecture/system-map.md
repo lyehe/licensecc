@@ -79,12 +79,10 @@ path, or method literals cannot be hidden by JavaScript object-key overwrite.
 The CMake presets use `build/<preset>` as their binary directories. The
 top-level build writes generated project material beneath
 `${CMAKE_BINARY_DIR}/projects` and generated templates beneath
-`${CMAKE_BINARY_DIR}/generated-project-templates`; lease-ring generation also
-uses `${CMAKE_BINARY_DIR}/lease_test_ring` and
-`${CMAKE_BINARY_DIR}/lease_ring_records.cmake`. Export/configuration artifacts
-remain beneath `${CMAKE_BINARY_DIR}`. All checked-in presets install into
-`build/<preset>/install`; the build/source boundary is enforced by the CMake
-path guard and the build-purity script.
+`${CMAKE_BINARY_DIR}/generated-project-templates`. Export/configuration
+artifacts remain beneath `${CMAKE_BINARY_DIR}`. All checked-in presets install
+into `build/<preset>/install`; the build/source boundary is enforced by the
+CMake path guard and the build-purity script.
 
 ## Measured hotspots and responsibility audit
 

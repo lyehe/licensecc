@@ -11,10 +11,6 @@
 
 namespace {
 
-constexpr std::size_t align_up(std::size_t value, std::size_t alignment) {
-	return (value + alignment - 1U) / alignment * alignment;
-}
-
 static_assert(LCC_DEVICE_OK == 0, "ABI value drift");
 static_assert(LCC_DEVICE_INVALID_ARGUMENT == 1, "ABI value drift");
 static_assert(LCC_DEVICE_UNSUPPORTED_VERSION == 2, "ABI value drift");

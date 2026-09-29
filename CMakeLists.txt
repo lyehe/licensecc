@@ -48,9 +48,6 @@ set(LCC_ADDITIONAL_PUBLIC_KEY_RECORDS "" CACHE STRING
 	"Optional C++ expressions for additional project verification-ring public keys.")
 set(LCC_RETIRED_PUBLIC_KEY_IDS "" CACHE STRING
 	"Optional C string literals for retired project verification-ring key ids.")
-option(LCC_BUILD_LEASE_RING_TEST
-	"Configure the optional lease-ring golden test; requires its external generator helper." OFF)
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LeaseRing.cmake")
 
 cmake_policy(SET CMP0048 NEW)
 if(POLICY CMP0091)

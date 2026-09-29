@@ -17,10 +17,6 @@ namespace license {
 namespace device_identity {
 namespace {
 
-constexpr std::size_t align_up(std::size_t value, std::size_t alignment) {
-	return (value + alignment - 1U) / alignment * alignment;
-}
-
 static_assert(std::is_standard_layout<LccDeviceIdentityOptions>::value, "options ABI must be standard-layout");
 static_assert(alignof(LccDeviceIdentityOptions) == alignof(std::uint32_t), "options ABI alignment");
 static_assert(offsetof(LccDeviceIdentityOptions, size) == 0U, "options.size ABI offset");

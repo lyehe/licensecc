@@ -70,8 +70,9 @@ int main(int argc, char** argv) {
 		return 2;
 	}
 
+	// Strict source-fatal handling is enabled by default: a rejected license candidate
+	// stays fatal even when another candidate verifies.
 	lcc_set_environment_license_sources_enabled(false);
-	lcc_set_strict_source_fatal_enabled(true);
 
 	const bool print_support_id = argc > 3 && std::strcmp(argv[3], "--print-id") == 0;
 

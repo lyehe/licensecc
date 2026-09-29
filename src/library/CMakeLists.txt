@@ -117,10 +117,11 @@ if(NOT "${LCC_CONFIG_ATTESTATION_RETIRED_KEY_IDS}" STREQUAL "")
     )
 endif()
 
-# Project verification ring (embedded cold-root key + additional hot lease keys).
-# Consumed by embedded_public_key_ring() in os/signature_verifier.hpp, which is
-# instantiated both in the os module (signature_verifier.cpp) and directly in
-# licensecc_static (limits/license_verifier.cpp), so the define lives on both.
+# Project verification ring: the embedded project key plus additional keys used to
+# rotate the offline project key. Consumed by embedded_public_key_ring() in
+# os/signature_verifier.hpp, which is instantiated both in the os module
+# (signature_verifier.cpp) and directly in licensecc_static (limits/license_verifier.cpp),
+# so the define lives on both.
 if(NOT "${LCC_ADDITIONAL_PUBLIC_KEY_RECORDS}" STREQUAL "")
     if(TARGET os)
         target_compile_definitions(os

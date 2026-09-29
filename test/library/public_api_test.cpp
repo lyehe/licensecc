@@ -726,7 +726,7 @@ BOOST_AUTO_TEST_CASE(strict_source_fatal_rejects_malformed_environment_with_vali
 
 	UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
 	std::remove(valid_license_path.c_str());
-	lcc_set_strict_source_fatal_enabled(false);
+	lcc_set_strict_source_fatal_enabled(true);
 	lcc_set_environment_license_sources_enabled(FIND_LICENSE_WITH_ENV_VAR);
 	locate::LocatorFactory::find_license_near_module(FIND_LICENSE_NEAR_MODULE);
 }
@@ -754,7 +754,7 @@ BOOST_AUTO_TEST_CASE(strict_source_fatal_rejects_malformed_explicit_source_with_
 
 	UNSETENV(LCC_LICENSE_LOCATION_ENV_VAR);
 	std::remove(valid_license_path.c_str());
-	lcc_set_strict_source_fatal_enabled(false);
+	lcc_set_strict_source_fatal_enabled(true);
 	lcc_set_environment_license_sources_enabled(FIND_LICENSE_WITH_ENV_VAR);
 	locate::LocatorFactory::find_license_near_module(FIND_LICENSE_NEAR_MODULE);
 }
@@ -783,7 +783,7 @@ BOOST_AUTO_TEST_CASE(strict_source_fatal_rejects_malformed_path_candidate_before
 
 	std::remove(malformed_path.c_str());
 	std::remove(valid_path.c_str());
-	lcc_set_strict_source_fatal_enabled(false);
+	lcc_set_strict_source_fatal_enabled(true);
 	lcc_set_environment_license_sources_enabled(FIND_LICENSE_WITH_ENV_VAR);
 	locate::LocatorFactory::find_license_near_module(FIND_LICENSE_NEAR_MODULE);
 }
@@ -860,7 +860,7 @@ BOOST_AUTO_TEST_CASE(runtime_policy_toggles_are_atomic_for_parallel_license_chec
 	}
 
 	std::remove(valid_license_path.c_str());
-	lcc_set_strict_source_fatal_enabled(false);
+	lcc_set_strict_source_fatal_enabled(true);
 	lcc_set_environment_license_sources_enabled(FIND_LICENSE_WITH_ENV_VAR);
 	locate::LocatorFactory::find_license_near_module(FIND_LICENSE_NEAR_MODULE);
 	BOOST_CHECK(!failed.load(std::memory_order_relaxed));
