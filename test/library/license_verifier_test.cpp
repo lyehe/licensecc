@@ -26,12 +26,12 @@ using namespace std;
  */
 BOOST_AUTO_TEST_CASE(to_license_info_sets_version) {
 	FullLicenseInfo full("source", "PRODUCT", "sig");
-	full.m_limits[LICENSE_VERSION] = "200";
+	full.m_limits[LICENSE_VERSION] = "201";
 	EventRegistry er;
 	LicenseVerifier verifier(er);
 
 	const LicenseInfo info = verifier.toLicenseInfo(full);
-	BOOST_CHECK_EQUAL(info.license_version, 200);
+	BOOST_CHECK_EQUAL(info.license_version, 201);
 	BOOST_CHECK_EQUAL(info.license_type, LCC_LOCAL);
 	BOOST_CHECK_MESSAGE(!info.has_expiry, "no expiry limit -> has_expiry false");
 }
@@ -51,7 +51,7 @@ BOOST_AUTO_TEST_CASE(to_license_info_version_defaults_to_zero) {
 
 static LCC_EVENT_TYPE verify_extra_data_result(const string& extra_data) {
 	FullLicenseInfo full("source", "PRODUCT", "sig");
-	full.m_limits[LICENSE_VERSION] = "200";
+	full.m_limits[LICENSE_VERSION] = "201";
 	full.m_limits[PARAM_EXTRA_DATA] = extra_data;
 	EventRegistry er;
 	LicenseVerifier verifier(er);
@@ -78,7 +78,7 @@ BOOST_AUTO_TEST_CASE(verify_limits_rejects_malformed_extra_data) {
 
 BOOST_AUTO_TEST_CASE(to_license_info_does_not_truncate_invalid_extra_data) {
 	FullLicenseInfo full("source", "PRODUCT", "sig");
-	full.m_limits[LICENSE_VERSION] = "200";
+	full.m_limits[LICENSE_VERSION] = "201";
 	full.m_limits[PARAM_EXTRA_DATA] = string(LCC_API_PROPRIETARY_DATA_SIZE + 1, 'x');
 	EventRegistry er;
 	LicenseVerifier verifier(er);

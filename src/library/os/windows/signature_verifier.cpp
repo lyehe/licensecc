@@ -21,7 +21,6 @@
 
 #include <public_key.h>
 #include "../../base/logger.h"
-#include "../../base/base64.h"
 #include "../signature_verifier.hpp"
 
 namespace license {
@@ -288,22 +287,6 @@ FUNCTION_RETURN verify_signature(const SignatureVerificationRequest& request) {
 		return FUNC_RET_ERROR;
 	}
 	return verify_signature_bytes(request.payload, request.signature, selected_public_key_der);
-}
-
-FUNCTION_RETURN verify_signature(const std::string& stringToVerify, const std::string& signatureB64) {
-	const vector<uint8_t> signature = unbase64(signatureB64);
-	if (signature.empty()) {
-		LOG_DEBUG("Error decoding signature");
-		return FUNC_RET_ERROR;
-	}
-	SignatureVerificationRequest request;
-	request.payload.assign(stringToVerify.begin(), stringToVerify.end());
-	request.signature = signature;
-	request.declared_algorithm = LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256;
-	request.key_id = embedded_public_key_id();
-	request.license_version = 200;
-	request.policy = legacy_v200_signature_policy();
-	return verify_signature(request);
 }
 }  // namespace os
 } /* namespace license */

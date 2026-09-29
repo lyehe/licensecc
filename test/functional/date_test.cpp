@@ -23,7 +23,7 @@ namespace test {
 
 static FUNCTION_RETURN verify_single_date_limit(const string &key, const string &value, EventRegistry &registry) {
 	FullLicenseInfo license_info("date-policy-test", LCC_PROJECT_NAME, "QUJDRA==");
-	license_info.m_limits[LICENSE_VERSION] = "200";
+	license_info.m_limits[LICENSE_VERSION] = "201";
 	license_info.m_limits[key] = value;
 	LicenseVerifier verifier(registry);
 	return verifier.verify_limits(license_info, nullptr);
@@ -98,10 +98,8 @@ BOOST_AUTO_TEST_CASE(canonical_date_parser_rejects_noncanonical_or_impossible_da
 										  "2050-00-01", "2050-01-00", "2050-13-01", "2050-10-10x",
 										  " 2050-10-10", "2050-10-10 "};
 	for (const string &date : invalid_dates) {
-		BOOST_CHECK_MESSAGE(!is_canonical_v200_date(date), "Date should be rejected: " + date);
 		BOOST_CHECK_THROW(seconds_from_epoch(date), invalid_argument);
 	}
-	BOOST_CHECK(is_canonical_v200_date("2020-02-29"));
 	BOOST_CHECK_NO_THROW(seconds_from_epoch("2020-02-29"));
 }
 

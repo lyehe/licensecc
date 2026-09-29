@@ -50,14 +50,6 @@ static void expect_malformed_fixture(const string &name, const string &license_t
 	BOOST_CHECK_EQUAL(LICENSE_MALFORMED, registry.getLastFailure()->event_type);
 }
 
-static string minimal_license_with(const string &line) {
-	return string("[PRODUCT]\n") + line + "\nsig = QUJDRA==\n";
-}
-
-static string valid_minimal_section(const string &section) {
-	return string("[") + section + "]\nlic_ver = 200\nsig = QUJDRA==\n";
-}
-
 static string v201_key_id() {
 	return string("sha256:") + string(64, '0');
 }
@@ -120,43 +112,20 @@ BOOST_AUTO_TEST_CASE(wrong_license_format_version_rejected) {
 	BOOST_CHECK_EQUAL(LICENSE_MALFORMED, registry.getLastFailure()->event_type);
 }
 
-BOOST_AUTO_TEST_CASE(noncanonical_v200_license_version_rejected) {
-	const vector<string> invalid_versions = {"lic_ver = 0200", "lic_ver = +200", "lic_ver = 200x", "lic_ver =  200",
-											 "lic_ver = 200 "};
-	for (size_t i = 0; i < invalid_versions.size(); ++i) {
-		expect_malformed_fixture("reader_bad_lic_ver_" + to_string(i), minimal_license_with(invalid_versions[i]));
-	}
-}
-
-BOOST_AUTO_TEST_CASE(canonical_v200_license_version_and_comments_are_accepted) {
+/**
+ * The runtime accepts only v201 license files. A v200-shaped license (the
+ * removed format) is refused exactly like any other unrecognized lic_ver
+ * value: LICENSE_MALFORMED "Invalid license format version".
+ */
+BOOST_AUTO_TEST_CASE(v200_license_is_refused) {
 	vector<FullLicenseInfo> licenseInfos;
-	const EventRegistry registry = read_fixture_text(
-		"reader_valid_comments",
-		"[PRODUCT]\n; leading comment\nlic_ver = 200\n# middle comment\nsig = QUJDRA==\n; trailing comment\n",
-		licenseInfos);
-	BOOST_CHECK(registry.isGood());
-	BOOST_REQUIRE_EQUAL(1, licenseInfos.size());
-	BOOST_CHECK_EQUAL(licenseInfos[0].m_limits[LICENSE_VERSION], "200");
-}
-
-BOOST_AUTO_TEST_CASE(v200_raw_format_acceptance_matrix_matches_documentation) {
-	const vector<string> valid_licenses = {
-		"[PRODUCT]\r\nlic_ver=200\r\nsig=QUJDRA==\r\n",
-		"[PRODUCT]\nlic_ver= 200\nsig= QUJDRA==\n",
-		"[PRODUCT]\nlic_ver =200\nsig =QUJDRA==\n",
-		"[product]\n# comment\nlic_ver = 200\n; comment\nsig = QUJDRA==\n",
-	};
-	for (size_t i = 0; i < valid_licenses.size(); ++i) {
-		vector<FullLicenseInfo> licenseInfos;
-		const EventRegistry registry =
-			read_fixture_text("reader_raw_format_accept_" + to_string(i), valid_licenses[i], licenseInfos, "PRODUCT");
-		BOOST_TEST_CONTEXT("accepted raw format row " << i) {
-			BOOST_CHECK(registry.isGood());
-			BOOST_REQUIRE_EQUAL(1, licenseInfos.size());
-			BOOST_CHECK_EQUAL(licenseInfos[0].m_limits[LICENSE_VERSION], "200");
-			BOOST_CHECK_EQUAL(licenseInfos[0].license_signature, "QUJDRA==");
-		}
-	}
+	const EventRegistry registry = read_fixture_text("reader_v200_license_is_refused",
+													 "[PRODUCT]\nlic_ver = 200\nsig = QUJDRA==\n", licenseInfos);
+	BOOST_CHECK(!registry.isGood());
+	BOOST_CHECK_EQUAL(0, licenseInfos.size());
+	BOOST_REQUIRE(registry.getLastFailure() != NULL);
+	BOOST_CHECK_EQUAL(LICENSE_MALFORMED, registry.getLastFailure()->event_type);
+	BOOST_CHECK_EQUAL(string(registry.getLastFailure()->param2), "Invalid license format version");
 }
 
 BOOST_AUTO_TEST_CASE(v201_raw_format_acceptance_matrix_matches_documentation) {
@@ -294,6 +263,10 @@ BOOST_AUTO_TEST_CASE(v201_duplicate_keys_sections_and_unknown_keys_rejected) {
 							 minimal_v201_with("lic_ver = 201\nunknown-key = value\n" + common_tail));
 	expect_malformed_fixture("reader_v201_empty_key",
 							 minimal_v201_with("lic_ver = 201\n = value\n" + common_tail));
+	expect_malformed_fixture(
+		"reader_v201_duplicate_valid_to",
+		minimal_v201_with("lic_ver = 201\nvalid-to = 2050-10-10\nvalid-to = 2050-10-11\n" + common_tail));
+	expect_malformed_fixture("reader_v201_no_lic_ver_key", minimal_v201_with("lic = _split_key_value\nsig = QUJDRA==\n"));
 }
 
 BOOST_AUTO_TEST_CASE(v201_noncanonical_license_version_rejected) {
@@ -317,6 +290,14 @@ BOOST_AUTO_TEST_CASE(v201_noncanonical_license_version_rejected) {
 						  "sig-alg = rsa-pkcs1-sha256\n"
 						  "key-id = " + v201_key_id() + "\n"
 						  "sig = QUJDRA==\n"));
+	expect_malformed_fixture(
+		"reader_v201_lic_ver_inline_comment",
+		minimal_v201_with("lic_ver = 201 ; comment\n"
+						  "canonical-v = 1\n"
+						  "sig-v = 1\n"
+						  "sig-alg = rsa-pkcs1-sha256\n"
+						  "key-id = " + v201_key_id() + "\n"
+						  "sig = QUJDRA==\n"));
 }
 
 BOOST_AUTO_TEST_CASE(v201_invalid_signature_base64_rejected) {
@@ -327,6 +308,8 @@ BOOST_AUTO_TEST_CASE(v201_invalid_signature_base64_rejected) {
 		{"truncated", "A"},
 		{"nonzero_one_byte_pad_bits", "QR=="},
 		{"nonzero_two_byte_pad_bits", "QUF="},
+		{"leading_space", " QUJDRA=="},
+		{"trailing_space", "QUJDRA== "},
 	};
 	for (size_t i = 0; i < invalid_signatures.size(); ++i) {
 		BOOST_TEST_CONTEXT("invalid v201 signature " << invalid_signatures[i].first) {
@@ -374,91 +357,6 @@ BOOST_AUTO_TEST_CASE(v201_malformed_requested_section_does_not_grant_through_unr
 
 	vector<FullLicenseInfo> validOtherInfos;
 	registry = read_fixture_text("reader_v201_bad_product_valid_other", bad_product_with_valid_other, validOtherInfos,
-								 "OTHER");
-	BOOST_CHECK(registry.isGood());
-	BOOST_REQUIRE_EQUAL(1, validOtherInfos.size());
-	BOOST_CHECK_EQUAL(validOtherInfos[0].m_project, "OTHER");
-}
-
-BOOST_AUTO_TEST_CASE(duplicate_v200_values_rejected) {
-	expect_malformed_fixture("reader_duplicate_lic_ver",
-							 "[PRODUCT]\nlic_ver = 200\nlic_ver = 200\nsig = QUJDRA==\n");
-	expect_malformed_fixture("reader_duplicate_sig",
-							 "[PRODUCT]\nlic_ver = 200\nsig = QUJDRA==\nsig = QUJDRA==\n");
-	expect_malformed_fixture(
-		"reader_duplicate_valid_to_conflict",
-		"[PRODUCT]\nlic_ver = 200\nvalid-to = 2050-10-10\nvalid-to = 2050-10-11\nsig = QUJDRA==\n");
-}
-
-BOOST_AUTO_TEST_CASE(noncanonical_or_impossible_v200_dates_rejected) {
-	const vector<string> invalid_dates = {"valid-to = 20501010", "valid-to = 2050/10/10",
-										  "valid-to = 2050-02-30", "valid-to = 2021-02-29",
-										  "valid-to = 2050-00-01", "valid-to = 2050-01-00",
-										  "valid-to = 2050-13-01", "valid-to = 2050-10-10x",
-										  "valid-to =  2050-10-10", "valid-to = 2050-10-10 "};
-	for (size_t i = 0; i < invalid_dates.size(); ++i) {
-		expect_malformed_fixture("reader_bad_date_" + to_string(i),
-								 minimal_license_with(string("lic_ver = 200\n") + invalid_dates[i]));
-	}
-}
-
-BOOST_AUTO_TEST_CASE(noncanonical_v200_signature_spacing_rejected) {
-	expect_malformed_fixture("reader_bad_sig_leading_space", "[PRODUCT]\nlic_ver = 200\nsig =  QUJDRA==\n");
-	expect_malformed_fixture("reader_bad_sig_trailing_space", "[PRODUCT]\nlic_ver = 200\nsig = QUJDRA== \n");
-}
-
-BOOST_AUTO_TEST_CASE(noncanonical_v200_signature_pad_bits_rejected) {
-	expect_malformed_fixture("reader_bad_sig_one_byte_pad_bits", "[PRODUCT]\nlic_ver = 200\nsig = QR==\n");
-	expect_malformed_fixture("reader_bad_sig_two_byte_pad_bits", "[PRODUCT]\nlic_ver = 200\nsig = QUF=\n");
-}
-
-BOOST_AUTO_TEST_CASE(v200_section_and_key_shape_attacks_rejected) {
-	expect_malformed_fixture("reader_duplicate_product_section",
-							 "[PRODUCT]\nlic_ver = 200\n[PRODUCT]\nsig = QUJDRA==\n");
-	expect_malformed_fixture("reader_empty_key", "[PRODUCT]\nlic_ver = 200\n = value\nsig = QUJDRA==\n");
-	expect_malformed_fixture("reader_key_leading_space",
-							 "[PRODUCT]\n lic_ver = 200\nsig = QUJDRA==\n");
-	expect_malformed_fixture("reader_key_extra_space",
-							 "[PRODUCT]\nlic_ver  = 200\nsig = QUJDRA==\n");
-	expect_malformed_fixture("reader_key_tab_spacing",
-							 "[PRODUCT]\nlic_ver\t= 200\nsig = QUJDRA==\n");
-	expect_malformed_fixture("reader_unknown_key",
-							 "[PRODUCT]\nlic_ver = 200\nunknown-key = value\nsig = QUJDRA==\n");
-	expect_malformed_fixture("reader_split_license_key",
-							 "[PRODUCT]\nlic = _ver200\nsig = QUJDRA==\n");
-	expect_malformed_fixture("reader_inline_comment_value",
-							 "[PRODUCT]\nlic_ver = 200 ; comment\nsig = QUJDRA==\n");
-}
-
-BOOST_AUTO_TEST_CASE(unrelated_sections_do_not_grant_or_break_requested_feature) {
-	const string valid_product_with_bad_other =
-		valid_minimal_section("PRODUCT") + "\n[OTHER]\nunknown-key = value\n";
-	vector<FullLicenseInfo> productInfos;
-	EventRegistry registry = read_fixture_text("reader_bad_other_valid_product", valid_product_with_bad_other,
-											   productInfos, "PRODUCT");
-	BOOST_CHECK(registry.isGood());
-	BOOST_REQUIRE_EQUAL(1, productInfos.size());
-	BOOST_CHECK_EQUAL(productInfos[0].m_project, "PRODUCT");
-
-	vector<FullLicenseInfo> otherInfos;
-	registry = read_fixture_text("reader_bad_other_requested", valid_product_with_bad_other, otherInfos, "OTHER");
-	BOOST_CHECK(!registry.isGood());
-	BOOST_CHECK_EQUAL(0, otherInfos.size());
-	BOOST_REQUIRE(registry.getLastFailure() != NULL);
-	BOOST_CHECK_EQUAL(LICENSE_MALFORMED, registry.getLastFailure()->event_type);
-
-	const string bad_product_with_valid_other =
-		"[PRODUCT]\nlic_ver = 200\nunknown-key = value\nsig = QUJDRA==\n\n" + valid_minimal_section("OTHER");
-	vector<FullLicenseInfo> badProductInfos;
-	registry = read_fixture_text("reader_bad_product_requested", bad_product_with_valid_other, badProductInfos,
-								 "PRODUCT");
-	BOOST_CHECK(!registry.isGood());
-	BOOST_CHECK_EQUAL(0, badProductInfos.size());
-	BOOST_REQUIRE(registry.getLastFailure() != NULL);
-	BOOST_CHECK_EQUAL(LICENSE_MALFORMED, registry.getLastFailure()->event_type);
-
-	vector<FullLicenseInfo> validOtherInfos;
-	registry = read_fixture_text("reader_bad_product_valid_other", bad_product_with_valid_other, validOtherInfos,
 								 "OTHER");
 	BOOST_CHECK(registry.isGood());
 	BOOST_REQUIRE_EQUAL(1, validOtherInfos.size());

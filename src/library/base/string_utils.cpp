@@ -41,8 +41,8 @@ string toupper_copy(const string &lowercase) {
 	return cp;
 }
 
-static bool parse_canonical_v200_date(const string &timeString, unsigned int &year, unsigned int &month,
-									  unsigned int &day) {
+static bool parse_canonical_date(const string &timeString, unsigned int &year, unsigned int &month,
+								 unsigned int &day) {
 	if (timeString.size() != 10 || timeString[4] != '-' || timeString[7] != '-') {
 		return false;
 	}
@@ -67,18 +67,11 @@ static bool parse_canonical_v200_date(const string &timeString, unsigned int &ye
 	return year != 0 && month >= 1 && month <= 12 && day >= 1 && day <= days_in_month[month];
 }
 
-bool is_canonical_v200_date(const string &timeString) {
-	unsigned int year = 0;
-	unsigned int month = 0;
-	unsigned int day = 0;
-	return parse_canonical_v200_date(timeString, year, month, day);
-}
-
 time_t seconds_from_epoch(const string &timeString) {
 	unsigned int year = 0;
 	unsigned int month = 0;
 	unsigned int day = 0;
-	if (!parse_canonical_v200_date(timeString, year, month, day)) {
+	if (!parse_canonical_date(timeString, year, month, day)) {
 		throw invalid_argument("Date [" + timeString + "] is not a canonical YYYY-MM-DD calendar date");
 	}
 	tm tm_value = {};

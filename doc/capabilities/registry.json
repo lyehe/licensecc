@@ -225,7 +225,7 @@
       "status": "shipped",
       "owner": "C++ ABI and core maintainer",
       "surfaces": ["C++ custom-limit callback", "license generator CLI"],
-      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.2", "platforms": ["Windows", "Linux"], "limitations": ["The signed v201 custom-limit value is an opaque printable policy. The host owns its schema and deterministic evaluator; absence, denial, or evaluator failure fails closed. Legacy v200 licenses cannot carry it."]},
+      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.2", "platforms": ["Windows", "Linux"], "limitations": ["The signed v201 custom-limit value is an opaque printable policy. The host owns its schema and deterministic evaluator; absence, denial, or evaluator failure fails closed."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "doc/analysis/features.rst"],
       "evidence": [

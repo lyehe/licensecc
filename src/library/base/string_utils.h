@@ -26,8 +26,6 @@ std::string toupper_copy(const std::string& lowercase);
 
 time_t seconds_from_epoch(const std::string& timeString);
 
-bool is_canonical_v200_date(const std::string& timeString);
-
 /**
  * Split a string on a given character
  */

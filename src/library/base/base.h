@@ -44,11 +44,9 @@ typedef int bool;
 #define LICENSE_SIGNATURE_VERSION "sig-v"
 #define LICENSE_SIGNATURE_ALGORITHM "sig-alg"
 #define LICENSE_KEY_ID "key-id"
-// v200 remains the default issuance format during migration. v201 is the
-// canonical format and is dispatched explicitly by reader/verifier code.
-#define LCC_LICENSE_FORMAT_VERSION_V200 200
+// v201 is the only license format the runtime accepts.
 #define LCC_LICENSE_FORMAT_VERSION_V201 201
-#define LCC_LICENSE_FORMAT_VERSION LCC_LICENSE_FORMAT_VERSION_V200
+#define LCC_LICENSE_FORMAT_VERSION LCC_LICENSE_FORMAT_VERSION_V201
 
 typedef enum { FUNC_RET_OK, FUNC_RET_NOT_AVAIL, FUNC_RET_ERROR, FUNC_RET_BUFFER_TOO_SMALL } FUNCTION_RETURN;
 

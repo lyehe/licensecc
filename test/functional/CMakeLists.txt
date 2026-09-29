@@ -74,7 +74,8 @@ add_executable(test_crack crack_test.cpp)
 target_link_libraries( test_crack
  license_generator_snippet
  licensecc_static
- Boost::unit_test_framework 
+ ${LCCGEN_TEST_SUPPORT_TARGET}
+ Boost::unit_test_framework
  Boost::filesystem
  Boost::system
 )

@@ -33,7 +33,7 @@ IF(NOT LCC_PROJECTS_BASE_DIR)
 	set(LCC_PROJECTS_BASE_DIR "${CMAKE_BINARY_DIR}/projects")
 ENDIF(NOT LCC_PROJECTS_BASE_DIR)
 
-set(LCC_SUPPORTED_LICENSE_FORMAT_MIN 200 CACHE STRING
+set(LCC_SUPPORTED_LICENSE_FORMAT_MIN 201 CACHE STRING
 	"Minimum license file format version supported by this runtime package.")
 set(LCC_SUPPORTED_LICENSE_FORMAT_MAX 201 CACHE STRING
 	"Maximum license file format version supported by this runtime package.")

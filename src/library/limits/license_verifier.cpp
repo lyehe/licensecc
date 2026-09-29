@@ -69,29 +69,19 @@ static bool is_v201_license(const FullLicenseInfo& licInfo) {
 }
 
 FUNCTION_RETURN LicenseVerifier::verify_signature(const FullLicenseInfo& licInfo) {
-	const bool is_v201 = is_v201_license(licInfo);
 	license::os::SignatureVerificationRequest request;
 	request.signature = unbase64(licInfo.license_signature);
-	if (is_v201) {
-		const license::v201::CanonicalPayloadResult canonical =
-			license::v201::build_canonical_payload(v201_fields_for(licInfo));
-		if (!canonical.ok) {
-			m_event_registry.addEvent(LICENSE_MALFORMED, licInfo.source.c_str(), canonical.error.c_str());
-			return FUNC_RET_ERROR;
-		}
-		request.payload = canonical.bytes;
-		request.declared_algorithm = limit_value_or_empty(licInfo, LICENSE_SIGNATURE_ALGORITHM);
-		request.key_id = limit_value_or_empty(licInfo, LICENSE_KEY_ID);
-		request.license_version = LCC_LICENSE_FORMAT_VERSION_V201;
-		request.policy = license::os::current_v201_signature_policy();
-	} else {
-		const string licInfoData(licInfo.printForSign());
-		request.payload.assign(licInfoData.begin(), licInfoData.end());
-		request.declared_algorithm = license::os::LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256;
-		request.key_id = license::os::embedded_public_key_id();
-		request.license_version = LCC_LICENSE_FORMAT_VERSION_V200;
-		request.policy = license::os::legacy_v200_signature_policy();
+	const license::v201::CanonicalPayloadResult canonical =
+		license::v201::build_canonical_payload(v201_fields_for(licInfo));
+	if (!canonical.ok) {
+		m_event_registry.addEvent(LICENSE_MALFORMED, licInfo.source.c_str(), canonical.error.c_str());
+		return FUNC_RET_ERROR;
 	}
+	request.payload = canonical.bytes;
+	request.declared_algorithm = limit_value_or_empty(licInfo, LICENSE_SIGNATURE_ALGORITHM);
+	request.key_id = limit_value_or_empty(licInfo, LICENSE_KEY_ID);
+	request.license_version = LCC_LICENSE_FORMAT_VERSION_V201;
+	request.policy = license::os::current_v201_signature_policy();
 
 	FUNCTION_RETURN ret = license::os::verify_signature(request);
 

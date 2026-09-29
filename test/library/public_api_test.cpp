@@ -163,7 +163,7 @@ BOOST_AUTO_TEST_CASE(public_abi_layout_profile_is_stable) {
 	BOOST_CHECK_EQUAL(static_cast<size_t>(LCC_API_FEATURE_NAME_SIZE), static_cast<size_t>(15));
 	BOOST_CHECK_EQUAL(static_cast<size_t>(LCC_API_EXPIRY_DATE_SIZE), static_cast<size_t>(10));
 	BOOST_CHECK_EQUAL(static_cast<size_t>(LCC_API_ERROR_BUFFER_SIZE), static_cast<size_t>(256));
-	BOOST_CHECK_EQUAL(LCC_SUPPORTED_LICENSE_FORMAT_MIN, 200);
+	BOOST_CHECK_EQUAL(LCC_SUPPORTED_LICENSE_FORMAT_MIN, 201);
 	BOOST_CHECK_EQUAL(LCC_SUPPORTED_LICENSE_FORMAT_MAX, 201);
 
 	BOOST_CHECK_EQUAL(sizeof(AuditEvent), expected_audit_event_size);
@@ -567,7 +567,7 @@ BOOST_AUTO_TEST_CASE(acquire_license_rejects_plain_external_non_ini_data_without
 BOOST_AUTO_TEST_CASE(acquire_license_rejects_embedded_nul_external_data_without_throwing) {
 	LicenseLocation location{};
 	location.license_data_type = LICENSE_PLAIN_DATA;
-	const string prefix = "[DEFAULT]\nlic_ver = 200\n";
+	const string prefix = "[DEFAULT]\nlic_ver = 201\n";
 	const string suffix = "sig = QUJDRA==\n";
 	std::copy(prefix.begin(), prefix.end(), location.licenseData);
 	location.licenseData[prefix.size()] = '\0';
@@ -767,7 +767,7 @@ BOOST_AUTO_TEST_CASE(strict_source_fatal_rejects_malformed_explicit_source_with_
 BOOST_AUTO_TEST_CASE(strict_source_fatal_rejects_malformed_path_candidate_before_valid_path) {
 	const string malformed_path = write_temp_file(
 		"strict-source-fatal-malformed.lic",
-		string("[") + LCC_PROJECT_NAME + "]\nlic_ver = 200\nunknown-key = value\nsig = QUJDRA==\n");
+		string("[") + LCC_PROJECT_NAME + "]\nlic_ver = 201\nunknown-key = value\nsig = QUJDRA==\n");
 	const string valid_path = issue_valid_license_file("strict-source-fatal-valid-path");
 	locate::LocatorFactory::find_license_near_module(false);
 	lcc_set_environment_license_sources_enabled(false);
@@ -796,7 +796,7 @@ BOOST_AUTO_TEST_CASE(strict_source_fatal_rejects_malformed_path_candidate_before
 BOOST_AUTO_TEST_CASE(rejected_candidate_is_fatal_by_default) {
 	const string malformed_path = write_temp_file(
 		"rejected-candidate-fatal-malformed.lic",
-		string("[") + LCC_PROJECT_NAME + "]\nlic_ver = 200\nunknown-key = value\nsig = QUJDRA==\n");
+		string("[") + LCC_PROJECT_NAME + "]\nlic_ver = 201\nunknown-key = value\nsig = QUJDRA==\n");
 	const string valid_path = issue_valid_license_file("rejected-candidate-fatal-valid-path");
 	locate::LocatorFactory::find_license_near_module(false);
 	lcc_set_environment_license_sources_enabled(false);

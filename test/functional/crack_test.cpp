@@ -11,15 +11,19 @@
 #include <iostream>
 #include <fstream>
 #include <cstring>
+#include <memory>
 #include <utility>
 #include "../../src/library/ini/SimpleIni.h"
 #include "../../src/library/base/base.h"
 #include "../../src/library/base/base64.h"
+#include "../../src/library/base/v201_canonical_payload.hpp"
 #include "generate-license.h"
 #include "../../src/library/base/file_utils.hpp"
 #include "../../src/library/locate/LocatorFactory.hpp"
 #include "../../src/library/os/os.h"
+#include "../../src/library/os/signature_verifier.hpp"
 #include "../../src/library/base/string_utils.h"
+#include "../../extern/license-generator/src/base_lib/crypto_helper.hpp"
 
 namespace license {
 namespace test {
@@ -57,11 +61,33 @@ static string suffix_to_exceed_license_limit(const string& current_content, cons
 	return tamper + string(target_size - current_content.size() - tamper.size(), 'A');
 }
 
+// Builds a hand-signed v201 license so tests can exercise extra-data shapes
+// (empty, oversized) that the generator itself would refuse to issue. An
+// empty extra-data value is never part of the signed canonical payload (the
+// verifier's v201_fields_for() skips empty fields the same way), so it is
+// written to storage without being signed; any other value is included in
+// the canonical payload and signed normally.
 static string write_signed_extra_data_license(const string& license_name, const string& extra_data) {
-	const string license_version = to_string(LCC_LICENSE_FORMAT_VERSION);
-	const string signature_payload =
-		default_feature_name() + PARAM_EXTRA_DATA + extra_data + LICENSE_VERSION + license_version;
-	const string signature = sign_data(signature_payload, license_name + "_signature");
+	vector<license::v201::CanonicalField> canonical_fields = {
+		{LICENSE_VERSION, "201"},
+		{LICENSE_CANONICAL_VERSION, "1"},
+		{LICENSE_SIGNATURE_VERSION, "1"},
+		{LICENSE_SIGNATURE_ALGORITHM, license::os::LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256},
+		{LICENSE_KEY_ID, license::os::embedded_public_key_id()},
+		{"project", LCC_PROJECT_NAME},
+		{"feature", default_feature_name()},
+	};
+	if (!extra_data.empty()) {
+		canonical_fields.push_back({PARAM_EXTRA_DATA, extra_data});
+	}
+	const license::v201::CanonicalPayloadResult canonical = license::v201::build_canonical_payload(canonical_fields);
+	BOOST_REQUIRE_MESSAGE(canonical.ok, canonical.error);
+
+	unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
+	crypto->loadPrivateKey_file(LCC_PROJECT_PRIVATE_KEY);
+	const string payload_text(canonical.bytes.begin(), canonical.bytes.end());
+	const string signature = crypto->signString(payload_text);
+
 	const fs::path licenses_base(LCC_LICENSES_BASE);
 	if (!fs::exists(licenses_base)) {
 		BOOST_REQUIRE_MESSAGE(fs::create_directories(licenses_base), "test folders created " + licenses_base.string());
@@ -70,7 +96,11 @@ static string write_signed_extra_data_license(const string& license_name, const 
 	ofstream out(license_path.string().c_str(), ios::binary | ios::trunc);
 	BOOST_REQUIRE_MESSAGE(out.is_open(), "Can write signed extra-data license");
 	out << "[" << default_feature_name() << "]\n";
-	out << LICENSE_VERSION << " = " << license_version << "\n";
+	out << LICENSE_VERSION << " = 201\n";
+	out << LICENSE_CANONICAL_VERSION << " = 1\n";
+	out << LICENSE_SIGNATURE_VERSION << " = 1\n";
+	out << LICENSE_SIGNATURE_ALGORITHM << " = " << license::os::LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256 << "\n";
+	out << LICENSE_KEY_ID << " = " << license::os::embedded_public_key_id() << "\n";
 	out << PARAM_EXTRA_DATA << " = " << extra_data << "\n";
 	out << LICENSE_SIGNATURE << " = " << signature << "\n";
 	return license_path.string();
@@ -272,13 +302,13 @@ BOOST_AUTO_TEST_CASE(test_reject_noncanonical_license_version_values) {
 	}
 }
 
-// A v201-issued license carries v201-only fields (canonical-v, sig-v, sig-alg,
-// key-id) that v200 does not recognize, so relabeling a genuine v201 license
-// as v200 without stripping them must still be rejected as malformed.
+// A genuine v201 license carries v201-only fields (canonical-v, sig-v, sig-alg,
+// key-id). Relabeling it with an unsupported lic_ver value must still be
+// rejected as malformed, even though every other field is well-formed.
 BOOST_AUTO_TEST_CASE(test_reject_unsupported_license_version) {
 	const vector<string> extraArgs;
 	const string licLocation = generate_license("unsupported_license_version_tamper", extraArgs);
-	replace_in_file(licLocation, "lic_ver = 201", "lic_ver = 200");
+	replace_in_file(licLocation, "lic_ver = 201", "lic_ver = 199");
 
 	BOOST_CHECK_EQUAL(acquire_from_path(licLocation), LICENSE_MALFORMED);
 }
@@ -502,23 +532,26 @@ BOOST_AUTO_TEST_CASE(test_full_explicit_plain_data_buffer_append_tamper_fails_cl
 	BOOST_CHECK_EQUAL(result, LICENSE_MALFORMED);
 }
 
-BOOST_AUTO_TEST_CASE(test_malformed_v200_shapes_return_malformed_without_throwing) {
+BOOST_AUTO_TEST_CASE(test_malformed_v201_shapes_return_malformed_without_throwing) {
 	const string header = string("[") + LCC_PROJECT_NAME + "]\n";
+	const string required_v201_fields = "canonical-v = 1\nsig-v = 1\nsig-alg = rsa-pkcs1-sha256\n"
+										"key-id = sha256:" + string(64, '0') + "\n";
 	const vector<pair<string, string>> malformed_licenses = {
-		{"unknown-key", header + "lic_ver = 200\nunknown-key = value\nsig = QUJDRA==\n"},
-		{"uppercase-key", header + "lic_ver = 200\nSig = QUJDRA==\n"},
-		{"duplicate-sig", header + "lic_ver = 200\nsig = QUJDRA==\nsig = QUJDRA==\n"},
-		{"missing-sig", header + "lic_ver = 200\n"},
-		{"empty-sig", header + "lic_ver = 200\nsig = \n"},
-		{"invalid-base64-sig", header + "lic_ver = 200\nsig = !!!!\n"},
-		{"bad-lic-ver", header + "lic_ver = +200\nsig = QUJDRA==\n"},
-		{"duplicate-lic-ver", header + "lic_ver = 200\nlic_ver = 200\nsig = QUJDRA==\n"},
-		{"duplicate-section", header + "lic_ver = 200\n[" + LCC_PROJECT_NAME + "]\nsig = QUJDRA==\n"},
-		{"empty-key", header + "lic_ver = 200\n = value\nsig = QUJDRA==\n"},
-		{"padded-key", header + " lic_ver = 200\nsig = QUJDRA==\n"},
-		{"split-key", header + "lic = _ver200\nsig = QUJDRA==\n"},
-		{"inline-comment", header + "lic_ver = 200 ; comment\nsig = QUJDRA==\n"},
-		{"bad-date", header + "lic_ver = 200\nvalid-to = 2050-02-30\nsig = QUJDRA==\n"},
+		{"unknown-key", header + "lic_ver = 201\n" + required_v201_fields + "unknown-key = value\nsig = QUJDRA==\n"},
+		{"uppercase-key", header + "lic_ver = 201\n" + required_v201_fields + "Sig = QUJDRA==\n"},
+		{"duplicate-sig", header + "lic_ver = 201\n" + required_v201_fields + "sig = QUJDRA==\nsig = QUJDRA==\n"},
+		{"missing-sig", header + "lic_ver = 201\n" + required_v201_fields},
+		{"empty-sig", header + "lic_ver = 201\n" + required_v201_fields + "sig = \n"},
+		{"invalid-base64-sig", header + "lic_ver = 201\n" + required_v201_fields + "sig = !!!!\n"},
+		{"bad-lic-ver", header + "lic_ver = +201\n" + required_v201_fields + "sig = QUJDRA==\n"},
+		{"duplicate-lic-ver", header + "lic_ver = 201\nlic_ver = 201\n" + required_v201_fields + "sig = QUJDRA==\n"},
+		{"duplicate-section",
+		 header + "lic_ver = 201\n" + required_v201_fields + "[" + LCC_PROJECT_NAME + "]\nsig = QUJDRA==\n"},
+		{"empty-key", header + "lic_ver = 201\n" + required_v201_fields + " = value\nsig = QUJDRA==\n"},
+		{"padded-key", header + " lic_ver = 201\n" + required_v201_fields + "sig = QUJDRA==\n"},
+		{"split-key", header + "lic = _split_key_value\nsig = QUJDRA==\n"},
+		{"inline-comment", header + "lic_ver = 201 ; comment\n" + required_v201_fields + "sig = QUJDRA==\n"},
+		{"bad-date", header + "lic_ver = 201\n" + required_v201_fields + "valid-to = 2050-02-30\nsig = QUJDRA==\n"},
 	};
 	for (const auto& malformed : malformed_licenses) {
 		BOOST_TEST_CONTEXT(malformed.first) {
@@ -645,33 +678,6 @@ BOOST_AUTO_TEST_CASE(test_reject_malformed_version_bound) {
 	strcpy(callInfo.version, "1.2.0");
 	callInfo.magic = 0;
 	const LCC_EVENT_TYPE result = acquire_license(&callInfo, &location, &license);
-	BOOST_CHECK_EQUAL(result, LICENSE_MALFORMED);
-}
-
-BOOST_AUTO_TEST_CASE(test_reject_signed_malformed_client_signature) {
-	const string client_signature = "XXX-XXX-XXX";
-	const string license_version = to_string(LCC_LICENSE_FORMAT_VERSION);
-	const string signature_payload = default_feature_name() + PARAM_CLIENT_SIGNATURE + client_signature +
-									 LICENSE_VERSION + license_version;
-	const string signature = sign_data(signature_payload, "signed_malformed_client_signature");
-	const fs::path licenses_base(LCC_LICENSES_BASE);
-	if (!fs::exists(licenses_base)) {
-		BOOST_REQUIRE_MESSAGE(fs::create_directories(licenses_base), "test folders created " + licenses_base.string());
-	}
-	const fs::path license_path(licenses_base / "signed_malformed_client_signature.lic");
-	ofstream out(license_path.string().c_str(), ios::binary | ios::trunc);
-	BOOST_REQUIRE_MESSAGE(out.is_open(), "Can write malformed client signature license");
-	out << "[" << default_feature_name() << "]\n";
-	out << LICENSE_VERSION << " = " << license_version << "\n";
-	out << PARAM_CLIENT_SIGNATURE << " = " << client_signature << "\n";
-	out << LICENSE_SIGNATURE << " = " << signature << "\n";
-	out.close();
-
-	LicenseInfo license;
-	LicenseLocation location = {LICENSE_PATH};
-	const string licLocation = license_path.string();
-	std::copy(licLocation.begin(), licLocation.end(), location.licenseData);
-	const LCC_EVENT_TYPE result = acquire_license(nullptr, &location, &license);
 	BOOST_CHECK_EQUAL(result, LICENSE_MALFORMED);
 }
 

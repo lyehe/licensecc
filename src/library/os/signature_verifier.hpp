@@ -25,7 +25,6 @@ namespace license {
 namespace os {
 
 static const char* const LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256 = "rsa-pkcs1-sha256";
-static const char* const LCC_SIGNATURE_KEY_ID_LEGACY_V200 = "legacy-v200-public-key";
 
 inline uint32_t signature_sha256_rotr(uint32_t value, uint32_t bits) {
 	return (value >> bits) | (value << (32U - bits));
@@ -216,22 +215,6 @@ struct SignatureVerificationRequest {
 	unsigned int license_version = 0;
 	SignatureVerificationPolicy policy;
 };
-
-inline SignatureVerificationPolicy legacy_v200_signature_policy() {
-	SignatureVerificationPolicy policy;
-	policy.license_version = 200;
-	policy.allowed_algorithms.push_back(LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256);
-	policy.public_keys = embedded_public_key_ring();
-	for (const SignaturePublicKey& public_key : policy.public_keys) {
-		policy.allowed_key_ids.push_back(public_key.key_id);
-	}
-	append_embedded_retired_key_ids(policy.retired_key_ids);
-	// The default license format must not be weaker than the modern v201 format: enforce the
-	// same 3072-bit RSA floor. Default projects already use 3072-bit keys; only explicitly
-	// weakened projects (lccgen --legacy-rsa1024 / --key-bits 2048) are rejected.
-	policy.min_public_key_bits = 3072;
-	return policy;
-}
 
 inline SignatureVerificationPolicy current_v201_signature_policy() {
 	SignatureVerificationPolicy policy;
@@ -487,7 +470,6 @@ inline bool signature_request_allowed(const SignatureVerificationRequest& reques
 }
 
 FUNCTION_RETURN verify_signature(const SignatureVerificationRequest& request);
-FUNCTION_RETURN verify_signature(const std::string& stringToVerify, const std::string& signatureB64);
 }
 } /* namespace license */
 

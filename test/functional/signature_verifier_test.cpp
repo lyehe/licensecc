@@ -43,21 +43,25 @@ static string default_feature_name() {
 	return toupper_copy(trim_copy(project_name()));
 }
 
-static license::os::SignatureVerificationRequest legacy_request(const vector<uint8_t>& payload,
-																 const vector<uint8_t>& signature) {
+// Builds a well-formed request against the current (v201) signature-verification
+// policy, for tests that exercise the generic policy engine (algorithm/key-id
+// allowlists, retired keys, duplicate detection, DER binding, key-size floors)
+// rather than any particular license format.
+static license::os::SignatureVerificationRequest signature_request_for(const vector<uint8_t>& payload,
+																		const vector<uint8_t>& signature) {
 	license::os::SignatureVerificationRequest request;
 	request.payload = payload;
 	request.signature = signature;
 	request.declared_algorithm = license::os::LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256;
 	request.key_id = license::os::embedded_public_key_id();
-	request.license_version = 200;
-	request.policy = license::os::legacy_v200_signature_policy();
+	request.license_version = 201;
+	request.policy = license::os::current_v201_signature_policy();
 	return request;
 }
 
-static license::os::SignatureVerificationRequest legacy_request(const string& payload, const string& signature) {
+static license::os::SignatureVerificationRequest signature_request_for(const string& payload, const string& signature) {
 	const vector<uint8_t> payload_bytes(payload.begin(), payload.end());
-	return legacy_request(payload_bytes, unbase64(signature));
+	return signature_request_for(payload_bytes, unbase64(signature));
 }
 
 static void bind_request_to_public_key_der(license::os::SignatureVerificationRequest& request,
@@ -72,9 +76,7 @@ static void bind_request_to_public_key_der(license::os::SignatureVerificationReq
 static license::os::SignatureVerificationRequest v201_request_for_public_key_der(const string& payload,
 																				 const string& signature,
 																				 const vector<uint8_t>& public_key_der) {
-	license::os::SignatureVerificationRequest request = legacy_request(payload, signature);
-	request.license_version = 201;
-	request.policy = license::os::current_v201_signature_policy();
+	license::os::SignatureVerificationRequest request = signature_request_for(payload, signature);
 	bind_request_to_public_key_der(request, public_key_der);
 	return request;
 }
@@ -355,7 +357,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_ok) {
 	const string test_data("test_data");
 	const string signature = sign_data(test_data, string("verify_signature"));
 
-	FUNCTION_RETURN result = license::os::verify_signature(test_data, signature);
+	FUNCTION_RETURN result = license::os::verify_signature(signature_request_for(test_data, signature));
 	BOOST_CHECK_MESSAGE(result == FUNC_RET_OK, "signature verified");
 }
 
@@ -363,7 +365,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_data_mismatch) {
 	const string test_data("test_data");
 	const string signature = sign_data(test_data, string("verify_signature"));
 
-	FUNCTION_RETURN result = license::os::verify_signature(string("other data"), signature);
+	FUNCTION_RETURN result = license::os::verify_signature(signature_request_for(string("other data"), signature));
 	BOOST_CHECK_MESSAGE(result == FUNC_RET_ERROR, "signature NOT verified");
 }
 
@@ -371,17 +373,17 @@ BOOST_AUTO_TEST_CASE(verify_signature_modified) {
 	const string test_data("test_data");
 	string signature = sign_data(test_data, string("verify_signature"));
 	signature[2] = signature[2] + 1;
-	FUNCTION_RETURN result = license::os::verify_signature(test_data, signature);
+	FUNCTION_RETURN result = license::os::verify_signature(signature_request_for(test_data, signature));
 	BOOST_CHECK_MESSAGE(result == FUNC_RET_ERROR, "signature NOT verified");
 }
 
 BOOST_AUTO_TEST_CASE(verify_signature_rejects_malformed_inputs) {
 	const string test_data("test_data");
-	BOOST_CHECK_EQUAL(license::os::verify_signature(test_data, ""), FUNC_RET_ERROR);
-	BOOST_CHECK_EQUAL(license::os::verify_signature(test_data, "!!!!"), FUNC_RET_ERROR);
-	BOOST_CHECK_EQUAL(license::os::verify_signature(test_data, "AA=A"), FUNC_RET_ERROR);
-	BOOST_CHECK_EQUAL(license::os::verify_signature(test_data, "QR=="), FUNC_RET_ERROR);
-	BOOST_CHECK_EQUAL(license::os::verify_signature(test_data, "QUF="), FUNC_RET_ERROR);
+	BOOST_CHECK_EQUAL(license::os::verify_signature(signature_request_for(test_data, "")), FUNC_RET_ERROR);
+	BOOST_CHECK_EQUAL(license::os::verify_signature(signature_request_for(test_data, "!!!!")), FUNC_RET_ERROR);
+	BOOST_CHECK_EQUAL(license::os::verify_signature(signature_request_for(test_data, "AA=A")), FUNC_RET_ERROR);
+	BOOST_CHECK_EQUAL(license::os::verify_signature(signature_request_for(test_data, "QR==")), FUNC_RET_ERROR);
+	BOOST_CHECK_EQUAL(license::os::verify_signature(signature_request_for(test_data, "QUF=")), FUNC_RET_ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(verify_signature_rejects_wrong_sized_inputs) {
@@ -389,11 +391,13 @@ BOOST_AUTO_TEST_CASE(verify_signature_rejects_wrong_sized_inputs) {
 	const string signature = sign_data(test_data, string("verify_signature"));
 
 	const string truncated_signature = signature.substr(0, signature.size() - 4);
-	BOOST_CHECK_EQUAL(license::os::verify_signature(test_data, truncated_signature), FUNC_RET_ERROR);
+	BOOST_CHECK_EQUAL(license::os::verify_signature(signature_request_for(test_data, truncated_signature)),
+					  FUNC_RET_ERROR);
 
 	const vector<uint8_t> oversized_signature(129, 0xab);
 	const string oversized_signature_b64 = base64(oversized_signature.data(), oversized_signature.size(), 0);
-	BOOST_CHECK_EQUAL(license::os::verify_signature(test_data, oversized_signature_b64), FUNC_RET_ERROR);
+	BOOST_CHECK_EQUAL(license::os::verify_signature(signature_request_for(test_data, oversized_signature_b64)),
+					  FUNC_RET_ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(verify_signature_rejects_random_key_sized_blob) {
@@ -403,7 +407,8 @@ BOOST_AUTO_TEST_CASE(verify_signature_rejects_random_key_sized_blob) {
 		random_signature[i] = static_cast<uint8_t>((i * 37U + 11U) & 0xffU);
 	}
 	const string random_signature_b64 = base64(random_signature.data(), random_signature.size(), 0);
-	BOOST_CHECK_EQUAL(license::os::verify_signature(test_data, random_signature_b64), FUNC_RET_ERROR);
+	BOOST_CHECK_EQUAL(license::os::verify_signature(signature_request_for(test_data, random_signature_b64)),
+					  FUNC_RET_ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_structured_key_sized_blobs) {
@@ -415,14 +420,14 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_structured_key_sized_blobs)
 		crypto->generateKeyPair(key_size);
 
 		vector<uint8_t> zero_signature(key_size / 8, 0x00);
-		license::os::SignatureVerificationRequest request = legacy_request(payload, zero_signature);
+		license::os::SignatureVerificationRequest request = signature_request_for(payload, zero_signature);
 		bind_request_to_public_key_der(request, crypto->exportPublicKey());
 		BOOST_TEST_CONTEXT("all-zero RSA signature bytes " << key_size) {
 			BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
 		}
 
 		vector<uint8_t> ones_signature(key_size / 8, 0xff);
-		request = legacy_request(payload, ones_signature);
+		request = signature_request_for(payload, ones_signature);
 		bind_request_to_public_key_der(request, crypto->exportPublicKey());
 		BOOST_TEST_CONTEXT("all-0xff RSA signature bytes " << key_size) {
 			BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
@@ -443,7 +448,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_handles_payload_edge_cases) {
 	for (size_t i = 0; i < payloads.size(); ++i) {
 		const string& payload = payloads[i];
 		const string signature = crypto->signString(payload);
-		license::os::SignatureVerificationRequest request = legacy_request(payload, signature);
+		license::os::SignatureVerificationRequest request = signature_request_for(payload, signature);
 		bind_request_to_public_key_der(request, crypto->exportPublicKey());
 		BOOST_TEST_CONTEXT("payload edge case " << i) {
 			BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_OK);
@@ -458,33 +463,23 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_alternate_payload_spelling)
 	unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
 	crypto->generateKeyPair(3072);
 
-	const string canonical_payload = string(LCC_PROJECT_NAME) + "lic_ver" + "200";
-	const string alternate_payload = string(LCC_PROJECT_NAME) + "lic_ver " + "200";
+	const string canonical_payload = string(LCC_PROJECT_NAME) + "lic_ver" + "201";
+	const string alternate_payload = string(LCC_PROJECT_NAME) + "lic_ver " + "201";
 	const string signature = crypto->signString(canonical_payload);
 
-	license::os::SignatureVerificationRequest request = legacy_request(canonical_payload, signature);
+	license::os::SignatureVerificationRequest request = signature_request_for(canonical_payload, signature);
 	bind_request_to_public_key_der(request, crypto->exportPublicKey());
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_OK);
 
-	request = legacy_request(alternate_payload, signature);
+	request = signature_request_for(alternate_payload, signature);
 	bind_request_to_public_key_der(request, crypto->exportPublicKey());
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
-}
-
-BOOST_AUTO_TEST_CASE(verify_signature_policy_accepts_legacy_v200_request) {
-	const string test_data("test_data");
-	const string signature = sign_data(test_data, string("verify_signature_policy"));
-	const license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);
-
-	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_OK);
-	BOOST_CHECK_MESSAGE(license::os::embedded_public_key_id().find("sha256:") == 0,
-						"embedded v200 policy uses generated public-key id");
 }
 
 BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_unknown_algorithm_and_aliases) {
 	const string test_data("test_data");
 	const string signature = sign_data(test_data, string("verify_signature_policy_algorithm"));
-	license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);
+	license::os::SignatureVerificationRequest request = signature_request_for(test_data, signature);
 
 	request.declared_algorithm = "RSA-PKCS1-SHA256";
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
@@ -496,7 +491,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_unknown_algorithm_and_alias
 BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_unimplemented_algorithm_even_if_allowlisted) {
 	const string test_data("test_data");
 	const string signature = sign_data(test_data, string("verify_signature_policy_algorithm_mismatch"));
-	license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);
+	license::os::SignatureVerificationRequest request = signature_request_for(test_data, signature);
 
 	request.declared_algorithm = "rsa-pss-sha256";
 	request.policy.allowed_algorithms.push_back("rsa-pss-sha256");
@@ -506,13 +501,13 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_unimplemented_algorithm_eve
 BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_unknown_key_and_version) {
 	const string test_data("test_data");
 	const string signature = sign_data(test_data, string("verify_signature_policy_key"));
-	license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);
+	license::os::SignatureVerificationRequest request = signature_request_for(test_data, signature);
 
 	request.key_id = "unknown-key";
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
 
-	request = legacy_request(test_data, signature);
-	request.license_version = 201;
+	request = signature_request_for(test_data, signature);
+	request.license_version = 202;
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
 }
 
@@ -522,19 +517,19 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_duplicate_and_retired_key_i
 	crypto->generateKeyPair(3072);
 	const string signature = crypto->signString(test_data);
 
-	license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);
+	license::os::SignatureVerificationRequest request = signature_request_for(test_data, signature);
 	bind_request_to_public_key_der(request, crypto->exportPublicKey());
 	BOOST_REQUIRE_EQUAL(license::os::verify_signature(request), FUNC_RET_OK);
 
 	request.policy.allowed_key_ids.push_back(request.key_id);
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
 
-	request = legacy_request(test_data, signature);
+	request = signature_request_for(test_data, signature);
 	bind_request_to_public_key_der(request, crypto->exportPublicKey());
 	request.policy.retired_key_ids.push_back(request.key_id);
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
 
-	request = legacy_request(test_data, signature);
+	request = signature_request_for(test_data, signature);
 	bind_request_to_public_key_der(request, crypto->exportPublicKey());
 	request.policy.retired_key_ids.push_back("sha256:2222222222222222222222222222222222222222222222222222222222222222");
 	request.policy.retired_key_ids.push_back("sha256:2222222222222222222222222222222222222222222222222222222222222222");
@@ -554,7 +549,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_selects_public_key_by_key_id) {
 	const string second_key_id = license::os::public_key_id_from_der(second_public_key);
 	const string second_signature = second_key->signString(test_data);
 
-	license::os::SignatureVerificationRequest request = legacy_request(test_data, second_signature);
+	license::os::SignatureVerificationRequest request = signature_request_for(test_data, second_signature);
 	request.public_key_der.clear();
 	request.key_id = second_key_id;
 	request.policy.allowed_key_ids.clear();
@@ -582,7 +577,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_duplicate_public_key_ring_e
 	const string key_id = license::os::public_key_id_from_der(public_key);
 	const string signature = crypto->signString(test_data);
 
-	license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);
+	license::os::SignatureVerificationRequest request = signature_request_for(test_data, signature);
 	request.public_key_der.clear();
 	request.key_id = key_id;
 	request.policy.allowed_key_ids.clear();
@@ -625,7 +620,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_key_id_public_key_mismatch)
 	const string signature = crypto->signString(test_data);
 	const vector<uint8_t> public_key = crypto->exportPublicKey();
 
-	license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);
+	license::os::SignatureVerificationRequest request = signature_request_for(test_data, signature);
 	bind_request_to_public_key_der(request, public_key);
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_OK);
 
@@ -642,7 +637,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_ungated_external_public_key
 	const string signature = crypto->signString(test_data);
 	const vector<uint8_t> public_key = crypto->exportPublicKey();
 
-	license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);
+	license::os::SignatureVerificationRequest request = signature_request_for(test_data, signature);
 	request.public_key_der = public_key;
 	request.key_id = license::os::public_key_id_from_der(public_key);
 	request.policy.allowed_key_ids.clear();
@@ -651,42 +646,6 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_ungated_external_public_key
 
 	request.policy.allow_external_public_key_der = true;
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_OK);
-}
-
-BOOST_AUTO_TEST_CASE(verify_legacy_v200_signature_policy_enforces_minimum_key_bits) {
-	const string test_data("test_data");
-	const size_t rejected_key_sizes[] = {1024, 2048};
-	const size_t accepted_key_sizes[] = {3072, 4096};
-
-	for (const size_t key_size : rejected_key_sizes) {
-		unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
-		crypto->generateKeyPair(key_size);
-		const string signature = crypto->signString(test_data);
-		license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);
-		bind_request_to_public_key_der(request, crypto->exportPublicKey());
-
-		BOOST_TEST_CONTEXT("legacy v200 rejects RSA key size " << key_size) {
-			BOOST_CHECK(!license::os::signature_request_allowed(request));
-			BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
-		}
-	}
-
-	for (const size_t key_size : accepted_key_sizes) {
-		unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
-		crypto->generateKeyPair(key_size);
-		const string signature = crypto->signString(test_data);
-		license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);
-		bind_request_to_public_key_der(request, crypto->exportPublicKey());
-
-		BOOST_TEST_CONTEXT("legacy v200 accepts RSA key size " << key_size) {
-			BOOST_CHECK(license::os::signature_request_allowed(request));
-			BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_OK);
-			BOOST_CHECK_EQUAL(request.signature.size(), key_size / 8);
-
-			request.signature[0] ^= 0x01;
-			BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
-		}
-	}
 }
 
 BOOST_AUTO_TEST_CASE(verify_v201_signature_policy_enforces_minimum_key_bits) {
@@ -752,7 +711,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_malformed_public_key_der) {
 	crypto->generateKeyPair(3072);
 	const string signature = crypto->signString(test_data);
 
-	license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);
+	license::os::SignatureVerificationRequest request = signature_request_for(test_data, signature);
 	bind_request_to_public_key_der(request, crypto->exportPublicKey());
 	BOOST_REQUIRE_GT(request.public_key_der.size(), 4);
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_OK);
@@ -798,19 +757,22 @@ BOOST_AUTO_TEST_CASE(signature_negative_vector_parity_report) {
 
 	const string payload_text("parity-payload");
 	const string payload_signature = sign_data(payload_text, "parity_report");
-	report_parity_vector("legacy-valid-signature", FUNC_RET_OK,
-						 license::os::verify_signature(legacy_request(payload_text, payload_signature)));
-	report_parity_vector("signature-empty", FUNC_RET_ERROR, license::os::verify_signature(payload_text, ""));
+	report_parity_vector("valid-signature", FUNC_RET_OK,
+						 license::os::verify_signature(signature_request_for(payload_text, payload_signature)));
+	report_parity_vector("signature-empty", FUNC_RET_ERROR,
+						 license::os::verify_signature(signature_request_for(payload_text, "")));
 	report_parity_vector("signature-malformed-base64", FUNC_RET_ERROR,
-						 license::os::verify_signature(payload_text, "!!!!"));
-	report_parity_vector("signature-truncated", FUNC_RET_ERROR,
-						 license::os::verify_signature(payload_text, payload_signature.substr(0, payload_signature.size() - 4)));
+						 license::os::verify_signature(signature_request_for(payload_text, "!!!!")));
+	report_parity_vector(
+		"signature-truncated", FUNC_RET_ERROR,
+		license::os::verify_signature(
+			signature_request_for(payload_text, payload_signature.substr(0, payload_signature.size() - 4))));
 
-	license::os::SignatureVerificationRequest request = legacy_request(payload_text, payload_signature);
+	license::os::SignatureVerificationRequest request = signature_request_for(payload_text, payload_signature);
 	request.declared_algorithm = "RSA-PKCS1-SHA256";
 	report_parity_vector("algorithm-alias-rejected", FUNC_RET_ERROR, license::os::verify_signature(request));
 
-	request = legacy_request(payload_text, payload_signature);
+	request = signature_request_for(payload_text, payload_signature);
 	request.key_id = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 	report_parity_vector("unknown-key-rejected", FUNC_RET_ERROR, license::os::verify_signature(request));
 
@@ -825,11 +787,11 @@ BOOST_AUTO_TEST_CASE(signature_negative_vector_parity_report) {
 	full.signature[0] ^= 0x01;
 	report_parity_vector("v201-golden-full-signature-mutated", FUNC_RET_ERROR, license::os::verify_signature(full));
 
-	const string v200_payload = default_feature_name() + LICENSE_VERSION + "200";
-	const string v200_signature = sign_data(v200_payload, "parity_v201_with_v200_signature");
+	const string mismatched_payload = default_feature_name() + "-signed-over-a-different-payload";
+	const string mismatched_signature = sign_data(mismatched_payload, "parity_wrong_payload_signature");
 	LicenseInfo license{};
-	report_parity_vector("v201-with-v200-signature", LICENSE_CORRUPTED,
-						 acquire_from_plain_data(v201_minimal_license(v200_signature), license));
+	report_parity_vector("v201-wrong-payload-signature", LICENSE_CORRUPTED,
+						 acquire_from_plain_data(v201_minimal_license(mismatched_signature), license));
 
 	string algorithm_alias = v201_minimal_license();
 	const string expected_algorithm =
@@ -851,21 +813,14 @@ BOOST_AUTO_TEST_CASE(signature_negative_vector_parity_report) {
 	report_parity_vector("v201-unknown-key-corrupted", LICENSE_CORRUPTED,
 						 acquire_from_plain_data(unknown_key, license));
 
-	const string v200_with_v201_field = string("[") + default_feature_name() + "]\n"
-										+ LICENSE_VERSION + " = 200\n"
-										+ LICENSE_CANONICAL_VERSION + " = 1\n"
-										+ LICENSE_SIGNATURE + " = QUJDRA==\n";
-	report_parity_vector("v200-with-v201-field-malformed", LICENSE_MALFORMED,
-						 acquire_from_plain_data(v200_with_v201_field, license));
-
 	cout << "licensecc-parity backend=" << signature_backend_name() << " end\n";
 }
 
-BOOST_AUTO_TEST_CASE(verify_v201_rejects_v200_style_signature) {
-	const string v200_payload = default_feature_name() + LICENSE_VERSION + "200";
-	const string v200_signature = sign_data(v200_payload, "v201_with_v200_signature");
+BOOST_AUTO_TEST_CASE(verify_v201_rejects_signature_over_a_different_payload) {
+	const string mismatched_payload = default_feature_name() + "-signed-over-a-different-payload";
+	const string mismatched_signature = sign_data(mismatched_payload, "v201_wrong_payload_signature");
 	LicenseInfo license{};
-	const LCC_EVENT_TYPE result = acquire_from_plain_data(v201_minimal_license(v200_signature), license);
+	const LCC_EVENT_TYPE result = acquire_from_plain_data(v201_minimal_license(mismatched_signature), license);
 
 	BOOST_CHECK_EQUAL(result, LICENSE_CORRUPTED);
 }
@@ -1015,16 +970,6 @@ BOOST_AUTO_TEST_CASE(verify_v201_optional_field_semantics_fail_closed_at_documen
 									error_summary(license));
 		}
 	}
-}
-
-BOOST_AUTO_TEST_CASE(verify_v200_rejects_v201_only_fields) {
-	const string license_text = string("[") + default_feature_name() + "]\n"
-								+ LICENSE_VERSION + " = 200\n"
-								+ LICENSE_CANONICAL_VERSION + " = 1\n"
-								+ LICENSE_SIGNATURE + " = QUJDRA==\n";
-	LicenseInfo license{};
-
-	BOOST_CHECK_EQUAL(acquire_from_plain_data(license_text, license), LICENSE_MALFORMED);
 }
 
 }  // namespace test

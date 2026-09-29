@@ -28,7 +28,6 @@ public:
 	std::map<std::string, std::string> m_limits;
 
 	FullLicenseInfo(const std::string& source, const std::string& product, const std::string& license_signature);
-	std::string printForSign() const;
 };
 
 /**
