@@ -234,10 +234,11 @@ templates.
 
 ## Google and GitHub sign-in
 
-Apply backend-owned migration `0033_portal_oauth.sql` before deploying this
-portal version. The migration is additive; the backend and admin do not need
-new binaries to use the same database. Rollback can leave the new tables in
-place. No licensing policy, entitlement, or SDK protocol changes are required.
+The backend-owned baseline schema contains the provider identity and OAuth
+state tables. Apply the baseline with
+`npm run migrate:remote --workspace @licensecc/cloudflare-licensing-backend`
+to a newly created database before deploying the portal. No licensing policy,
+entitlement, or SDK protocol changes are required.
 
 Set `PORTAL_PUBLIC_ORIGIN` to the exact HTTPS portal origin. Register separate
 OAuth applications for staging and production. On the provider dashboard:
@@ -310,9 +311,11 @@ and [GitHub OAuth web flow](https://docs.github.com/en/apps/oauth-apps/building-
 
 ## Email and password
 
-Apply all backend migrations through `0042_portal_password_actions.sql` before
-updating the portal. Keep `PORTAL_PASSWORD_ENABLED="0"` until Workers Paid and
-email delivery are configured. Set the exact HTTPS `PORTAL_PUBLIC_ORIGIN` and
+Apply the backend baseline with
+`npm run migrate:remote --workspace @licensecc/cloudflare-licensing-backend`
+to a newly created database before deploying the portal. Keep
+`PORTAL_PASSWORD_ENABLED="0"` until Workers Paid and email delivery are
+configured. Set the exact HTTPS `PORTAL_PUBLIC_ORIGIN` and
 retain the existing session peppers. Disabling the flag hides the form and
 rejects every password route.
 
@@ -325,7 +328,7 @@ To enable verified registration and recovery:
    compatible HTTPS service. Credentials must never be committed.
 2. Enable Workers Paid and configure enough CPU time for the hashing below.
    This is a separate billing decision; deploying this code does not enable it.
-3. Apply migration 0042, deploy the portal, then set
+3. Deploy the portal against a database created from the baseline, then set
    `PORTAL_PASSWORD_ENABLED="1"`. Keep Google/GitHub available during rollout.
 4. On staging, test delivery to a real inbox, registration, expiry/resend,
    password recovery, old-session revocation and normal password sign-in.
@@ -351,8 +354,7 @@ Forgot password sends a link for an active password account whose login
 email matches its verified contact address, or whose contact email is still
 empty -- a legacy or admin-created credential -- as long as no other customer
 has already verified that address; redeeming the link also sets it as the
-account's verified contact. This migration deliberately does not mark
-historical emails as verified. An address another customer already verified
+account's verified contact. An address another customer already verified
 is refused with the same generic response; connect a provider or use the
 protected operator recovery procedure instead.
 
@@ -377,10 +379,11 @@ must follow the email link and POST `{ "token": "...", "password": "..." }` to
 `/portal/v1/auth/password/complete`. POST `/portal/v1/auth/password/reset` requests
 a recovery link. Update old registration clients before enabling this flow.
 
-Before deployment, apply the migration, verify the billing/CPU configuration,
-and test registration, sign-out/login, password changes, and provider recovery
-on staging. The local browser tests mock API responses; Worker integration
-tests separately exercise hashing, database ownership, and session rotation.
+Before deployment, apply the baseline to a newly created database, verify the
+billing/CPU configuration, and test registration, sign-out/login, password
+changes, and provider recovery on staging. The local browser tests mock API
+responses; Worker integration tests separately exercise hashing, database
+ownership, and session rotation.
 
 ## Suspended accounts and the support contact
 

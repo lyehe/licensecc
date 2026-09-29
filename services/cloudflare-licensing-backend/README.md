@@ -74,12 +74,18 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
    binding. Cloudflare requires `namespace_id` to be a positive integer string,
    for example `"1001"`.
 
-3. Apply migrations:
+3. Apply the baseline schema to the newly created database:
 
    ```console
    npm run migrate:local
    npm run migrate:remote
    ```
+
+   The schema is a single baseline that is edited in place until the first
+   release. There is no upgrade path: after pulling a schema change, delete and
+   recreate each D1 database (local `.wrangler` state, staging, production,
+   restore scratch databases), apply the baseline, and take a fresh backup.
+   Backups of an earlier database cannot be restored into the new schema.
 
 4. Generate a dedicated online assertion key:
 
@@ -482,9 +488,10 @@ duplicate check as crash-redrive evidence.
   binding; leave it unset during normal operation.
 - Logs are structured JSON and redact fingerprints/device hashes. Do not log
   assertions or private key material.
-- `schema.sql` is a snapshot of the final schema. The forward migrations remain
-  authoritative; run `npm run schema:parity` after schema edits to confirm the
-  snapshot and migrations still match.
+- `schema.sql` is a generated snapshot of the single baseline migration
+  `migrations/0001_baseline.sql`, which stays authoritative and is edited in
+  place. After editing the baseline, run `npm run schema:write`;
+  `npm run schema:parity` confirms the snapshot and the baseline still match.
 - D1 Time Travel is the short-window emergency recovery path. For longer
   retention, deploy the companion backup Workflow in `../cloudflare-d1-backup`
   to export SQL dumps into R2 on a schedule.
@@ -575,24 +582,21 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
 
 ### Portal OAuth schema
 
-Migration `0034_portal_passwords.sql` adds portal password credentials and session
-authentication provenance. Apply it before deploying the password-capable portal,
-even if password sign-in is disabled. Login addresses are stored separately from
+The baseline schema contains portal password credentials and session
+authentication provenance, which the password-capable portal uses even if
+password sign-in is disabled. Login addresses are stored separately from
 customer contact emails until verified; registration grants no licensing access.
-The existing backend and admin remain compatible with this additive migration.
 
-Migration `0033_portal_oauth.sql` adds provider identities and expiring browser-bound
-OAuth state for the customer portal. Apply it before deploying the portal OAuth
-routes; existing backend/admin deployments remain compatible. New social
-registrations create customers without granting licensing access. See the
+The baseline schema also contains provider identities and expiring browser-bound
+OAuth state for the customer portal's OAuth routes. New social registrations
+create customers without granting licensing access. See the
 [portal setup](../cloudflare-customer-portal/README.md#google-and-github-sign-in).
 
 ### Protected-device API (staged implementation)
 
-Migration `0036_device_bound_licensing.sql` adds persistent device bindings,
-capacity holds, proof challenges, authorization attempts, exact operation
-recovery and audit records. Apply it before deploying the backend lookup changes:
-v1 verification, leases and floating-seat paths now select only legacy-mode
+The baseline schema contains persistent device bindings, capacity holds, proof
+challenges, authorization attempts, exact operation recovery and audit records.
+v1 verification, leases and floating-seat paths select only legacy-mode
 entitlements. Existing entitlements default to `legacy`; no customer is opted in.
 The backend now serves `/v2/device-authorizations`, `/v2/device-challenges`,
 `/v2/device-authorizations/exchange` and `/v2/device-leases/renew`. Staged browser
@@ -621,8 +625,8 @@ rejected by request admission. Consumed attempts are retained for the separate
 operation-recovery lifecycle. This sweep does not delete devices, bindings,
 leases, operation results or audit records, and cannot free a device slot.
 
-Migration `0038_bound_recovery_retention.sql` must precede deployment of recovery
-cleanup. After the 48-hour recovery deadline, a separate bounded sweep erases
+Recovery cleanup uses the baseline's operation-tombstone triggers and cleanup
+indexes. After the 48-hour recovery deadline, a separate bounded sweep erases
 completed operation response payloads and deletes consumed authorization attempts.
 Operation identity and digest remain as immutable tombstones: retries cannot
 become new issuances after cleanup, and erased responses remain unavailable even
@@ -630,9 +634,9 @@ if the database clock moves backward. The database rejects tombstone deletion an
 payload restoration. A restore predating the original
 operation can omit its tombstone, so backup/cutover qualification remains required.
 
-Migration `0039_bound_lease_cleanup.sql` must precede deployment of lease-table
-cleanup. An indexed sweep prunes lease rows at `accept_until`, using database time
-and at most ten batches of 1,000 rows per tick. Binding identities, generations
+Lease-table cleanup uses the baseline's `accept_until` index. An indexed sweep
+prunes lease rows at `accept_until`, using database time and at most ten
+batches of 1,000 rows per tick. Binding identities, generations
 and maximum holds remain unchanged. Exact operation responses retain their token
 copy for the separate 48-hour recovery window; recovering one never extends its
 original expiry. Backup lifecycle qualification remains open; device audit
@@ -696,13 +700,10 @@ Because a test send goes to a real receiver, the admin Worker records each one
 the backend attempted in `webhook_events` as a `test_send` row: the operator,
 the actor type, the request id, the endpoint's unchanged status and the
 receiver's status class (including `network_error`) as the reason. A send the
-backend refused writes no row. Migration
-`0043_allow_webhook_test_send_event.sql` rebuilds `webhook_events` to allow
-that event type, keeping its rows, ids, index and endpoint cascade. Apply it
-before deploying the admin Worker. Until it is applied, each test-send audit
-row fails and the admin Worker logs `webhook.test_send_audit_failed` with the
-request and endpoint ids, but test sends still work and report the real
-outcome.
+backend refused writes no row. The baseline's `webhook_events` table allows
+that event type. If a test-send audit row cannot be written, the admin Worker
+logs `webhook.test_send_audit_failed` with the request and endpoint ids, and the
+test send still reports the real outcome.
 
 Monitor scheduled protected-device cleanup using structured events:
 
@@ -725,12 +726,11 @@ Monitor scheduled protected-device cleanup using structured events:
 - `device.cleanup_backlog_failed` means the snapshot is unavailable or invalid.
   It emits no per-target samples and must not be interpreted as a zero backlog.
 
-Apply migration `0040_bound_unconsumed_cleanup.sql` before deploying this
-measurement/cleanup code. The unconsumed-attempt sweep and probe explicitly use
-its partial index to avoid scanning retained consumed recovery history. Missing
-required indexes fail visibly rather than falling back to a history scan. All
-six probes use one statement with database time and fetch only the earliest
-eligible deadline; they do not count all records, inspect account status or
+The unconsumed-attempt sweep and probe explicitly use the baseline's partial
+index `idx_bound_unconsumed_attempt_cleanup` to avoid scanning retained consumed
+recovery history. Missing required indexes fail visibly rather than falling
+back to a history scan. All six probes use one statement with database time and
+fetch only the earliest eligible deadline; they do not count all records, inspect account status or
 change authority. Backup restore inventories include the same index;
 protected cleanup remains owned by the D1 backend.
 
@@ -760,8 +760,8 @@ In-place `legacy` to `device_bound_v1` updates fail with
 seats and external offline licenses prevent empty current tables from proving
 that legacy authority has drained. The backend/release owner must complete the
 reviewed cutover-evidence protocol and restore tests before replacing that guard.
-Use fresh synthetic protected-only entitlements for development; this migration
-does not authorize enabling protection for existing customers.
+Use fresh synthetic protected-only entitlements for development; the baseline
+schema does not authorize enabling protection for existing customers.
 
 `npm run test:sql` includes deterministic SQLite boundary tests and the local
 Miniflare D1 binding tests for concurrent allocation and complete batch rollback.
@@ -852,11 +852,12 @@ local workerd tests verify that entrypoint and its service-binding isolation.
 
 ### Protected enrollment compatibility and readiness
 
-Migration 0041 adds immutable optional `requested_feature` to enrollment attempts.
+The baseline schema gives enrollment attempts an immutable optional
+`requested_feature`.
 New native clients always send it; consent and approval enforce it and the
 comparison transcript uses `lcc-device-enrollment-comparison-v2`. Older clients
 without the field retain v1 comparison and project-wide consent selection.
-Deploy the migration and backend before distributing new native clients.
+Deploy the backend before distributing new native clients.
 
 Protected traffic has a 1,000/minute global fuse (`BOUND_GLOBAL_RATE_LIMIT`,
 range 100..1000000), a 20/minute registration IP limit, and a separate

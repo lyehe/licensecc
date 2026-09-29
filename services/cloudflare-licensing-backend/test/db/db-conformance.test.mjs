@@ -122,3 +122,48 @@ test("local SQLite adapter applies real migrations and persists a file-backed da
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("the baseline seeds the catalog projection generation row", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "licensecc-local-sqlite-seed-"));
+  const dbPath = join(dir, "licensecc.sqlite");
+  try {
+    const opened = createLocalSqliteDb({ path: dbPath, migrationsDir: resolve("migrations") });
+    try {
+      // Plan preview/apply and the catalog import read this row and fail closed when it is absent,
+      // so a fresh database must carry it without any operator step.
+      const row = await opened.adapter
+        .prepare("SELECT generation FROM license_plan_projection_generations WHERE scope = 'catalog'")
+        .first();
+      assert.ok(row, "the catalog projection generation row is missing");
+      assert.equal(row.generation, 0);
+    } finally {
+      opened.db.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the baseline creates each table after the tables its foreign keys reference", () => {
+  // A D1 SQL export replays tables, with their rows, in creation order, and D1 enforces foreign
+  // keys during the import. A child table created before its parent makes every backup that holds
+  // a child row fail to restore with "no such table".
+  const { db } = createLocalSqliteDb({ path: ":memory:", migrationsDir: resolve("migrations") });
+  try {
+    const created = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid")
+      .all()
+      .map((row) => row.name);
+    const position = new Map(created.map((name, index) => [name, index]));
+    const outOfOrder = [];
+    for (const table of created) {
+      for (const { table: parent } of db.prepare(`PRAGMA foreign_key_list("${table}")`).all()) {
+        if (parent !== table && !(position.get(parent) < position.get(table))) {
+          outOfOrder.push(`${table} -> ${parent}`);
+        }
+      }
+    }
+    assert.deepEqual(outOfOrder, []);
+  } finally {
+    db.close();
+  }
+});

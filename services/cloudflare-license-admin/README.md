@@ -119,8 +119,8 @@ Eligibility and copied policy state are checked in the mutation batch. Conflicts
 leave no partial grant, audit event or replay record. Retained legacy history
 blocks protected creation; empty history does not prove that external or pruned
 legacy grants never existed. Production still requires the issuer/cohort inventory
-and cutover gates in ADR 0006. Apply backend migration 0036 before deploying the
-new entitlement projections; the complete deployment requires the current schema.
+and cutover gates in ADR 0006. The complete deployment requires the backend's
+baseline schema.
 
 ### Device limit
 
@@ -150,7 +150,9 @@ new entitlement projections; the complete deployment requires the current schema
 Use this Worker alongside the
 [licensing backend](../cloudflare-licensing-backend/README.md#hosted-setup-remote-changes).
 Both Workers bind the same D1 database; only the backend holds signing keys.
-Apply backend-owned migrations before deploying either service.
+Apply the backend-owned baseline with
+`npm run migrate:remote --workspace @licensecc/cloudflare-licensing-backend`
+to a newly created database before deploying either service.
 
 From `services/cloudflare-license-admin`, after the root `npm ci`, copy
 `wrangler.example.jsonc` to the ignored `wrangler.jsonc` without overwriting an
@@ -178,10 +180,9 @@ binding to the same profile's backend, as it does for `DEVICE_OPERATOR`. Deploy
 the backend version that exports `WebhookOperator` before an admin
 configuration that binds it. Each test send the backend attempted also leaves
 a `test_send` row in `webhook_events` with the operator, the request id and
-the status class; a refused send leaves none. Apply backend migration
-`0043_allow_webhook_test_send_event.sql` before deploying this Worker.
-Otherwise the audit write fails and is logged as
-`webhook.test_send_audit_failed`, while test sends still work.
+the status class; a refused send leaves none. If that audit write fails, it is
+logged as `webhook.test_send_audit_failed`, and the test send still reports its
+outcome.
 
 Create a Cloudflare Access application and allow policy for the admin hostname
 before exposing it. Protect every enabled hostname, including `workers.dev`
@@ -227,7 +228,7 @@ npm run migrate:local --workspace @licensecc/cloudflare-license-admin
 After the root install, the same `npm run <script>` commands also work from
 this service directory; do not create a package-local lockfile.
 
-`npm run migrate:local` applies the shared verifier migrations from
+`npm run migrate:local` applies the shared verifier baseline migration from
 `../cloudflare-licensing-backend/migrations` because the admin service and public
 verifier share the same D1 schema.
 
@@ -597,8 +598,8 @@ atomically. Prefer the authenticated admin Worker or `/api/sync/entitlements` fo
 normal, audited writes.
 
 Production deployments should also deploy `../cloudflare-d1-backup` so D1 Time
-Travel and scheduled R2 SQL exports are available before admin mutations or
-migrations are run against live data.
+Travel and scheduled R2 SQL exports are available before admin mutations run
+against live data.
 
 ## User database sync
 
@@ -644,9 +645,12 @@ LICENSECC_SYNC_TOKEN=<secret> npm run sync:entitlement -- \
 
 ## Deployment notes
 
-Apply D1 migrations before deploying a Worker version that reads the new
-columns. Use distinct D1 databases and Access applications for staging and
-production. Keep the public verifier and admin Worker on separate routes.
+The schema is a single baseline edited in place. After a schema change,
+recreate each D1 database and apply the baseline with
+`npm run migrate:remote --workspace @licensecc/cloudflare-licensing-backend`
+before deploying a Worker version that reads the new columns. Use distinct D1
+databases and Access applications for staging and production. Keep the public
+verifier and admin Worker on separate routes.
 
 Do not deploy the admin Worker with local bearer authentication enabled. A
 staging deployment should be protected by Cloudflare Access and should validate
@@ -708,7 +712,6 @@ same-key retries return the original result; they do not initiate a new operatio
 The UI sends this pair for edits and individual lifecycle transitions. Exact list
 filters id and customer_id compose with existing project/feature/status filters.
 
-Migration 0035 adds a customer/project/feature/fingerprint index. Apply it through
-the backend migration workflow before rollout for efficient customer paging; old
-code and schemas remain functionally compatible. No data rewrite or rollback DROP
-is required. Aggregation and deep offset scans still scale with customer size.
+The baseline schema has a customer/project/feature/fingerprint index for
+efficient customer paging. Aggregation and deep offset scans still scale with
+customer size.

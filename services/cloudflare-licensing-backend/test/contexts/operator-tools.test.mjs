@@ -60,9 +60,7 @@ test("break-glass CLI list does not require a fingerprint", () => {
 
 test("schema permits sync audit actor type", () => {
   const schema = readFileSync("schema.sql", "utf8");
-  const migration = readFileSync("migrations/0006_allow_sync_actor_type.sql", "utf8");
   assert.match(schema, /actor_type IN \('access', 'dev', 'cli', 'sync', 'system', 'unknown'\)/);
-  assert.match(migration, /actor_type IN \('access', 'dev', 'cli', 'sync', 'system', 'unknown'\)/);
 });
 
 test("break-glass CLI upsert --allow-revoked-override drops the guard and stamps a distinct event", () => {
@@ -105,22 +103,17 @@ test("break-glass CLI upsert leaves customer_id and license_id NULL when unset",
   assert.match(sql, /, NULL, NULL, unixepoch\(\), unixepoch\(\)\)/);
 });
 
-test("schema and migration 0007 permit the revoked-override audit event type", () => {
+test("schema permits the revoked-override audit event type", () => {
   const schema = readFileSync("schema.sql", "utf8");
-  const migration = readFileSync("migrations/0007_allow_revoked_override_event_type.sql", "utf8");
   assert.match(schema, /event_type IN \([^)]*'revoked-override'\)/);
-  assert.match(migration, /event_type IN \([^)]*'revoked-override'\)/);
 });
 
-test("schema and migration 0008 define entitlement device keys", () => {
+test("schema defines entitlement device keys", () => {
   const schema = readFileSync("schema.sql", "utf8");
-  const migration = readFileSync("migrations/0008_create_entitlement_devices.sql", "utf8");
-  for (const sql of [schema, migration]) {
-    assert.match(sql, /CREATE TABLE IF NOT EXISTS entitlement_devices/);
-    assert.match(sql, /device_key_id TEXT NOT NULL/);
-    assert.match(sql, /public_key_spki_der_base64 TEXT NOT NULL/);
-    assert.match(sql, /status TEXT NOT NULL CHECK \(status IN \('active', 'revoked', 'disabled'\)\)/);
-  }
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS entitlement_devices/);
+  assert.match(schema, /device_key_id TEXT NOT NULL/);
+  assert.match(schema, /public_key_spki_der_base64 TEXT NOT NULL/);
+  assert.match(schema, /status TEXT NOT NULL CHECK \(status IN \('active', 'revoked', 'disabled'\)\)/);
 });
 
 test("interpretWranglerResult flags 0-row mutations and ignores reads", () => {

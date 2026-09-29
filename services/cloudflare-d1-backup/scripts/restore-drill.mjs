@@ -117,7 +117,7 @@ const SENSITIVE_TABLES = [
 // Every table the restored database must contain (presence-asserted as one set).
 const ALL_RESTORE_TABLES = [...REQUIRED_TABLES, ...PRESENCE_ONLY_TABLES];
 
-// Final named indexes and triggers from migrations 0001-0043. SQLite's
+// Final named indexes and triggers from the baseline schema. SQLite's
 // autoindexes are intentionally excluded; each named object's type, owner, and
 // normalized DDL contributes to the canonical schema signature below.
 const EXPECTED_INDEXES = {

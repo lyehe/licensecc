@@ -160,7 +160,7 @@ export interface CatalogPlanFeatureInput {
 }
 
 // ── License-policy templates (Stage 3) ───────────────────────────────────────
-// Mirrors entitlement_policies (migration 0018) + the policy.mjs stamp shape. A
+// Mirrors entitlement_policies + the policy.mjs stamp shape. A
 // policy is a frozen stamp-time template: stamping copies the defaults onto a new
 // entitlement (which is thereafter its own source of truth). The canonical Policy /
 // stamp types live in the backend package's policy.d.ts; these re-declare only the
@@ -329,7 +329,7 @@ export interface SearchData {
   results: SearchResult[];
 }
 
-// ── Webhook endpoint CRUD + delivery status (migration 0020) ──────────────────
+// ── Webhook endpoint CRUD + delivery status ───────────────────────────────────
 // webhook_endpoints are operator-managed CONFIG rows (URL + a csv event_types filter).
 // The signing secret is NEVER stored here — it lives only in the Worker-env
 // WEBHOOK_SIGNING_SECRETS map (the repo forbids plaintext secrets in D1). The

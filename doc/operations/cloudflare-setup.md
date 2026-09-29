@@ -95,21 +95,21 @@ from `services/cloudflare-licensing-backend`:
 2. Copy `wrangler.example.toml` to ignored `wrangler.toml` only if that local
    file does not already exist. Set the account, Worker name, database name and
    ID for the chosen environment. Keep `migrations_dir = "migrations"`.
-3. Inspect the migration list and apply the backend's ordered migrations to
-   the **new, empty** remote database. Use the configured `DB` binding and an
-   explicit remote target. Cloudflare documents the
+3. Apply the backend's single baseline migration
+   (`migrations/0001_baseline.sql`) to the **new, empty** remote database with
+   `npm run migrate:remote --workspace @licensecc/cloudflare-licensing-backend`.
+   Use the configured `DB` binding and an explicit remote target. Cloudflare documents the
    [D1 commands and migration behavior](https://developers.cloudflare.com/workers/wrangler/commands/d1/).
 4. Verify there are no pending migrations before deploying application code.
 
 Do not apply `schema.sql` on top of a migrated database or create separate
-admin/portal migration histories. Do not stop at a historical migration number
-mentioned in a feature section: a fresh install needs the complete migration
-set in the selected checkout.
+admin/portal migration histories.
 
-For an existing database, use the backup and upgrade sequence below instead.
-An empty-database bootstrap does not need a backup of customer data that does
-not yet exist; the deployment workflows' pre-migration backup gate still
-requires a functioning backup service before an automated rollout.
+An existing database cannot be upgraded to a changed baseline; step 10 below
+explains how to recreate it. An empty-database bootstrap does not need a backup
+of customer data that does not yet exist; the deployment workflows'
+pre-migration backup gate still requires a functioning backup service before an
+automated rollout.
 
 ## 4. Configure the Workers and admin Access
 
@@ -231,7 +231,7 @@ For the initial bootstrap, follow these service-local runbooks in order:
 
 | Order | Action | Completion signal |
 | --- | --- | --- |
-| 1 | D1 initialization from step 3 | Complete migration history for the checked-out code |
+| 1 | D1 initialization from step 3 | The checked-out baseline applied, with no pending migrations |
 | 2 | [Backup setup and validation](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-d1-backup/README.md#cloudflare-setup) | A completed, inspectable backup and a successful restore drill against a scratch database |
 | 3 | [Backend deploy](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-licensing-backend/README.md#hosted-setup-remote-changes) | New serving version, expected health result and signing configuration |
 | 4 | [Admin build and deploy](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-license-admin/README.md#hosted-setup) | Fresh UI assets, correct backend RPC binding, Access-protected console |
@@ -327,16 +327,24 @@ gates before promoting a staging success to production.
 
 ## 10. Upgrade and recover
 
+The schema is a single baseline that is edited in place until the first
+release. There is no upgrade path: after pulling a schema change, delete and
+recreate each D1 database (local `.wrangler` state, staging, production,
+restore scratch databases), apply the baseline, and take a fresh backup.
+Backups of an earlier database cannot be restored into the new schema.
+
 For every later release:
 
-1. Review the source commit, migration suffix and configuration changes. Record
+1. Review the source commit, baseline schema and configuration changes. Record
    the currently serving versions and preserve the corresponding configuration
    and signer pairing.
 2. Run the documented
    [pre-migration backup gate](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-d1-backup/README.md#pre-migration-backup-gate)
    and qualify restore against a separate scratch D1 database.
-3. Apply reviewed backend migrations before dependent Workers. A failed D1
-   migration does not imply earlier successful migrations were undone.
+3. If the baseline schema changed, recreate each D1 database as described
+   above and apply the baseline with
+   `npm run migrate:remote --workspace @licensecc/cloudflare-licensing-backend`
+   before deploying dependent Workers.
 4. Build UI assets, deploy the candidate, and repeat the live checks from step 8.
 5. If recovery is needed, use the
    [rollback workflow](https://github.com/lyehe/licensecc/blob/main/.github/workflows/rollback-workers.yml) and
@@ -359,7 +367,7 @@ recovering a failed deployment.
 
 | Symptom | First check |
 | --- | --- |
-| Missing table/column or migration failure | Correct remote `DB` ID, ordered backend history, and pending migrations |
+| Missing table/column or migration failure | Correct remote `DB` ID, and a database recreated from the checked-out baseline |
 | Admin redirect loop or 403 | Access application audience/issuer, every enabled hostname, operator role allowlist |
 | Portal login returns configuration error | Session peppers, enabled provider/password configuration, exact portal origin |
 | Password request exceeds resources | Workers plan and CPU budget; preserve password hashing parameters |
@@ -400,10 +408,10 @@ an empty string — fails `checks.global_rate_limit`). Output contains only safe
 check results and explicitly says live issuance/renewal were not run. This
 command currently accepts JSON configuration, not TOML or JSONC.
 
-Apply migration 0041 before deploying this backend. It preserves older pending
-attempts with no requested feature and makes new feature intent immutable.
-Deploy the backend before releasing the new native clients; older backends
-correctly reject the new field. No audit-event deletion policy changes.
+The baseline schema accepts pending attempts with no requested feature and
+makes feature intent immutable once recorded. Deploy the backend before
+releasing the new native clients; older backends correctly reject the new
+field. No audit-event deletion policy changes.
 
 For release qualification, use a temporary protected entitlement and the real
 native example: enroll the configured feature, compare/approve the browser

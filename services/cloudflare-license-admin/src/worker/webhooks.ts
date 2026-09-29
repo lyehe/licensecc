@@ -1,4 +1,4 @@
-// ── Webhook endpoint domain module (extracted from index.ts; migration 0020) ──
+// ── Webhook endpoint domain module (extracted from index.ts) ──────────────────
 // CRUD over webhook_endpoints (the dispatcher's config rows) + a read/redrive view over
 // webhook_deliveries (the cron-drained outbox). Reads are reader+admin; writes require
 // requireAdmin. The signing secret is NEVER stored or surfaced here — it lives only in the
@@ -26,7 +26,7 @@ import { clientIp } from "@licensecc/cloudflare-runtime/http/kit";
 import { safeWebhookUrl } from "@licensecc/cloudflare-runtime/webhooks/webhook_endpoint";
 import { INVALID_EVENT_TYPES, safeWebhookEventTypes, safeWebhookEventTypesShape, webhookEventTypesUnknownTokens, WEBHOOK_EVENT_TYPES } from "./webhook_event_types.js";
 
-// ── Webhook endpoint validation (migration 0020) ──────────────────────────────
+// ── Webhook endpoint validation ───────────────────────────────────────────────
 // An endpoint is a CONFIG row: an https URL + a csv event_types filter ("" = all) +
 // a description. NO signing secret lives here — it is only in the env secret map. URL
 // validation is the security gate (else 400 invalid_url): https on a public host name only —
@@ -346,7 +346,7 @@ async function handleWebhookPatch(request: Request, env: Env, actor: Actor, endp
   });
 }
 
-// Append-only audit for a webhook kill-switch flip (migration 0027; mirrors customer_events).
+// Append-only audit for a webhook kill-switch flip (mirrors customer_events).
 // Batched WITH the guarded UPDATE by transitionWithGuard, so the WHERE EXISTS ... updated_at = ?
 // guard writes the event only when the flip actually landed (never on a lost race / replay).
 function webhookEventAudit(

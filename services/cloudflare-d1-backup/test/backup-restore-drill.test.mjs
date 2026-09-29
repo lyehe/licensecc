@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { SNAPSHOT_COUNTED_TABLES } from "../dist/core.js";
 import {
   BACKUP_MANIFEST_SUFFIX,
@@ -326,11 +325,8 @@ test("migration lineage fails closed when history is absent, divergent, or incom
   ], canonicalNames), /snapshot_migration_history_invalid/);
 });
 
-test("checked-out backend migrations are a contiguous canonical inventory", () => {
-  const names = canonicalMigrationNames();
-  assert.equal(names.length, 43);
-  assert.equal(names[0], "0001_create_entitlements.sql");
-  assert.equal(names.at(-1), "0043_allow_webhook_test_send_event.sql");
+test("the checked-out backend migration inventory is the single baseline", () => {
+  assert.deepEqual(canonicalMigrationNames(), ["0001_baseline.sql"]);
   assert.equal(migrationHistorySql(), "SELECT id, name FROM d1_migrations ORDER BY id");
   assert.match(snapshotSchemaObjectSql(), /name NOT IN \('_cf_KV', 'd1_migrations'\)/);
   assert.deepEqual([...SNAPSHOT_COUNTED_TABLES], REQUIRED_TABLES);
@@ -340,54 +336,6 @@ test("checked-out backend migrations are a contiguous canonical inventory", () =
     table_name: "entitlements",
     sql: "CREATE TABLE entitlements (id TEXT)",
   }]).table_count, 1);
-});
-
-test("real backend migration suffix upgrades a deterministic old local D1 to the current schema", () => {
-  withTempDirectory((directory) => {
-    const canonicalNames = canonicalMigrationNames();
-    const oldMigrationCount = 24;
-    const oldMigrations = join(directory, "old-migrations");
-    const persistence = join(directory, "d1-state");
-    const configFile = join(directory, "wrangler.jsonc");
-    const currentMigrations = fileURLToPath(new URL("../../cloudflare-licensing-backend/migrations/", import.meta.url));
-    mkdirSync(oldMigrations);
-    for (const name of canonicalNames.slice(0, oldMigrationCount)) {
-      copyFileSync(join(currentMigrations, name), join(oldMigrations, name));
-    }
-    const writeConfig = (migrationsDir) => writeFileSync(configFile, JSON.stringify({
-      name: "licensecc-backup-migration-integration",
-      compatibility_date: "2026-08-01",
-      d1_databases: [{
-        binding: "DB",
-        database_name: "licensecc-backup-migration-integration",
-        database_id: "00000000-0000-0000-0000-000000000001",
-        migrations_dir: migrationsDir,
-      }],
-    }));
-    const apply = () => runWrangler([
-      "d1", "migrations", "apply", "licensecc-backup-migration-integration",
-      "--local", "--persist-to", persistence, "--config", configFile,
-    ], "local migration integration");
-    const query = (command) => {
-      const output = runWrangler([
-        "d1", "execute", "licensecc-backup-migration-integration",
-        "--command", command, "--json", "--local", "--persist-to", persistence,
-        "--config", configFile,
-      ], "local migration integration query");
-      return parseWranglerJson(output.stdout)[0].results;
-    };
-
-    writeConfig(oldMigrations);
-    apply();
-    assert.equal(query(migrationHistorySql()).length, oldMigrationCount);
-
-    writeConfig(currentMigrations);
-    apply();
-    const history = migrationHistoryFromRows(query(migrationHistorySql()), canonicalNames);
-    assert.equal(history.applied_migration_count, canonicalNames.length);
-    assert.equal(history.latest_migration, canonicalNames.at(-1));
-    assert.equal(validateSchemaObjectRows(query(schemaObjectSql())).digest, EXPECTED_SCHEMA_SIGNATURE_SHA256);
-  });
 });
 
 test("Wrangler failures expose stable metadata but never raw command output", () => {
@@ -836,7 +784,7 @@ test("wrangler json parser tolerates advisory text before json", () => {
   assert.equal(parsed[0].results[0].x, 1);
 });
 
-test("restore inventory pins all migrated tables through migration 0043", () => {
+test("restore inventory pins all migrated tables in the baseline schema", () => {
   const migratedTables = [
     "account_token_events", "account_token_revocations", "account_tokens", "audit_digests",
     "catalog_events", "catalog_features", "catalog_import_previews", "catalog_plan_features", "catalog_plans",

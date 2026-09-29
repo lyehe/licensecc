@@ -76,7 +76,7 @@ verification, issuance, device registration and floating-seat writes fail closed
 for protected mode. There is no fallback from a protected validation failure to
 a legacy format or an environment-wide optional-proof setting.
 
-Migration 0036 leaves existing entitlements in legacy mode. Automatic in-place
+The baseline schema defaults entitlements to legacy mode. Automatic in-place
 conversion is blocked: retained lease/seat rows cannot prove complete historical
 authority, and legacy offline clients have different clock and expiry semantics.
 Future conversion needs reviewed issuer fencing and durable cutover evidence,

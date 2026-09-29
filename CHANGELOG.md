@@ -92,12 +92,16 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
 - Admin: each webhook test send the backend attempted leaves a
   `webhook_events` audit row (`event_type` `test_send`) with the operator, the
   request id and the receiver's status class as the reason; a refused send
-  leaves none. Migration `0043_allow_webhook_test_send_event.sql` rebuilds
-  `webhook_events` to allow the new type and must be applied before the admin
-  Worker is deployed; until then the audit write fails and is logged as
-  `webhook.test_send_audit_failed`, and test sends still work.
+  leaves none.
 
 ### Changed
+- D1 schema: the numbered migration history is replaced by one baseline
+  migration, `services/cloudflare-licensing-backend/migrations/0001_baseline.sql`.
+  The schema is a single baseline that is edited in place until the first
+  release. There is no upgrade path: after pulling a schema change, delete and
+  recreate each D1 database (local `.wrangler` state, staging, production,
+  restore scratch databases), apply the baseline, and take a fresh backup.
+  Backups of an earlier database cannot be restored into the new schema.
 - Advanced the unpublished platform candidate from `0.1.0-rc.1` to `0.1.0-rc.2`.
   The backend `OrderRequest` OpenAPI schema now matches the runtime's closed
   event contract; generated clients based on `rc.1` must regenerate before
@@ -212,9 +216,7 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
      That same secret also feeds the rollback, recovery-drill and capacity
      workflows, so update it before running any of those too, not just the
      next deploy.
-  2. Apply migration `0043_allow_webhook_test_send_event.sql` before
-     deploying the admin Worker.
-  3. After deploying, audit stored webhook endpoints. Any whose URL the
+  2. After deploying, audit stored webhook endpoints. Any whose URL the
      stricter rule now refuses (credentials, an IP-literal host, a
      single-label or internal host name, or a trailing dot) will fail every
      delivery with `invalid_url` until you edit or disable it.

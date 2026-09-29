@@ -19,9 +19,9 @@
   },
   // Single source of truth: bind the SAME entitlements D1 as the licensing-backend Worker
   // (database_name identical to its wrangler). One database, one audit log, no split-brain.
-  // The licensing-backend owns the migrations (incl. 0016 portal_otp/portal_sessions); the
-  // portal runs none of its own — migrations_dir points at the backend so a stray
-  // `wrangler d1 migrations apply` here cannot diverge the schema.
+  // The licensing-backend owns the single baseline migration (including portal_otp and
+  // portal_sessions); the portal runs none of its own — migrations_dir points at the
+  // backend so a stray `wrangler d1 migrations apply` here cannot diverge the schema.
   "d1_databases": [
     {
       "binding": "DB",

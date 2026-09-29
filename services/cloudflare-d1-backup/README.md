@@ -293,7 +293,7 @@ old. Missing, divergent, ahead-of-repository, or incomplete migration history
 fails closed. A migration upgrade requires `--scratch-config` pointing at the
 backend configuration.
 
-Device operation tombstones are durable counted state from migration 0038.
+Device operation tombstones are durable counted state in the baseline schema.
 Older manifests that omit counts for an already-present `device_bound_operations`
 table fail restore validation; they require explicit restore migration and
 revalidation, not an exemption treating tombstones as temporary records. Counts

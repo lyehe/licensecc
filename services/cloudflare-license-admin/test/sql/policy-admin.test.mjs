@@ -3,7 +3,7 @@
 // The hermetic unit MockD1 (admin-worker.test.mjs) only knows the entitlement SQL and throws on anything
 // else, so policy CRUD (entitlement_policies / policy_events) + the atomic policy-stamp side-write cannot
 // run there. This suite drives the REAL compiled worker over an in-memory SQLite built from the shared
-// migrations/*.sql (which include 0018 entitlement_policies + 0019 policy_events) wrapped in a D1-like
+// baseline migration (which includes entitlement_policies + policy_events) wrapped in a D1-like
 // adapter — nothing about the policy SQL is mocked.
 //
 // Covers: create + audit row; UNIQUE(project, lower(name)) -> 409 policy_name_conflict; patch

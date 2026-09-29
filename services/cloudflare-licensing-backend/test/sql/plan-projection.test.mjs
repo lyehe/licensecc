@@ -141,14 +141,6 @@ function freshDb() {
   return db;
 }
 
-function preProjectionProtocolDb() {
-  const db = new DatabaseSync(":memory:");
-  for (const file of readdirSync(migrationsDir).filter((x) => x.endsWith(".sql") && x < "0028_plan_projection_preview_protocol.sql").sort()) {
-    db.exec(readFileSync(join(migrationsDir, file), "utf8"));
-  }
-  return db;
-}
-
 function ctx(overrides = {}) {
   return {
     actor: { subject: "admin", email: "admin@example.test", role: "admin", actorType: "access" },
@@ -347,22 +339,6 @@ for (const state of ["active", "retiring"]) {
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   });
 }
-
-test("projection preview migrations upgrade a pre-0028 D1 database without rewriting catalog data", async () => {
-  const db = preProjectionProtocolDb();
-  seedCatalog(db);
-  const catalogCount = db.prepare("SELECT COUNT(*) AS c FROM catalog_features").get().c;
-  for (const file of readdirSync(migrationsDir).filter((x) => x >= "0028_plan_projection_preview_protocol.sql" && x.endsWith(".sql")).sort()) {
-    db.exec(readFileSync(join(migrationsDir, file), "utf8"));
-  }
-
-  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM catalog_features").get().c, catalogCount);
-  const generation = db.prepare("SELECT scope, generation FROM license_plan_projection_generations").get();
-  assert.equal(generation.scope, "catalog");
-  assert.equal(generation.generation, 0);
-  const preview = await previewPlanProjection({ DB: new D1Like(db) }, projectionInput(), "admin", NOW);
-  assert.match(preview.preview_id, /^ppv_/);
-});
 
 test("legacy entitlement identity fence uses the project-license-fingerprint index", () => {
   const db = freshDb();

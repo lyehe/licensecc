@@ -3,11 +3,11 @@
 // ONE portal_otp row backs BOTH a numeric code AND a magic-link secret:
 //   secret = base64url(32 random bytes)        -> the magic-link body (?token=...)
 //   code   = (first 4 secret bytes as uint32) % 1e8, zero-padded to 8 digits
-// Stored as KEYED HMAC (pepper-versioned), NEVER plaintext, mirroring account_tokens (0015):
+// Stored as KEYED HMAC (pepper-versioned), NEVER plaintext, mirroring account_tokens:
 //   secret_hmac = HMAC(pepper, secret)
 //   code_hmac   = HMAC(pepper, email_lower + ":" + code)   <- email-bound (A's code + B's email no-match)
 // Single-use is enforced by an ATOMIC `UPDATE ... consumed_at ... WHERE consumed_at IS NULL ... RETURNING`,
-// the same discipline as request_proof_nonces (0009). HMAC-at-rest peppers come from PORTAL_OTP_PEPPERS
+// the same discipline as request_proof_nonces. HMAC-at-rest peppers come from PORTAL_OTP_PEPPERS
 // (the shared fail-closed loadSecretMap loader).
 //
 // Security properties (the OTP attack surface):

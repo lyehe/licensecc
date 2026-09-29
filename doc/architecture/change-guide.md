@@ -38,16 +38,20 @@ two deployables use the same protocol primitive.
 
 ## D1 query or migration
 
-The canonical licensing D1 migrations and schema-parity inputs live under
-`services/cloudflare-licensing-backend/migrations/` and its `schema.sql`/
-`scripts/check-schema-parity.py` tooling. Admin and portal local migration
-commands deliberately apply that backend-owned schema; they do not create a
-second migration history. Put a service-specific query beside the route or
-bounded context that owns the data transition. Shared D1 binding mechanics
-belong in `packages/cloudflare-runtime` when reused by multiple deployables;
+The canonical licensing D1 schema lives under
+`services/cloudflare-licensing-backend/` as the single baseline migration
+`migrations/0001_baseline.sql`, edited in place, with its generated
+`schema.sql` and `scripts/check-schema-parity.py` tooling. After editing the
+baseline, run
+`npm run schema:write --workspace @licensecc/cloudflare-licensing-backend`
+and recreate every D1 database; there is no upgrade path. Admin and portal
+local migration commands deliberately apply that backend-owned schema; they do
+not create a second migration history. Put a service-specific query beside the
+route or bounded context that owns the data transition. Shared D1 binding
+mechanics belong in `packages/cloudflare-runtime` when reused by multiple deployables;
 service-specific SQL, authorization, and atomicity stay local. Update backend
-SQL/parity tests and each affected operational README when the migration
-changes deployment order or recovery behavior.
+SQL/parity tests and each affected operational README when the baseline
+change affects deployment order or recovery behavior.
 
 ## Policy rule
 

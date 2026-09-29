@@ -1,9 +1,9 @@
 // Webhook endpoint CRUD + delivery status/redrive (real SQLite, end-to-end through worker.fetch).
 //
 // The hermetic unit MockD1 (admin-worker.test.mjs) only knows the entitlement SQL and throws on
-// anything else, so webhook CRUD (webhook_endpoints / webhook_deliveries, migration 0020) cannot run
+// anything else, so webhook CRUD (webhook_endpoints / webhook_deliveries) cannot run
 // there. This suite drives the REAL compiled worker over an in-memory SQLite built from the shared
-// migrations/*.sql (which include 0020) wrapped in a D1-like adapter — nothing about the webhook SQL
+// baseline migration wrapped in a D1-like adapter — nothing about the webhook SQL
 // is mocked.
 //
 // Covers: create + the https-only URL gate (a non-https URL is 400 invalid_url, persists nothing);
@@ -389,7 +389,7 @@ test("webhook: disable requires a reason and records it in an audit event", asyn
   assert.equal(reEvent.reason, "");
 });
 
-test("webhook_events: after all migrations a test_send row is accepted and an unknown event_type still fails the CHECK", async () => {
+test("webhook_events: in the baseline schema a test_send row is accepted and an unknown event_type still fails the CHECK", async () => {
   const db = freshDb();
   const env = devEnv(db);
   const ep = await createWebhook(env, { url: "https://check.example.com/h" });
