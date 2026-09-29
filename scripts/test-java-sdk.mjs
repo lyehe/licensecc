@@ -31,9 +31,9 @@ run("javac", ["--release", "17", "-Xlint:all", "-Werror", "-d", classes,
 const artifact = join(output, "licensecc-client-0.1.0-rc.2.jar");
 run("jar", ["--create", "--file", artifact,
   "--manifest", join(root, "sdks", "java", "MANIFEST.MF"), "-C", classes, "."]);
-run("javac", ["--release", "17", "--add-modules", "jdk.httpserver", "-Xlint:all", "-Werror",
+run("javac", ["--release", "17", "-Xlint:all", "-Werror",
   "-cp", artifact, "-d", tests, ...files(join(sourceRoot, "test", "java"))]);
-run("java", ["-Xcheck:jni", "--add-modules", "jdk.httpserver", "-cp", `${artifact}${process.platform === "win32" ? ";" : ":"}${tests}`,
+run("java", ["-Xcheck:jni", "-cp", `${artifact}${process.platform === "win32" ? ";" : ":"}${tests}`,
   "io.licensecc.client.SdkTest", root]);
 if (process.env.LCC_TEST_JNI_FIXTURE_DLL) {
   run("java", ["-Xcheck:jni", "-cp", `${artifact}${process.platform === "win32" ? ";" : ":"}${tests}`,

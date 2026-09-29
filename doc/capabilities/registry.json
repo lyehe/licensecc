@@ -269,18 +269,16 @@
     },
     {
       "id": "java-sdk",
-      "title": "Java SDK token verification and HTTP client",
+      "title": "Java SDK token verification",
       "status": "shipped",
       "owner": "SDK maintainer",
-      "surfaces": ["Java token verifier", "Java HTTP client"],
+      "surfaces": ["Java token verifier"],
       "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Java 17+"], "limitations": ["The dependency-free JAR is repository-built and included in deterministic release staging but is not published to Maven Central; it does not provide C++ binary enforcement."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "sdks/java/README.md"],
       "evidence": [
-        {"kind": "implementation", "surface": "Java token verifier", "path": "sdks/java/src/main/java/io/licensecc/client/OnlineAssertion.java", "selector": "public final class OnlineAssertion {", "assertion": "The Java SDK implements strict signed online-assertion verification and shares the same token primitives with config attestation."},
-        {"kind": "automated_test", "surface": "Java token verifier", "path": "sdks/java/src/test/java/io/licensecc/client/SdkTest.java", "selector": "    private static void onlineGolden(Path root) throws IOException {", "assertion": "Java golden-vector, cache, retired-key, tamper, and strict parsing behavior is automated."},
-        {"kind": "implementation", "surface": "Java HTTP client", "path": "sdks/java/src/main/java/io/licensecc/client/LicensingBackendClient.java", "selector": "public final class LicensingBackendClient {", "assertion": "The dependency-free Java SDK implements the backend HTTP contract."},
-        {"kind": "automated_test", "surface": "Java HTTP client", "path": "sdks/java/src/test/java/io/licensecc/client/SdkTest.java", "selector": "    private static void httpContract() throws Exception {", "assertion": "A local HTTP server pins retry, no-retry metering, bearer, route, and response parsing behavior."}
+        {"kind": "implementation", "surface": "Java token verifier", "path": "sdks/java/src/main/java/io/licensecc/client/ConfigAttestation.java", "selector": "public final class ConfigAttestation {", "assertion": "The Java SDK implements config-attestation verification."},
+        {"kind": "automated_test", "surface": "Java token verifier", "path": "sdks/java/src/test/java/io/licensecc/client/SdkTest.java", "selector": "    private static void configGolden(Path root) throws IOException {", "assertion": "Java golden-vector verification is automated."}
       ]
     }
   ]

@@ -67,7 +67,6 @@ const requiredVersionPaths = [
   "sdks/python/src/licensecc/__init__.py",
   "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj",
   "sdks/java/MANIFEST.MF",
-  "sdks/java/src/main/java/io/licensecc/client/LicensingBackendClient.java",
   ...platformTextPaths,
   ...maintainedPlatformDocPaths,
   capabilityRegistryPath,
@@ -538,9 +537,6 @@ export function checkVersionContract({ root = repositoryRoot, trackedPaths = tra
   const javaManifestPath = "sdks/java/MANIFEST.MF";
   const javaManifestVersion = /^Implementation-Version:\s*([^\r\n]+)$/mu.exec(sourceAt(root, javaManifestPath))?.[1] ?? null;
   mismatch(errors, javaManifestPath, platformVersion, javaManifestVersion);
-  const javaClientPath = "sdks/java/src/main/java/io/licensecc/client/LicensingBackendClient.java";
-  const javaClientVersion = /^\s*public static final String VERSION = "([^"]+)";$/mu.exec(sourceAt(root, javaClientPath))?.[1] ?? null;
-  mismatch(errors, javaClientPath, platformVersion, javaClientVersion);
   anchoredPlatformProjections(root, platformVersion, pythonVersion, errors);
 
   // The authority reader above is deliberately the only CMake grammar used by

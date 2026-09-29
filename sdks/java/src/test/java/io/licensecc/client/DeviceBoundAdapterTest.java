@@ -169,9 +169,6 @@ final class DeviceBoundAdapterTest {
         check(DeviceBoundClient.DenialDetail.fromCode(0) == DeviceBoundClient.DenialDetail.NONE
             && DeviceBoundClient.DenialDetail.fromCode(1) == DeviceBoundClient.DenialDetail.DEVICE_LIMIT
             && DeviceBoundClient.DenialDetail.fromCode(4294967295L) == DeviceBoundClient.DenialDetail.UNKNOWN, "detail codes");
-        var legacy = new DeviceBoundClient.Outcome(DeviceBoundClient.Result.BUSY, DeviceBoundClient.ProviderResult.OK,
-            DeviceBoundClient.CheckpointResult.NOT_ATTEMPTED, false, BigInteger.ZERO);
-        check(legacy.detail() == DeviceBoundClient.DenialDetail.NONE, "five-value outcomes keep no detail");
     }
     private static void reentry() {
         var fake = new Fake();

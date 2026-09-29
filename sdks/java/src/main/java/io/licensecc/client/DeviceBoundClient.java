@@ -39,18 +39,13 @@ public final class DeviceBoundClient implements AutoCloseable {
     /** Persistence and renewal hints are independent of permission to perform protected work. */
     public record Outcome(Result code, ProviderResult providerResult, CheckpointResult checkpointResult,
             boolean renewalDue, BigInteger effectiveTime, DenialDetail detail) {
-        /** An outcome without a refusal detail. */
-        public Outcome(Result code, ProviderResult providerResult, CheckpointResult checkpointResult,
-                boolean renewalDue, BigInteger effectiveTime) {
-            this(code, providerResult, checkpointResult, renewalDue, effectiveTime, DenialDetail.NONE);
-        }
     }
     /** Comparison display only: expiresAt is never a caller-supplied authorization clock. */
     public record EnrollmentView(String comparisonCode, BigInteger expiresAt) { }
     public record PrepareResult(Result code, EnrollmentView view) { }
 
     private static final Cleaner CLEANER = Cleaner.create();
-    private static final Outcome BUSY = new Outcome(Result.BUSY, ProviderResult.OK, CheckpointResult.NOT_ATTEMPTED, false, BigInteger.ZERO);
+    private static final Outcome BUSY = new Outcome(Result.BUSY, ProviderResult.OK, CheckpointResult.NOT_ATTEMPTED, false, BigInteger.ZERO, DenialDetail.NONE);
     private final State state;
     private final Cleaner.Cleanable cleanable;
     // This action must not retain the client. The shared lock excludes close from native calls.

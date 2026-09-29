@@ -4,10 +4,9 @@ Choose an SDK or support tool
 SDK clients
 -----------
 
-The Python, .NET, and Java SDKs verify signed server tokens; the Java SDK
-also wraps selected backend HTTP operations. None of them acquire local
-``.lic`` files, fingerprint hardware, or enforce native application
-execution. Use the C/C++ runtime for those properties.
+The Python, .NET, and Java SDKs verify signed server tokens. None of them
+acquire local ``.lic`` files, fingerprint hardware, or enforce native
+application execution. Use the C/C++ runtime for those properties.
 
 Start with :doc:`../api/sdks` for the cross-language scope and token contract,
 then follow the README owned by the selected package:
@@ -20,7 +19,7 @@ then follow the README owned by the selected package:
   BCL-only token verification.
 * `Java SDK guide
   <https://github.com/lyehe/licensecc/tree/main/sdks/java>`_ — dependency-free
-  Java 17 token verification and backend HTTP client.
+  Java 17 token verification.
 
 The packages are source-available release candidates. Their public registry
 publication is a separate release operation, so use the package-local README's

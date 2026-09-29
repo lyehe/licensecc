@@ -35,8 +35,8 @@ npm run test:java-sdk
 
 Distribute the built SDK JAR with
 `bin/licensecc_device_bound_jni.dll` and its matching runtime dependencies.
-No DLL is embedded in or automatically extracted from the JAR. The legacy
-HTTP/token APIs remain usable without JNI on other platforms. The public
+No DLL is embedded in or automatically extracted from the JAR. The
+signed-token API remains usable without JNI on other platforms. The public
 classes are `DeviceBoundLibrary`, `DeviceBoundConfiguration` and
 `DeviceBoundClient`, all under `io.licensecc.client`.
 
