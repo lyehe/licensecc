@@ -30,17 +30,6 @@ specific policy or platform boundary you need.
        ``acquire_license_ex``.
      - Best-effort signal only; it is not proof that a host is trustworthy.
      - ``anti_tamper_host``
-   * - `examples/online_callback
-       <https://github.com/lyehe/licensecc/tree/main/examples/online_callback>`_
-     - Supply HTTPS transport and require a fresh server-signed assertion.
-     - Fails over only on transport/5xx failures, never an entitlement denial.
-     - ``online_callback``
-   * - `examples/production_decision_host
-       <https://github.com/lyehe/licensecc/tree/main/examples/production_decision_host>`_
-     - Combine local verification, host integrity, online verification, backup
-       endpoints, and a persisted revocation floor.
-     - Production-shaped client policy; deployment remains separately owned.
-     - ``production_decision_host``
    * - `examples/device_identity
        <https://github.com/lyehe/licensecc/tree/main/examples/device_identity>`_
      - Open or provision the Windows Platform KSP or Linux TPM2/OpenSSL device

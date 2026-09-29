@@ -9,4 +9,3 @@ function(lcc_add_parser_fuzzer target source)
 endfunction()
 
 lcc_add_parser_fuzzer(fuzz_activation_request activation_request_fuzzer.cpp)
-lcc_add_parser_fuzzer(fuzz_online_assertion online_assertion_fuzzer.cpp)

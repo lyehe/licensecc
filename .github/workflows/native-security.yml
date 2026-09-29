@@ -67,12 +67,6 @@ jobs:
           build/ci-linux-sanitizers/fuzz/fuzz_activation_request
           -max_total_time=20 -timeout=5 -max_len=16384 -rss_limit_mb=2048
           -print_final_stats=1 fuzz/corpus/activation_request
-      - name: Fuzz online-assertion parser with synthetic corpus
-        run: >-
-          timeout --signal=TERM --kill-after=5s 30s
-          build/ci-linux-sanitizers/fuzz/fuzz_online_assertion
-          -max_total_time=20 -timeout=5 -max_len=16384 -rss_limit_mb=2048
-          -print_final_stats=1 fuzz/corpus/online_assertion
 
   sanitizers-device-identity:
     name: Clang ASan and UBSan over device identity

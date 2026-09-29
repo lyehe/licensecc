@@ -174,20 +174,7 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
    After the root install, the same `npm run <script>` commands also work from
    this service directory; do not create a package-local lockfile.
 
-9. Validate a remote Worker-signed assertion with the C++ verifier test against
-   a staging/test D1 database:
-
-   ```console
-   npm run validate:remote-cpp -- wrangler.toml ../../build Debug
-   ```
-
-   The script deploys a temporary verifier Worker with generated online signing
-   key material, creates a scratch entitlement, obtains a real `lccoa1`
-   assertion, runs `test_online_verification` with the matching public key,
-   revokes the scratch entitlement, deletes the temporary Worker, and removes
-   temporary key material.
-
-10. Validate the public verifier abuse controls against a staging Worker:
+9. Validate the public verifier abuse controls against a staging Worker:
 
    ```console
    npm run validate:public-verifier --url=https://licensecc-online-verifier.example.workers.dev --expect-rate-limit --json

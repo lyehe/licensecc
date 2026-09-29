@@ -56,8 +56,7 @@ if(TARGET device_bound_linux_test)
     # visible here. LCC_ENABLE_LINUX_DESKTOP already forced src/library's own
     # find_package(CURL 7.85) to succeed (or FATAL_ERROR) before this directory
     # is ever reached, so this call only reuses the cached result to create the
-    # imported target in this directory's scope. Same pattern as
-    # examples/online_callback and examples/production_decision_host.
+    # imported target in this directory's scope.
     find_package(CURL 7.85 REQUIRED)
     target_link_libraries(device_bound_linux_test PRIVATE CURL::libcurl)
 endif()

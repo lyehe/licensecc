@@ -12,7 +12,6 @@ const cmake = readRepositoryFile("CMakeLists.txt");
 const presets = JSON.parse(readRepositoryFile("CMakePresets.json"));
 const fuzzCmake = readRepositoryFile("fuzz/CMakeLists.txt");
 const activationHarness = readRepositoryFile("fuzz/activation_request_fuzzer.cpp");
-const assertionHarness = readRepositoryFile("fuzz/online_assertion_fuzzer.cpp");
 const workflow = readRepositoryFile(".github/workflows/native-security.yml");
 
 test("sanitizers and fuzzers are opt-in, Clang-only, and fail closed", () => {
@@ -84,29 +83,20 @@ test("only the dedicated Linux Clang presets enable native-security instrumentat
   assert.match(testPreset.environment.UBSAN_OPTIONS, /halt_on_error=1/);
 });
 
-test("both libFuzzer harnesses enforce the same strict 16 KiB input cap", () => {
+test("the libFuzzer harness enforces a strict 16 KiB input cap", () => {
   assert.match(fuzzCmake, /target_link_options\([^\n]+-fsanitize=fuzzer\)/);
   assert.match(fuzzCmake, /fuzz_activation_request/);
-  assert.match(fuzzCmake, /fuzz_online_assertion/);
+  assert.doesNotMatch(fuzzCmake, /fuzz_online_assertion/);
 
-  for (const [name, source] of [
-    ["activation request", activationHarness],
-    ["online assertion", assertionHarness],
-  ]) {
-    assert.match(source, /kMaxInputSize = 16U \* 1024U/);
-    assert.match(source, /size > kMaxInputSize/, `${name} harness must reject oversized input`);
-    assert.match(source, /LLVMFuzzerTestOneInput/);
-  }
+  assert.match(activationHarness, /kMaxInputSize = 16U \* 1024U/);
+  assert.match(activationHarness, /size > kMaxInputSize/, "harness must reject oversized input");
+  assert.match(activationHarness, /LLVMFuzzerTestOneInput/);
   assert.match(activationHarness, /parse_activation_request\(input, fields, error\)/);
-  assert.match(assertionHarness, /split_envelope\(assertion, "lccoa1", "online assertion"/);
-  assert.match(assertionHarness, /parse_fields_in_order/);
-  assert.match(assertionHarness, /verify_assertion_envelope/);
 });
 
 test("fuzzer seeds are small, protocol-shaped, and synthetic", () => {
   const corpusRoots = [
     "fuzz/corpus/activation_request",
-    "fuzz/corpus/online_assertion",
   ];
   for (const corpusRoot of corpusRoots) {
     const absoluteRoot = path.join(repositoryRoot, corpusRoot);
@@ -141,19 +131,19 @@ test("native-security workflow is least-privilege, pinned, and fully triggered",
   }
 });
 
-test("workflow runs the full sanitizer suite and bounds both corpus fuzz smokes", () => {
+test("workflow runs the full sanitizer suite and bounds the corpus fuzz smoke", () => {
   assert.match(workflow, /cmake --preset ci-linux-sanitizers/);
   assert.match(workflow, /cmake --build --preset ci-linux-sanitizers/);
   assert.match(workflow, /ctest --preset ci-linux-sanitizers --no-tests=error/);
   assert.match(workflow, /fuzz\/corpus\/activation_request/);
-  assert.match(workflow, /fuzz\/corpus\/online_assertion/);
+  assert.doesNotMatch(workflow, /corpus\/online_assertion/);
 
   const maxLengths = [...workflow.matchAll(/-max_len=(\d+)/g)].map((match) => Number(match[1]));
-  assert.deepEqual(maxLengths, [16384, 16384]);
+  assert.deepEqual(maxLengths, [16384]);
   const fuzzBudgets = [...workflow.matchAll(/-max_total_time=(\d+)/g)].map((match) => Number(match[1]));
-  assert.equal(fuzzBudgets.length, 2);
+  assert.equal(fuzzBudgets.length, 1);
   assert.ok(fuzzBudgets.every((seconds) => seconds > 0 && seconds <= 30));
   const processBudgets = [...workflow.matchAll(/--kill-after=5s (\d+)s/g)].map((match) => Number(match[1]));
-  assert.deepEqual(processBudgets, [30, 30]);
+  assert.deepEqual(processBudgets, [30]);
   assert.doesNotMatch(workflow, /\b(?:curl|wget)\b/);
 });
