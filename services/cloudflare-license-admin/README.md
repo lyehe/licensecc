@@ -66,11 +66,11 @@ The whole path runs in the console; no SQL is needed.
 3. Optionally set the **Device limit**, the most devices that can be connected
    at once (1 to 1,000,000). Blank sends none: a new license (entitlement) gets
    1, and an existing one keeps its limit. Or choose a policy instead: the list
-   shows this project's active policies as "{name} · {n} devices · {project}"
-   ("{n} seats" for a floating policy), and a chosen policy sets the capacity,
-   shown read-only as "Device limit (from policy {name})" or "Seats (from policy
-   {name})". **Create policy…** opens the policy form for this project and
-   brings you back to the unchanged draft with the new policy chosen.
+   shows this project's active policies as "{name} · {n} devices · {project}",
+   and a chosen policy sets the device limit, shown read-only as "Device limit
+   (from policy {name})". **Create policy…** opens the policy form for this
+   project and brings you back to the unchanged draft with the new policy
+   chosen.
 4. Choose **Generate fingerprint** for a new protected license, or enter its
    exact lowercase 64-character fingerprint, then choose **Create entitlement**.
 
@@ -78,9 +78,9 @@ Changing the project clears dependent selections. Protected project and feature
 IDs use ASCII letters, numbers, `_`, `.`, `:`, or `-` (127 and 15 characters).
 A protected grant has no device hash and no assertion TTL: a create or PATCH
 that names `device_hash` or `assertion_ttl_seconds` returns `400
-invalid_request`. A selected policy stamps only its device limit and
-trial/expiry settings, never a seat pool, borrowing or a meter, so it must have
-at least one device slot and usable trial/expiry settings.
+invalid_request`. A selected policy stamps its device limit and trial/expiry
+settings, so it must have at least one device slot and usable trial/expiry
+settings.
 
 To change an existing grant's device limit, open it with **Edit** and use **Save
 device limit**. A protected grant cannot go below the devices already connected;
@@ -511,18 +511,27 @@ Revoked entitlements are terminal for this first admin version.
 
 ## License mode setup
 
-`license_mode` is derived from entitlement capacity, not stored as a separate
-operator switch:
+Every grant is protected. Its `license_mode` is derived, not stored as a
+separate operator switch:
 
-- `node_locked`: `pool_size = 0`
-- `floating`: `pool_size > 0`
 - `trial`: `is_trial = 1`
+- `node_locked`: every other grant
+
+A grant's only capacity is its device limit, `max_active_devices`: the most
+devices that can be connected at once.
 
 Use policy stamping for normal setup. Enable `POLICY_STAMP_MODE=on`, create a
 policy, then create an entitlement with that `policy_id`. The policy is frozen
 onto the entitlement at stamp time; later policy edits affect new stamps only.
 Edit a policy with **Policies → Edit** (`PATCH /api/admin/policies/{id}`); its
 project, name, and type cannot change.
+
+A policy is `trial`, `node_locked` or `subscription`. It carries a device
+limit, a validity window and trial rules, and nothing else: a create or PATCH
+that names any other field returns `400 invalid_request`. This includes the
+`floating` type and the seat, borrowing, meter, assertion-TTL and device-proof
+fields (`pool_size`, `max_borrow_sec`, `meter_quota`, `meter_period_sec`,
+`assertion_ttl_seconds`, `trial_require_device_proof`).
 
 Node-locked policy example:
 
@@ -531,24 +540,19 @@ Node-locked policy example:
   "project": "DEFAULT",
   "name": "Pro node locked",
   "type": "node_locked",
-  "pool_size": 0,
-  "max_active_devices": 1,
-  "max_borrow_sec": 0,
-  "assertion_ttl_seconds": 300
+  "max_active_devices": 1
 }
 ```
 
-Floating policy example:
+Subscription policy example:
 
 ```json
 {
   "project": "DEFAULT",
-  "name": "Team floating 5 seats",
-  "type": "floating",
-  "pool_size": 5,
-  "max_active_devices": 5,
-  "max_borrow_sec": 0,
-  "assertion_ttl_seconds": 300
+  "name": "Team annual, 5 devices",
+  "type": "subscription",
+  "duration_sec": 31536000,
+  "max_active_devices": 5
 }
 ```
 
@@ -569,27 +573,24 @@ Then stamp an entitlement from either policy:
 For catalog-driven tiers, create catalog features and plans, attach each plan
 feature to a policy or set a device limit override on the plan feature, then
 use `/api/admin/license-plans/preview` and `/api/admin/license-plans/apply`.
-Runtime checks read the stamped entitlement rows, not plan or tier names. Plan
-apply writes protected grants: a created grant has no device hash, seat pool,
+A plan feature carries only its policy and that optional device limit; a plan
+feature or imported manifest row that names a seat, borrowing, meter or TTL
+field returns `400 invalid_request`, and a plan export names none. Runtime
+checks read the stamped entitlement rows, not plan or tier names. Plan apply
+writes protected grants: a created grant has no device hash, seat pool,
 borrowing or meter, and keeps the default TTLs. An update writes only the
 validity window, notes, owner, license, policy, device limit and trial state,
-so it never makes a protected grant unusable. A plan feature's seat, borrowing,
-meter and TTL overrides do not apply.
+so it never makes a protected grant unusable. A preview item reports each
+grant's mode and device limit.
 
-Client behavior differs by mode:
-
-- Node-locked clients use `/v1/activate` and `/v1/renew`; `max_active_devices`
-  controls how many distinct devices can hold a lease in the rebind window.
-- Floating clients use `/v1/checkout`, `/v1/heartbeat`, and `/v1/release`;
-  `pool_size` is the live seat pool, and `max_borrow_sec > 0` enables bounded
-  borrowed/offline seats.
+Applications use the protected v2 integration: a customer enrolls each device,
+and the device limit caps how many are connected at once.
 
 The `/api/sync/entitlements` endpoint creates or updates a protected grant for a
 named customer and license ([User database sync](#user-database-sync)); it sets
 no device limit. Policies and catalog plan projection stamp the device limit and
-trial state, never a seat pool, borrowing or a meter. An admin create without a
-policy, or a PATCH, can set the device limit directly
-([Device limit](#device-limit)).
+trial state. An admin create without a policy, or a PATCH, can set the device
+limit directly ([Device limit](#device-limit)).
 
 ### Break-glass CLI
 

@@ -1,5 +1,5 @@
 import { INVALID_IDEMPOTENCY_KEY, mutationResponse, readIdempotencyKey } from "../../idempotency.js";
-import { policyTypeCapacityIsValid, validatePolicyInput, validatePolicyPatch } from "../../policy_validation.js";
+import { validatePolicyInput, validatePolicyPatch } from "../../policy_validation.js";
 import { envelope } from "../../responses.js";
 import { batchReturnedRow } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type { Actor, D1DatabaseLike, MutationContext } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
@@ -10,8 +10,9 @@ import { requireAdmin } from "../../auth.js";
 import { parseJsonBody, safeNotes } from "../../request.js";
 import { clientIp } from "../../support.js";
 import { boundedCursor } from "../../query.js";
+// What a policy stamps onto a protected grant: its device limit, validity and trial rules.
 const POLICY_COLUMNS =
-  "id, project, name, type, status, valid_from_offset_sec, duration_sec, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, notes, created_at, updated_at, meter_quota, meter_period_sec";
+  "id, project, name, type, status, valid_from_offset_sec, duration_sec, max_active_devices, expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, notes, created_at, updated_at";
 
 function policyStampOn(env: Env): boolean {
   return env.POLICY_STAMP_MODE === "on";
@@ -113,15 +114,13 @@ export async function handlePolicyCreate(request: Request, env: Env, actor: Acto
     const id = crypto.randomUUID();
     const now = Math.floor(Date.now() / 1000);
     const insert = env.DB.prepare(
-      `INSERT INTO entitlement_policies (id, project, name, type, status, valid_from_offset_sec, duration_sec, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, notes, created_at, updated_at, meter_quota, meter_period_sec)
-       VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${POLICY_COLUMNS}`,
+      `INSERT INTO entitlement_policies (id, project, name, type, status, valid_from_offset_sec, duration_sec, max_active_devices, expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, notes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${POLICY_COLUMNS}`,
     ).bind(
       id, input.project, input.name, input.type,
-      input.valid_from_offset_sec ?? null, input.duration_sec ?? null, input.assertion_ttl_seconds ?? 300,
-      input.pool_size ?? 0, input.max_active_devices ?? 1, input.max_borrow_sec ?? 0,
-      input.expiry_strategy ?? "fixed_window", input.trial_expiration_basis ?? "from_issue",
-      input.trial_duration_sec ?? 0, input.trial_one_per_device ?? 0, input.trial_require_device_proof ?? 0,
-      input.notes ?? "", now, now, input.meter_quota ?? 0, input.meter_period_sec ?? 2592000,
+      input.valid_from_offset_sec, input.duration_sec, input.max_active_devices,
+      input.expiry_strategy, input.trial_expiration_basis, input.trial_duration_sec, input.trial_one_per_device,
+      input.notes, now, now,
     );
     let row: Record<string, unknown> | null;
     try {
@@ -155,19 +154,14 @@ export async function handlePolicyPatch(request: Request, env: Env, actor: Actor
     if (existing === null) {
       return envelope(requestIdValue, "not_found", undefined, 404);
     }
-    const nextPoolSize = patch.pool_size ?? Number(existing.pool_size);
-    if (!policyTypeCapacityIsValid(existing.type, nextPoolSize)) {
-      return envelope(requestIdValue, "invalid_request", undefined, 400);
-    }
     if (typeof env.DB.batch !== "function") {
       return envelope(requestIdValue, "mutation_failed", undefined, 500);
     }
     const assignments: string[] = [];
     const values: unknown[] = [];
     for (const field of [
-      "valid_from_offset_sec", "duration_sec", "assertion_ttl_seconds", "pool_size", "max_active_devices",
-      "max_borrow_sec", "meter_quota", "meter_period_sec", "expiry_strategy", "trial_expiration_basis",
-      "trial_duration_sec", "trial_one_per_device", "trial_require_device_proof", "notes",
+      "valid_from_offset_sec", "duration_sec", "max_active_devices", "expiry_strategy", "trial_expiration_basis",
+      "trial_duration_sec", "trial_one_per_device", "notes",
     ] as const) {
       const value = (patch as Record<string, unknown>)[field];
       if (value !== undefined) {

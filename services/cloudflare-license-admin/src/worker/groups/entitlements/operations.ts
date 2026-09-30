@@ -69,7 +69,7 @@ export async function listEntitlements(request: Request, env: Env, requestIdValu
       .all<Omit<EntitlementRecord, "id">>();
     return csvResponse(
       "entitlements.csv",
-      ["id", "project", "feature", "license_fingerprint", "device_hash", "status", "assertion_ttl_seconds", "revocation_seq", "valid_from", "valid_until", "notes", "customer_id", "license_id", "created_at", "updated_at"],
+      ["id", "project", "feature", "license_fingerprint", "status", "revocation_seq", "valid_from", "valid_until", "notes", "customer_id", "license_id", "created_at", "updated_at"],
       csvRows.results.map(withId) as unknown as ReadonlyArray<Record<string, unknown>>,
     );
   }
@@ -202,11 +202,8 @@ export async function createFromPolicy(request: Request, env: Env, ctx: Mutation
     if (customerId !== undefined) overrides.customer_id = customerId;
     if (licenseId !== undefined) overrides.license_id = licenseId;
     const stamp = stampFromPolicy(policy as never, overrides as never, now);
-    // The stamp's input also names a device hash and the policy's assertion TTL; a protected grant
-    // takes neither, so the create keeps the empty hash and the default TTL.
-    const { device_hash: _deviceHash, assertion_ttl_seconds: _assertionTtl, ...stamped } = stamp.input;
     const key = { project, feature, license_fingerprint: licenseFingerprint };
-    return createWithEnforcement(env, { ...stamped, enforcement_mode: selected.enforcement_mode }, ctx, idempotency, [
+    return createWithEnforcement(env, { ...stamp.input, enforcement_mode: selected.enforcement_mode }, ctx, idempotency, [
         buildPolicyStampStatement(env as never, key, policy.id, stamp.capacity, stamp.trial),
       ], policy);
   }, admitReplay);

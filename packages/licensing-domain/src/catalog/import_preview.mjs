@@ -38,12 +38,7 @@ function normalizePlanFeature(value) {
     policy_id: value.policy_id ?? null,
     status: value.status ?? "active",
     display_order: value.display_order ?? 0,
-    assertion_ttl_seconds: value.assertion_ttl_seconds ?? null,
-    pool_size: value.pool_size ?? null,
     max_active_devices: value.max_active_devices ?? null,
-    max_borrow_sec: value.max_borrow_sec ?? null,
-    meter_quota: value.meter_quota ?? null,
-    meter_period_sec: value.meter_period_sec ?? null,
   };
 }
 

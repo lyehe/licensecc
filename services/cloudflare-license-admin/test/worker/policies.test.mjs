@@ -30,36 +30,36 @@ test("policy routes have direct owners and reject anonymous access", async () =>
 const { validatePolicyInput, validatePolicyPatch } = adminInternalsForTests;
 
 test("validatePolicyInput accepts a minimal body and applies defaults", () => {
-  const v = validatePolicyInput({ project: "DEFAULT", name: "Trial", type: "trial" });
-  assert.ok(v);
-  assert.equal(v.project, "DEFAULT");
-  assert.equal(v.name, "Trial");
-  assert.equal(v.type, "trial");
-  assert.equal(v.assertion_ttl_seconds, 300);
-  assert.equal(v.pool_size, 0);
-  assert.equal(v.max_active_devices, 1);
-  assert.equal(v.max_borrow_sec, 0);
-  assert.equal(v.expiry_strategy, "fixed_window");
-  assert.equal(v.trial_expiration_basis, "from_issue");
-  assert.equal(v.trial_duration_sec, 0);
-  assert.equal(v.trial_one_per_device, 0);
-  assert.equal(v.trial_require_device_proof, 0);
-  assert.equal(v.valid_from_offset_sec, null);
-  assert.equal(v.duration_sec, null);
-  assert.equal(v.notes, "");
+  // A policy carries its identity, validity, device limit and trial rules, and nothing else.
+  assert.deepEqual(validatePolicyInput({ project: "DEFAULT", name: "Trial", type: "trial" }), {
+    project: "DEFAULT",
+    name: "Trial",
+    type: "trial",
+    notes: "",
+    valid_from_offset_sec: null,
+    duration_sec: null,
+    max_active_devices: 1,
+    expiry_strategy: "fixed_window",
+    trial_expiration_basis: "from_issue",
+    trial_duration_sec: 0,
+    trial_one_per_device: 0,
+  });
 });
 
 test("validatePolicyInput honors explicit values and rejects malformed bodies", () => {
   const full = validatePolicyInput({
     project: "P", name: "Pro", type: "subscription", valid_from_offset_sec: 0, duration_sec: 31536000,
-    assertion_ttl_seconds: 600, pool_size: 10, max_active_devices: 5, max_borrow_sec: 3600,
-    expiry_strategy: "non_expiring", trial_expiration_basis: "from_first_activation",
-    trial_duration_sec: 1209600, trial_one_per_device: 1, trial_require_device_proof: 1, notes: "ok",
+    max_active_devices: 5, expiry_strategy: "non_expiring", trial_expiration_basis: "from_first_activation",
+    trial_duration_sec: 1209600, trial_one_per_device: 1, notes: "ok",
   });
   assert.ok(full);
   assert.equal(full.duration_sec, 31536000);
+  assert.equal(full.max_active_devices, 5);
   assert.equal(full.expiry_strategy, "non_expiring");
   assert.equal(full.trial_one_per_device, 1);
+  for (const type of ["trial", "node_locked", "subscription"]) {
+    assert.equal(validatePolicyInput({ project: "P", name: "x", type })?.type, type);
+  }
 
   for (const bad of [
     null,
@@ -69,23 +69,27 @@ test("validatePolicyInput honors explicit values and rejects malformed bodies", 
     { project: "P", name: "x", type: "bogus" },
     { project: "", name: "x", type: "trial" },
     { project: "P", name: "x\ninjection", type: "trial" },
-    { project: "P", name: "x", type: "trial", assertion_ttl_seconds: 0 },
-    { project: "P", name: "x", type: "trial", assertion_ttl_seconds: 9999 },
     { project: "P", name: "x", type: "trial", expiry_strategy: "nope" },
     { project: "P", name: "x", type: "trial", trial_expiration_basis: "nope" },
     { project: "P", name: "x", type: "trial", trial_one_per_device: 2 },
-    { project: "P", name: "x", type: "trial", pool_size: -1 },
+    { project: "P", name: "x", type: "trial", max_active_devices: -1 },
     { project: "P", name: "x", type: "trial", duration_sec: -5 },
-    { project: "P", name: "x", type: "node_locked", pool_size: 1 },
     { project: "P", name: "x", type: "floating" },
-    { project: "P", name: "x", type: "floating", pool_size: 0 },
+    { project: "P", name: "x", type: "floating", pool_size: 2 },
+    { project: "P", name: "x", type: "node_locked", pool_size: 0 },
+    { project: "P", name: "x", type: "trial", max_borrow_sec: 0 },
+    { project: "P", name: "x", type: "trial", meter_quota: 0 },
+    { project: "P", name: "x", type: "trial", meter_period_sec: 2592000 },
+    { project: "P", name: "x", type: "trial", assertion_ttl_seconds: 300 },
+    { project: "P", name: "x", type: "trial", trial_require_device_proof: 0 },
+    { project: "P", name: "x", type: "trial", status: "active" },
   ]) {
     assert.equal(validatePolicyInput(bad), null, `expected null for ${JSON.stringify(bad)}`);
   }
 });
 
 test("validatePolicyPatch updates mutable fields and rejects identity fields", () => {
-  assert.deepEqual(validatePolicyPatch({ pool_size: 8, notes: "x" }), { pool_size: 8, notes: "x" });
+  assert.deepEqual(validatePolicyPatch({ max_active_devices: 8, notes: "x" }), { max_active_devices: 8, notes: "x" });
   assert.deepEqual(validatePolicyPatch({ valid_from_offset_sec: null, duration_sec: 100 }), { valid_from_offset_sec: null, duration_sec: 100 });
   assert.deepEqual(validatePolicyPatch({}), {});
 
@@ -93,10 +97,13 @@ test("validatePolicyPatch updates mutable fields and rejects identity fields", (
   for (const bad of [{ project: "X" }, { name: "Renamed" }, { type: "trial" }, { status: "disabled" }]) {
     assert.equal(validatePolicyPatch(bad), null, `identity field ${JSON.stringify(bad)} must be rejected`);
   }
-  // Out-of-range / bad-enum values are rejected.
+  // Out-of-range / bad-enum values, and fields a policy does not have, are rejected.
   for (const bad of [
-    { assertion_ttl_seconds: 0 },
-    { trial_require_device_proof: 5 },
+    { max_active_devices: -1 },
+    { trial_one_per_device: 5 },
+    { pool_size: 8 },
+    { assertion_ttl_seconds: 300 },
+    { trial_require_device_proof: 0 },
     { expiry_strategy: "weird" },
     { trial_expiration_basis: "weird" },
     { notes: "a".repeat(2000) },

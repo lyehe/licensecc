@@ -62,8 +62,7 @@ function ctx() {
 function policy(overrides = {}) {
   return {
     id: "pol_1", project: "DEFAULT", name: "P", type: "subscription", status: "active",
-    valid_from_offset_sec: null, duration_sec: null, assertion_ttl_seconds: 300,
-    pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000, expiry_strategy: "fixed_window",
+    valid_from_offset_sec: null, duration_sec: null, max_active_devices: 1, expiry_strategy: "fixed_window",
     trial_expiration_basis: "from_issue", trial_duration_sec: 0, trial_one_per_device: 0, trial_require_device_proof: 0,
     notes: "", created_at: NOW, updated_at: NOW, ...overrides,
   };
@@ -71,11 +70,14 @@ function policy(overrides = {}) {
 const target = { project: "DEFAULT", feature: "DEFAULT", license_fingerprint: FP };
 
 test("stampFromPolicy: trial from_issue sets a now+duration window and freezes trial state", () => {
-  const p = policy({ type: "trial", trial_expiration_basis: "from_issue", trial_duration_sec: 1209600, pool_size: 2, max_active_devices: 3, trial_one_per_device: 1, trial_require_device_proof: 1 });
+  const p = policy({ type: "trial", trial_expiration_basis: "from_issue", trial_duration_sec: 1209600, max_active_devices: 3, trial_one_per_device: 1, trial_require_device_proof: 1 });
   const { input, capacity, trial } = stampFromPolicy(p, { ...target }, NOW);
   assert.equal(input.valid_until, NOW + 1209600);
   assert.equal(input.status, "active");
-  assert.deepEqual(capacity, { pool_size: 2, max_active_devices: 3, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000 });
+  // A protected grant takes only its device limit from a policy, and no device hash or assertion TTL.
+  assert.deepEqual(capacity, { max_active_devices: 3 });
+  assert.equal("device_hash" in input, false);
+  assert.equal("assertion_ttl_seconds" in input, false);
   assert.deepEqual(trial, { is_trial: 1, trial_expiration_basis: "from_issue", trial_duration_sec: 1209600, trial_one_per_device: 1, trial_require_device_proof: 1 });
 });
 
@@ -91,10 +93,9 @@ test("stampFromPolicy: non_expiring -> null window; subscription duration -> now
   assert.equal(stampFromPolicy(policy({ expiry_strategy: "non_expiring", duration_sec: 999 }), { ...target }, NOW).input.valid_until, null);
   assert.equal(stampFromPolicy(policy({ duration_sec: 2592000 }), { ...target }, NOW).input.valid_until, NOW + 2592000);
   // explicit overrides beat the policy defaults
-  const o = stampFromPolicy(policy({ duration_sec: 2592000, pool_size: 5 }), { ...target, valid_until: 42, pool_size: 9, assertion_ttl_seconds: 120 }, NOW);
+  const o = stampFromPolicy(policy({ duration_sec: 2592000, max_active_devices: 5 }), { ...target, valid_until: 42, max_active_devices: 9 }, NOW);
   assert.equal(o.input.valid_until, 42);
-  assert.equal(o.input.assertion_ttl_seconds, 120);
-  assert.equal(o.capacity.pool_size, 9);
+  assert.deepEqual(o.capacity, { max_active_devices: 9 });
 });
 
 test("stampFromPolicy: non-trial zeroes the trial state", () => {
@@ -150,7 +151,7 @@ test("createEntitlement + stamp extra writes the window, device limit and trial 
 test("byte-identical guard: createEntitlement with NO extras leaves capacity/trial at column defaults", async () => {
   const db = freshDb();
   const env = { DB: new D1Like(db) };
-  const result = await createEntitlement(env, { ...target, assertion_ttl_seconds: 300 }, ctx());
+  const result = await createEntitlement(env, { ...target }, ctx());
   assert.equal(result.data.revocation_seq, 1);
   const row = db.prepare("SELECT policy_id, pool_size, max_active_devices, max_borrow_sec, is_trial, trial_expiration_basis, trial_duration_sec FROM entitlements WHERE license_fingerprint = ?").get(FP);
   assert.equal(row.policy_id, null);

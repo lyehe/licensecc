@@ -635,15 +635,15 @@ export function hasCatalogImportManifestData(value: unknown): boolean {
     return row !== null && stringField(row, "project") && stringField(row, "feature_key") && typeof row.name === "string" &&
       typeof row.description === "string" && typeof row.category === "string" && enumField(row, "status", CATALOG_STATUSES);
   };
+  // A manifest plan feature names its policy and optional device limit; it has no seat, borrowing,
+  // meter or TTL field.
   const planFeatureInput = (item: unknown): boolean => {
     const row = record(item);
     if (row === null || !stringField(row, "project") || !stringField(row, "feature_key") ||
       !enumField(row, "feature_inclusion", ["included", "addon"] as const) || !nullableStringField(row, "addon_key") ||
       !nullableStringField(row, "policy_id") || !enumField(row, "status", CATALOG_STATUSES) ||
       !integerInRangeField(row, "display_order", 0, MAX_CAPACITY) ||
-      !nullableIntegerInRangeField(row, "assertion_ttl_seconds", 0, 3600) || !nullableIntegerInRangeField(row, "pool_size", 0, MAX_CAPACITY) ||
-      !nullableIntegerInRangeField(row, "max_active_devices", 0, MAX_CAPACITY) || !nullableIntegerInRangeField(row, "max_borrow_sec", 0, MAX_DURATION_SECONDS) ||
-      !nullableIntegerInRangeField(row, "meter_quota", 0, MAX_METER_QUOTA) || !nullableIntegerInRangeField(row, "meter_period_sec", 0, MAX_DURATION_SECONDS)) {
+      !nullableIntegerInRangeField(row, "max_active_devices", 0, MAX_CAPACITY)) {
       return false;
     }
     return row.feature_inclusion !== "addon" || stringField(row, "addon_key");

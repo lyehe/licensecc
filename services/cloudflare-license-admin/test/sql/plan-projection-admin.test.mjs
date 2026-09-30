@@ -149,9 +149,8 @@ function addIncludedProjectionFeatures(db, count) {
   const planFeature = db.prepare(
     `INSERT INTO catalog_plan_features
       (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
-       assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
-       created_at, updated_at)
-     VALUES ('DEFAULT', 'plan_pro', ?, 'included', NULL, 'pol_node', 'active', ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+       max_active_devices, created_at, updated_at)
+     VALUES ('DEFAULT', 'plan_pro', ?, 'included', NULL, 'pol_node', 'active', ?, NULL, ?, ?)`,
   );
   for (let index = 0; index < count; index += 1) {
     const key = `budget_${index}`;
@@ -179,27 +178,20 @@ function seedPolicy(db, id, overrides = {}) {
     status: "active",
     valid_from_offset_sec: null,
     duration_sec: null,
-    assertion_ttl_seconds: 600,
-    pool_size: 0,
     max_active_devices: 1,
-    max_borrow_sec: 0,
     expiry_strategy: "non_expiring",
     trial_expiration_basis: "from_issue",
     trial_duration_sec: 0,
     trial_one_per_device: 0,
-    trial_require_device_proof: 0,
     notes: "",
-    meter_quota: 0,
-    meter_period_sec: 2592000,
     ...overrides,
   };
   db.prepare(
     `INSERT INTO entitlement_policies
-      (id, project, name, type, status, valid_from_offset_sec, duration_sec, assertion_ttl_seconds,
-       pool_size, max_active_devices, max_borrow_sec, expiry_strategy, trial_expiration_basis,
-       trial_duration_sec, trial_one_per_device, trial_require_device_proof, notes, created_at,
-       updated_at, meter_quota, meter_period_sec)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, project, name, type, status, valid_from_offset_sec, duration_sec, max_active_devices,
+       expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, notes,
+       created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     policy.project,
@@ -208,26 +200,20 @@ function seedPolicy(db, id, overrides = {}) {
     policy.status,
     policy.valid_from_offset_sec,
     policy.duration_sec,
-    policy.assertion_ttl_seconds,
-    policy.pool_size,
     policy.max_active_devices,
-    policy.max_borrow_sec,
     policy.expiry_strategy,
     policy.trial_expiration_basis,
     policy.trial_duration_sec,
     policy.trial_one_per_device,
-    policy.trial_require_device_proof,
     policy.notes,
     NOW,
     NOW,
-    policy.meter_quota,
-    policy.meter_period_sec,
   );
 }
 
 function seedCatalog(db) {
   seedPolicy(db, "pol_node");
-  seedPolicy(db, "pol_float", { pool_size: 4, max_active_devices: 4, max_borrow_sec: 86400 });
+  seedPolicy(db, "pol_team", { max_active_devices: 4 });
 
   const feature = db.prepare(
     "INSERT INTO catalog_features (id, project, feature_key, name, description, category, status, created_at, updated_at) VALUES (?, 'DEFAULT', ?, ?, '', '', 'active', ?, ?)",
@@ -243,13 +229,12 @@ function seedCatalog(db) {
   const planFeature = db.prepare(
     `INSERT INTO catalog_plan_features
       (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
-       assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
-       created_at, updated_at)
-     VALUES ('DEFAULT', 'plan_pro', ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       max_active_devices, created_at, updated_at)
+     VALUES ('DEFAULT', 'plan_pro', ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
   );
-  planFeature.run("core", "included", null, "pol_node", 1, null, null, null, null, null, null, NOW, NOW);
-  planFeature.run("export", "included", null, "pol_node", 2, null, null, null, null, null, null, NOW, NOW);
-  planFeature.run("team", "addon", "team_seats", "pol_float", 3, null, 6, 6, 172800, null, null, NOW, NOW);
+  planFeature.run("core", "included", null, "pol_node", 1, null, NOW, NOW);
+  planFeature.run("export", "included", null, "pol_node", 2, null, NOW, NOW);
+  planFeature.run("team", "addon", "team_seats", "pol_team", 3, 6, NOW, NOW);
 }
 
 function projectionBody(overrides = {}) {
@@ -276,8 +261,13 @@ test("license-plan preview is non-mutating and returns the concrete entitlement 
   assert.equal(json.code, "license_plan_projection_previewed");
   assert.equal(json.data.summary.create, 3);
   assert.deepEqual(json.data.will_create.map((row) => row.feature), ["core", "export", "team"]);
-  // The team add-on's policy is floating, but a projected grant is protected: it never has a seat pool.
-  assert.equal(json.data.will_create.find((row) => row.feature === "team").license_mode, "node_locked");
+  // A projected grant is protected: node-locked, with the plan row's device limit as its only capacity.
+  const team = json.data.will_create.find((row) => row.feature === "team");
+  assert.equal(team.license_mode, "node_locked");
+  assert.equal(team.max_active_devices, 6);
+  for (const legacy of ["assertion_ttl_seconds", "pool_size", "max_borrow_sec", "meter_quota", "meter_period_sec"]) {
+    assert.equal(Object.hasOwn(team, legacy), false, `a preview item has no ${legacy}`);
+  }
   assert.match(json.data.preview_id, /^ppv_/);
   assert.equal(typeof json.data.effective_at, "number");
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
@@ -347,8 +337,10 @@ test("catalog admin APIs create plan definitions consumed by projection", async 
   assert.equal(planFeatureBody.code, "catalog_plan_feature_saved");
   assert.equal(planFeatureBody.data.feature_inclusion, "included");
   assert.equal(planFeatureBody.data.policy_id, "pol_node");
-  assert.equal(planFeatureBody.data.pool_size, null);
   assert.equal(planFeatureBody.data.max_active_devices, null);
+  for (const legacy of ["assertion_ttl_seconds", "pool_size", "max_borrow_sec", "meter_quota", "meter_period_sec"]) {
+    assert.equal(Object.hasOwn(planFeatureBody.data, legacy), false, `a plan feature has no ${legacy}`);
+  }
 
   const list = await worker.fetch(devReq(`/api/admin/catalog/plans/${encodeURIComponent(planBody.data.id)}/features?project=DEFAULT`), env);
   assert.equal(list.status, 200, await list.clone().text());
@@ -540,7 +532,7 @@ test("catalog lifecycle APIs patch, transition, audit, and replay idempotently",
 test("catalog import/export manifests preview, apply, replay, and re-import unchanged", async () => {
   const db = freshDb();
   seedPolicy(db, "pol_node");
-  seedPolicy(db, "pol_float", { type: "floating", pool_size: 6, max_active_devices: 6, max_borrow_sec: 172800 });
+  seedPolicy(db, "pol_team", { max_active_devices: 6 });
   const env = devEnv(db);
   const manifest = {
     format_version: 1,
@@ -557,8 +549,8 @@ test("catalog import/export manifests preview, apply, replay, and re-import unch
         status: "active",
         version: 1,
         features: [
-          { project: "DEFAULT", feature_key: "core", feature_inclusion: "included", addon_key: null, policy_id: "pol_node", status: "active", display_order: 0, assertion_ttl_seconds: null, pool_size: null, max_active_devices: null, max_borrow_sec: null, meter_quota: null, meter_period_sec: null },
-          { project: "DEFAULT", feature_key: "team", feature_inclusion: "addon", addon_key: "team_seats", policy_id: "pol_float", status: "active", display_order: 1, assertion_ttl_seconds: null, pool_size: 6, max_active_devices: 6, max_borrow_sec: 172800, meter_quota: null, meter_period_sec: null },
+          { project: "DEFAULT", feature_key: "core", feature_inclusion: "included", addon_key: null, policy_id: "pol_node", status: "active", display_order: 0, max_active_devices: null },
+          { project: "DEFAULT", feature_key: "team", feature_inclusion: "addon", addon_key: "team_seats", policy_id: "pol_team", status: "active", display_order: 1, max_active_devices: 6 },
         ],
       },
     ],
@@ -601,6 +593,10 @@ test("catalog import/export manifests preview, apply, replay, and re-import unch
   assert.equal(exportedBody.data.features.length, 2);
   assert.equal(exportedBody.data.plans[0].features.length, 2);
   assert.equal(exportedBody.data.plans[0].features[1].addon_key, "team_seats");
+  // An export names only what a plan feature carries, so it re-imports as is.
+  assert.deepEqual(exportedBody.data.plans[0].features[1], {
+    project: "DEFAULT", feature_key: "team", feature_inclusion: "addon", addon_key: "team_seats", policy_id: "pol_team", status: "active", display_order: 1, max_active_devices: 6,
+  });
 
   const unchanged = await worker.fetch(
     devReq("/api/admin/catalog/import?dry_run=1", { method: "POST", body: JSON.stringify(exportedBody.data) }),
@@ -657,14 +653,12 @@ test("license-plan apply creates stamped entitlements, assignment row, and is re
   assert.equal(firstBody.code, "license_plan_projection_applied");
   assert.equal(firstBody.data.applied.created.length, 3);
 
-  const team = db.prepare("SELECT status, enforcement_mode, policy_id, pool_size, max_active_devices, max_borrow_sec, valid_until FROM entitlements WHERE feature = 'team' AND license_fingerprint = ?").get(FP);
+  const team = db.prepare("SELECT status, enforcement_mode, policy_id, max_active_devices, valid_until FROM entitlements WHERE feature = 'team' AND license_fingerprint = ?").get(FP);
   assert.equal(team.status, "active");
   assert.equal(team.enforcement_mode, "device_bound_v1");
-  assert.equal(team.policy_id, "pol_float");
-  // The plan row's device limit applies; its seat pool and borrowing do not.
-  assert.equal(team.pool_size, 0);
+  assert.equal(team.policy_id, "pol_team");
+  // The plan row's device limit overrides its policy's.
   assert.equal(team.max_active_devices, 6);
-  assert.equal(team.max_borrow_sec, 0);
   assert.equal(team.valid_until, SUPPORT_UNTIL);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events WHERE license_fingerprint = ?").get(FP).c, 3);
   assert.equal(db.prepare("SELECT plan_id FROM license_plan_assignments WHERE license_id = 'lic_plan' AND project = 'DEFAULT'").get().plan_id, "plan_pro");

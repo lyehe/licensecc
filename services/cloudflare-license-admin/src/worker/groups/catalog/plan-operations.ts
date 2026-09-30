@@ -205,8 +205,7 @@ export async function listCatalogPlanFeatures(request: Request, env: Env, planId
   const result = await env.DB.prepare(
     `SELECT pf.project, pf.plan_id, p.plan_key, pf.feature_key, f.name AS feature_name,
             pf.feature_inclusion, pf.addon_key, pf.policy_id, pf.status, pf.display_order,
-            pf.assertion_ttl_seconds, pf.pool_size, pf.max_active_devices, pf.max_borrow_sec,
-            pf.meter_quota, pf.meter_period_sec, pf.created_at, pf.updated_at
+            pf.max_active_devices, pf.created_at, pf.updated_at
      FROM catalog_plan_features pf
      JOIN catalog_plans p ON p.id = pf.plan_id
      JOIN catalog_features f ON f.project = pf.project AND f.feature_key = pf.feature_key
@@ -226,8 +225,7 @@ export async function getCatalogPlanFeatureView(env: Env, planId: string, featur
   return env.DB.prepare(
     `SELECT pf.project, pf.plan_id, p.plan_key, pf.feature_key, f.name AS feature_name,
             pf.feature_inclusion, pf.addon_key, pf.policy_id, pf.status, pf.display_order,
-            pf.assertion_ttl_seconds, pf.pool_size, pf.max_active_devices, pf.max_borrow_sec,
-            pf.meter_quota, pf.meter_period_sec, pf.created_at, pf.updated_at
+            pf.max_active_devices, pf.created_at, pf.updated_at
      FROM catalog_plan_features pf
      JOIN catalog_plans p ON p.id = pf.plan_id
      JOIN catalog_features f ON f.project = pf.project AND f.feature_key = pf.feature_key

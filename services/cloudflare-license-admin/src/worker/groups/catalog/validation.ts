@@ -13,7 +13,7 @@ export const MAX_FEATURE_SIZE = 15;
 const MAX_NOTES_SIZE = 1000;
 export const MAX_NAME_SIZE = 127;
 const CATALOG_TUPLE_CONTROL = "\u001f";
-// A generous-but-bounded ceiling for the policy duration/offset/borrow integers
+// A generous-but-bounded ceiling for duration and offset integers
 // (~100 years in seconds). Keeps validators from accepting absurd or overflow values.
 export const MAX_DURATION_SECONDS = 3_153_600_000;
 const INVALID = Symbol("invalid");
@@ -197,12 +197,7 @@ export interface CatalogPlanFeatureInput {
   policy_id: string | null;
   status: "active" | "disabled";
   display_order: number;
-  assertion_ttl_seconds: number | null;
-  pool_size: number | null;
   max_active_devices: number | null;
-  max_borrow_sec: number | null;
-  meter_quota: number | null;
-  meter_period_sec: number | null;
 }
 
 export interface CatalogImportInput {
@@ -366,6 +361,8 @@ export function validateCatalogPlanFeatureInput(value: unknown): CatalogPlanFeat
     return null;
   }
   const input = value as Record<string, unknown>;
+  // A plan feature grants a protected grant its device limit, directly or through its policy; a
+  // body naming any other field (a seat pool, borrowing, a meter or an assertion TTL) is refused.
   if (!hasOnlyKeys(input, new Set([
     "project",
     "feature_key",
@@ -374,12 +371,7 @@ export function validateCatalogPlanFeatureInput(value: unknown): CatalogPlanFeat
     "policy_id",
     "status",
     "display_order",
-    "assertion_ttl_seconds",
-    "pool_size",
     "max_active_devices",
-    "max_borrow_sec",
-    "meter_quota",
-    "meter_period_sec",
   ]))) {
     return null;
   }
@@ -390,19 +382,13 @@ export function validateCatalogPlanFeatureInput(value: unknown): CatalogPlanFeat
   const policyId = input.policy_id === undefined ? null : nullableCatalogIdentifier(input.policy_id, 128);
   const status = catalogStatus(input.status);
   const displayOrder = boundedInt(input.display_order ?? 0, 0, 1_000_000);
-  const assertionTtl = readNullableNonNegativeInt(input, "assertion_ttl_seconds", 3600);
-  const poolSize = readNullableNonNegativeInt(input, "pool_size");
   const maxActiveDevices = readNullableNonNegativeInt(input, "max_active_devices");
-  const maxBorrow = readNullableNonNegativeInt(input, "max_borrow_sec", MAX_DURATION_SECONDS);
-  const meterQuota = readNullableNonNegativeInt(input, "meter_quota");
-  const meterPeriod = readNullableNonNegativeInt(input, "meter_period_sec", MAX_DURATION_SECONDS);
   if (
     project === null || featureKey === null ||
     (inclusion !== "included" && inclusion !== "addon") ||
     (inclusion === "addon" && addonKey === null) ||
     addonKey === undefined || policyId === undefined || status === null || displayOrder === undefined ||
-    assertionTtl === INVALID || poolSize === INVALID || maxActiveDevices === INVALID ||
-    maxBorrow === INVALID || meterQuota === INVALID || meterPeriod === INVALID
+    maxActiveDevices === INVALID
   ) {
     return null;
   }
@@ -414,12 +400,7 @@ export function validateCatalogPlanFeatureInput(value: unknown): CatalogPlanFeat
     policy_id: policyId,
     status,
     display_order: displayOrder,
-    assertion_ttl_seconds: assertionTtl,
-    pool_size: poolSize,
     max_active_devices: maxActiveDevices,
-    max_borrow_sec: maxBorrow,
-    meter_quota: meterQuota,
-    meter_period_sec: meterPeriod,
   };
 }
 

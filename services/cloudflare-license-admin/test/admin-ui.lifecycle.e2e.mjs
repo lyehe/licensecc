@@ -550,7 +550,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
         version: 1,
         status: "active",
         features: [
-          { project: "DEFAULT", feature_key: "analytics", feature_inclusion: "included", addon_key: null, policy_id: "pol_node", status: "active", display_order: 4, assertion_ttl_seconds: null, pool_size: null, max_active_devices: null, max_borrow_sec: null, meter_quota: null, meter_period_sec: null },
+          { project: "DEFAULT", feature_key: "analytics", feature_inclusion: "included", addon_key: null, policy_id: "pol_node", status: "active", display_order: 4, max_active_devices: null },
         ],
       },
     ],

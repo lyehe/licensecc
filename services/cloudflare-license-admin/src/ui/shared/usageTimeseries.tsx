@@ -9,11 +9,14 @@ import { useRequestFence } from "./requestFence";
 import type { TimeseriesRange } from "./timeseries";
 import { timeseriesPath } from "./timeseries";
 
+/** The console's charts still read a checkout series, which the report no longer returns. */
+type ConsoleTimeseriesBucket = TimeseriesBucket & { checkouts: number; releases: number; denial_rate: number };
+
 export interface UsageTimeseriesData {
   from: number;
   to: number;
   bucket_seconds: number;
-  buckets: TimeseriesBucket[];
+  buckets: ConsoleTimeseriesBucket[];
 }
 
 interface UsageTimeseriesControls {

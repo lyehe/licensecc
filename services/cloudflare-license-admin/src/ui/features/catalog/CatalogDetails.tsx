@@ -4,7 +4,10 @@ import type { CatalogImportEffect, CatalogImportPreviewResponse, CatalogPlanFeat
 import { formatEpoch, formatUtcDate } from "../../shared/format";
 import { catalogImportEffectValueLabel, catalogImportTargetFields, catalogImportTargetKey } from "./workflow";
 
-export function ProjectionRows({ title, items }: { title: string; items: PlanProjectionItem[] }): React.ReactElement | null {
+/** The console still shows a seat pool, which a preview item no longer reports. */
+type ConsoleProjectionItem = PlanProjectionItem & { pool_size?: number };
+
+export function ProjectionRows({ title, items }: { title: string; items: ConsoleProjectionItem[] }): React.ReactElement | null {
   if (items.length === 0) return null;
   return (
     <section className="deliveriesPane">
@@ -15,7 +18,7 @@ export function ProjectionRows({ title, items }: { title: string; items: PlanPro
           <tr key={`${title}:${item.feature}`}>
             <td>{item.feature}</td><td>{item.license_mode}</td><td>{item.policy_id ?? "-"}</td>
             <td>{item.valid_until === null ? "open" : formatUtcDate(item.valid_until)}</td>
-            <td>{item.pool_size > 0 ? `pool ${item.pool_size}` : `devices ${item.max_active_devices}`}</td>
+            <td>{item.pool_size !== undefined && item.pool_size > 0 ? `pool ${item.pool_size}` : `devices ${item.max_active_devices}`}</td>
             <td>{item.addon_key ?? item.source}{item.reason ? ` / ${item.reason}` : ""}</td>
           </tr>
         ))}</tbody>

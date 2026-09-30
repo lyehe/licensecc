@@ -171,7 +171,7 @@ export interface CatalogPlanFeatureInput {
 // entitlement (which is thereafter its own source of truth). The canonical Policy /
 // stamp types live in the backend package's policy.d.ts; these re-declare only the
 // admin-facing CRUD request/response shapes.
-export type PolicyType = "trial" | "node_locked" | "floating" | "subscription";
+export type PolicyType = "trial" | "node_locked" | "subscription";
 export type PolicyStatus = "active" | "disabled";
 export type ExpiryStrategy = "fixed_window" | "non_expiring";
 export type TrialExpirationBasis = "from_issue" | "from_first_activation" | "from_first_use";
@@ -415,21 +415,17 @@ export interface EntitlementTrialFields {
   trial_device_hash?: string | null;
 }
 
-// ── Workstream F: usage-analytics reports + the stuck-seat force-release lever ─
-// Three new admin routes that read the SAME D1 the backend owns: a bucketed usage
-// time-series + fulfillment counts (for the inline-SVG charts), an expiring-soon
-// entitlement list, and an admin-only "release the seats stuck on a dead machine"
-// force-release that mirrors the backend's reclaim discipline.
+// ── Workstream F: reports ────────────────────────────────────────────────────
+// Admin routes that read the SAME D1 the backend owns: a bucketed time-series of refused
+// connections and fulfillment counts (for the inline-SVG charts), and an expiring-soon
+// entitlement list.
 
-// GET /api/admin/report/timeseries — one row per bucket over the [from,to] window. checkouts /
-// releases / denials come from usage_events.ts; fulfillment_events from order_events.received_at.
-// denial_rate = denials / (checkouts + denials), 0 when the bucket saw neither.
+// GET /api/admin/report/timeseries — one row per bucket over the [from,to] window. denials counts
+// the protected device-limit refusals recorded in usage_events.ts; fulfillment_events counts
+// order_events.received_at.
 export interface TimeseriesBucket {
   start: number;
-  checkouts: number;
-  releases: number;
   denials: number;
-  denial_rate: number;
   fulfillment_events: number;
 }
 

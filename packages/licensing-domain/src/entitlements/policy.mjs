@@ -15,34 +15,17 @@
 const TRIAL_BASES = new Set(["from_issue", "from_first_activation", "from_first_use"]);
 
 /**
- * The four policy capacity modes, in canonical order. This is the ONE runtime source of the enum
- * that the admin validators, UI form, OpenAPI spec crosscheck, and SQL CHECK backstops all mirror.
+ * The three policy types, in canonical order. This is the ONE runtime source of the enum that the
+ * admin validators, UI form, OpenAPI spec crosscheck, and SQL CHECK backstops all mirror. A policy
+ * stamps a protected grant, which never has a seat pool, so there is no floating type.
  */
-export const POLICY_TYPES = /** @type {const} */ (["trial", "node_locked", "floating", "subscription"]);
-
-/**
- * The capacity-mode invariant, single-sourced. Returns null when (type, poolSize) is valid; else the
- * violated rule as a stable error-code string:
- *   node_locked  -> pool_size MUST be 0  (a node-locked policy pins one device, no shared pool)
- *   floating     -> pool_size MUST be > 0 (a floating policy needs a seat pool to lease from)
- *   trial/subscription -> unconstrained on pool_size.
- * Rules mirror admin policy_validation.ts's former policyTypeCapacityIsValid exactly.
- */
-export function policyCapacityViolation(type, poolSize) {
-  if (type === "node_locked" && poolSize !== 0) {
-    return "node_locked_requires_zero_pool";
-  }
-  if (type === "floating" && !(poolSize > 0)) {
-    return "floating_requires_pool";
-  }
-  return null;
-}
+export const POLICY_TYPES = /** @type {const} */ (["trial", "node_locked", "subscription"]);
 
 /**
  * Pure stamp. `overrides` MUST carry the target tuple (project, feature, license_fingerprint) and MAY
  * override any default. Returns { input, capacity, trial }:
  *   input    -> EntitlementInput for createEntitlement (status forced 'active' on a fresh stamp)
- *   capacity -> { pool_size, max_active_devices, max_borrow_sec }
+ *   capacity -> { max_active_devices }: a protected grant takes only its device limit from a policy
  *   trial    -> { is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof }
  */
 export function stampFromPolicy(policy, overrides, now) {
@@ -83,9 +66,7 @@ export function stampFromPolicy(policy, overrides, now) {
     project: overrides.project,
     feature: overrides.feature,
     license_fingerprint: overrides.license_fingerprint,
-    device_hash: overrides.device_hash ?? "",
     status: "active",
-    assertion_ttl_seconds: overrides.assertion_ttl_seconds ?? policy.assertion_ttl_seconds,
     valid_from: validFrom,
     valid_until: validUntil,
     notes: overrides.notes ?? "",
@@ -94,13 +75,7 @@ export function stampFromPolicy(policy, overrides, now) {
   };
 
   const capacity = {
-    pool_size: overrides.pool_size ?? policy.pool_size,
     max_active_devices: overrides.max_active_devices ?? policy.max_active_devices,
-    max_borrow_sec: overrides.max_borrow_sec ?? policy.max_borrow_sec,
-    // Metering quota (audit R6.3): a stamped entitlement inherits the policy's per-period consumption
-    // quota + window, so a "metered" policy makes meterUsage enforce it end-to-end.
-    meter_quota: overrides.meter_quota ?? policy.meter_quota ?? 0,
-    meter_period_sec: overrides.meter_period_sec ?? policy.meter_period_sec ?? 2592000,
   };
 
   const trial = isTrial

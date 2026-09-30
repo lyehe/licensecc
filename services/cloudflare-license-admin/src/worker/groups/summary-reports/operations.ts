@@ -3,7 +3,6 @@ import { envelope, json } from "../../responses.js";
 import type { TimeseriesBucket, ExpiringEntitlement } from "../../../shared/api";
 import { verifyAuditChain } from "@licensecc/cloudflare-runtime/d1/audit_digest";
 import { boundTrialDeadlineSql } from "@licensecc/cloudflare-runtime/device/bound_trial";
-import { legacyTrialDeadlineSql } from "@licensecc/cloudflare-runtime/lease/trial_store";
 import { entitlementId } from "@licensecc/licensing-domain/entitlements/contracts";
 import type { Env } from "../../env.js";
 import { envFlag } from "../../support.js";
@@ -75,10 +74,11 @@ function epochParam(url: URL, name: string): number | null {
 }
 
 // GET /api/admin/report/timeseries?from=&to=&buckets= (reader+admin). Bucket [from,to] into N
-// equal buckets and aggregate, per bucket, usage_events (checkout/release+reclaim/denied by ts)
-// and order_events (fulfillment_events by received_at) in a SINGLE-PASS GROUP BY over a computed
-// bucket index. The bucket index is CAST((ts - from) * buckets / span) clamped to [0, buckets-1];
-// the time window itself bounds the scan (indexed on ts / received_at).
+// equal buckets and count, per bucket, the protected refusals (a device-limit refusal is the only
+// usage_events row a protected grant records) and order_events (fulfillment_events by
+// received_at), each in a SINGLE-PASS GROUP BY over a computed bucket index. The bucket index is
+// CAST((ts - from) * buckets / span) clamped to [0, buckets-1]; the time window itself bounds the
+// scan (indexed on ts / received_at).
 export async function reportTimeseries(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
   const now = Math.floor(Date.now() / 1000);
@@ -103,14 +103,11 @@ export async function reportTimeseries(request: Request, env: Env, requestIdValu
   const bucketIndexExpr = (tsColumn: string): string =>
     `MIN(CAST((${tsColumn} - ?) * ? / ? AS INTEGER), ?)`;
 
-  // Usage events: one GROUP BY over the window, counting each event_type per bucket.
-  const usageRows = await env.DB.prepare(
-    `SELECT ${bucketIndexExpr("ts")} AS bucket,
-       SUM(CASE WHEN event_type = 'checkout' THEN 1 ELSE 0 END) AS checkouts,
-       SUM(CASE WHEN event_type IN ('release', 'reclaim') THEN 1 ELSE 0 END) AS releases,
-       SUM(CASE WHEN event_type = 'denied' THEN 1 ELSE 0 END) AS denials
-     FROM usage_events WHERE ts >= ? AND ts < ? GROUP BY bucket`,
-  ).bind(from, buckets, span, buckets - 1, from, to).all<{ bucket: number; checkouts: number; releases: number; denials: number }>();
+  // Protected refusals: the device-limit refusals protected issuance records, one GROUP BY over the window.
+  const denialRows = await env.DB.prepare(
+    `SELECT ${bucketIndexExpr("ts")} AS bucket, COUNT(*) AS denials
+     FROM usage_events WHERE ts >= ? AND ts < ? AND event_type = 'denied' AND reason = 'device_limit_reached' GROUP BY bucket`,
+  ).bind(from, buckets, span, buckets - 1, from, to).all<{ bucket: number; denials: number }>();
 
   // Fulfillment events: order_events bucketed by received_at over the same window.
   const orderRows = await env.DB.prepare(
@@ -121,20 +118,13 @@ export async function reportTimeseries(request: Request, env: Env, requestIdValu
   // Dense the sparse GROUP BY results into a fixed [0..buckets-1] array (zero-filled gaps).
   const out: TimeseriesBucket[] = [];
   for (let i = 0; i < buckets; ++i) {
-    out.push({ start: from + i * bucketSeconds, checkouts: 0, releases: 0, denials: 0, denial_rate: 0, fulfillment_events: 0 });
+    out.push({ start: from + i * bucketSeconds, denials: 0, fulfillment_events: 0 });
   }
-  for (const row of usageRows.results) {
+  for (const row of denialRows.results) {
     const bucket = out[row.bucket];
-    if (bucket === undefined) {
-      continue;
+    if (bucket !== undefined) {
+      bucket.denials = Number(row.denials) || 0;
     }
-    bucket.checkouts = Number(row.checkouts) || 0;
-    bucket.releases = Number(row.releases) || 0;
-    bucket.denials = Number(row.denials) || 0;
-    const attempts = bucket.checkouts + bucket.denials;
-    // denial_rate = denials / (checkouts + denials); 0 when the bucket saw no attempts. Mirrors
-    // usage_report.mjs (denials / checkout-attempts is the upsell signal).
-    bucket.denial_rate = attempts === 0 ? 0 : bucket.denials / attempts;
   }
   for (const row of orderRows.results) {
     const bucket = out[row.bucket];
@@ -162,16 +152,17 @@ export async function auditVerify(env: Env, requestIdValue: string): Promise<Res
 }
 
 // A grant's effective deadline is normally its stamped valid_until. A trial's clock can end earlier
-// (or, for an activation-basis trial with no valid_until at all, be the ONLY deadline it has); its
-// enforcing rule's own SQL twin computes that clock exactly as the lease/consent path enforces it,
-// clamped to valid_until with the same min(coalesce(valid_until, MAX), trial deadline) discipline the
-// portal's self-service entitlement list uses (never a hand-rolled copy of that clamp). An unstarted
-// activation-basis trial has no trial deadline yet (its rule yields NULL), so that side falls back to
-// the same MAX sentinel: SQLite's min() is NULL if any argument is, and an unknown clock must never
-// hide a stamped valid_until, which the consent page and lease issuer enforce regardless of it. With
-// neither date the result is MAX, which the report's window excludes just as a non-expiring grant.
+// (or, for an activation-basis trial with no valid_until at all, be the ONLY deadline it has); the
+// protected trial rule's own SQL twin computes that clock exactly as the lease/consent path enforces
+// it, clamped to valid_until with the same min(coalesce(valid_until, MAX), trial deadline) discipline
+// the portal's self-service entitlement list uses (never a hand-rolled copy of that clamp). An
+// unstarted activation-basis trial has no trial deadline yet (its rule yields NULL), so that side
+// falls back to the same MAX sentinel: SQLite's min() is NULL if any argument is, and an unknown clock
+// must never hide a stamped valid_until, which the consent page and lease issuer enforce regardless of
+// it. With neither date the result is MAX, which the report's window excludes just as a non-expiring
+// grant.
 const EFFECTIVE_UNTIL_EXPRESSION = `CASE WHEN e.is_trial <> 1 THEN e.valid_until ELSE min(coalesce(e.valid_until, 9007199254740991),
-             coalesce(CASE WHEN e.enforcement_mode = 'device_bound_v1' THEN ${boundTrialDeadlineSql("e", "NULL")} ELSE ${legacyTrialDeadlineSql("e")} END, 9007199254740991)) END`;
+             coalesce(${boundTrialDeadlineSql("e", "NULL")}, 9007199254740991)) END`;
 
 // The SELECT list shared by both branches below (kept identical so the UNION ALL output shape and
 // the effective-deadline computation cannot drift between them).

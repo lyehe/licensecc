@@ -18,6 +18,9 @@ import { canEditEntitlement, canRunAction, disableEntitlementConfirm, ENTITLEMEN
 /** The entitlement table's column count, so the inline inspector row's cell spans every column. */
 const ENTITLEMENT_TABLE_COLUMN_COUNT = 6;
 
+/** The list still marks a floating grant, a mode the API no longer creates. */
+const isFloating = (mode: EntitlementRecord["license_mode"] | "floating"): boolean => mode === "floating";
+
 interface ListProps {
   scoped?: boolean;
   items: EntitlementRecord[];
@@ -89,7 +92,7 @@ export function EntitlementList(props: ListProps): React.ReactElement {
       {canRunAction(item.status, "disable") && <button data-focus-action="disable" className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Disable entitlement", body: disableEntitlementConfirm(item), requiresReason: true, reasonPresets: ENTITLEMENT_DISABLE_REASON_PRESETS, run: ({ idempotencyKey }) => onTransition(item, "disable", idempotencyKey), successFocusTarget: focus, isCurrent })}>Disable</button>}
       {canRunAction(item.status, "reenable") && <button data-focus-action="reenable" disabled={locked} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }) => onTransition(item, "reenable", idempotencyKey), successFocusTarget: focus, isCurrent })}>Reenable</button>}
       {canRunAction(item.status, "revoke") && <button className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Revoke entitlement", body: revokeEntitlementConfirm(item), requiresReason: true, confirmLabel: "Revoke", typedConfirmation: revokeTypedConfirmation(1), run: ({ idempotencyKey }) => onTransition(item, "revoke", idempotencyKey), successFocusTarget: focus, isCurrent })}>Revoke</button>}
-      {!props.scoped && <>{item.license_mode==="floating" && item.status==="active" && <button className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Release seats", body: releaseSeatsConfirm(item), requiresReason: true, run: ({ idempotencyKey }) => onReleaseSeats(item, idempotencyKey), successFocusTarget: focus, isCurrent })}>Release seats</button>}
+      {!props.scoped && <>{isFloating(item.license_mode) && item.status==="active" && <button className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Release seats", body: releaseSeatsConfirm(item), requiresReason: true, run: ({ idempotencyKey }) => onReleaseSeats(item, idempotencyKey), successFocusTarget: focus, isCurrent })}>Release seats</button>}
       <button data-focus-action="devices" disabled={busy} aria-expanded={props.inspection.deviceEntitlementId === item.id} onClick={() => props.onDevices(item.id)}>Devices</button>
       <button data-focus-action="meter" disabled={busy} aria-expanded={props.inspection.meterEntitlementId === item.id} onClick={() => props.onMeter(item.id)}>Meter</button></>}
     </ActionMenu></div>;
@@ -115,7 +118,7 @@ export function EntitlementList(props: ListProps): React.ReactElement {
       isCurrent,
     });
   }
-  const capacity = (item: EntitlementRecord): React.ReactElement => <><div>{item.license_mode?.replaceAll("_", " ") || "Default mode"}</div><span className="muted">{item.license_mode === "floating" ? <>Pool {item.pool_size}</> : <>Device limit {item.max_active_devices}</>}</span></>;
+  const capacity = (item: EntitlementRecord): React.ReactElement => <><div>{item.license_mode?.replaceAll("_", " ") || "Default mode"}</div><span className="muted">{isFloating(item.license_mode) ? <>Pool {item.pool_size}</> : <>Device limit {item.max_active_devices}</>}</span></>;
   // Inline, under the triggering row: the device/metering panel for whichever one entitlement has
   // it open (never more than one; see useEntitlementInspection). Every other row has none.
   const inspectorOpenFor = (item: EntitlementRecord): boolean => props.inspection.deviceEntitlementId === item.id || props.inspection.meterEntitlementId === item.id;

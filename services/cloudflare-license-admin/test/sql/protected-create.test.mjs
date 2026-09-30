@@ -344,7 +344,7 @@ const REASON_CASES = [
     setup: `INSERT INTO catalog_plans(id,project,plan_key,name,created_at,updated_at) VALUES('plan','APP','basic','Basic',1,1);
       INSERT INTO license_plan_assignments(license_id,project,plan_id,license_fingerprint,customer_id,created_at,updated_at) VALUES('license','APP','plan','${otherFp}','owner',1,1)`,
     fix: `UPDATE license_plan_assignments SET license_fingerprint='${fp}'` },
-  { reason: "policy_mismatch", body: { policy_id: "policy" }, race: "UPDATE entitlement_policies SET max_borrow_sec=60" },
+  { reason: "policy_mismatch", body: { policy_id: "policy" }, race: "UPDATE entitlement_policies SET max_active_devices=2" },
   // The likeliest trigger: an active policy of another project, which the create never re-checks
   // against the grant's project before the batch guard refuses it.
   { reason: "policy_mismatch", name: "another project's active policy",
@@ -415,9 +415,9 @@ test("a create without a policy is judged with the trial state it keeps from the
 // keep stamped validity independent of time.
 const WOULD_BE_ROW_CASES = [
   { name: "a fresh grant without a policy", creates: [{}] },
-  { name: "a fresh grant stamped from a policy", policy: "type='trial',trial_expiration_basis='from_first_activation',trial_duration_sec=600,max_active_devices=3,max_borrow_sec=60", creates: [{ policy_id: "policy" }] },
+  { name: "a fresh grant stamped from a policy", policy: "type='trial',trial_expiration_basis='from_first_activation',trial_duration_sec=600,max_active_devices=3", creates: [{ policy_id: "policy" }] },
   { name: "a grant re-created without a policy over a stamped one", policy: "type='trial',trial_expiration_basis='from_first_activation',trial_duration_sec=600,max_active_devices=3", creates: [{ policy_id: "policy" }, { notes: "again" }] },
-  { name: "a grant re-created from a policy over an unstamped one", policy: "max_active_devices=4,meter_quota=9", creates: [{}, { policy_id: "policy" }] },
+  { name: "a grant re-created from a policy over an unstamped one", policy: "max_active_devices=4", creates: [{}, { policy_id: "policy" }] },
   // A create without a policy may set its own device limit in the same batch.
   { name: "a fresh grant with its own device limit", creates: [{ max_active_devices: 3 }] },
   { name: "a grant re-created with its own device limit over a stamped one", policy: "max_active_devices=4", creates: [{ policy_id: "policy" }, { max_active_devices: 7 }] },
@@ -439,7 +439,7 @@ for (const { name, policy, creates } of WOULD_BE_ROW_CASES) {
     assert.equal((await f.send(last, "final")).status, 200);
     const committed = f.sql.prepare(`SELECT ${Object.keys(wouldBe).join(", ")} FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=?`)
       .get(input.project, input.feature, input.license_fingerprint);
-    assert.ok(Object.keys(wouldBe).length >= 19);
+    assert.ok(Object.keys(wouldBe).length >= 16);
     assert.deepEqual({ ...wouldBe }, { ...committed });
   });
 }

@@ -55,8 +55,9 @@ export function planProjectionError(error: unknown, requestIdValue: string): Res
 
 export const CATALOG_FEATURE_COLUMNS = "id, project, feature_key, name, description, category, status, created_at, updated_at";
 export const CATALOG_PLAN_COLUMNS = "id, project, plan_key, name, status, version, description, created_at, updated_at";
+// A plan feature's capacity is its device limit, directly or through its policy.
 export const CATALOG_PLAN_FEATURE_COLUMNS =
-  "project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec, created_at, updated_at";
+  "project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order, max_active_devices, created_at, updated_at";
 
 export function catalogJsonObject(columns: string): string {
   return columns.split(", ").map((column) => `'${column}', ${column}`).join(", ");
@@ -172,21 +173,15 @@ export function catalogPlanFeatureUpsertStatement(
   return env.DB.prepare(
     `INSERT INTO catalog_plan_features
         (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
-         assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
-         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         max_active_devices, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(plan_id, feature_key) DO UPDATE SET
          feature_inclusion = excluded.feature_inclusion,
          addon_key = excluded.addon_key,
          policy_id = excluded.policy_id,
          status = excluded.status,
          display_order = excluded.display_order,
-         assertion_ttl_seconds = excluded.assertion_ttl_seconds,
-         pool_size = excluded.pool_size,
          max_active_devices = excluded.max_active_devices,
-         max_borrow_sec = excluded.max_borrow_sec,
-         meter_quota = excluded.meter_quota,
-         meter_period_sec = excluded.meter_period_sec,
          updated_at = excluded.updated_at
        RETURNING ${CATALOG_PLAN_FEATURE_COLUMNS}`,
   ).bind(
@@ -198,12 +193,7 @@ export function catalogPlanFeatureUpsertStatement(
     input.policy_id,
     input.status,
     input.display_order,
-    input.assertion_ttl_seconds,
-    input.pool_size,
     input.max_active_devices,
-    input.max_borrow_sec,
-    input.meter_quota,
-    input.meter_period_sec,
     now,
     now,
   );

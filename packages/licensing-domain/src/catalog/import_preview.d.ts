@@ -24,12 +24,7 @@ export interface CatalogImportPlanFeatureInput {
   policy_id?: string | null;
   status?: CatalogImportStatus;
   display_order?: number;
-  assertion_ttl_seconds?: number | null;
-  pool_size?: number | null;
   max_active_devices?: number | null;
-  max_borrow_sec?: number | null;
-  meter_quota?: number | null;
-  meter_period_sec?: number | null;
 }
 
 export interface CatalogImportPlanInput {
@@ -65,12 +60,7 @@ export interface NormalizedCatalogImportPlanFeature {
   policy_id: string | null;
   status: CatalogImportStatus;
   display_order: number;
-  assertion_ttl_seconds: number | null;
-  pool_size: number | null;
   max_active_devices: number | null;
-  max_borrow_sec: number | null;
-  meter_quota: number | null;
-  meter_period_sec: number | null;
 }
 
 export interface NormalizedCatalogImportPlan {

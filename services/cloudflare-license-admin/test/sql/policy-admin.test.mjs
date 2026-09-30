@@ -182,6 +182,22 @@ async function body(response) {
 }
 
 // Create a policy through the worker and return its row.
+// A policy record carries its identity, validity, device limit and trial rules, and nothing else.
+const POLICY_RECORD_KEYS = [
+  "id", "project", "name", "type", "status", "valid_from_offset_sec", "duration_sec", "max_active_devices",
+  "expiry_strategy", "trial_expiration_basis", "trial_duration_sec", "trial_one_per_device", "notes", "created_at", "updated_at",
+].sort();
+
+// Fields a policy no longer has; each is refused on create and PATCH.
+const REFUSED_POLICY_FIELDS = [
+  { pool_size: 0 },
+  { max_borrow_sec: 0 },
+  { meter_quota: 0 },
+  { meter_period_sec: 2592000 },
+  { assertion_ttl_seconds: 300 },
+  { trial_require_device_proof: 0 },
+];
+
 async function createPolicy(env, payload) {
   const res = await worker.fetch(devReq("/api/admin/policies", { method: "POST", body: JSON.stringify(payload) }), env);
   assert.equal(res.status, 200, `create policy: ${await res.clone().text()}`);
@@ -196,20 +212,17 @@ test("policy: create writes the row + a policy_events audit row", async () => {
     name: "Pro Annual",
     type: "subscription",
     duration_sec: 31536000,
-    assertion_ttl_seconds: 600,
     max_active_devices: 5,
-    pool_size: 10,
-    notes: "annual seat plan",
+    notes: "annual plan",
   });
   assert.ok(created.id);
+  assert.deepEqual(Object.keys(created).sort(), POLICY_RECORD_KEYS);
   assert.equal(created.project, "DEFAULT");
   assert.equal(created.name, "Pro Annual");
   assert.equal(created.type, "subscription");
   assert.equal(created.status, "active");
   assert.equal(created.duration_sec, 31536000);
-  assert.equal(created.assertion_ttl_seconds, 600);
   assert.equal(created.max_active_devices, 5);
-  assert.equal(created.pool_size, 10);
 
   const row = db.prepare("SELECT * FROM entitlement_policies WHERE id = ?").get(created.id);
   assert.equal(row.name, "Pro Annual");
@@ -221,16 +234,14 @@ test("policy: create writes the row + a policy_events audit row", async () => {
   const next = JSON.parse(event.next_json);
   assert.equal(next.name, "Pro Annual");
   assert.equal(next.id, created.id);
+  assert.deepEqual(Object.keys(next).sort(), POLICY_RECORD_KEYS);
 });
 
 test("policy: defaults are applied for omitted columns", async () => {
   const db = freshDb();
   const env = devEnv(db);
   const created = await createPolicy(env, { project: "DEFAULT", name: "Bare", type: "node_locked" });
-  assert.equal(created.assertion_ttl_seconds, 300);
-  assert.equal(created.pool_size, 0);
   assert.equal(created.max_active_devices, 1);
-  assert.equal(created.max_borrow_sec, 0);
   assert.equal(created.expiry_strategy, "fixed_window");
   assert.equal(created.trial_expiration_basis, "from_issue");
   assert.equal(created.valid_from_offset_sec, null);
@@ -268,58 +279,51 @@ test("policy: invalid create bodies are 400 invalid_request", async () => {
     {},
     { project: "DEFAULT", name: "x" }, // missing type
     { project: "DEFAULT", name: "x", type: "bogus" }, // bad enum
-    { project: "DEFAULT", name: "x", type: "trial", assertion_ttl_seconds: 0 }, // out of range
+    { project: "DEFAULT", name: "x", type: "trial", max_active_devices: -1 }, // out of range
     { project: "DEFAULT", name: "x", type: "trial", expiry_strategy: "nope" },
     { project: "DEFAULT", name: "x", type: "trial", trial_one_per_device: 2 },
     { project: "DEFAULT", name: "x\ninjection", type: "trial" }, // newline rejected
-    { project: "DEFAULT", name: "x", type: "node_locked", pool_size: 1 },
     { project: "DEFAULT", name: "x", type: "floating" },
-    { project: "DEFAULT", name: "x", type: "floating", pool_size: 0 },
+    { project: "DEFAULT", name: "x", type: "floating", pool_size: 2 },
+    ...REFUSED_POLICY_FIELDS.map((field) => ({ project: "DEFAULT", name: "x", type: "node_locked", ...field })),
   ]) {
     const res = await worker.fetch(devReq("/api/admin/policies", { method: "POST", body: JSON.stringify(bad) }), env);
     assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(bad)}`);
     assert.equal((await body(res)).code, "invalid_request");
   }
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_policies").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM policy_events").get().c, 0);
 });
 
-test("policy: patch preserves explicit type/capacity invariants", async () => {
+test("policy: PATCH refuses seat, borrow, meter, TTL and device-proof fields and writes nothing", async () => {
   const db = freshDb();
   const env = devEnv(db);
   const node = await createPolicy(env, { project: "DEFAULT", name: "Node", type: "node_locked" });
-  const floating = await createPolicy(env, { project: "DEFAULT", name: "Float", type: "floating", pool_size: 2 });
+  const before = db.prepare("SELECT * FROM entitlement_policies WHERE id=?").get(node.id);
 
-  const badNodePatch = await worker.fetch(devReq(`/api/admin/policies/${node.id}`, {
-    method: "PATCH",
-    body: JSON.stringify({ pool_size: 1 }),
-  }), env);
-  assert.equal(badNodePatch.status, 400);
-  assert.equal((await body(badNodePatch)).code, "invalid_request");
-
-  const badFloatingPatch = await worker.fetch(devReq(`/api/admin/policies/${floating.id}`, {
-    method: "PATCH",
-    body: JSON.stringify({ pool_size: 0 }),
-  }), env);
-  assert.equal(badFloatingPatch.status, 400);
-  assert.equal((await body(badFloatingPatch)).code, "invalid_request");
-
-  assert.equal(db.prepare("SELECT pool_size FROM entitlement_policies WHERE id=?").get(node.id).pool_size, 0);
-  assert.equal(db.prepare("SELECT pool_size FROM entitlement_policies WHERE id=?").get(floating.id).pool_size, 2);
+  for (const field of REFUSED_POLICY_FIELDS) {
+    const res = await worker.fetch(devReq(`/api/admin/policies/${node.id}`, { method: "PATCH", body: JSON.stringify({ notes: "x", ...field }) }), env);
+    assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(field)}`);
+    assert.equal((await body(res)).code, "invalid_request");
+  }
+  assert.deepEqual({ ...db.prepare("SELECT * FROM entitlement_policies WHERE id=?").get(node.id) }, { ...before });
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM policy_events WHERE event_type='update'").get().c, 0);
 });
 
 test("policy: patch updates mutable fields + audits; identity fields are rejected", async () => {
   const db = freshDb();
   const env = devEnv(db);
-  const created = await createPolicy(env, { project: "DEFAULT", name: "Editable", type: "floating", pool_size: 3 });
+  const created = await createPolicy(env, { project: "DEFAULT", name: "Editable", type: "subscription", max_active_devices: 3 });
 
   const patched = await worker.fetch(devReq(`/api/admin/policies/${created.id}`, {
     method: "PATCH",
-    body: JSON.stringify({ pool_size: 8, max_borrow_sec: 3600, notes: "bumped" }),
+    body: JSON.stringify({ max_active_devices: 8, duration_sec: 3600, notes: "bumped" }),
   }), env);
   assert.equal(patched.status, 200);
   const data = (await body(patched)).data;
-  assert.equal(data.pool_size, 8);
-  assert.equal(data.max_borrow_sec, 3600);
+  assert.deepEqual(Object.keys(data).sort(), POLICY_RECORD_KEYS);
+  assert.equal(data.max_active_devices, 8);
+  assert.equal(data.duration_sec, 3600);
   assert.equal(data.notes, "bumped");
   assert.ok(data.updated_at >= created.updated_at);
   assert.equal(db.prepare("SELECT event_type FROM policy_events WHERE policy_id=? ORDER BY id DESC LIMIT 1").get(created.id).event_type, "update");
@@ -331,7 +335,7 @@ test("policy: patch updates mutable fields + audits; identity fields are rejecte
     assert.equal((await body(res)).code, "invalid_request");
   }
   // Patch on a missing policy is 404.
-  const missing = await worker.fetch(devReq("/api/admin/policies/nope", { method: "PATCH", body: JSON.stringify({ pool_size: 1 }) }), env);
+  const missing = await worker.fetch(devReq("/api/admin/policies/nope", { method: "PATCH", body: JSON.stringify({ max_active_devices: 1 }) }), env);
   assert.equal(missing.status, 404);
 });
 
@@ -467,10 +471,8 @@ test("stamp: POLICY_STAMP_MODE on stamps the policy window + device limit/trial 
     project: "DEFAULT",
     name: "Trial14",
     type: "trial",
-    assertion_ttl_seconds: 900,
     trial_duration_sec: 1209600, // 14 days
     trial_one_per_device: 1,
-    trial_require_device_proof: 1,
     max_active_devices: 2,
   });
 
@@ -480,7 +482,6 @@ test("stamp: POLICY_STAMP_MODE on stamps the policy window + device limit/trial 
   }), env);
   assert.equal(res.status, 200, await res.clone().text());
   const data = (await body(res)).data;
-  assert.equal(data.assertion_ttl_seconds, 300, "a protected grant takes no assertion TTL from its policy");
   assert.equal(data.customer_id, "cus_x", "override flowed through");
   // from_issue trial, no valid_from_offset_sec -> open start (null), valid_until = now + trial_duration.
   assert.equal(data.valid_from, null);
@@ -488,16 +489,13 @@ test("stamp: POLICY_STAMP_MODE on stamps the policy window + device limit/trial 
   assert.ok(Math.abs(data.valid_until - (stampNow + 1209600)) <= 5, `valid_until ~ now+trial_duration, got ${data.valid_until}`);
 
   // The capacity + frozen-trial side-state landed on the SAME row (atomic with the INSERT).
-  const row = db.prepare("SELECT policy_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, pool_size, max_active_devices, assertion_ttl_seconds FROM entitlements WHERE project='DEFAULT' AND feature='DEFAULT' AND license_fingerprint=?").get(FP_A);
+  const row = db.prepare("SELECT policy_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, max_active_devices FROM entitlements WHERE project='DEFAULT' AND feature='DEFAULT' AND license_fingerprint=?").get(FP_A);
   assert.equal(row.policy_id, policy.id);
   assert.equal(row.is_trial, 1);
   assert.equal(row.trial_expiration_basis, "from_issue");
   assert.equal(row.trial_duration_sec, 1209600);
   assert.equal(row.trial_one_per_device, 1);
-  assert.equal(row.trial_require_device_proof, 1);
-  assert.equal(row.pool_size, 0);
   assert.equal(row.max_active_devices, 2);
-  assert.equal(row.assertion_ttl_seconds, 300);
 
   // The stamp produced exactly one entitlement audit event (create), proving the side-write rode the same batch.
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events WHERE license_fingerprint=?").get(FP_A).c, 1);
@@ -575,7 +573,7 @@ test("policy: reader can read policies but cannot run any policy write or stamp"
   // Reader CANNOT create / patch / disable / reenable / stamp.
   const denied = [
     accessReq("/api/admin/policies", reader, { method: "POST", body: JSON.stringify({ project: "DEFAULT", name: "Nope", type: "trial" }) }),
-    accessReq(`/api/admin/policies/${policyId}`, reader, { method: "PATCH", body: JSON.stringify({ pool_size: 9 }) }),
+    accessReq(`/api/admin/policies/${policyId}`, reader, { method: "PATCH", body: JSON.stringify({ max_active_devices: 9 }) }),
     accessReq(`/api/admin/policies/${policyId}/disable`, reader, { method: "POST", body: JSON.stringify({ reason: "x" }) }),
     accessReq(`/api/admin/policies/${policyId}/reenable`, reader, { method: "POST", body: "{}" }),
     accessReq("/api/admin/entitlements", reader, { method: "POST", body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: FP_A, policy_id: policyId }) }),

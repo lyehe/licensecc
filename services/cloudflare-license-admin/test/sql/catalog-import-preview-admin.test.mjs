@@ -137,21 +137,18 @@ function seedCatalog(db) {
   db.prepare(
     `INSERT INTO catalog_plan_features
        (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
-        assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
-        created_at, updated_at)
-     VALUES ('DEFAULT', 'plan_pro', 'core', 'included', NULL, NULL, 'active', 0, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+        max_active_devices, created_at, updated_at)
+     VALUES ('DEFAULT', 'plan_pro', 'core', 'included', NULL, NULL, 'active', 0, NULL, ?, ?)`,
   ).run(NOW, NOW);
 }
 
 function seedPolicy(db, id, project = "DEFAULT") {
   db.prepare(
     `INSERT INTO entitlement_policies
-       (id, project, name, type, status, valid_from_offset_sec, duration_sec, assertion_ttl_seconds,
-        pool_size, max_active_devices, max_borrow_sec, expiry_strategy, trial_expiration_basis,
-        trial_duration_sec, trial_one_per_device, trial_require_device_proof, notes, created_at,
-        updated_at, meter_quota, meter_period_sec)
-     VALUES (?, ?, ?, 'subscription', 'active', NULL, NULL, 600, 0, 1, 0, 'non_expiring',
-             'from_issue', 0, 0, 0, '', ?, ?, 0, 2592000)`,
+       (id, project, name, type, status, valid_from_offset_sec, duration_sec, max_active_devices,
+        expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, notes,
+        created_at, updated_at)
+     VALUES (?, ?, ?, 'subscription', 'active', NULL, NULL, 1, 'non_expiring', 'from_issue', 0, 0, '', ?, ?)`,
   ).run(id, project, id, NOW, NOW);
 }
 
@@ -174,12 +171,7 @@ function transitionManifest() {
         policy_id: null,
         status: "disabled",
         display_order: 0,
-        assertion_ttl_seconds: null,
-        pool_size: null,
         max_active_devices: null,
-        max_borrow_sec: null,
-        meter_quota: null,
-        meter_period_sec: null,
       }],
     }],
   };
@@ -204,12 +196,7 @@ function unchangedManifest() {
         policy_id: null,
         status: "active",
         display_order: 0,
-        assertion_ttl_seconds: null,
-        pool_size: null,
         max_active_devices: null,
-        max_borrow_sec: null,
-        meter_quota: null,
-        meter_period_sec: null,
       }],
     }],
   };
@@ -442,8 +429,7 @@ test("catalog import publishes unchanged effects as exact persisted rows and App
   );
   assert.deepEqual(
     { ...db.prepare(`SELECT project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
-                            assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota,
-                            meter_period_sec, created_at, updated_at
+                            max_active_devices, created_at, updated_at
                        FROM catalog_plan_features WHERE plan_id = 'plan_pro' AND feature_key = 'core'`).get() },
     effects.plan_features[0].after,
   );

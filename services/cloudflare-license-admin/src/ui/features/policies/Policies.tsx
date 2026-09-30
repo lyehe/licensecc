@@ -127,7 +127,7 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
     setPolicyForm((current) => ({ ...current, ...patch }));
   }
 
-  function setPolicyType(type: Policy["type"]): void {
+  function setPolicyType(type: PolicyFormState["type"]): void {
     formFeedback.clearField("pool_size");
     setPolicyForm((current) => ({
       ...current,
@@ -308,7 +308,7 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
         <form id={POLICY_FORM} aria-label={editorTitle} onSubmit={(event) => void (editing === null ? submitPolicyCreate(event) : submitPolicyPatch(event, editing))}><fieldset disabled={operationLocked}>
           <label>Project<input readOnly={editing !== null} value={policyForm.project} onChange={(event) => setPolicyForm({ ...policyForm, project: event.target.value })} /></label>
           <label>Name (required)<input required readOnly={editing !== null} {...field("name", "Name (required)")} value={policyForm.name} onChange={(event) => update("name", { name: event.target.value })} />{error("name")}</label>{details("name")}
-          <label>Type<select aria-label="Type" disabled={editing !== null} value={policyForm.type} onChange={(event) => setPolicyType(event.target.value as Policy["type"])}><option value="trial">Trial</option><option value="node_locked">Device-locked</option><option value="floating">Floating</option><option value="subscription">Subscription</option></select></label>
+          <label>Type<select aria-label="Type" disabled={editing !== null} value={policyForm.type} onChange={(event) => setPolicyType(event.target.value as PolicyFormState["type"])}><option value="trial">Trial</option><option value="node_locked">Device-locked</option><option value="floating">Floating</option><option value="subscription">Subscription</option></select></label>
           <label>Duration (sec)<input type="number" {...field("duration_sec", "Duration (sec)")} value={policyForm.duration_sec} onChange={(event) => update("duration_sec", { duration_sec: event.target.value })} />{error("duration_sec")}</label>{details("duration_sec")}
           {policyForm.type === "floating" && <><label>Floating pool size<input type="number" {...field("pool_size", "Floating pool size")} value={policyForm.pool_size} onChange={(event) => update("pool_size", { pool_size: Number(event.target.value) })} />{error("pool_size")}</label>{details("pool_size")}<label>Max borrow (sec)<input type="number" {...field("max_borrow_sec", "Max borrow (sec)")} value={policyForm.max_borrow_sec} onChange={(event) => update("max_borrow_sec", { max_borrow_sec: Number(event.target.value) })} />{error("max_borrow_sec")}</label>{details("max_borrow_sec")}</>}
           {policyForm.type !== "floating" && <><label>Device limit<input type="number" {...field("max_active_devices", "Device limit")} value={policyForm.max_active_devices} onChange={(event) => update("max_active_devices", { max_active_devices: Number(event.target.value) })} />{error("max_active_devices")}</label>{details("max_active_devices")}</>}

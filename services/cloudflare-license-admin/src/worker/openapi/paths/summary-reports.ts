@@ -45,7 +45,7 @@ export const summaryReportPaths: LabeledPathFragment = {
     ["/api/admin/report/timeseries", {
     get: {
       tags: ["admin:reports"],
-      summary: "Bucketed usage + fulfillment time-series over a [from,to] window (reader+admin)",
+      summary: "Bucketed refused-connection + fulfillment time-series over a [from,to] window (reader+admin)",
       operationId: "getReportTimeseries",
       security: ADMIN_SECURITY,
       parameters: [
@@ -54,7 +54,7 @@ export const summaryReportPaths: LabeledPathFragment = {
         { name: "buckets", in: "query", required: false, description: "Number of equal buckets to split the window into (default 24, clamped to 1..200).", schema: { type: "integer", default: 24, minimum: 1, maximum: 200 } },
       ],
       responses: {
-        "200": okResponse("Per-bucket usage (checkouts/releases/denials/denial_rate) + fulfillment_events.", "#/components/schemas/TimeseriesData", "report_timeseries"),
+        "200": okResponse("Per-bucket protected refusals (denials) + fulfillment_events.", "#/components/schemas/TimeseriesData", "report_timeseries"),
         "400": errorResponse("Invalid window (from >= to).", "invalid_request"),
         ...ADMIN_AUTH_ERRORS,
       },

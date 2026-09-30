@@ -7,7 +7,7 @@ export const MAX_PROJECT_SIZE = 127;
 export const MAX_FEATURE_SIZE = 15;
 const MAX_NOTES_SIZE = 1000;
 export const MAX_NAME_SIZE = 127;
-// A generous-but-bounded ceiling for the policy duration/offset/borrow integers
+// A generous-but-bounded ceiling for duration and offset integers
 // (~100 years in seconds). Keeps validators from accepting absurd or overflow values.
 export const MAX_DURATION_SECONDS = 3_153_600_000;
 const INVALID = Symbol("invalid");

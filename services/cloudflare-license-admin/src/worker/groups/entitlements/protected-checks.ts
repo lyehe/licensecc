@@ -21,17 +21,16 @@ export interface ProtectedCheck {
 
 // Compare all fields used by stampFromPolicy, including nullable values. An
 // updated_at comparison alone misses changes made within the same second.
-const POLICY_FIELDS = ["id", "project", "status", "type", "valid_from_offset_sec", "duration_sec", "assertion_ttl_seconds",
-  "pool_size", "max_active_devices", "max_borrow_sec", "expiry_strategy", "trial_expiration_basis", "trial_duration_sec",
-  "trial_one_per_device", "trial_require_device_proof", "meter_quota", "meter_period_sec"] as const;
+const POLICY_FIELDS = ["id", "project", "status", "type", "valid_from_offset_sec", "duration_sec", "max_active_devices",
+  "expiry_strategy", "trial_expiration_basis", "trial_duration_sec", "trial_one_per_device", "trial_require_device_proof"] as const;
 
 // The provenance, capacity and trial columns the would-be row models, with the schema default each
 // keeps when a create writes none of them (pinned to schema.sql by the SQL suite). A policy stamp
 // writes policy_id, the device limit and the trial state; nothing a create writes sets the seat
-// pool, borrowing or meter. A create that updates an existing protected grant keeps that grant's
-// values for every column it does not write.
+// pool, which the integrity rule reads. A create that updates an existing protected grant keeps
+// that grant's values for every column it does not write.
 export const STAMP_COLUMN_DEFAULTS = {
-  policy_id: null, pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000,
+  policy_id: null, pool_size: 0, max_active_devices: 1,
   is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0, trial_require_device_proof: 0,
 } as const;
 type StampColumn = keyof typeof STAMP_COLUMN_DEFAULTS;

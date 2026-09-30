@@ -5,16 +5,6 @@ import { stampFromPolicy } from "../entitlements/policy.mjs";
 // window at the column defaults.
 const DEFAULT_CAPACITY = Object.freeze({ max_active_devices: 1 });
 
-// The preview still reports the seat, borrow, meter and TTL columns the console reads, at the
-// values a protected grant holds: apply creates a grant with them and never changes them later.
-const PROTECTED_GRANT_COLUMNS = Object.freeze({
-  assertion_ttl_seconds: 300,
-  pool_size: 0,
-  max_borrow_sec: 0,
-  meter_quota: 0,
-  meter_period_sec: 2592000,
-});
-
 const ZERO_TRIAL = Object.freeze({
   is_trial: 0,
   trial_expiration_basis: null,
@@ -110,12 +100,7 @@ function policyFromCatalogRow(row) {
     status: row.policy_status,
     valid_from_offset_sec: row.policy_valid_from_offset_sec,
     duration_sec: row.policy_duration_sec,
-    assertion_ttl_seconds: row.policy_assertion_ttl_seconds,
-    pool_size: row.policy_pool_size,
     max_active_devices: row.policy_max_active_devices,
-    max_borrow_sec: row.policy_max_borrow_sec,
-    meter_quota: row.policy_meter_quota,
-    meter_period_sec: row.policy_meter_period_sec,
     expiry_strategy: row.policy_expiry_strategy,
     trial_expiration_basis: row.policy_trial_expiration_basis,
     trial_duration_sec: row.policy_trial_duration_sec,
@@ -127,7 +112,7 @@ function policyFromCatalogRow(row) {
   };
 }
 
-// The plan feature's device limit override; its seat, borrow, meter and TTL overrides do not apply.
+// The plan feature's device limit override: the only capacity a plan feature carries.
 function deviceLimitOverride(row) {
   const maxActiveDevices = rowInteger(row, "max_active_devices");
   return maxActiveDevices === undefined ? {} : { max_active_devices: maxActiveDevices };
@@ -157,8 +142,7 @@ export function desiredPlanProjectionRow(row, input, now) {
         trial: { ...ZERO_TRIAL },
       }
     : stampFromPolicy(policy, { ...base, ...deviceLimitOverride(row) }, now);
-  // A policy stamp also names a device hash, an assertion TTL and the policy's seat, borrow and
-  // meter values. A protected grant takes none of them.
+  // The desired input is exactly the columns plan apply writes, in one stable order.
   const { project, feature, license_fingerprint, status, valid_from, valid_until, notes, customer_id, license_id } = stamp.input;
 
   return {
@@ -189,7 +173,6 @@ function summarizeDesired(desired) {
     status: desired.input.status,
     valid_from: desired.input.valid_from,
     valid_until: desired.input.valid_until,
-    ...PROTECTED_GRANT_COLUMNS,
     max_active_devices: desired.capacity.max_active_devices,
   };
 }
@@ -202,16 +185,11 @@ function summarizeExisting(row, reason = "") {
     policy_id: row.policy_id,
     source: "included",
     addon_key: null,
-    license_mode: row.license_mode,
+    license_mode: capabilityMode(row),
     status: row.status,
     valid_from: row.valid_from,
     valid_until: row.valid_until,
-    assertion_ttl_seconds: row.assertion_ttl_seconds,
-    pool_size: row.pool_size,
     max_active_devices: row.max_active_devices,
-    max_borrow_sec: row.max_borrow_sec,
-    meter_quota: row.meter_quota,
-    meter_period_sec: row.meter_period_sec,
     reason,
   };
 }
@@ -220,8 +198,8 @@ function valuesEqual(left, right) {
   return (left ?? null) === (right ?? null);
 }
 
-// Only the columns plan apply writes decide whether an existing grant changes. Its device hash,
-// TTLs, seat pool, borrowing and meter are its own, and apply never touches them.
+// Only the columns plan apply writes decide whether an existing grant changes; apply never writes
+// any other column of an existing grant.
 export function planProjectionMatchesDesired(existing, desired) {
   const input = desired.input;
   const trial = desired.trial;

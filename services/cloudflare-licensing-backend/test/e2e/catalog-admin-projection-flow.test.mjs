@@ -81,27 +81,20 @@ function seedPolicy(db, id, overrides = {}) {
     status: "active",
     valid_from_offset_sec: null,
     duration_sec: null,
-    assertion_ttl_seconds: 600,
-    pool_size: 0,
     max_active_devices: 1,
-    max_borrow_sec: 0,
     expiry_strategy: "non_expiring",
     trial_expiration_basis: "from_issue",
     trial_duration_sec: 0,
     trial_one_per_device: 0,
-    trial_require_device_proof: 0,
     notes: "",
-    meter_quota: 0,
-    meter_period_sec: 2_592_000,
     ...overrides,
   };
   db.prepare(
     `INSERT INTO entitlement_policies
-      (id, project, name, type, status, valid_from_offset_sec, duration_sec, assertion_ttl_seconds,
-       pool_size, max_active_devices, max_borrow_sec, expiry_strategy, trial_expiration_basis,
-       trial_duration_sec, trial_one_per_device, trial_require_device_proof, notes, created_at,
-       updated_at, meter_quota, meter_period_sec)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, project, name, type, status, valid_from_offset_sec, duration_sec, max_active_devices,
+       expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, notes,
+       created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     policy.project,
@@ -110,20 +103,14 @@ function seedPolicy(db, id, overrides = {}) {
     policy.status,
     policy.valid_from_offset_sec,
     policy.duration_sec,
-    policy.assertion_ttl_seconds,
-    policy.pool_size,
     policy.max_active_devices,
-    policy.max_borrow_sec,
     policy.expiry_strategy,
     policy.trial_expiration_basis,
     policy.trial_duration_sec,
     policy.trial_one_per_device,
-    policy.trial_require_device_proof,
     policy.notes,
     NOW,
     NOW,
-    policy.meter_quota,
-    policy.meter_period_sec,
   );
 }
 
@@ -143,8 +130,8 @@ function catalogManifest() {
         status: "active",
         version: 1,
         features: [
-          { project: "DEFAULT", feature_key: "core", feature_inclusion: "included", addon_key: null, policy_id: "pol_node", status: "active", display_order: 1, assertion_ttl_seconds: null, pool_size: null, max_active_devices: null, max_borrow_sec: null, meter_quota: null, meter_period_sec: null },
-          { project: "DEFAULT", feature_key: "team", feature_inclusion: "addon", addon_key: "team_seats", policy_id: "pol_float", status: "active", display_order: 2, assertion_ttl_seconds: null, pool_size: 6, max_active_devices: 6, max_borrow_sec: 172_800, meter_quota: null, meter_period_sec: null },
+          { project: "DEFAULT", feature_key: "core", feature_inclusion: "included", addon_key: null, policy_id: "pol_node", status: "active", display_order: 1, max_active_devices: null },
+          { project: "DEFAULT", feature_key: "team", feature_inclusion: "addon", addon_key: "team_seats", policy_id: "pol_team", status: "active", display_order: 2, max_active_devices: 6 },
         ],
       },
     ],
@@ -171,8 +158,8 @@ test("admin catalog import and plan projection yield protected grants that suppo
     // Plan apply names the customer and license; the protected issuer requires both to exist and be active.
     db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_catalog_e2e','Owner',1,1);
       INSERT INTO licenses(id,customer_id,project,created_at,updated_at) VALUES('lic_catalog_e2e','cus_catalog_e2e','DEFAULT',1,1);`);
-    seedPolicy(db, "pol_node", { assertion_ttl_seconds: 300 });
-    seedPolicy(db, "pol_float", { type: "floating", pool_size: 6, max_active_devices: 6, max_borrow_sec: 172_800 });
+    seedPolicy(db, "pol_node");
+    seedPolicy(db, "pol_team", { max_active_devices: 3 });
     const env = adminEnv(adapter);
     const manifest = catalogManifest();
 
@@ -217,7 +204,7 @@ test("admin catalog import and plan projection yield protected grants that suppo
     assert.equal(previewBody.code, "license_plan_projection_previewed");
     assert.equal(previewBody.data.summary.create, 2);
     assert.deepEqual(previewBody.data.will_create.map((row) => row.feature), ["core", "team"]);
-    // The team add-on's policy and plan row carry a seat pool, but a projected grant is protected.
+    // A projected grant is protected: node-locked, with the plan row's device limit.
     assert.equal(previewBody.data.will_create.find((row) => row.feature === "team").license_mode, "node_locked");
     assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
 
@@ -236,7 +223,7 @@ test("admin catalog import and plan projection yield protected grants that suppo
       FROM entitlements WHERE project = 'DEFAULT' AND license_fingerprint = ? ORDER BY feature`).all(FP).map((row) => ({ ...row }));
     const protectedGrant = (feature, maxActiveDevices) => ({ feature, enforcement_mode: "device_bound_v1", device_hash: "", license_id: "lic_catalog_e2e",
       customer_id: "cus_catalog_e2e", pool_size: 0, max_active_devices: maxActiveDevices, max_borrow_sec: 0 });
-    // The plan row's device limit applies to the team grant; its seat pool and borrowing do not.
+    // The plan row's device limit overrides the team policy's; no grant has a seat pool or borrowing.
     assert.deepEqual(rows, [protectedGrant("core", 1), protectedGrant("team", 6)]);
 
     // Each plan-applied grant supports the protected consent and signed exchange.

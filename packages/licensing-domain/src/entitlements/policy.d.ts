@@ -1,7 +1,7 @@
 // Types for portable policy stamp mechanics.
 import type { EntitlementInput } from "./contracts";
 
-export type PolicyType = "trial" | "node_locked" | "floating" | "subscription";
+export type PolicyType = "trial" | "node_locked" | "subscription";
 export type PolicyStatus = "active" | "disabled";
 export type ExpiryStrategy = "fixed_window" | "non_expiring";
 export type TrialExpirationBasis = "from_issue" | "from_first_activation" | "from_first_use";
@@ -14,12 +14,7 @@ export interface Policy {
   status: PolicyStatus;
   valid_from_offset_sec: number | null;
   duration_sec: number | null;
-  assertion_ttl_seconds: number;
-  pool_size: number;
   max_active_devices: number;
-  max_borrow_sec: number;
-  meter_quota: number;
-  meter_period_sec: number;
   expiry_strategy: ExpiryStrategy;
   trial_expiration_basis: TrialExpirationBasis;
   trial_duration_sec: number;
@@ -34,26 +29,17 @@ export interface PolicyStampOverrides {
   project: string;
   feature: string;
   license_fingerprint: string;
-  device_hash?: string;
-  assertion_ttl_seconds?: number;
   valid_from?: number | null;
   valid_until?: number | null;
   notes?: string;
   customer_id?: string | null;
   license_id?: string | null;
-  pool_size?: number;
   max_active_devices?: number;
-  max_borrow_sec?: number;
-  meter_quota?: number;
-  meter_period_sec?: number;
 }
 
+/** A protected grant takes only its device limit from a policy. */
 export interface PolicyCapacity {
-  pool_size: number;
   max_active_devices: number;
-  max_borrow_sec: number;
-  meter_quota: number;
-  meter_period_sec: number;
 }
 
 export interface PolicyTrialState {
@@ -70,9 +56,6 @@ export interface PolicyStamp {
   trial: PolicyTrialState;
 }
 
-export declare const POLICY_TYPES: readonly ["trial", "node_locked", "floating", "subscription"];
-
-/** null when (type, pool_size) satisfies the capacity-mode invariant; else the violated rule as an error code string. */
-export declare function policyCapacityViolation(type: PolicyType, poolSize: number): string | null;
+export declare const POLICY_TYPES: readonly ["trial", "node_locked", "subscription"];
 
 export function stampFromPolicy(policy: Policy, overrides: PolicyStampOverrides, now: number): PolicyStamp;

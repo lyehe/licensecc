@@ -27,7 +27,7 @@ export const policyPaths: LabeledPathFragment = {
       security: ADMIN_SECURITY,
       parameters: [
         { name: "project", in: "query", required: false, description: "Exact-match project filter.", schema: { type: "string" } },
-        { name: "type", in: "query", required: false, description: "Exact-match policy type filter.", schema: { type: "string", enum: ["trial", "node_locked", "floating", "subscription"] } },
+        { name: "type", in: "query", required: false, description: "Exact-match policy type filter.", schema: { type: "string", enum: ["trial", "node_locked", "subscription"] } },
         { name: "status", in: "query", required: false, description: "Exact-match status filter.", schema: { type: "string", enum: ["active", "disabled"] } },
         ...limitCursorParams(),
       ],

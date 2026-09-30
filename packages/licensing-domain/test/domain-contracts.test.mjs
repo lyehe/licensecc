@@ -5,7 +5,7 @@ import {
   entitlementId,
   withId,
 } from "../src/entitlements/contracts.mjs";
-import { policyCapacityViolation, stampFromPolicy } from "../src/entitlements/policy.mjs";
+import { POLICY_TYPES, stampFromPolicy } from "../src/entitlements/policy.mjs";
 import { canonicalEntitlementEvent, computeSegmentDigest } from "../src/audit/audit_digest.mjs";
 import {
   catalogImportManifestDigest,
@@ -41,18 +41,21 @@ test("every explicit domain export resolves without Worker bindings", async () =
 test("entitlement value contract is stable without a Worker binding", () => {
   const id = entitlementId("project", "FEATURE", "fingerprint");
   assert.deepEqual(decodeEntitlementId(id), { project: "project", feature: "FEATURE", license_fingerprint: "fingerprint" });
-  assert.equal(withId({ project: "project", feature: "FEATURE", license_fingerprint: "fingerprint", pool_size: 2, cache_ttl_seconds: 30 }).license_mode, "floating");
+  // A grant is protected: a trial or node-locked, and a stray seat pool never makes it floating.
+  assert.equal(withId({ project: "project", feature: "FEATURE", license_fingerprint: "fingerprint", pool_size: 2, cache_ttl_seconds: 30 }).license_mode, "node_locked");
+  assert.equal(withId({ project: "project", feature: "FEATURE", license_fingerprint: "fingerprint", is_trial: 1 }).license_mode, "trial");
 });
 
-test("policy stamps retain capacity invariants and pure output", () => {
-  assert.equal(policyCapacityViolation("floating", 0), "floating_requires_pool");
+test("policies are trial, node-locked or subscription, and a stamp is pure and carries only a device limit", () => {
+  assert.deepEqual([...POLICY_TYPES], ["trial", "node_locked", "subscription"]);
   const stamped = stampFromPolicy({
     type: "trial", trial_expiration_basis: "from_issue", expiry_strategy: "fixed_window", trial_duration_sec: 60,
-    valid_from_offset_sec: null, duration_sec: null, assertion_ttl_seconds: 300, pool_size: 0,
-    max_active_devices: 1, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000,
+    valid_from_offset_sec: null, duration_sec: null, max_active_devices: 2,
     trial_one_per_device: 0, trial_require_device_proof: 0,
   }, { project: "p", feature: "F", license_fingerprint: "fp" }, 100);
   assert.equal(stamped.input.valid_until, 160);
+  assert.deepEqual(stamped.capacity, { max_active_devices: 2 });
+  assert.deepEqual(Object.keys(stamped.input).sort(), ["customer_id", "feature", "license_fingerprint", "license_id", "notes", "project", "status", "valid_from", "valid_until"]);
 });
 
 test("usage and audit cores are deterministic without D1", async () => {
@@ -85,10 +88,10 @@ test("catalog import preview values have a stable opaque grammar and canonical d
 
 test("a plan-projected grant takes only its device limit from the catalog, and a change is judged on what apply writes", () => {
   const input = normalizePlanProjectionInput({ project: "DEFAULT", license_id: "lic_1", license_fingerprint: "f".repeat(64), plan_key: "basic" });
-  // A catalog row that still carries seat, borrow, meter and TTL overrides.
+  // A catalog row names only its device limit.
   const desired = desiredPlanProjectionRow({
     feature_key: "CORE", feature_inclusion: "included", addon_key: null, feature_name: "Core", policy_id_resolved: null,
-    assertion_ttl_seconds: 600, pool_size: 5, max_active_devices: 3, max_borrow_sec: 60, meter_quota: 10, meter_period_sec: 3600,
+    max_active_devices: 3,
   }, input, 100);
   assert.deepEqual(desired.capacity, { max_active_devices: 3 });
   assert.equal("device_hash" in desired.input, false);

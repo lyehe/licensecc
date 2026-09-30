@@ -26,10 +26,9 @@ export function decodeEntitlementId(id) {
   }
 }
 
+// A grant is protected, so it is a trial or node-locked; a seat pool never makes it floating.
 export function effectiveLicenseMode(row) {
-  if (Number(row?.is_trial ?? 0) === 1) return "trial";
-  if (Number(row?.pool_size ?? 0) > 0) return "floating";
-  return "node_locked";
+  return Number(row?.is_trial ?? 0) === 1 ? "trial" : "node_locked";
 }
 
 export function withId(row) {

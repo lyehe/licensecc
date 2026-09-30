@@ -9,10 +9,13 @@ export interface PolicyFilter {
 
 export type PolicyAction = "disable" | "reenable";
 
+/** The form still offers a floating policy, which the API now refuses. */
+type PolicyFormType = PolicyType | "floating";
+
 export interface PolicyFormState {
   project: string;
   name: string;
-  type: PolicyType;
+  type: PolicyFormType;
   valid_from_offset_sec: string;
   duration_sec: string;
   assertion_ttl_seconds: number;
@@ -73,7 +76,7 @@ export function disablePolicyConfirm(policy: { name: string; type: string }): st
   return `Disable policy "${policy.name}" (${policy.type}). New entitlements can no longer be stamped from it; already-stamped entitlements are frozen and unaffected.`;
 }
 
-export function normalizePolicyForm(form: PolicyFormState): PolicyInput {
+export function normalizePolicyForm(form: PolicyFormState): Omit<PolicyInput, "type"> & { type: PolicyFormType } {
   if (form.type === "floating" && form.pool_size < 1) {
     throw new Error("floating_pool_size_must_be_at_least_1");
   }

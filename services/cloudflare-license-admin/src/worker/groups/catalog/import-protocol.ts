@@ -165,12 +165,7 @@ function planFeatureRow(row: StoredRow): StoredRow {
     policy_id: row.policy_id === null ? null : rowString(row, "policy_id"),
     status: rowString(row, "status"),
     display_order: rowInteger(row, "display_order"),
-    assertion_ttl_seconds: nullableInteger(row, "assertion_ttl_seconds"),
-    pool_size: nullableInteger(row, "pool_size"),
     max_active_devices: nullableInteger(row, "max_active_devices"),
-    max_borrow_sec: nullableInteger(row, "max_borrow_sec"),
-    meter_quota: nullableInteger(row, "meter_quota"),
-    meter_period_sec: nullableInteger(row, "meter_period_sec"),
     created_at: rowInteger(row, "created_at"),
     updated_at: rowInteger(row, "updated_at"),
   };
@@ -198,12 +193,7 @@ function planFeatureMatches(row: StoredRow, input: CatalogPlanFeatureInput): boo
     (row.policy_id ?? null) === input.policy_id &&
     row.status === input.status &&
     row.display_order === input.display_order &&
-    (row.assertion_ttl_seconds ?? null) === input.assertion_ttl_seconds &&
-    (row.pool_size ?? null) === input.pool_size &&
-    (row.max_active_devices ?? null) === input.max_active_devices &&
-    (row.max_borrow_sec ?? null) === input.max_borrow_sec &&
-    (row.meter_quota ?? null) === input.meter_quota &&
-    (row.meter_period_sec ?? null) === input.meter_period_sec;
+    (row.max_active_devices ?? null) === input.max_active_devices;
 }
 
 function catalogEffect(existing: StoredRow | null, matches: boolean, nextStatus: string): CatalogImportEffectKind {
@@ -287,12 +277,7 @@ function planFeatureAfter(input: CatalogPlanFeatureInput, planId: string, existi
     policy_id: input.policy_id,
     status: input.status,
     display_order: input.display_order,
-    assertion_ttl_seconds: input.assertion_ttl_seconds,
-    pool_size: input.pool_size,
     max_active_devices: input.max_active_devices,
-    max_borrow_sec: input.max_borrow_sec,
-    meter_quota: input.meter_quota,
-    meter_period_sec: input.meter_period_sec,
     created_at: existing === null ? effectiveAt : rowInteger(existing, "created_at"),
     updated_at: effectiveAt,
   };
@@ -650,18 +635,14 @@ function planMatchValues(after: StoredRow): unknown[] {
 function planFeatureMatchSql(alias: string): string {
   return `${alias}.project IS ? AND ${alias}.plan_id IS ? AND ${alias}.feature_key IS ? AND ${alias}.feature_inclusion IS ?
     AND ${alias}.addon_key IS ? AND ${alias}.policy_id IS ? AND ${alias}.status IS ? AND ${alias}.display_order IS ?
-    AND ${alias}.assertion_ttl_seconds IS ? AND ${alias}.pool_size IS ? AND ${alias}.max_active_devices IS ?
-    AND ${alias}.max_borrow_sec IS ? AND ${alias}.meter_quota IS ? AND ${alias}.meter_period_sec IS ?
-    AND ${alias}.created_at IS ? AND ${alias}.updated_at IS ?`;
+    AND ${alias}.max_active_devices IS ? AND ${alias}.created_at IS ? AND ${alias}.updated_at IS ?`;
 }
 
 function planFeatureMatchValues(after: StoredRow): unknown[] {
   return [
     rowString(after, "project"), rowString(after, "plan_id"), rowString(after, "feature_key"), rowString(after, "feature_inclusion"),
     after.addon_key ?? null, after.policy_id ?? null, rowString(after, "status"), rowInteger(after, "display_order"),
-    after.assertion_ttl_seconds ?? null, after.pool_size ?? null, after.max_active_devices ?? null,
-    after.max_borrow_sec ?? null, after.meter_quota ?? null, after.meter_period_sec ?? null,
-    rowInteger(after, "created_at"), rowInteger(after, "updated_at"),
+    after.max_active_devices ?? null, rowInteger(after, "created_at"), rowInteger(after, "updated_at"),
   ];
 }
 
@@ -726,22 +707,19 @@ function mutationStatement(env: Env, action: CatalogImportAction, previewId: str
         return env.DB.prepare(
           `INSERT INTO catalog_plan_features
              (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
-              assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
-              created_at, updated_at)
-           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+              max_active_devices, created_at, updated_at)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
            WHERE ${claimGuardSql()}`,
         ).bind(...planFeatureMatchValues(after), previewId, claimToken);
       }
       return env.DB.prepare(
         `UPDATE catalog_plan_features
          SET feature_inclusion = ?, addon_key = ?, policy_id = ?, status = ?, display_order = ?,
-             assertion_ttl_seconds = ?, pool_size = ?, max_active_devices = ?, max_borrow_sec = ?,
-             meter_quota = ?, meter_period_sec = ?, updated_at = ?
+             max_active_devices = ?, updated_at = ?
          WHERE project = ? AND plan_id = ? AND feature_key = ? AND ${claimGuardSql()}`,
       ).bind(
         rowString(after, "feature_inclusion"), after.addon_key ?? null, after.policy_id ?? null, rowString(after, "status"), rowInteger(after, "display_order"),
-        after.assertion_ttl_seconds ?? null, after.pool_size ?? null, after.max_active_devices ?? null, after.max_borrow_sec ?? null,
-        after.meter_quota ?? null, after.meter_period_sec ?? null, rowInteger(after, "updated_at"),
+        after.max_active_devices ?? null, rowInteger(after, "updated_at"),
         rowString(after, "project"), rowString(after, "plan_id"), rowString(after, "feature_key"), previewId, claimToken,
       );
   }

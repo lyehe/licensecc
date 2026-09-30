@@ -938,12 +938,6 @@
                 "null"
               ]
             },
-            "assertion_ttl_seconds": {
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
             "created_at": {
               "type": "integer"
             },
@@ -964,24 +958,7 @@
               "type": "string"
             },
             "max_active_devices": {
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "max_borrow_sec": {
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "meter_period_sec": {
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "meter_quota": {
+              "description": "Device limit override; null takes the limit from the policy (or 1 without one).",
               "type": [
                 "integer",
                 "null"
@@ -996,12 +973,6 @@
             "policy_id": {
               "type": [
                 "string",
-                "null"
-              ]
-            },
-            "pool_size": {
-              "type": [
-                "integer",
                 "null"
               ]
             },
@@ -1023,18 +994,12 @@
         },
         "CatalogPlanFeatureInput": {
           "additionalProperties": false,
+          "description": "A plan feature grants a protected grant its device limit, directly or through its policy. A body naming any other field (a seat pool, borrowing, a meter or an assertion TTL) returns 400 invalid_request.",
           "properties": {
             "addon_key": {
               "maxLength": 128,
               "type": [
                 "string",
-                "null"
-              ]
-            },
-            "assertion_ttl_seconds": {
-              "minimum": 0,
-              "type": [
-                "integer",
                 "null"
               ]
             },
@@ -1062,38 +1027,10 @@
                 "null"
               ]
             },
-            "max_borrow_sec": {
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "meter_period_sec": {
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "meter_quota": {
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
             "policy_id": {
               "maxLength": 128,
               "type": [
                 "string",
-                "null"
-              ]
-            },
-            "pool_size": {
-              "minimum": 0,
-              "type": [
-                "integer",
                 "null"
               ]
             },
@@ -2489,9 +2426,6 @@
                 "null"
               ]
             },
-            "assertion_ttl_seconds": {
-              "type": "integer"
-            },
             "feature": {
               "type": "string"
             },
@@ -2499,23 +2433,15 @@
               "type": "string"
             },
             "license_mode": {
+              "description": "Every grant is protected: a trial or node-locked.",
               "enum": [
                 "trial",
-                "floating",
                 "node_locked"
               ],
               "type": "string"
             },
             "max_active_devices": {
-              "type": "integer"
-            },
-            "max_borrow_sec": {
-              "type": "integer"
-            },
-            "meter_period_sec": {
-              "type": "integer"
-            },
-            "meter_quota": {
+              "description": "Device limit: a protected grant's only capacity.",
               "type": "integer"
             },
             "policy_id": {
@@ -2523,9 +2449,6 @@
                 "string",
                 "null"
               ]
-            },
-            "pool_size": {
-              "type": "integer"
             },
             "previous_status": {
               "type": "string"
@@ -2725,11 +2648,6 @@
         "Policy": {
           "description": "A license-policy template (entitlement_policies row). Frozen at stamp time onto a new entitlement.",
           "properties": {
-            "assertion_ttl_seconds": {
-              "maximum": 3600,
-              "minimum": 1,
-              "type": "integer"
-            },
             "created_at": {
               "type": "integer"
             },
@@ -2750,20 +2668,7 @@
               "type": "string"
             },
             "max_active_devices": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "max_borrow_sec": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "meter_period_sec": {
-              "description": "Rolling metering period length in seconds (0 -> the 30d default).",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "meter_quota": {
-              "description": "Per-period consumption quota (0 = unlimited/count-only). A stamped entitlement inherits it.",
+              "description": "Device limit the policy stamps onto a protected grant: its only capacity.",
               "minimum": 0,
               "type": "integer"
             },
@@ -2774,10 +2679,6 @@
             "notes": {
               "maxLength": 1000,
               "type": "string"
-            },
-            "pool_size": {
-              "minimum": 0,
-              "type": "integer"
             },
             "project": {
               "maxLength": 127,
@@ -2809,18 +2710,10 @@
               ],
               "type": "integer"
             },
-            "trial_require_device_proof": {
-              "enum": [
-                0,
-                1
-              ],
-              "type": "integer"
-            },
             "type": {
               "enum": [
                 "trial",
                 "node_locked",
-                "floating",
                 "subscription"
               ],
               "type": "string"
@@ -2838,14 +2731,9 @@
           "type": "object"
         },
         "PolicyInput": {
-          "description": "Create body. project/name/type required; every other field takes the column default. Explicit node_locked policies require pool_size=0; explicit floating policies require pool_size>0.",
+          "additionalProperties": false,
+          "description": "Create body. project/name/type required; every other field takes the column default. A policy stamps a protected grant, so a body naming any other field (a seat pool, borrowing, a meter, an assertion TTL or device proof) returns 400 invalid_request.",
           "properties": {
-            "assertion_ttl_seconds": {
-              "default": 300,
-              "maximum": 3600,
-              "minimum": 1,
-              "type": "integer"
-            },
             "duration_sec": {
               "default": null,
               "type": [
@@ -2866,23 +2754,6 @@
               "minimum": 0,
               "type": "integer"
             },
-            "max_borrow_sec": {
-              "default": 0,
-              "minimum": 0,
-              "type": "integer"
-            },
-            "meter_period_sec": {
-              "default": 2592000,
-              "description": "Rolling metering period length in seconds.",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "meter_quota": {
-              "default": 0,
-              "description": "Per-period consumption quota (0 = unlimited/count-only).",
-              "minimum": 0,
-              "type": "integer"
-            },
             "name": {
               "description": "Unique per project (case-insensitive). A duplicate returns 409 policy_name_conflict.",
               "maxLength": 127,
@@ -2892,12 +2763,6 @@
               "default": "",
               "maxLength": 1000,
               "type": "string"
-            },
-            "pool_size": {
-              "default": 0,
-              "description": "Capacity source of truth. node_locked requires 0; floating requires a value greater than 0.",
-              "minimum": 0,
-              "type": "integer"
             },
             "project": {
               "maxLength": 127,
@@ -2925,19 +2790,10 @@
               ],
               "type": "integer"
             },
-            "trial_require_device_proof": {
-              "default": 0,
-              "enum": [
-                0,
-                1
-              ],
-              "type": "integer"
-            },
             "type": {
               "enum": [
                 "trial",
                 "node_locked",
-                "floating",
                 "subscription"
               ],
               "type": "string"
@@ -2958,13 +2814,9 @@
           "type": "object"
         },
         "PolicyPatch": {
-          "description": "All fields optional; only provided fields are updated. project/name/type/status are NOT patchable (status flips only via disable/reenable). A pool_size patch must preserve the existing policy type's node_locked/floating invariant.",
+          "additionalProperties": false,
+          "description": "All fields optional; only provided fields are updated. project/name/type/status are NOT patchable (status flips only via disable/reenable), and a body naming them or any other field (a seat pool, borrowing, a meter, an assertion TTL or device proof) returns 400 invalid_request.",
           "properties": {
-            "assertion_ttl_seconds": {
-              "maximum": 3600,
-              "minimum": 1,
-              "type": "integer"
-            },
             "duration_sec": {
               "type": [
                 "integer",
@@ -2982,28 +2834,9 @@
               "minimum": 0,
               "type": "integer"
             },
-            "max_borrow_sec": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "meter_period_sec": {
-              "description": "Rolling metering period length in seconds (0 -> the 30d default).",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "meter_quota": {
-              "description": "Per-period consumption quota (0 = unlimited/count-only). A stamped entitlement inherits it.",
-              "minimum": 0,
-              "type": "integer"
-            },
             "notes": {
               "maxLength": 1000,
               "type": "string"
-            },
-            "pool_size": {
-              "description": "Capacity source of truth. node_locked policies cannot be patched above 0; floating policies cannot be patched to 0.",
-              "minimum": 0,
-              "type": "integer"
             },
             "trial_duration_sec": {
               "minimum": 0,
@@ -3018,13 +2851,6 @@
               "type": "string"
             },
             "trial_one_per_device": {
-              "enum": [
-                0,
-                1
-              ],
-              "type": "integer"
-            },
-            "trial_require_device_proof": {
               "enum": [
                 0,
                 1
@@ -3301,7 +3127,7 @@
           "type": "object"
         },
         "TimeseriesData": {
-          "description": "Bucketed usage-analytics over [from,to). `buckets` is a dense, fixed-length array (zero-filled gaps); each bucket aggregates usage_events (by ts) + order_events (by received_at).",
+          "description": "Refused connections and fulfillment events bucketed over [from,to). `buckets` is a dense, fixed-length array (zero-filled gaps); each bucket counts the protected device-limit refusals (usage_events by ts) and order_events (by received_at), and nothing else.",
           "properties": {
             "bucket_seconds": {
               "description": "Nominal bucket width; the last bucket absorbs any integer remainder of the span.",
@@ -3309,25 +3135,14 @@
             },
             "buckets": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
-                  "checkouts": {
-                    "description": "usage_events event_type='checkout' in this bucket.",
-                    "type": "integer"
-                  },
-                  "denial_rate": {
-                    "description": "denials / (checkouts + denials); 0 when the bucket saw no attempts (the upsell signal).",
-                    "type": "number"
-                  },
                   "denials": {
-                    "description": "usage_events event_type='denied' in this bucket.",
+                    "description": "Protected refusals in this bucket: connections refused because the grant's device limit was reached.",
                     "type": "integer"
                   },
                   "fulfillment_events": {
                     "description": "order_events received_at in this bucket.",
-                    "type": "integer"
-                  },
-                  "releases": {
-                    "description": "usage_events event_type IN ('release','reclaim') in this bucket.",
                     "type": "integer"
                   },
                   "start": {
@@ -3337,10 +3152,7 @@
                 },
                 "required": [
                   "start",
-                  "checkouts",
-                  "releases",
                   "denials",
-                  "denial_rate",
                   "fulfillment_events"
                 ],
                 "type": "object"
@@ -14079,7 +13891,6 @@
                 "enum": [
                   "trial",
                   "node_locked",
-                  "floating",
                   "subscription"
                 ],
                 "type": "string"
@@ -15689,7 +15500,7 @@
                   }
                 }
               },
-              "description": "Per-bucket usage (checkouts/releases/denials/denial_rate) + fulfillment_events."
+              "description": "Per-bucket protected refusals (denials) + fulfillment_events."
             },
             "400": {
               "content": {
@@ -15771,7 +15582,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Bucketed usage + fulfillment time-series over a [from,to] window (reader+admin)",
+          "summary": "Bucketed refused-connection + fulfillment time-series over a [from,to] window (reader+admin)",
           "tags": [
             "admin:reports"
           ]

@@ -1,4 +1,4 @@
-import type { EntitlementRecord } from "../entitlements/contracts";
+import type { EntitlementRecord, LicenseMode } from "../entitlements/contracts";
 
 export const PLAN_PROJECTION_PREVIEW_ID_PATTERN: RegExp;
 /** 9999-12-31T23:59:59Z; the maximum accepted support_until epoch second. */
@@ -90,17 +90,12 @@ export interface PlanProjectionItem {
   policy_id: string | null;
   source: "included" | "addon";
   addon_key: string | null;
-  /** A projected grant is `trial` or `node_locked`; an item for an existing row reports its stored mode. */
-  license_mode: "trial" | "floating" | "node_locked";
+  /** Every grant is protected: a trial or node-locked, and its device limit is its only capacity. */
+  license_mode: LicenseMode;
   status: "active" | "disabled" | "revoked";
   valid_from: number | null;
   valid_until: number | null;
-  assertion_ttl_seconds: number;
-  pool_size: number;
   max_active_devices: number;
-  max_borrow_sec: number;
-  meter_quota: number;
-  meter_period_sec: number;
   reason?: string;
   previous_status?: string;
 }

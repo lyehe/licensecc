@@ -1,23 +1,52 @@
 import type {
   ExpiryStrategy,
-  PolicyInput,
-  PolicyPatch,
   PolicyType,
   TrialExpirationBasis,
 } from "../shared/api";
 import { safeString } from "@licensecc/cloudflare-runtime/http/kit";
-import { POLICY_TYPES, policyCapacityViolation } from "@licensecc/licensing-domain/entitlements/policy";
+import { POLICY_TYPES } from "@licensecc/licensing-domain/entitlements/policy";
 
 const MAX_PROJECT_SIZE = 127;
 const MAX_NOTES_SIZE = 1000;
 const MAX_NAME_SIZE = 127;
-// A generous-but-bounded ceiling for the policy duration/offset/borrow integers
+// A generous-but-bounded ceiling for the policy duration and offset integers
 // (~100 years in seconds). Keeps validators from accepting absurd or overflow values.
 const MAX_DURATION_SECONDS = 3_153_600_000;
 const INVALID = Symbol("invalid");
 
 const EXPIRY_STRATEGIES: ReadonlyArray<ExpiryStrategy> = ["fixed_window", "non_expiring"];
 const TRIAL_BASES: ReadonlyArray<TrialExpirationBasis> = ["from_issue", "from_first_activation", "from_first_use"];
+
+// A policy stamps a protected grant: its device limit, validity and trial rules. A body naming any
+// other field (a seat pool, borrowing, a meter, an assertion TTL, device proof, or anything else)
+// is refused whole, so a caller never believes a field it sent took effect.
+const PATCHABLE_FIELDS: ReadonlySet<string> = new Set([
+  "valid_from_offset_sec", "duration_sec", "max_active_devices", "expiry_strategy",
+  "trial_expiration_basis", "trial_duration_sec", "trial_one_per_device", "notes",
+]);
+const CREATE_FIELDS: ReadonlySet<string> = new Set(["project", "name", "type", ...PATCHABLE_FIELDS]);
+
+/** The policy a create writes: every column but its identity takes the given value or the default. */
+export interface ValidPolicyInput {
+  project: string;
+  name: string;
+  type: PolicyType;
+  notes: string;
+  valid_from_offset_sec: number | null;
+  duration_sec: number | null;
+  max_active_devices: number;
+  expiry_strategy: ExpiryStrategy;
+  trial_expiration_basis: TrialExpirationBasis;
+  trial_duration_sec: number;
+  trial_one_per_device: number;
+}
+
+/** The columns a PATCH updates; project, name, type and status are never patchable. */
+export type ValidPolicyPatch = Partial<Omit<ValidPolicyInput, "project" | "name" | "type">>;
+
+function namesOnly(input: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
+  return Object.keys(input).every((key) => allowed.has(key));
+}
 
 function safeNotes(value: unknown): string | null {
   if (typeof value !== "string" || value.length > MAX_NOTES_SIZE) {
@@ -51,100 +80,65 @@ function nullableBoundedInt(value: unknown, min: number, max: number): number | 
   return value;
 }
 
-// Thin re-export of the single-sourced capacity invariant (backend policy.mjs) as the boolean the
-// worker call sites want. The rule itself lives in exactly one place now.
-export function policyTypeCapacityIsValid(type: PolicyType, poolSize: number): boolean {
-  return policyCapacityViolation(type, poolSize) === null;
-}
-
 // Resolve the per-policy default columns. Each is "undefined -> default; else validate".
 // Returns null on ANY invalid field so the caller emits a single 400 invalid_request.
-function readPolicyColumns(input: Record<string, unknown>): {
-  valid_from_offset_sec: number | null;
-  duration_sec: number | null;
-  assertion_ttl_seconds: number;
-  pool_size: number;
-  max_active_devices: number;
-  max_borrow_sec: number;
-  meter_quota: number;
-  meter_period_sec: number;
-  expiry_strategy: ExpiryStrategy;
-  trial_expiration_basis: TrialExpirationBasis;
-  trial_duration_sec: number;
-  trial_one_per_device: number;
-  trial_require_device_proof: number;
-} | null {
+function readPolicyColumns(input: Record<string, unknown>): Omit<ValidPolicyInput, "project" | "name" | "type" | "notes"> | null {
   const validFromOffset = input.valid_from_offset_sec === undefined ? null : nullableBoundedInt(input.valid_from_offset_sec, -MAX_DURATION_SECONDS, MAX_DURATION_SECONDS);
   const duration = input.duration_sec === undefined ? null : nullableBoundedInt(input.duration_sec, 0, MAX_DURATION_SECONDS);
-  const assertionTtl = boundedInt(input.assertion_ttl_seconds ?? 300, 1, 3600);
-  const poolSize = boundedInt(input.pool_size ?? 0, 0, 1_000_000);
   const maxActiveDevices = boundedInt(input.max_active_devices ?? 1, 0, 1_000_000);
-  const maxBorrow = boundedInt(input.max_borrow_sec ?? 0, 0, MAX_DURATION_SECONDS);
-  const meterQuota = boundedInt(input.meter_quota ?? 0, 0, 1_000_000_000);
-  const meterPeriodSec = boundedInt(input.meter_period_sec ?? 2592000, 0, MAX_DURATION_SECONDS);
   const expiryStrategy = input.expiry_strategy === undefined ? "fixed_window" : input.expiry_strategy;
   const trialBasis = input.trial_expiration_basis === undefined ? "from_issue" : input.trial_expiration_basis;
   const trialDuration = boundedInt(input.trial_duration_sec ?? 0, 0, MAX_DURATION_SECONDS);
   const trialOnePerDevice = boundedInt(input.trial_one_per_device ?? 0, 0, 1);
-  const trialRequireProof = boundedInt(input.trial_require_device_proof ?? 0, 0, 1);
   if (
-    validFromOffset === INVALID || duration === INVALID || assertionTtl === undefined ||
-    poolSize === undefined || maxActiveDevices === undefined || maxBorrow === undefined ||
-    meterQuota === undefined || meterPeriodSec === undefined ||
+    validFromOffset === INVALID || duration === INVALID || maxActiveDevices === undefined ||
     !EXPIRY_STRATEGIES.includes(expiryStrategy as ExpiryStrategy) ||
     !TRIAL_BASES.includes(trialBasis as TrialExpirationBasis) ||
-    trialDuration === undefined || trialOnePerDevice === undefined || trialRequireProof === undefined
+    trialDuration === undefined || trialOnePerDevice === undefined
   ) {
     return null;
   }
   return {
     valid_from_offset_sec: validFromOffset,
     duration_sec: duration,
-    assertion_ttl_seconds: assertionTtl,
-    pool_size: poolSize,
     max_active_devices: maxActiveDevices,
-    max_borrow_sec: maxBorrow,
-    meter_quota: meterQuota,
-    meter_period_sec: meterPeriodSec,
     expiry_strategy: expiryStrategy as ExpiryStrategy,
     trial_expiration_basis: trialBasis as TrialExpirationBasis,
     trial_duration_sec: trialDuration,
     trial_one_per_device: trialOnePerDevice,
-    trial_require_device_proof: trialRequireProof,
   };
 }
 
-export function validatePolicyInput(value: unknown): PolicyInput | null {
+export function validatePolicyInput(value: unknown): ValidPolicyInput | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
   const input = value as Record<string, unknown>;
-  const project = safeString(input.project, MAX_PROJECT_SIZE);
-  const name = safeString(input.name, MAX_NAME_SIZE);
-  const type = input.type;
-  const notes = input.notes === undefined ? "" : safeNotes(input.notes);
-  const columns = readPolicyColumns(input);
-  if (
-    project === null || name === null || !POLICY_TYPES.includes(type as PolicyType) ||
-    notes === null || columns === null ||
-    !policyTypeCapacityIsValid(type as PolicyType, columns.pool_size)
-  ) {
+  if (!namesOnly(input, CREATE_FIELDS)) {
     return null;
   }
-  return { project, name, type: type as PolicyType, notes, ...columns };
+  const project = safeString(input.project, MAX_PROJECT_SIZE);
+  const name = safeString(input.name, MAX_NAME_SIZE);
+  const type = POLICY_TYPES.find((candidate) => candidate === input.type);
+  const notes = input.notes === undefined ? "" : safeNotes(input.notes);
+  const columns = readPolicyColumns(input);
+  if (project === null || name === null || type === undefined || notes === null || columns === null) {
+    return null;
+  }
+  return { project, name, type, notes, ...columns };
 }
 
-export function validatePolicyPatch(value: unknown): PolicyPatch | null {
+export function validatePolicyPatch(value: unknown): ValidPolicyPatch | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
   const input = value as Record<string, unknown>;
   // project/name/type/status are NOT patchable, so callers cannot believe they
   // changed identity or flipped status outside disable/reenable.
-  if (input.project !== undefined || input.name !== undefined || input.type !== undefined || input.status !== undefined) {
+  if (!namesOnly(input, PATCHABLE_FIELDS)) {
     return null;
   }
-  const patch: PolicyPatch = {};
+  const patch: ValidPolicyPatch = {};
   if (input.valid_from_offset_sec !== undefined) {
     const v = nullableBoundedInt(input.valid_from_offset_sec, -MAX_DURATION_SECONDS, MAX_DURATION_SECONDS);
     if (v === INVALID) return null;
@@ -156,15 +150,9 @@ export function validatePolicyPatch(value: unknown): PolicyPatch | null {
     patch.duration_sec = v;
   }
   for (const [field, min, max] of [
-    ["assertion_ttl_seconds", 1, 3600],
-    ["pool_size", 0, 1_000_000],
     ["max_active_devices", 0, 1_000_000],
-    ["max_borrow_sec", 0, MAX_DURATION_SECONDS],
-    ["meter_quota", 0, 1_000_000_000],
-    ["meter_period_sec", 0, MAX_DURATION_SECONDS],
     ["trial_duration_sec", 0, MAX_DURATION_SECONDS],
     ["trial_one_per_device", 0, 1],
-    ["trial_require_device_proof", 0, 1],
   ] as const) {
     if (input[field] !== undefined) {
       const v = boundedInt(input[field], min, max);

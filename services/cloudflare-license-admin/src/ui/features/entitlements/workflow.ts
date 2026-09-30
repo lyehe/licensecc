@@ -145,7 +145,7 @@ export function policyOptionLabel(policy: Pick<Policy, "name" | "project" | "poo
 
 /** A grant can only be stamped from a policy of its own project; a floating policy grants seats,
  * which a protected create never offers, so it is excluded too. */
-export function policiesForProject<T extends Pick<Policy, "project" | "type">>(policies: readonly T[], project: string): T[] {
+export function policiesForProject<T extends Pick<Policy, "project"> & { type: Policy["type"] | "floating" }>(policies: readonly T[], project: string): T[] {
   return policies.filter((policy) => policy.project === project && policy.type !== "floating");
 }
 

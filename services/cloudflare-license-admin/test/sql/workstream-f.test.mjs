@@ -1,10 +1,10 @@
-// Workstream F — usage-analytics reports
+// Workstream F — reports
 // (real SQLite, end-to-end through worker.fetch). Mirrors policy-admin.test.mjs: the
 // REAL compiled worker is driven over an in-memory SQLite built from the shared
 // migrations/*.sql wrapped in a D1-like adapter — nothing about the analytics SQL is mocked.
 //
 // Covers:
-//   timeseries  — events land in the right bucket; denial_rate math; fulfillment_events;
+//   timeseries  — only protected refusals and fulfillment events land in each bucket;
 //                 an empty window returns zero-filled buckets; from >= to is 400.
 //   expiring    — in-window vs out-of-window vs non-active vs no-valid_until; valid_until ASC
 //                 ordering; days_left = ceil((valid_until-now)/86400); cursor pagination.
@@ -175,6 +175,11 @@ function insertUsage(db, fp, eventType, ts, { seatId = null, deviceKeyId = null,
   ).run(fp, eventType, seatId, deviceKeyId, reason, ts);
 }
 
+// The row protected issuance records when it refuses a device because the grant's limit is reached.
+function insertRefusal(db, fp, ts) {
+  insertUsage(db, fp, "denied", ts, { deviceKeyId: "key", reason: "device_limit_reached" });
+}
+
 function insertOrderEvent(db, eventId, receivedAt, status = "accepted") {
   db.prepare(
     `INSERT INTO order_events (event_id, subscription_id, project, feature, order_epoch, seq, intent, key_id, payload_digest, raw_payload, status, received_at)
@@ -185,12 +190,11 @@ function insertOrderEvent(db, eventId, receivedAt, status = "accepted") {
 function insertEntitlement(db, fp, {
   status = "active", validUntil = null, customerId = null, now = 1000,
   isTrial = 0, trialBasis = "from_issue", trialDurationSec = 0, trialStartedAt = null,
-  enforcementMode = "device_bound_v1",
 } = {}) {
   db.prepare(
     `INSERT INTO entitlements (project, feature, license_fingerprint, status, valid_until, customer_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_started_at, enforcement_mode, created_at, updated_at)
-     VALUES ('DEFAULT','DEFAULT',?,?,?,?,?,?,?,?,?,?,?)`,
-  ).run(fp, status, validUntil, customerId, isTrial, trialBasis, trialDurationSec, trialStartedAt, enforcementMode, now, now);
+     VALUES ('DEFAULT','DEFAULT',?,?,?,?,?,?,?,?,'device_bound_v1',?,?)`,
+  ).run(fp, status, validUntil, customerId, isTrial, trialBasis, trialDurationSec, trialStartedAt, now, now);
 }
 
 function insertCustomer(db, id, name, now = 1000) {
@@ -199,21 +203,21 @@ function insertCustomer(db, id, name, now = 1000) {
 
 // ── Time-series ───────────────────────────────────────────────────────────────
 
-test("timeseries: events land in the right bucket with correct denial_rate math", async () => {
+test("timeseries: each bucket counts only protected refusals and fulfillment events", async () => {
   const db = freshDb();
   const env = devEnv(db);
   // A fixed, deterministic window: 4 buckets of 1000s each over [0, 4000).
-  // Bucket 0 [0,1000): 3 checkouts, 1 denial -> denial_rate 1/4 = 0.25
+  // Bucket 0 [0,1000): one protected refusal among seat checkouts and a seat-pool denial.
   insertUsage(db, FP_A, "checkout", 10);
   insertUsage(db, FP_A, "checkout", 500);
-  insertUsage(db, FP_A, "checkout", 999);
-  insertUsage(db, FP_A, "denied", 100);
-  // Bucket 1 [1000,2000): 1 release + 1 reclaim -> releases=2, no attempts -> denial_rate 0
+  insertUsage(db, FP_A, "denied", 600, { reason: "pool_exhausted" });
+  insertRefusal(db, FP_A, 100);
+  // Bucket 1 [1000,2000): seat releases only, so no refusal.
   insertUsage(db, FP_A, "release", 1200);
   insertUsage(db, FP_A, "reclaim", 1800);
-  // Bucket 2 [2000,3000): 2 denials, 0 checkouts -> denial_rate 2/2 = 1.0
-  insertUsage(db, FP_A, "denied", 2100);
-  insertUsage(db, FP_A, "denied", 2900);
+  // Bucket 2 [2000,3000): two protected refusals.
+  insertRefusal(db, FP_A, 2100);
+  insertRefusal(db, FP_B, 2900);
   // Bucket 3 [3000,4000): empty
   // Fulfillment events: 1 in bucket 0, 2 in bucket 2.
   insertOrderEvent(db, "oe1", 50);
@@ -226,25 +230,25 @@ test("timeseries: events land in the right bucket with correct denial_rate math"
   assert.equal(data.from, 0);
   assert.equal(data.to, 4000);
   assert.equal(data.bucket_seconds, 1000);
-  assert.equal(data.buckets.length, 4);
-
-  assert.deepEqual(data.buckets[0], { start: 0, checkouts: 3, releases: 0, denials: 1, denial_rate: 0.25, fulfillment_events: 1 });
-  assert.deepEqual(data.buckets[1], { start: 1000, checkouts: 0, releases: 2, denials: 0, denial_rate: 0, fulfillment_events: 0 });
-  assert.deepEqual(data.buckets[2], { start: 2000, checkouts: 0, releases: 0, denials: 2, denial_rate: 1, fulfillment_events: 2 });
-  assert.deepEqual(data.buckets[3], { start: 3000, checkouts: 0, releases: 0, denials: 0, denial_rate: 0, fulfillment_events: 0 });
+  assert.deepEqual(data.buckets, [
+    { start: 0, denials: 1, fulfillment_events: 1 },
+    { start: 1000, denials: 0, fulfillment_events: 0 },
+    { start: 2000, denials: 2, fulfillment_events: 2 },
+    { start: 3000, denials: 0, fulfillment_events: 0 },
+  ]);
 });
 
 test("timeseries: a row exactly at the upper edge is excluded; one just inside lands in the last bucket", async () => {
   const db = freshDb();
   const env = devEnv(db);
   // `to` is the exclusive upper edge: ts == to must NOT count.
-  insertUsage(db, FP_A, "checkout", 4000); // == to -> excluded
-  insertUsage(db, FP_A, "checkout", 3999); // last bucket
+  insertRefusal(db, FP_A, 4000); // == to -> excluded
+  insertRefusal(db, FP_B, 3999); // last bucket
   const res = await worker.fetch(devReq("/api/admin/report/timeseries?from=0&to=4000&buckets=4"), env);
   const data = (await body(res)).data;
-  // Only the 3999 checkout is in-window, and it must clamp into bucket 3 (never a phantom bucket 4).
-  assert.equal(data.buckets.reduce((sum, b) => sum + b.checkouts, 0), 1);
-  assert.equal(data.buckets[3].checkouts, 1);
+  // Only the 3999 refusal is in-window, and it must clamp into bucket 3 (never a phantom bucket 4).
+  assert.equal(data.buckets.reduce((sum, b) => sum + b.denials, 0), 1);
+  assert.equal(data.buckets[3].denials, 1);
 });
 
 test("timeseries: an empty window returns zero-filled buckets (default 24)", async () => {
@@ -255,11 +259,8 @@ test("timeseries: an empty window returns zero-filled buckets (default 24)", asy
   const data = (await body(res)).data;
   assert.equal(data.buckets.length, 24, "default bucket count");
   assert.equal(data.bucket_seconds, 100);
-  for (const bucket of data.buckets) {
-    assert.deepEqual(
-      { checkouts: bucket.checkouts, releases: bucket.releases, denials: bucket.denials, denial_rate: bucket.denial_rate, fulfillment_events: bucket.fulfillment_events },
-      { checkouts: 0, releases: 0, denials: 0, denial_rate: 0, fulfillment_events: 0 },
-    );
+  for (const [index, bucket] of data.buckets.entries()) {
+    assert.deepEqual(bucket, { start: index * 100, denials: 0, fulfillment_events: 0 });
   }
 });
 
@@ -406,13 +407,11 @@ test("expiring: an activated activation-basis trial is included via its trial de
   insertEntitlement(db, FP_A, {
     validUntil: null, now,
     isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 5 * DAY, trialStartedAt: now,
-    enforcementMode: "legacy",
   });
   // Not yet activated: no known deadline yet, so it cannot be "expiring soon".
   insertEntitlement(db, FP_B, {
     validUntil: null, now,
     isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 5 * DAY, trialStartedAt: null,
-    enforcementMode: "legacy",
   });
   // from_issue trial: unchanged behavior, still keyed off the stamped valid_until.
   insertEntitlement(db, FP_C, {
@@ -435,38 +434,35 @@ test("expiring: an unstarted activation-basis trial is listed by its stamped val
   const env = devEnv(db);
   const now = Math.floor(Date.now() / 1000);
   const DAY = 86400;
-  // Legacy grant: no first activation yet, but the license itself ends in 2 days.
+  // No first activation yet, but the license itself ends in 2 days.
   insertEntitlement(db, FP_A, {
     validUntil: now + 2 * DAY, now,
     isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 20 * DAY, trialStartedAt: null,
-    enforcementMode: "legacy",
   });
-  // The same shape for a protected (device_bound_v1) grant, whose clock rule has its own SQL twin.
+  // The same shape for a first-use trial.
   insertEntitlement(db, FP_B, {
     validUntil: now + 3 * DAY, now,
     isTrial: 1, trialBasis: "from_first_use", trialDurationSec: 20 * DAY, trialStartedAt: null,
-    enforcementMode: "device_bound_v1",
   });
   // Unstarted and without any valid_until: still no known deadline, so still not expiring soon.
   insertEntitlement(db, FP_C, {
     validUntil: null, now,
     isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 2 * DAY, trialStartedAt: null,
-    enforcementMode: "legacy",
   });
 
   const data = (await body(await worker.fetch(devReq("/api/admin/report/expiring"), env))).data;
   assert.deepEqual(data.items.map((item) => item.license_fingerprint), [FP_A, FP_B]);
-  const legacy = data.items.find((item) => item.license_fingerprint === FP_A);
-  assert.equal(legacy.valid_until, now + 2 * DAY);
-  assert.equal(legacy.days_left, 2);
-  const bound = data.items.find((item) => item.license_fingerprint === FP_B);
-  assert.equal(bound.valid_until, now + 3 * DAY);
-  assert.equal(bound.days_left, 3);
+  const activation = data.items.find((item) => item.license_fingerprint === FP_A);
+  assert.equal(activation.valid_until, now + 2 * DAY);
+  assert.equal(activation.days_left, 2);
+  const firstUse = data.items.find((item) => item.license_fingerprint === FP_B);
+  assert.equal(firstUse.valid_until, now + 3 * DAY);
+  assert.equal(firstUse.days_left, 3);
 });
 
-// An operator can set valid_until on a trial grant; every enforcing path (the lease issuer, the
-// protected-device store, the portal's self-service list) then clamps the trial clock to it, since a
-// trial never outlives its license. The report must use the same min(valid_until, trial deadline)
+// An operator can set valid_until on a trial grant; every enforcing path (the protected-device store,
+// the portal's self-service list) then clamps the trial clock to it, since a trial never outlives its
+// license. The report must use the same min(valid_until, trial deadline)
 // clamp, not the trial deadline alone, or it shows the wrong date (or a wrong inclusion/exclusion).
 test("expiring: an activated trial clamps to an EARLIER valid_until, exactly like the enforcing rules", async () => {
   const db = freshDb();
@@ -478,30 +474,27 @@ test("expiring: an activated trial clamps to an EARLIER valid_until, exactly lik
   insertEntitlement(db, FP_A, {
     validUntil: now + 2 * DAY, now,
     isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 20 * DAY, trialStartedAt: now,
-    enforcementMode: "legacy",
   });
   // Same shape, but the operator's valid_until is already in the past: the row is fully expired by
   // the license itself and must be excluded even though the trial clock alone still has 20 days left.
   insertEntitlement(db, FP_B, {
     validUntil: now - DAY, now,
     isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 20 * DAY, trialStartedAt: now,
-    enforcementMode: "legacy",
   });
-  // The same clamp, for a protected (device_bound_v1) grant using its own enforcing rule's twin.
+  // A trial clock that ends BEFORE valid_until: the earlier trial deadline wins instead.
   insertEntitlement(db, FP_C, {
-    validUntil: now + 3 * DAY, now,
-    isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 20 * DAY, trialStartedAt: now,
-    enforcementMode: "device_bound_v1",
+    validUntil: now + 20 * DAY, now,
+    isTrial: 1, trialBasis: "from_first_use", trialDurationSec: 3 * DAY, trialStartedAt: now,
   });
 
   const data = (await body(await worker.fetch(devReq("/api/admin/report/expiring"), env))).data;
   assert.deepEqual(data.items.map((item) => item.license_fingerprint).sort(), [FP_A, FP_C].sort());
-  const legacyClamped = data.items.find((item) => item.license_fingerprint === FP_A);
-  assert.equal(legacyClamped.valid_until, now + 2 * DAY, "the earlier valid_until wins over the later trial clock");
-  assert.equal(legacyClamped.days_left, 2);
-  const boundClamped = data.items.find((item) => item.license_fingerprint === FP_C);
-  assert.equal(boundClamped.valid_until, now + 3 * DAY);
-  assert.equal(boundClamped.days_left, 3);
+  const validUntilClamped = data.items.find((item) => item.license_fingerprint === FP_A);
+  assert.equal(validUntilClamped.valid_until, now + 2 * DAY, "the earlier valid_until wins over the later trial clock");
+  assert.equal(validUntilClamped.days_left, 2);
+  const trialClamped = data.items.find((item) => item.license_fingerprint === FP_C);
+  assert.equal(trialClamped.valid_until, now + 3 * DAY, "the earlier trial clock wins over the later valid_until");
+  assert.equal(trialClamped.days_left, 3);
 });
 
 // ── Reader access ─────────────────────────────────────────────────────────────

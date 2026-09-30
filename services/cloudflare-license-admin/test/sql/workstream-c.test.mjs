@@ -702,7 +702,8 @@ test("csv: entitlements ?format=csv streams a text/csv attachment with the SAME 
   assert.match(res.headers.get("content-type") ?? "", /text\/csv/);
   assert.match(res.headers.get("content-disposition") ?? "", /attachment; filename="entitlements\.csv"/);
   const rows = parseCsv(await res.text());
-  assert.deepEqual(rows[0], ["id", "project", "feature", "license_fingerprint", "device_hash", "status", "assertion_ttl_seconds", "revocation_seq", "valid_from", "valid_until", "notes", "customer_id", "license_id", "created_at", "updated_at"]);
+  // A protected grant has no device hash or assertion TTL, so the export names neither.
+  assert.deepEqual(rows[0], ["id", "project", "feature", "license_fingerprint", "status", "revocation_seq", "valid_from", "valid_until", "notes", "customer_id", "license_id", "created_at", "updated_at"]);
   const fpCol = rows[0].indexOf("license_fingerprint");
   const fps = rows.slice(1).map((r) => r[fpCol]);
   assert.ok(fps.includes(FP_A) && fps.includes(FP_B));
