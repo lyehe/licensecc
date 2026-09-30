@@ -18,7 +18,7 @@ First enroll each feature with the existing :doc:`device_identity` browser
 flow. The app shows its expected feature and includes it in registration.
 The portal lists only matching entitlements; approval cannot change the requested
 feature. The comparison code binds the feature as well as the app, key and callback.
-Older clients that omit the feature retain their project-wide selection behavior.
+The feature is required: the backend refuses a registration without it.
 One approval does not enroll all features.
 
 Features in the same application/project reuse the device key, but have separate

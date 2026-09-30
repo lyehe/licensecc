@@ -445,10 +445,9 @@ failure carries only the warning count, never the warning text — and exits
 non-zero on any other answer. It enrolls no device and does not prove a live
 issuance or renewal.
 
-The baseline schema accepts pending attempts with no requested feature and
-makes feature intent immutable once recorded. Deploy the backend before
-releasing the new native clients; older backends correctly reject the new
-field. No audit-event deletion policy changes.
+The baseline schema requires every enrollment attempt to record its requested
+feature and keeps that feature intent immutable; the backend refuses a
+registration without it. No audit-event deletion policy changes.
 
 For release qualification, use a temporary protected entitlement and the real
 native example: enroll the configured feature, compare/approve the browser

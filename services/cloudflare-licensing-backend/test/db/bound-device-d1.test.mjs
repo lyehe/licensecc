@@ -20,8 +20,8 @@ const fingerprint = "a".repeat(64);
 
 test("local D1 commits one denial and its exact retry record atomically", async t => {
   const f=await fixture(t),handle=boundRandomId(32),hash=await boundSecretHash(handle);
-  await f.db.prepare(`INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,created_at,expires_at)
-    VALUES(?,'desktop','APP','key','spki','http://127.0.0.1:1234/callback','state','pkce',unixepoch(),unixepoch()+300)`).bind(hash).run();
+  await f.db.prepare(`INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,requested_feature,created_at,expires_at)
+    VALUES(?,'desktop','APP','key','spki','http://127.0.0.1:1234/callback','state','pkce','DEFAULT',unixepoch(),unixepoch()+300)`).bind(hash).run();
   const config={clients:[{client_id:"desktop",project:"APP",callbacks:[{host:"127.0.0.1",path:"/callback"}]}]};
   const input={attempt_handle:handle,expected_attempt_revision:0,operation_id:boundRandomId(32)};
   const results=await Promise.all([denyBoundAuthorization(f.db,"customer",input,config),denyBoundAuthorization(f.db,"customer",input,config)]);
@@ -37,8 +37,8 @@ test("local D1 erases expired approval ciphertext without changing approval iden
   await purgeExpiredBoundApprovals(f.db);
   assert.equal((await f.db.prepare("SELECT approval_ciphertext FROM device_bound_authorizations WHERE handle_hash=?").bind(c.subjectId).first()).approval_ciphertext,'encrypted-fixture');
   // Seed an already expired approved attempt; pinned approval fields cannot be edited.
-  await f.db.prepare(`INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,status,customer_id,feature,license_fingerprint,code_hash,code_expires_at,approval_ciphertext,created_at,expires_at)
-    VALUES('expired-cleanup','desktop','APP','key','spki','http://127.0.0.1:1234/callback','state','pkce','approved','customer','DEFAULT',?,'hash',unixepoch()-1,'expired-cipher',unixepoch()-100,unixepoch()+100)`).bind(fingerprint).run();
+  await f.db.prepare(`INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,requested_feature,status,customer_id,feature,license_fingerprint,code_hash,code_expires_at,approval_ciphertext,created_at,expires_at)
+    VALUES('expired-cleanup','desktop','APP','key','spki','http://127.0.0.1:1234/callback','state','pkce','DEFAULT','approved','customer','DEFAULT',?,'hash',unixepoch()-1,'expired-cipher',unixepoch()-100,unixepoch()+100)`).bind(fingerprint).run();
   const before=await f.db.prepare("SELECT * FROM device_bound_authorizations WHERE handle_hash='expired-cleanup'").first();
   await purgeExpiredBoundApprovals(f.db);
   assert.deepEqual(await f.db.prepare("SELECT * FROM device_bound_authorizations WHERE handle_hash='expired-cleanup'").first(),{...before,approval_ciphertext:null});
@@ -92,7 +92,7 @@ async function candidate({db,now}, id, overrides = {}) {
     data:{binding_id:c.bindingId,lease:c.token,expires_at:c.expiresAt}});
   // The store consumes an already cryptographically verified internal candidate;
   // independent crypto tests own signatures. This test targets D1 transaction behavior.
-  await db.prepare("INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,status,customer_id,feature,license_fingerprint,code_hash,code_expires_at,created_at,expires_at) VALUES(?,'desktop','APP',?,?,?,'state',?,'approved','customer','DEFAULT',?,?,?,?,?)")
+  await db.prepare("INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,requested_feature,status,customer_id,feature,license_fingerprint,code_hash,code_expires_at,created_at,expires_at) VALUES(?,'desktop','APP',?,?,?,'state',?,'DEFAULT','approved','customer','DEFAULT',?,?,?,?,?)")
     .bind(c.subjectId,c.keyId,c.publicKeySpki,c.redirectUri,c.pkceChallenge,c.fingerprint,c.codeHash,now+60,now,now+300).run();
   await db.prepare("INSERT INTO device_bound_challenges(id,purpose,subject_id,key_id,operation_id,nonce_hash,created_at,expires_at) VALUES(?,'exchange',?,?,?,?,?,?)")
     .bind(c.challengeId,c.subjectId,c.keyId,c.operationId,c.nonceHash,now,now+60).run();
@@ -104,8 +104,8 @@ test("local D1 ephemera and lease cleanup preserve committed authority and recov
   await commitBoundDeviceLease(f.db,c);
   const tables=['device_bound_devices','device_bound_bindings','device_bound_operations','device_bound_leases','device_bound_events'];
   const before=await Promise.all(tables.map(table=>f.db.prepare(`SELECT * FROM ${table}`).all()));
-  await f.db.prepare(`INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,created_at,expires_at)
-    VALUES('expired-attempt','client','APP','key','spki','uri','state','pkce',?,?)`).bind(f.now-10,f.now-1).run();
+  await f.db.prepare(`INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,requested_feature,created_at,expires_at)
+    VALUES('expired-attempt','client','APP','key','spki','uri','state','pkce','DEFAULT',?,?)`).bind(f.now-10,f.now-1).run();
   await f.db.prepare(`INSERT INTO device_bound_challenges(id,purpose,subject_id,key_id,operation_id,nonce_hash,created_at,expires_at)
     VALUES('expired-proof','exchange','expired-attempt','key','operation','old-nonce',?,?)`).bind(f.now-10,f.now-1).run();
   assert.deepEqual(await purgeExpiredBoundEphemera(f.db),{challenges:1,attempts:1});
@@ -192,7 +192,7 @@ test("local D1 trial stamp is atomic under competing first activations and audit
 test("local D1 enrollment pins validated intent, hashes handles and issues bounded challenges", async t => {
   const {db}=await fixture(t);
   const keys=await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign","verify"]);
-  const request={client_id:"desktop",project:"APP",
+  const request={client_id:"desktop",project:"APP",requested_feature:"DEFAULT",
     public_key_spki:encodeBase64url(new Uint8Array(await crypto.subtle.exportKey("spki",keys.publicKey))),
     device_label:" My PC ",redirect_uri:"http://127.0.0.1:45678/callback",
     state:boundRandomId(32),code_challenge:boundRandomId(32),code_challenge_method:"S256"};
@@ -206,6 +206,7 @@ test("local D1 enrollment pins validated intent, hashes handles and issues bound
   assert.equal(row.redirect_uri,request.redirect_uri);
   assert.equal(row.client_state,request.state);
   assert.equal(row.pkce_challenge,request.code_challenge);
+  assert.equal(row.requested_feature,"DEFAULT");
   assert.equal(row.status,"pending");
   assert.equal(JSON.stringify(row).includes(result.attempt_handle),false);
   const destination=new URL(result.authorization_url);

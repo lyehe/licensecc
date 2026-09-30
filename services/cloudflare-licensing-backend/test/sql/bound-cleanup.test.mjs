@@ -14,8 +14,8 @@ function fixture(t) {
     (id,purpose,subject_id,key_id,operation_id,nonce_hash,created_at,expires_at,consumed_invocation_id)
     VALUES(?,'exchange','attempt','key','operation',?,1,?,?)`).run(id,id,deadline,consumed);
   const attempt = (id, deadline) => sql.prepare(`INSERT INTO device_bound_authorizations
-    (handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,created_at,expires_at)
-    VALUES(?,'client','APP','key','spki','redirect','state','pkce',1,?)`).run(id,deadline);
+    (handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,requested_feature,created_at,expires_at)
+    VALUES(?,'client','APP','key','spki','redirect','state','pkce','DEFAULT',1,?)`).run(id,deadline);
   return { sql, db, challenge, attempt, clock(value) { now=value; } };
 }
 

@@ -65,9 +65,9 @@ for(const trial of [false,true])test(`actual local Worker and D1 execute ${trial
   const keys=await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign","verify"]);
   const spki=encodeBase64url(new Uint8Array(await crypto.subtle.exportKey("spki",keys.publicKey))),keyId=(await importBoundDeviceKey(spki)).keyId;
   const verifier=boundRandomId(32),redirect="http://127.0.0.1:45678/callback";
-  const original={client_id:"desktop",project:"APP",public_key_spki:spki,device_label:"Workstation",redirect_uri:redirect,state:boundRandomId(32),code_challenge:encodeBase64url(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier)))),code_challenge_method:"S256"};
+  const original={client_id:"desktop",project:"APP",requested_feature:"DEFAULT",public_key_spki:spki,device_label:"Workstation",redirect_uri:redirect,state:boundRandomId(32),code_challenge:encodeBase64url(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier)))),code_challenge_method:"S256"};
   const attempt=await call("/v2/device-authorizations",original);
-  const comparison=formatDeviceEnrollmentComparison(new Uint8Array(await crypto.subtle.digest("SHA-256",deviceEnrollmentComparisonInput({attempt_handle:attempt.data.attempt_handle,client_id:original.client_id,project:original.project,key_id:keyId,redirect_uri:original.redirect_uri,state:original.state,code_challenge:original.code_challenge}))));
+  const comparison=formatDeviceEnrollmentComparison(new Uint8Array(await crypto.subtle.digest("SHA-256",deviceEnrollmentComparisonInput({attempt_handle:attempt.data.attempt_handle,client_id:original.client_id,project:original.project,key_id:keyId,redirect_uri:original.redirect_uri,state:original.state,code_challenge:original.code_challenge,requested_feature:original.requested_feature}))));
   assert.equal(attempt.data.comparison_code,comparison);
   const caller=await mf.getWorker("consent-caller");
   async function consent(method,input,extra={}) {
@@ -162,7 +162,7 @@ for(const trial of [false,true])test(`actual local Worker and D1 execute ${trial
   assert.equal(persisted.revision,binding.revision+1);
   assert.equal((await db.prepare("SELECT count(*) n FROM device_bound_events WHERE binding_id=? AND event_type='retire'").bind(retireInput.binding_id).first()).n,1);
   assert.equal((await call('/v2/device-challenges',{purpose:'renew',binding_id:activated.data.binding_id,operation_id:boundRandomId(32)},404)).code,'binding_unavailable');
-  const cancelAttempt=await call("/v2/device-authorizations",{client_id:"desktop",project:"APP",public_key_spki:spki,device_label:"Cancel test",redirect_uri:redirect,state:boundRandomId(32),code_challenge:encodeBase64url(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier)))),code_challenge_method:"S256"});
+  const cancelAttempt=await call("/v2/device-authorizations",{client_id:"desktop",project:"APP",requested_feature:"DEFAULT",public_key_spki:spki,device_label:"Cancel test",redirect_uri:redirect,state:boundRandomId(32),code_challenge:encodeBase64url(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier)))),code_challenge_method:"S256"});
   const cancelInput={attempt_handle:cancelAttempt.data.attempt_handle,expected_attempt_revision:0,operation_id:boundRandomId(32)};
   for(const malformed of ["undefined","bigint","negative-zero","oversized"]) {
     assert.equal((await consent("deny",cancelInput,{malformed})).status,400,malformed);

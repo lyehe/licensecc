@@ -46,7 +46,7 @@ for (const [type, basis] of [["node_locked", "from_issue"], ["trial", "from_issu
     const spki = encodeBase64url(new Uint8Array(await crypto.subtle.exportKey("spki", keys.publicKey)));
     const verifier = boundRandomId(32), redirect = "http://127.0.0.1:45678/callback";
     const challenge = encodeBase64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-    const attempt = await call("/v2/device-authorizations", { client_id: "desktop", project: "APP", public_key_spki: spki,
+    const attempt = await call("/v2/device-authorizations", { client_id: "desktop", project: "APP", requested_feature: "PRO", public_key_spki: spki,
       device_label: "Workstation", redirect_uri: redirect, state: boundRandomId(32), code_challenge: challenge, code_challenge_method: "S256" });
     const page = await inspectBoundAuthorization(portal.DB, "protected-owner", attempt.attempt_handle, config);
     assert.equal(page.entitlements.length, 1); assert.equal(page.entitlements[0].id, grant.data.id);

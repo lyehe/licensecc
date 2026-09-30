@@ -25,7 +25,8 @@ test("enrollment cursor accepts only the bounded canonical ep1 tuple",()=>{
 });
 
 test("enrollment comparison matches the independent Python transcript and digest",()=>{
-  const vector=JSON.parse(readFileSync(new URL("../../../test/vectors/device_bound/v1/enrollment_comparison.json",import.meta.url),"utf8"));
+  const vector=JSON.parse(readFileSync(new URL("../../../test/vectors/device_bound/v1/enrollment_comparison_feature.json",import.meta.url),"utf8"));
+  assert.equal(DEVICE_COMPARISON_FIELDS.at(-1),"requested_feature");
   const bytes=deviceEnrollmentComparisonInput(vector.input),digest=createHash("sha256").update(bytes).digest();
   assert.equal(Buffer.from(bytes).toString("hex"),vector.input_hex);
   assert.equal(digest.toString("hex"),vector.sha256_hex);
@@ -109,13 +110,14 @@ test("proof signs full request intent and rejects unsupported operations", () =>
 });
 
 
-test("feature-specific comparison matches independent bytes and cannot silently downgrade", () => {
+test("feature-specific comparison matches independent bytes and requires the requested feature", () => {
   const vector = JSON.parse(readFileSync(new URL("../../../test/vectors/device_bound/v1/enrollment_comparison_feature.json", import.meta.url), "utf8"));
   const bytes = deviceEnrollmentComparisonInput(vector.input);
   assert.equal(Buffer.from(bytes).toString("hex"), vector.input_hex);
   assert.equal(formatDeviceEnrollmentComparison(createHash("sha256").update(bytes).digest()), vector.comparison_code);
-  const legacy = {...vector.input}; delete legacy.requested_feature;
-  assert.notDeepEqual(deviceEnrollmentComparisonInput(legacy), bytes);
+  assert.equal(dec.decode(bytes).startsWith("lcc-device-enrollment-comparison-v2\n"), true);
+  const missing = {...vector.input}; delete missing.requested_feature;
+  assert.throws(() => deviceEnrollmentComparisonInput(missing), /invalid_fields/);
   assert.notDeepEqual(deviceEnrollmentComparisonInput({...vector.input,requested_feature:"BATCH_RUN"}), bytes);
   for (const value of [null,"",123,"TOO_LONG_FEATURE_NAME"])
     assert.throws(() => deviceEnrollmentComparisonInput({...vector.input,requested_feature:value}));

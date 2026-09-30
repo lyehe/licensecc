@@ -124,11 +124,11 @@ public sealed class DeviceBoundVectorsTests
     [TestMethod]
     public void EnrollmentComparison()
     {
-        using JsonDocument document = Read("enrollment_comparison.json");
+        using JsonDocument document = Read("enrollment_comparison_feature.json");
         JsonElement vector = document.RootElement, values = vector.GetProperty("input");
-        var input = new StringBuilder("lcc-device-enrollment-comparison-v1\n");
+        var input = new StringBuilder("lcc-device-enrollment-comparison-v2\n");
         foreach (string field in new[] { "attempt_handle", "client_id", "project", "key_id", "redirect_uri",
-            "state", "code_challenge" }) input.Append(Encoded(values, field)).Append('\n');
+            "state", "code_challenge", "requested_feature" }) input.Append(Encoded(values, field)).Append('\n');
         Assert.AreEqual(Value(vector, "input_hex"), Hex(Bytes(input.ToString())));
         string digest = Hash(Bytes(input.ToString()));
         Assert.AreEqual(Value(vector, "sha256_hex"), digest);

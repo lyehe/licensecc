@@ -46,7 +46,7 @@ BOOST_AUTO_TEST_CASE(registration_wire_matches_shared_fixture_and_normalizes_lab
 	BoundAuthorizationInput input{r.get<std::string>("client_id"),		 r.get<std::string>("project"),
 								  r.get<std::string>("public_key_spki"), r.get<std::string>("device_label"),
 								  r.get<std::string>("redirect_uri"),	 r.get<std::string>("state"),
-								  r.get<std::string>("code_challenge")};
+								  r.get<std::string>("code_challenge"),	 r.get<std::string>("requested_feature")};
 	SensitiveVector out;
 	BOOST_REQUIRE(encode_bound_authorization(input, out));
 	const auto wire = v.get<std::string>("request_json");

@@ -72,7 +72,7 @@ async function enrollment(f,feature="DEFAULT",existingKeys=null) {
   const verifier=boundRandomId(32),code=boundRandomId(32);
   const pkce=encodeBase64url(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier))));
   const redirect="http://127.0.0.1:45678/callback";
-  const attempt=await f.call("/v2/device-authorizations",{client_id:"desktop",project:"APP",public_key_spki:spki,device_label:"My PC",redirect_uri:redirect,state:boundRandomId(32),code_challenge:pkce,code_challenge_method:"S256"});
+  const attempt=await f.call("/v2/device-authorizations",{client_id:"desktop",project:"APP",requested_feature:feature,public_key_spki:spki,device_label:"My PC",redirect_uri:redirect,state:boundRandomId(32),code_challenge:pkce,code_challenge_method:"S256"});
   assert.equal(attempt.status,200,JSON.stringify(attempt.body));
   const handle=attempt.body.data.attempt_handle;
   // Fixture-only browser consent; the production portal entrypoint is Phase 3.

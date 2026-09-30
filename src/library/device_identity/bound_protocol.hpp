@@ -28,7 +28,7 @@ struct EnrollmentComparisonInput {
 	std::string redirect_uri;
 	std::string state;
 	std::string code_challenge;
-	std::string requested_feature;	// Empty only for legacy comparison vectors.
+	std::string requested_feature;	// Required: an empty feature is an encoding error.
 };
 struct BoundExchangeInput {
 	std::string attempt_handle, code, code_verifier, redirect_uri, operation_id;

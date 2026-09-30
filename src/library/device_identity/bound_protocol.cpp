@@ -231,15 +231,14 @@ bool enrollment_comparison_input(const EnrollmentComparisonInput& input, const s
 								 std::vector<std::uint8_t>& out) noexcept {
 	try {
 		if (!key_id_valid(key_id) || !name(input.client_id) || !name(input.project) ||
-			!token(input.attempt_handle, 32) || !token(input.state, 32) || !token(input.code_challenge, 32))
+			!name(input.requested_feature, 15) || !token(input.attempt_handle, 32) || !token(input.state, 32) ||
+			!token(input.code_challenge, 32))
 			return false;
-		if (!input.requested_feature.empty() && !name(input.requested_feature, 15)) return false;
-		std::string payload = input.requested_feature.empty() ? "lcc-device-enrollment-comparison-v1\n"
-															  : "lcc-device-enrollment-comparison-v2\n";
-		if (!append_fields(payload, {&input.attempt_handle, &input.client_id, &input.project, &key_id,
-									 &input.redirect_uri, &input.state, &input.code_challenge}))
+		std::string payload = "lcc-device-enrollment-comparison-v2\n";
+		if (!append_fields(payload,
+						   {&input.attempt_handle, &input.client_id, &input.project, &key_id, &input.redirect_uri,
+							&input.state, &input.code_challenge, &input.requested_feature}))
 			return false;
-		if (!input.requested_feature.empty() && !append_fields(payload, {&input.requested_feature})) return false;
 		std::vector<std::uint8_t> candidate(payload.begin(), payload.end());
 		out.swap(candidate);
 		return true;

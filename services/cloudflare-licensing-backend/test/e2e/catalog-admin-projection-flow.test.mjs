@@ -38,7 +38,7 @@ function adminReq(path, options = {}) {
 
 // The consent and signed-exchange flow a protected application runs: a new device key asks for the
 // named grant, the customer approves it, and the key proves possession to receive a signed lease.
-async function signedExchange(adapter, env, customerId, entitlementId) {
+async function signedExchange(adapter, env, customerId, entitlementId, feature) {
   const call = async (path, body) => {
     const response = await backend.fetch(new Request(`https://license.test${path}`, { method: "POST",
       headers: { "content-type": "application/json", "cf-connecting-ip": "127.0.0.2" }, body: JSON.stringify(body) }), env);
@@ -48,7 +48,7 @@ async function signedExchange(adapter, env, customerId, entitlementId) {
   const spki = encodeBase64url(new Uint8Array(await crypto.subtle.exportKey("spki", keys.publicKey)));
   const verifier = boundRandomId(32), redirect = "http://127.0.0.1:45678/callback";
   const challenge = encodeBase64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-  const attempt = await call("/v2/device-authorizations", { client_id: "desktop", project: "DEFAULT", public_key_spki: spki,
+  const attempt = await call("/v2/device-authorizations", { client_id: "desktop", project: "DEFAULT", requested_feature: feature, public_key_spki: spki,
     device_label: "Workstation", redirect_uri: redirect, state: boundRandomId(32), code_challenge: challenge, code_challenge_method: "S256" });
   const page = await inspectBoundAuthorization(adapter, customerId, attempt.attempt_handle, config);
   assert.ok(page.entitlements.some((offered) => offered.id === entitlementId), "the plan-applied grant is offered for consent");
@@ -229,7 +229,7 @@ test("admin catalog import and plan projection yield protected grants that suppo
     const backendEnv = { DB: adapter, BOUND_DEVICE_CONFIG: JSON.stringify(config), BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM: privatePem,
       BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM: publicPem };
     for (const created of appliedBody.data.applied.created) {
-      const claims = await signedExchange(adapter, backendEnv, "cus_catalog_e2e", created.id);
+      const claims = await signedExchange(adapter, backendEnv, "cus_catalog_e2e", created.id, created.feature);
       assert.equal(claims.project, "DEFAULT"); assert.equal(claims.feature, created.feature); assert.equal(claims["license-fingerprint"], FP);
     }
     assert.equal(db.prepare("SELECT count(*) AS n FROM device_bound_bindings WHERE state = 'active'").get().n, 2);

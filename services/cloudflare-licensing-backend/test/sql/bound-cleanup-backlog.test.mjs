@@ -29,9 +29,9 @@ function fixture(t) {
   function attempt(id, expires, status='pending', code=null, recovery=null, ciphertext=null) {
     const approved = status==='approved' || status==='consumed';
     sql.prepare(`INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,
-      client_state,pkce_challenge,created_at,expires_at,status,customer_id,feature,license_fingerprint,code_hash,code_expires_at,
+      client_state,pkce_challenge,requested_feature,created_at,expires_at,status,customer_id,feature,license_fingerprint,code_hash,code_expires_at,
       approval_ciphertext,consumed_invocation_id,consumed_operation_id,recovery_until)
-      VALUES(?,'client','APP','key','spki','redirect','state','pkce',0,?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      VALUES(?,'client','APP','key','spki','redirect','state','pkce','PRO',0,?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id,expires,status,approved?'owner':null,approved?'PRO':null,approved?'fp':null,approved?'hash':null,code,ciphertext,
         status==='consumed'?id:null,status==='consumed'?id:null,recovery);
   }

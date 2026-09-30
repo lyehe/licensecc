@@ -93,23 +93,23 @@ BOOST_AUTO_TEST_CASE(exchange_and_renew_transcripts_match_server_bytes) {
 	}
 }
 
-BOOST_AUTO_TEST_CASE(comparison_matches_independent_python_bytes_digest_and_display) {
-	const auto value = fixture("enrollment_comparison.json");
+BOOST_AUTO_TEST_CASE(comparison_binds_every_field_and_refuses_an_empty_feature) {
+	const auto value = fixture("enrollment_comparison_feature.json");
 	const auto fields = value.get_child("input");
-	const auto input = comparison(fields);
+	auto input = comparison(fields);
+	input.requested_feature = fields.get<std::string>("requested_feature");
 	const auto key_id = fields.get<std::string>("key_id");
 	std::vector<std::uint8_t> bytes;
 	BOOST_REQUIRE(enrollment_comparison_input(input, key_id, bytes));
-	BOOST_CHECK_EQUAL(lowercase_hex(bytes.data(), bytes.size()), value.get<std::string>("input_hex"));
 	P256Digest digest;
 	BOOST_REQUIRE(sha256(bytes.data(), bytes.size(), digest));
 	BOOST_CHECK_EQUAL(lowercase_hex(digest.data(), digest.size()), value.get<std::string>("sha256_hex"));
 	std::string code;
 	BOOST_REQUIRE(enrollment_comparison_code(input, key_id, code));
-	BOOST_CHECK_EQUAL(code, value.get<std::string>("comparison_code"));
 	for (auto field : {&EnrollmentComparisonInput::attempt_handle, &EnrollmentComparisonInput::state,
 					   &EnrollmentComparisonInput::code_challenge, &EnrollmentComparisonInput::client_id,
-					   &EnrollmentComparisonInput::project, &EnrollmentComparisonInput::redirect_uri}) {
+					   &EnrollmentComparisonInput::project, &EnrollmentComparisonInput::redirect_uri,
+					   &EnrollmentComparisonInput::requested_feature}) {
 		auto changed = input;
 		(changed.*field)[0] = (changed.*field)[0] == 'A' ? 'B' : 'A';
 		std::string other;
@@ -135,6 +135,14 @@ BOOST_AUTO_TEST_CASE(comparison_matches_independent_python_bytes_digest_and_disp
 	BOOST_REQUIRE(enrollment_comparison_code(changed, key_id, other));
 	changed.redirect_uri += "x";
 	BOOST_CHECK(!enrollment_comparison_code(changed, key_id, other));
+	changed = input;
+	changed.requested_feature.clear();
+	const auto original = bytes;
+	BOOST_CHECK(!enrollment_comparison_input(changed, key_id, bytes));
+	BOOST_CHECK(bytes == original);
+	other = "unchanged";
+	BOOST_CHECK(!enrollment_comparison_code(changed, key_id, other));
+	BOOST_CHECK_EQUAL(other, "unchanged");
 }
 
 BOOST_AUTO_TEST_CASE(feature_intent_matches_independent_comparison_vector) {
@@ -159,9 +167,9 @@ BOOST_AUTO_TEST_CASE(feature_intent_matches_independent_comparison_vector) {
 
 BOOST_AUTO_TEST_CASE(registration_with_an_empty_requested_feature_is_an_encoding_error) {
 	const auto request = fixture("registration_wire.json").get_child("request");
-	BoundAuthorizationInput input{request.get<std::string>("client_id"),		request.get<std::string>("project"),
+	BoundAuthorizationInput input{request.get<std::string>("client_id"),	   request.get<std::string>("project"),
 								  request.get<std::string>("public_key_spki"), request.get<std::string>("device_label"),
-								  request.get<std::string>("redirect_uri"),	request.get<std::string>("state"),
+								  request.get<std::string>("redirect_uri"),	   request.get<std::string>("state"),
 								  request.get<std::string>("code_challenge")};
 	SensitiveVector out;
 	BOOST_CHECK(!encode_bound_authorization(input, out));

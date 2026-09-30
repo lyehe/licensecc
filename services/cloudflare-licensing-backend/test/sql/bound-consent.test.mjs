@@ -8,7 +8,7 @@ import { openBoundApproval } from "../../src/device/bound_approval_crypto.mjs";
 import { ERASE_EXPIRED_BOUND_APPROVALS_SQL, purgeExpiredBoundApprovals } from "../../src/device/bound_cleanup.mjs";
 import { CONSENT_PAGE_SQL } from "../../src/device/bound_consent_page.mjs";
 
-async function fixture(t, requestedFeature = null) {
+async function fixture(t, requestedFeature = "DEFAULT") {
   const sql=new DatabaseSync(":memory:");t.after(()=>sql.close());let now=1000,before=()=>{};
   sql.function("unixepoch",()=>BigInt(now));sql.exec("PRAGMA foreign_keys=ON");
   sql.exec(readFileSync(new URL("../../schema.sql",import.meta.url),"utf8"));
@@ -300,7 +300,7 @@ test("lost approval response recovers the committed callback without code or rev
   assert.deepEqual(await approveBoundAuthorization(f.db,"owner",f.input,f.config,f.ring),expected.response);
   assert.deepEqual(f.sql.prepare("SELECT * FROM device_bound_authorizations").get(),before);
   await assert.rejects(approveBoundAuthorization(f.db,"owner",{...f.input,expected_attempt_revision:1},f.config,f.ring),/idempotency_conflict/);
-  const changedId=Buffer.from(JSON.stringify(["APP","OTHER","a".repeat(64)])).toString("base64url");
+  const changedId=Buffer.from(JSON.stringify(["APP","DEFAULT","b".repeat(64)])).toString("base64url");
   await assert.rejects(approveBoundAuthorization(f.db,"owner",{...f.input,entitlement_id:changedId},f.config,f.ring),/idempotency_conflict/);
 });
 
@@ -314,6 +314,13 @@ test("requested feature constrains consent, approval, recovery and immutable int
   const otherId = Buffer.from(JSON.stringify(["APP", "EXPORT", "c".repeat(64)])).toString("base64url");
   await assert.rejects(approveBoundAuthorization(f.db,"owner",{...f.input,entitlement_id:otherId},f.config,f.ring), /access_denied/);
   assert.throws(() => f.sql.exec("UPDATE device_bound_authorizations SET requested_feature='EXPORT'"), /authorization_intent_immutable/);
+  const pending = requested => f.sql.prepare(`INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,requested_feature,created_at,expires_at)
+    VALUES('schema-probe','desktop','APP','key','spki','http://127.0.0.1:45678/callback','state','pkce',?,1000,1300)`).run(requested);
+  assert.throws(() => pending(null), /NOT NULL constraint failed: device_bound_authorizations\.requested_feature/);
+  for (const bad of ["", "TOO_LONG_FEATURE", "bad feature"]) assert.throws(() => pending(bad), /CHECK constraint failed/);
+  assert.throws(() => f.sql.prepare(`INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,requested_feature,status,customer_id,feature,license_fingerprint,code_hash,code_expires_at,created_at,expires_at)
+    VALUES('schema-probe','desktop','APP','key','spki','http://127.0.0.1:45678/callback','state','pkce','EXPORT','approved','owner','DEFAULT','${"a".repeat(64)}','hash',1000,1000,1300)`).run(), /authorization_feature_mismatch/);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_authorizations WHERE handle_hash='schema-probe'").get().n, 0);
   const approved = await approveBoundAuthorization(f.db,"owner",f.input,f.config,f.ring);
   assert.deepEqual(await approveBoundAuthorization(f.db,"owner",f.input,f.config,f.ring), approved);
   await assert.rejects(approveBoundAuthorization(f.db,"owner",{...f.input,entitlement_id:otherId},f.config,f.ring), /access_denied/);
@@ -357,29 +364,30 @@ test("consent page counts occupied device slots, expires a retiring hold's count
 test("consent page flags a device that already holds an active binding for this exact license, not a retiring or different-license one",async t=>{
   const f=await fixture(t),fp="a".repeat(64),otherFp="e".repeat(64),selfKey=`sha256:${"b".repeat(64)}`;
   f.sql.exec(`INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,created_at,updated_at)
-      VALUES('APP','EXPORT','${otherFp}','owner','active',1000,1000);
+      VALUES('APP','DEFAULT','${otherFp}','owner','active',1000,1000);
     INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
       VALUES('device-self','owner','APP','${selfKey}','spki-self',1000,1000),
         ('device-other','owner','APP','sha256:${"c".repeat(64)}','spki-other',1000,1000);`);
+  const id=license=>Buffer.from(JSON.stringify(["APP","DEFAULT",license])).toString("base64url");
   const read=async()=>{
     const page=await inspectBoundAuthorization(f.db,"owner",f.input.attempt_handle,f.config);
-    return Object.fromEntries(page.entitlements.map(e=>[e.feature,e]));
+    return Object.fromEntries(page.entitlements.map(e=>[e.id,e]));
   };
-  assert.equal((await read()).DEFAULT.device_connected,false);
+  assert.equal((await read())[id(fp)].device_connected,false);
   // Another device's active binding on this exact license does not connect THIS device.
   f.sql.prepare(`INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,hold_until,created_at,updated_at)
     VALUES('binding-other','APP','DEFAULT',?,'device-other','active',0,1000,1000)`).run(fp);
-  assert.equal((await read()).DEFAULT.device_connected,false);
+  assert.equal((await read())[id(fp)].device_connected,false);
   // This device's active binding on a DIFFERENT license does not connect it here.
   f.sql.prepare(`INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,hold_until,created_at,updated_at)
-    VALUES('binding-self-other-license','APP','EXPORT',?,'device-self','active',0,1000,1000)`).run(otherFp);
-  {const pages=await read();assert.equal(pages.DEFAULT.device_connected,false);assert.equal(pages.EXPORT.device_connected,true);}
+    VALUES('binding-self-other-license','APP','DEFAULT',?,'device-self','active',0,1000,1000)`).run(otherFp);
+  {const pages=await read();assert.equal(pages[id(fp)].device_connected,false);assert.equal(pages[id(otherFp)].device_connected,true);}
   // A retiring (non-active) binding for this device on THIS license does not count as connected.
   f.sql.prepare(`INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,hold_until,created_at,updated_at)
     VALUES('binding-self-retiring','APP','DEFAULT',?,'device-self','retiring',2000,1000,1000)`).run(fp);
-  assert.equal((await read()).DEFAULT.device_connected,false);
+  assert.equal((await read())[id(fp)].device_connected,false);
   // An active binding for this device on this exact license: connected, regardless of capacity.
   f.sql.prepare(`INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,hold_until,created_at,updated_at)
     VALUES('binding-self-active','APP','DEFAULT',?,'device-self','active',0,1000,1000)`).run(fp);
-  assert.equal((await read()).DEFAULT.device_connected,true);
+  assert.equal((await read())[id(fp)].device_connected,true);
 });

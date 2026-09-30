@@ -1,6 +1,6 @@
 export const DEVICE_LEASE_FIELDS: readonly string[];
 export const DEVICE_COMPARISON_FIELDS: readonly string[];
-export interface DeviceEnrollmentComparisonInput {attempt_handle:string;client_id:string;project:string;key_id:string;redirect_uri:string;state:string;code_challenge:string}
+export interface DeviceEnrollmentComparisonInput {attempt_handle:string;client_id:string;project:string;key_id:string;redirect_uri:string;state:string;code_challenge:string;requested_feature:string}
 export function deviceEnrollmentComparisonInput(input:DeviceEnrollmentComparisonInput): Uint8Array<ArrayBuffer>;
 export function formatDeviceEnrollmentComparison(digest:Uint8Array): string;
 export const DEVICE_OPERATION_FIELDS: Readonly<Record<"exchange" | "renew", readonly string[]>>;

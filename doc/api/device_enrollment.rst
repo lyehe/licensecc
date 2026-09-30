@@ -35,9 +35,11 @@ Enrollment comparison
 Registration and authenticated inspection return ``comparison_code``. The
 portable encoder is ``deviceEnrollmentComparisonInput`` in
 ``packages/licensing-domain/src/lease/device_protocol.mjs``; the independent
-fixture is ``test/vectors/device_bound/v1/enrollment_comparison.json``.
+fixture is ``test/vectors/device_bound/v1/enrollment_comparison_feature.json``.
 
-Encode these exact fields in this order:
+Encode these exact fields in this order. ``requested_feature`` is required;
+an empty feature is an encoding error, and the backend refuses a registration
+without it.
 
 .. code-block:: text
 
@@ -48,9 +50,10 @@ Encode these exact fields in this order:
    redirect_uri
    state
    code_challenge
+   requested_feature
 
 The transcript starts with the UTF-8 bytes of
-``lcc-device-enrollment-comparison-v1`` followed by LF. For each field, append
+``lcc-device-enrollment-comparison-v2`` followed by LF. For each field, append
 canonical unpadded base64url of its UTF-8 value, then LF, including the final
 field. Hash the complete transcript with SHA-256. Format the first six digest
 bytes as twelve uppercase hexadecimal digits, grouped ``XXXX-XXXX-XXXX``.

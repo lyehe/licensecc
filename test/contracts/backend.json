@@ -675,7 +675,7 @@
                       "type": "string"
                     },
                     "requested_feature": {
-                      "description": "Feature requested by the application; pins consent and the v2 comparison code. Omit only for older clients.",
+                      "description": "Feature requested by the application. Required; it pins consent to that feature and is part of the comparison code.",
                       "pattern": "^[A-Za-z0-9_.:-]{1,15}$",
                       "type": "string"
                     },
@@ -693,7 +693,8 @@
                     "redirect_uri",
                     "state",
                     "code_challenge",
-                    "code_challenge_method"
+                    "code_challenge_method",
+                    "requested_feature"
                   ],
                   "type": "object"
                 }

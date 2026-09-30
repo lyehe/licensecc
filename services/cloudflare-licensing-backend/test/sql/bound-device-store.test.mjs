@@ -61,8 +61,8 @@ test("challenge issuance honors exclusive deadlines and consumed-operation recov
 test("pending challenge lifetime is clamped to the authorization deadline", async t => {
   const f=fixture(); t.after(()=>f.sql.close());
   const handle=boundRandomId(32),hash=await boundSecretHash(handle);
-  f.sql.prepare(`INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,created_at,expires_at)
-    VALUES(?,'desktop','APP','key','spki','http://127.0.0.1:1234/callback','state','pkce',1000,1300)`).run(hash);
+  f.sql.prepare(`INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,requested_feature,created_at,expires_at)
+    VALUES(?,'desktop','APP','key','spki','http://127.0.0.1:1234/callback','state','pkce','DEFAULT',1000,1300)`).run(hash);
   const input={purpose:"exchange",attempt_handle:handle,operation_id:boundRandomId(32)};
   f.clock(1299);
   assert.equal((await createBoundChallenge(f.db,input)).expires_at,1300);
@@ -128,9 +128,9 @@ test("erased recovery payloads remain denied after the database clock moves back
 });
 function seed(f,c) {
   f.sql.prepare(`INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,
-    redirect_uri,client_state,pkce_challenge,status,customer_id,feature,license_fingerprint,code_hash,code_expires_at,created_at,expires_at)
-    VALUES(?,'desktop',?,?,?,?,?,?, 'approved',?,?,?,?,1100,1000,1300)`)
-    .run(c.subjectId,c.project,c.keyId,c.publicKeySpki,c.redirectUri,"state",c.pkceChallenge,c.customerId,c.feature,c.fingerprint,c.codeHash);
+    redirect_uri,client_state,pkce_challenge,requested_feature,status,customer_id,feature,license_fingerprint,code_hash,code_expires_at,created_at,expires_at)
+    VALUES(?,'desktop',?,?,?,?,?,?,?, 'approved',?,?,?,?,1100,1000,1300)`)
+    .run(c.subjectId,c.project,c.keyId,c.publicKeySpki,c.redirectUri,"state",c.pkceChallenge,c.feature,c.customerId,c.feature,c.fingerprint,c.codeHash);
   challenge(f,c);
 }
 function challenge(f,c) {
@@ -310,7 +310,7 @@ test("authorization records require coherent states and preserve consumed recove
   const f=fixture(),c=candidate(); seed(f,c);
   assert.throws(()=>f.sql.exec("UPDATE device_bound_authorizations SET status='consumed'"),/CHECK/);
   assert.throws(()=>f.sql.exec("UPDATE device_bound_authorizations SET consumed_operation_id='premature'"),/CHECK/);
-  assert.throws(()=>f.sql.exec("INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,status,created_at,expires_at) VALUES('incomplete','desktop','APP','key','spki','redirect','state','pkce','approved',1000,1300)"),/CHECK/);
+  assert.throws(()=>f.sql.exec("INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,redirect_uri,client_state,pkce_challenge,requested_feature,status,created_at,expires_at) VALUES('incomplete','desktop','APP','key','spki','redirect','state','pkce','DEFAULT','approved',1000,1300)"),/CHECK/);
   await commitBoundDeviceLease(f.db,c);
   assert.throws(()=>f.sql.exec("UPDATE device_bound_authorizations SET consumed_operation_id='replacement'"),/immutable/);
   assert.throws(()=>f.sql.exec("UPDATE device_bound_authorizations SET recovery_until=recovery_until+1"),/immutable/);

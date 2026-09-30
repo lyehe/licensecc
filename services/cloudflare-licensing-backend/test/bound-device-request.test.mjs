@@ -7,7 +7,7 @@ import { encodeBase64url, deviceOperationBody, deviceProofSigningInput, decodeDe
 
 const encoded = size => encodeBase64url(new Uint8Array(size).fill(7));
 const parse = source => parseBoundJson(new TextEncoder().encode(source));
-const enrollment = () => ({ client_id: "desktop", project: "APP", public_key_spki: encoded(91), device_label: " My PC ", redirect_uri: "http://127.0.0.1:45678/callback", state: encoded(32), code_challenge: encoded(32), code_challenge_method: "S256" });
+const enrollment = () => ({ client_id: "desktop", project: "APP", requested_feature: "DEFAULT", public_key_spki: encoded(91), device_label: " My PC ", redirect_uri: "http://127.0.0.1:45678/callback", state: encoded(32), code_challenge: encoded(32), code_challenge_method: "S256" });
 test("native registration fixture agrees on request, PKCE and key-bound comparison", async () => {
   const wire = JSON.parse(await readFile(new URL("../../../test/vectors/device_bound/v1/registration_wire.json", import.meta.url), "utf8"));
   const request = validateBoundRequest("authorize", parse(wire.request_json));
@@ -18,7 +18,8 @@ test("native registration fixture agrees on request, PKCE and key-bound comparis
   assert.equal("sha256:"+createHash("sha256").update(key.export({ format: "der", type: "spki" })).digest("hex"), wire.key_id);
   const response = parse(wire.response_json).data;
   const input = { attempt_handle: response.attempt_handle, client_id: request.client_id, project: request.project,
-    key_id: wire.key_id, redirect_uri: request.redirect_uri, state: request.state, code_challenge: request.code_challenge };
+    key_id: wire.key_id, redirect_uri: request.redirect_uri, state: request.state, code_challenge: request.code_challenge,
+    requested_feature: request.requested_feature };
   assert.equal(formatDeviceEnrollmentComparison(createHash("sha256").update(deviceEnrollmentComparisonInput(input)).digest()), response.comparison_code);
   assert.equal(validateBoundRequest("authorize", { ...request, device_label: "\ufeff \t"+request.device_label+"\u3000\r\n" }).device_label, request.device_label);
   assert.throws(() => validateBoundRequest("authorize", { ...request, device_label: " \t\r\n\u00a0\u2028" }));

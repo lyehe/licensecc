@@ -620,14 +620,13 @@ The deployed `src/index.ts` additionally loads the Cloudflare-native RPC runtime
 local workerd tests verify that entrypoint and its service-binding isolation.
 
 
-### Protected enrollment compatibility and readiness
+### Protected enrollment readiness
 
-The baseline schema gives enrollment attempts an immutable optional
-`requested_feature`.
-New native clients always send it; consent and approval enforce it and the
-comparison transcript uses `lcc-device-enrollment-comparison-v2`. Older clients
-without the field retain v1 comparison and project-wide consent selection.
-Deploy the backend before distributing new native clients.
+Every enrollment attempt records the immutable, required `requested_feature`.
+A registration without it is refused with `400 invalid_request`. Native clients
+always send it; consent lists only entitlements for that feature, approval
+enforces it, and the comparison transcript is
+`lcc-device-enrollment-comparison-v2`, which includes the feature.
 
 Protected traffic has a 1,000/minute global fuse (`BOUND_GLOBAL_RATE_LIMIT`,
 range 100..1000000), a 20/minute registration IP limit, and a separate

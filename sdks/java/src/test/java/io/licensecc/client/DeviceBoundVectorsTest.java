@@ -30,7 +30,7 @@ final class DeviceBoundVectorsTest {
         proof(renewal, "renew");
         proof(read(directory, "exchange.json"), "exchange");
         lease(renewal);
-        comparison(read(directory, "enrollment_comparison.json"));
+        comparison(read(directory, "enrollment_comparison_feature.json"));
         System.out.println("Device-bound Java vectors passed (test-only oracle)");
     }
 
@@ -126,9 +126,9 @@ final class DeviceBoundVectorsTest {
 
     private static void comparison(Map<?, ?> vector) throws Exception {
         Map<?, ?> values = (Map<?, ?>) vector.get("input");
-        StringBuilder input = new StringBuilder("lcc-device-enrollment-comparison-v1\n");
+        StringBuilder input = new StringBuilder("lcc-device-enrollment-comparison-v2\n");
         for (String field : List.of("attempt_handle", "client_id", "project", "key_id",
-                "redirect_uri", "state", "code_challenge")) input.append(encoded(values, field)).append('\n');
+                "redirect_uri", "state", "code_challenge", "requested_feature")) input.append(encoded(values, field)).append('\n');
         equal(hex(bytes(input.toString())), value(vector, "input_hex"), "comparison bytes");
         String digest = hash(bytes(input.toString()));
         equal(digest, value(vector, "sha256_hex"), "comparison hash");

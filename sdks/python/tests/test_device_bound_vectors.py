@@ -37,9 +37,9 @@ def text(value: str) -> str:
 
 
 def test_enrollment_comparison_bytes_and_display_independently():
-    vector = json.loads((Path(__file__).resolve().parents[3] / "test/vectors/device_bound/v1/enrollment_comparison.json").read_text())
-    fields = ["attempt_handle", "client_id", "project", "key_id", "redirect_uri", "state", "code_challenge"]
-    transcript = ("lcc-device-enrollment-comparison-v1\n" + "".join(text(vector["input"][field]) + "\n" for field in fields)).encode("utf-8")
+    vector = json.loads((Path(__file__).resolve().parents[3] / "test/vectors/device_bound/v1/enrollment_comparison_feature.json").read_text())
+    fields = ["attempt_handle", "client_id", "project", "key_id", "redirect_uri", "state", "code_challenge", "requested_feature"]
+    transcript = ("lcc-device-enrollment-comparison-v2\n" +"".join(text(vector["input"][field]) + "\n" for field in fields)).encode("utf-8")
     digest = hashlib.sha256(transcript).digest()
     display = digest[:6].hex().upper()
     assert transcript.hex() == vector["input_hex"]

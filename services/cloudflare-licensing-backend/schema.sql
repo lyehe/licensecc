@@ -138,9 +138,8 @@ CREATE TABLE IF NOT EXISTS device_bound_authorizations (
   expires_at INTEGER NOT NULL CHECK (expires_at = CAST(expires_at AS BIGINT) AND expires_at > created_at AND expires_at <= 9007199254740991),
   consumed_invocation_id TEXT,
   consumed_operation_id TEXT,
-  recovery_until INTEGER CHECK (recovery_until = CAST(recovery_until AS BIGINT) AND recovery_until BETWEEN 0 AND 9007199254740991), requested_feature TEXT
-  CHECK(requested_feature IS NULL OR (length(requested_feature) BETWEEN 1 AND 15
-    AND requested_feature NOT GLOB '*[^A-Za-z0-9_.:-]*')),
+  recovery_until INTEGER CHECK (recovery_until = CAST(recovery_until AS BIGINT) AND recovery_until BETWEEN 0 AND 9007199254740991),
+  requested_feature TEXT NOT NULL CHECK (length(requested_feature) BETWEEN 1 AND 15 AND requested_feature NOT GLOB '*[^A-Za-z0-9_.:-]*'),
   CHECK (
     (status IN ('pending','denied') AND customer_id IS NULL AND feature IS NULL
       AND license_fingerprint IS NULL AND code_hash IS NULL AND code_expires_at IS NULL
@@ -1062,9 +1061,9 @@ WHEN NEW.requested_feature IS NOT OLD.requested_feature
 BEGIN SELECT RAISE(ABORT, 'authorization_intent_immutable'); END;
 
 CREATE TRIGGER IF NOT EXISTS tr_bound_requested_feature_insert BEFORE INSERT ON device_bound_authorizations
-WHEN NEW.requested_feature IS NOT NULL AND NEW.feature IS NOT NULL AND NEW.feature<>NEW.requested_feature
+WHEN NEW.feature IS NOT NULL AND NEW.feature <> NEW.requested_feature
 BEGIN SELECT RAISE(ABORT, 'authorization_feature_mismatch'); END;
 
 CREATE TRIGGER IF NOT EXISTS tr_bound_requested_feature_update BEFORE UPDATE OF feature,requested_feature ON device_bound_authorizations
-WHEN NEW.requested_feature IS NOT NULL AND NEW.feature IS NOT NULL AND NEW.feature<>NEW.requested_feature
+WHEN NEW.feature IS NOT NULL AND NEW.feature <> NEW.requested_feature
 BEGIN SELECT RAISE(ABORT, 'authorization_feature_mismatch'); END;

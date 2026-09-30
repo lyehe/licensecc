@@ -381,7 +381,7 @@ test("hygiene reads the tracked list and permits only documented deterministic e
 test("hygiene permits only the exact reviewed JSON vector fixtures", () => {
   const result = fixture({
     trackedPaths: [
-      "test/vectors/device_bound/v1/enrollment_comparison.json",
+      "test/vectors/device_bound/v1/enrollment_comparison_feature.json",
       "test/vectors/device_bound/v1/exchange.json",
       "test/vectors/device_bound/v1/exchange_wire.json",
       "test/vectors/device_bound/v1/protocol.json",
