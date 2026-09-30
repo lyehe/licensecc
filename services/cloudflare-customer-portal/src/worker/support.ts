@@ -18,10 +18,7 @@ export interface OwnedEntitlement {
   status: string;
   valid_from: number | null;
   valid_until: number | null;
-  pool_size: number;
   max_active_devices: number;
-  max_borrow_sec: number;
-  heartbeat_grace_sec: number;
   is_trial: number;
   policy_id: string | null;
   enforcement_mode: "device_bound_v1";

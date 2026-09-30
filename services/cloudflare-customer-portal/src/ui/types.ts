@@ -12,11 +12,8 @@ export interface EntitlementRow {
   valid_from: number | null;
   valid_until: number | null;
   enforcement_mode: "device_bound_v1";
-  license_mode: "trial" | "node_locked" | "floating";
-  pool_size: number;
+  license_mode: "trial" | "node_locked";
   max_active_devices: number;
-  max_borrow_sec: number;
-  heartbeat_grace_sec: number;
   policy_id: string | null;
   // When the rule that enforces the row ends its trial (epoch seconds, never after valid_until); null
   // for a license that is not a trial, a trial clock not started yet, or a trial with no end of its own.

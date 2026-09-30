@@ -9,7 +9,6 @@ test("A's /api/portal/entitlements returns ONLY A's entitlements", async () => {
     assert.equal(r.body.data.items.length, 1);
     assert.equal(r.body.data.items[0].project, "DEFAULT");
     assert.equal(r.body.data.items[0].license_mode, "node_locked");
-    assert.equal(r.body.data.items[0].pool_size, 0);
     assert.equal(r.body.data.items[0].enforcement_mode, "device_bound_v1");
     assert.equal(typeof r.body.data.items[0].id, "string");
   // The response carries no fingerprint/foreign id.

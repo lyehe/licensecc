@@ -316,22 +316,19 @@ const POLICY_TYPES = ["trial", "node_locked", "subscription"] as const;
 const CATALOG_STATUSES = ["active", "disabled"] as const;
 const MAX_DURATION_SECONDS = 3_153_600_000;
 const MAX_CAPACITY = 1_000_000;
-const MAX_METER_QUOTA = 1_000_000_000;
 
 export function hasEntitlementRecordData(value: unknown): boolean {
   const row = record(value);
   return row !== null &&
     stringField(row, "id") && stringField(row, "project") && stringField(row, "feature") && stringField(row, "license_fingerprint") &&
-    typeof row.device_hash === "string" && enumField(row, "status", ENTITLEMENT_STATUSES) && enumField(row, "license_mode", LICENSE_MODES) &&
-    integerInRangeField(row, "assertion_ttl_seconds", 1, 3600) && nonNegativeIntegerField(row, "revocation_seq") &&
+    enumField(row, "status", ENTITLEMENT_STATUSES) && enumField(row, "license_mode", LICENSE_MODES) &&
+    nonNegativeIntegerField(row, "revocation_seq") &&
     nullableIntegerInRangeField(row, "valid_from", 0, Number.MAX_SAFE_INTEGER) && nullableIntegerInRangeField(row, "valid_until", 0, Number.MAX_SAFE_INTEGER) && typeof row.notes === "string" &&
     nullableStringField(row, "customer_id") && nullableStringField(row, "license_id") && nullableStringField(row, "policy_id") &&
     binaryFlagField(row, "is_trial") && nullableEnumField(row, "trial_expiration_basis", ["from_issue", "from_first_activation", "from_first_use"] as const) && integerInRangeField(row, "trial_duration_sec", 0, MAX_DURATION_SECONDS) &&
-    binaryFlagField(row, "trial_one_per_device") && binaryFlagField(row, "trial_require_device_proof") && nullableIntegerInRangeField(row, "trial_started_at", 0, Number.MAX_SAFE_INTEGER) &&
+    binaryFlagField(row, "trial_one_per_device") && nullableIntegerInRangeField(row, "trial_started_at", 0, Number.MAX_SAFE_INTEGER) &&
     nullableStringField(row, "trial_device_hash") && integerInRangeField(row, "max_active_devices", 0, MAX_CAPACITY) && integerInRangeField(row, "lease_seconds", 0, MAX_DURATION_SECONDS) &&
-    integerInRangeField(row, "rebind_window_sec", 0, MAX_DURATION_SECONDS) && integerInRangeField(row, "pool_size", 0, MAX_CAPACITY) && integerInRangeField(row, "heartbeat_grace_sec", 0, MAX_DURATION_SECONDS) &&
-    integerInRangeField(row, "max_borrow_sec", 0, MAX_DURATION_SECONDS) && binaryFlagField(row, "allow_overdraft") && integerInRangeField(row, "meter_quota", 0, MAX_METER_QUOTA) &&
-    integerInRangeField(row, "meter_period_sec", 0, MAX_DURATION_SECONDS) && nonNegativeIntegerField(row, "created_at") && nonNegativeIntegerField(row, "updated_at");
+    nonNegativeIntegerField(row, "created_at") && nonNegativeIntegerField(row, "updated_at");
 }
 
 export function hasEntitlementTransitionData(value: unknown, id: string, expectedStatus: string): boolean {

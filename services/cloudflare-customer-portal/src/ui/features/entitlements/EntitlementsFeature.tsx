@@ -59,7 +59,7 @@ export function EntitlementsFeature({ entitlements }: { entitlements: Entitlemen
               <tr key={item.id}>
                 <td data-label="Feature"><div>{item.feature}<details className="referenceDetails"><summary>License details</summary><code>{item.license_fingerprint || item.id}</code></details><span className="licenseReference">{shortHash(item.license_fingerprint || item.id)}</span></div></td>
                 <td data-label="Mode"><DatedText text={licenseModeLabel(item, now)} /></td>
-                <td data-label="Capacity">{item.license_mode === "floating" ? `${item.pool_size} seats` : `${item.max_active_devices} ${item.max_active_devices === 1 ? "device" : "devices"}`}</td>
+                <td data-label="Capacity">{item.max_active_devices} {item.max_active_devices === 1 ? "device" : "devices"}</td>
                 <td data-label="Status"><span className="licenseStatus"><span className={`status ${state}`}><DatedText text={licenseStatusLead(item, now)} /></span><LicenseNextStep state={state} /></span></td>
                 <td data-label="Valid"><DatedText text={formatWindow(item.valid_from, item.valid_until)} /></td>
                 <td data-label="Action" className="licenseAction"><LicenseAction state={state} /></td>
