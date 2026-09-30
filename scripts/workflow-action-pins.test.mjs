@@ -6,6 +6,8 @@ import test from "node:test";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const fullSha = /^[0-9a-f]{40}$/i;
+// Every alias of the eight inputs that switch the portal drill's protected device journey on.
+const PROTECTED_PORTAL_DRILL_INPUT = /^(?:(?:STAGING|LICENSECC)_DEVICE_[A-Z_]+|STAGING_BACKEND_BASE_URL|LICENSECC_BACKEND_URL|[A-Z_]+_PROTECTED_ENTITLEMENT_ID|[A-Z_]+_BOUND_LEASE_PUBLIC_KEY_SPKI_PEM)$/u;
 
 function trackedWorkflowPaths() {
   return execFileSync("git", ["ls-files", "--", ".github/workflows"], {
@@ -578,6 +580,9 @@ test("production deployment is manual, confirmed, serialized, and uses only mate
   assert.match(productionVerifier.properties.get("run")?.value ?? "", /backend-public-verifier-drill\.json/u);
   const remainingProductionDrills = namedWorkflowStep(job, "Run remaining service post-deploy drills", ".github/workflows/deploy-production.yml");
   assert.equal(remainingProductionDrills.children.get("env")?.has("LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM"), false);
+  // The production portal drill is read-only: no protected-journey input may reach it, so it never enrolls a device.
+  assert.deepEqual([...(remainingProductionDrills.children.get("env")?.keys() ?? [])].filter((key) => PROTECTED_PORTAL_DRILL_INPUT.test(key)), []);
+  assert.doesNotMatch(workflow, /LICENSECC_STAGING_(?:DEVICE_|BOUND_LEASE_PUBLIC_KEY_SPKI_PEM)/u);
   assert.match(workflow, /validate:access-admin[^\n]*--read-only/u);
   assert.match(workflow, /validate:staging-portal/u);
   assert.match(workflow, /validate:deploy[^\n]*--require-d1-rest-token --require-trigger-token/u);
@@ -651,8 +656,22 @@ test("staging deployment is isolated, confirmed, backup-gated, and exercises eve
   assert.match(workflow, /validate:access-admin/u);
   assert.match(workflow, /LICENSECC_NON_ADMIN_ACCESS_JWT: \$\{\{ secrets\.LICENSECC_NON_ADMIN_ACCESS_JWT \}\}/u);
   assert.match(workflow, /validate:access-admin[^\n]*--require-non-admin/u);
-  assert.match(workflow, /STAGING_PORTAL_ALLOW_SEAT_MUTATION: "1"/u);
-  assert.match(workflow, /STAGING_PORTAL_ALLOW_DOWNLOAD: "1"/u);
+  assert.match(workflow, /^\s*portal_protected_entitlement_id:\s*$/mu);
+  assert.deepEqual(
+    Object.fromEntries([...(remainingStagingDrills.children.get("env") ?? [])]
+      .filter(([key]) => PROTECTED_PORTAL_DRILL_INPUT.test(key))
+      .map(([key, property]) => [key, property.value])),
+    {
+      STAGING_BACKEND_BASE_URL: "${{ inputs.backend_url }}",
+      STAGING_PORTAL_PROTECTED_ENTITLEMENT_ID: "${{ inputs.portal_protected_entitlement_id }}",
+      STAGING_DEVICE_CLIENT_ID: "${{ vars.LICENSECC_STAGING_DEVICE_CLIENT_ID }}",
+      STAGING_DEVICE_PROJECT: "${{ vars.LICENSECC_STAGING_DEVICE_PROJECT }}",
+      STAGING_DEVICE_FEATURE: "${{ vars.LICENSECC_STAGING_DEVICE_FEATURE }}",
+      STAGING_DEVICE_REDIRECT_URI: "${{ vars.LICENSECC_STAGING_DEVICE_REDIRECT_URI }}",
+      STAGING_DEVICE_AUDIENCE: "${{ vars.LICENSECC_STAGING_DEVICE_AUDIENCE }}",
+      STAGING_BOUND_LEASE_PUBLIC_KEY_SPKI_PEM: "${{ vars.LICENSECC_STAGING_BOUND_LEASE_PUBLIC_KEY_SPKI_PEM }}",
+    },
+  );
   assert.match(workflow, /validate:staging-portal/u);
   assert.match(workflow, /validate:deploy[^\n]*--require-d1-rest-token --require-trigger-token/u);
   assert.equal((workflow.match(/run-protected-wrangler\.mjs --operation deployments --worker/gmu) ?? []).length, 4);
