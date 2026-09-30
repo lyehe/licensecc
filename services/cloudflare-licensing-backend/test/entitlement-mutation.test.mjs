@@ -131,11 +131,13 @@ function ctx(overrides = {}) {
   };
 }
 
+// Every grant has an owner, so every written input names one.
 function input(overrides = {}) {
   return {
     project: "DEFAULT",
     feature: "DEFAULT",
     license_fingerprint: "a".repeat(64),
+    customer_id: "cus_1",
     ...overrides,
   };
 }
