@@ -538,6 +538,31 @@ function protectedCreateFixture() {
   return { env, db, request };
 }
 
+/**
+ * A D1 stand-in that records every statement and finds nothing, so a request that reaches D1 shows.
+ * Each prepared statement keeps its SQL and bound values; `first` answers a single-row read and
+ * `batchResults` answers a batch, for a test that needs a write to go through.
+ */
+function recordingDb({ first = null, batchResults = null } = {}) {
+  const statements = [];
+  const statement = (sql, values = []) => ({
+    bind: (...bound) => statement(sql, bound),
+    first: async () => first,
+    all: async () => ({ results: [] }),
+    run: async () => ({}),
+    sql,
+    values,
+  });
+  return {
+    statements,
+    prepare(sql) { statements.push(sql); return statement(sql); },
+    async batch(list) {
+      statements.push(...list.map((item) => item.sql));
+      return batchResults === null ? list.map(() => ({ results: [], meta: { changes: 0 } })) : batchResults(list);
+    },
+  };
+}
+
 export {
   NEXT_JSON_KEYS,
   MockD1,
@@ -556,6 +581,7 @@ export {
   keyOf,
   protectedCreateFixture,
   protectedGrant,
+  recordingDb,
   rotatableAccessFixture,
   syncAuthed,
   syncEnv,

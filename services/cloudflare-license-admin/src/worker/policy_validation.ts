@@ -20,10 +20,17 @@ const TRIAL_BASES: ReadonlyArray<TrialExpirationBasis> = ["from_issue", "from_fi
 // A policy stamps a protected grant: its device limit, validity and trial rules. A body naming any
 // other field (a seat pool, borrowing, a meter, an assertion TTL, device proof, or anything else)
 // is refused whole, so a caller never believes a field it sent took effect.
-const PATCHABLE_FIELDS: ReadonlySet<string> = new Set([
+//
+// The PATCH writer updates exactly these columns, in this order, so a field this validator accepts
+// can never be dropped by the writer. The type checks below keep the list and ValidPolicyPatch equal.
+export const POLICY_PATCHABLE_FIELDS = [
   "valid_from_offset_sec", "duration_sec", "max_active_devices", "expiry_strategy",
   "trial_expiration_basis", "trial_duration_sec", "trial_one_per_device", "notes",
-]);
+] as const satisfies ReadonlyArray<keyof ValidPolicyPatch>;
+type UnlistedPatchField = Exclude<keyof ValidPolicyPatch, typeof POLICY_PATCHABLE_FIELDS[number]>;
+const everyPatchFieldIsListed: [UnlistedPatchField] extends [never] ? true : never = true;
+void everyPatchFieldIsListed;
+const PATCHABLE_FIELDS: ReadonlySet<string> = new Set(POLICY_PATCHABLE_FIELDS);
 const CREATE_FIELDS: ReadonlySet<string> = new Set(["project", "name", "type", ...PATCHABLE_FIELDS]);
 
 /** The policy a create writes: every column but its identity takes the given value or the default. */

@@ -16,12 +16,14 @@ import {
   fingerprint,
   json,
   keyOf,
+  recordingDb,
   rotatableAccessFixture,
   syncAuthed,
   syncEnv,
   worker,
 } from "./fixtures.mjs";
 import { assertRouteGroup, assertRouteGroupRejectsUnauthenticated } from "./route-group-assertions.mjs";
+import { POLICY_PATCHABLE_FIELDS } from "../../dist-worker/worker/policy_validation.js";
 test("policy routes have direct owners and reject anonymous access", async () => {
   assertRouteGroup("policies", 6);
   await assertRouteGroupRejectsUnauthenticated("policies");
@@ -112,22 +114,35 @@ test("validatePolicyPatch updates mutable fields and rejects identity fields", (
   }
 });
 
-// A D1 stand-in that records every statement and finds nothing, so a request that reaches D1 shows.
-function recordingDb() {
-  const statements = [];
-  const statement = (sql) => ({
-    bind: () => statement(sql),
-    first: async () => null,
-    all: async () => ({ results: [] }),
-    run: async () => ({}),
-    sql,
-  });
-  return {
-    statements,
-    prepare(sql) { statements.push(sql); return statement(sql); },
-    async batch(list) { statements.push(...list.map((item) => item.sql)); return list.map(() => ({ results: [], meta: { changes: 0 } })); },
-  };
-}
+// One valid value for every field a policy PATCH may name. A new patchable field must be added here,
+// which is what makes the drift test below cover it.
+const EVERY_PATCHABLE_FIELD = {
+  valid_from_offset_sec: -60,
+  duration_sec: 86_400,
+  max_active_devices: 4,
+  expiry_strategy: "non_expiring",
+  trial_expiration_basis: "from_first_use",
+  trial_duration_sec: 3_600,
+  trial_one_per_device: 1,
+  notes: "every field",
+};
+
+test("a policy PATCH writes every field its validator accepts, and no other", async () => {
+  assert.deepEqual(Object.keys(EVERY_PATCHABLE_FIELD).sort(), [...POLICY_PATCHABLE_FIELDS].sort(), "give every patchable field a test value");
+  // The validator carries each accepted field into the patch it hands the writer.
+  assert.deepEqual(validatePolicyPatch(EVERY_PATCHABLE_FIELD), EVERY_PATCHABLE_FIELD);
+
+  const existing = { id: "pol_1", project: "APP", name: "Pro", type: "node_locked", status: "active" };
+  const db = recordingDb({ first: existing, batchResults: (list) => list.map(() => ({ results: [{ ...existing }], meta: { changes: 1 } })) });
+  const response = await worker.fetch(authed("/api/admin/policies/pol_1", { method: "PATCH", body: JSON.stringify(EVERY_PATCHABLE_FIELD) }), baseEnv(db));
+  assert.equal(response.status, 200);
+  assert.equal((await json(response)).code, "policy_patched");
+  const update = db.statements.find((sql) => sql.startsWith("UPDATE entitlement_policies SET "));
+  assert.ok(update, "the PATCH reached its UPDATE");
+  const columns = update.slice("UPDATE entitlement_policies SET ".length, update.indexOf(" WHERE ")).split(", ").map((assignment) => assignment.replace(/ = \?$/u, ""));
+  // The writer updates every validated field, in the validator's order, then the timestamp.
+  assert.deepEqual(columns, [...POLICY_PATCHABLE_FIELDS, "updated_at"]);
+});
 
 test("a floating policy is refused", async () => {
   for (const body of [

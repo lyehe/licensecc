@@ -1,5 +1,5 @@
 import { INVALID_IDEMPOTENCY_KEY, mutationResponse, readIdempotencyKey } from "../../idempotency.js";
-import { validatePolicyInput, validatePolicyPatch } from "../../policy_validation.js";
+import { POLICY_PATCHABLE_FIELDS, validatePolicyInput, validatePolicyPatch } from "../../policy_validation.js";
 import { envelope } from "../../responses.js";
 import { batchReturnedRow } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type { Actor, D1DatabaseLike, MutationContext } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
@@ -159,11 +159,9 @@ export async function handlePolicyPatch(request: Request, env: Env, actor: Actor
     }
     const assignments: string[] = [];
     const values: unknown[] = [];
-    for (const field of [
-      "valid_from_offset_sec", "duration_sec", "max_active_devices", "expiry_strategy", "trial_expiration_basis",
-      "trial_duration_sec", "trial_one_per_device", "notes",
-    ] as const) {
-      const value = (patch as Record<string, unknown>)[field];
+    // Exactly the fields the validator admits, so a validated field is never dropped here.
+    for (const field of POLICY_PATCHABLE_FIELDS) {
+      const value = patch[field];
       if (value !== undefined) {
         assignments.push(`${field} = ?`);
         values.push(value);

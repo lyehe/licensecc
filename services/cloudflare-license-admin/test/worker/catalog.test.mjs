@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MAX_SUPPORT_UNTIL_EPOCH_SECONDS } from "@licensecc/licensing-domain/catalog/plan_projection";
-import { MockD1, adminInternalsForTests, authed, baseEnv, json, worker } from "./fixtures.mjs";
+import { MockD1, adminInternalsForTests, authed, baseEnv, json, recordingDb, worker } from "./fixtures.mjs";
 import { assertRouteGroup, assertRouteGroupRejectsUnauthenticated } from "./route-group-assertions.mjs";
 
 test("catalog routes have direct owners and reject anonymous access", async () => {
@@ -42,23 +42,6 @@ test("plan projection worker validation uses the documented safe epoch ceiling",
     assert.equal(validatePlanProjectionInput(projectionInput({ support_until })), null, String(support_until));
   }
 });
-
-// A D1 stand-in that records every statement and finds nothing, so a request that reaches D1 shows.
-function recordingDb() {
-  const statements = [];
-  const statement = (sql) => ({
-    bind: () => statement(sql),
-    first: async () => null,
-    all: async () => ({ results: [] }),
-    run: async () => ({}),
-    sql,
-  });
-  return {
-    statements,
-    prepare(sql) { statements.push(sql); return statement(sql); },
-    async batch(list) { statements.push(...list.map((item) => item.sql)); return list.map(() => ({ results: [], meta: { changes: 0 } })); },
-  };
-}
 
 test("a plan feature with pool_size is refused", async () => {
   // A plan feature names only its device limit and policy; seat, borrow, meter and TTL fields are refused.
