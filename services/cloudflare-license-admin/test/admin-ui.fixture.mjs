@@ -55,8 +55,18 @@ export const test = base.extend({
 
 /** The fields a policy PATCH may name; a create adds project, name and type. Mirrors the Worker. */
 const POLICY_PATCHABLE_FIELDS = ["valid_from_offset_sec", "duration_sec", "max_active_devices", "expiry_strategy", "trial_expiration_basis", "trial_duration_sec", "trial_one_per_device", "notes"];
-/** A protected grant has no device hash or assertion TTL; a create or PATCH naming either is refused. */
-const REFUSED_ENTITLEMENT_FIELDS = ["device_hash", "assertion_ttl_seconds"];
+/** A protected grant has no device hash or assertion TTL, and no PATCH chooses its mode; a create
+ * or PATCH naming any of them is refused. Derived from the Worker's own list (rather than hand-copied)
+ * so the two can never drift. */
+const REFUSED_ENTITLEMENT_FIELDS = (() => {
+  const source = readFileSync(new URL("../src/worker/groups/entitlements/validation.ts", import.meta.url), "utf8");
+  const match = /REFUSED_ENTITLEMENT_FIELDS = \[([^\]]+)\]/.exec(source);
+  if (match === null) throw new Error("could not find REFUSED_ENTITLEMENT_FIELDS in validation.ts");
+  return match[1].split(",").map((field) => field.trim().replace(/^"|"$/g, "")).filter(Boolean);
+})();
+/** A create's own body legitimately names its mode (the Worker validates it separately and strips
+ * it before this same refusal check); only a PATCH naming it is refused. */
+const REFUSED_ENTITLEMENT_CREATE_FIELDS = REFUSED_ENTITLEMENT_FIELDS.filter((field) => field !== "enforcement_mode");
 const namesOnly = (body, allowed) => Object.keys(body).every((field) => allowed.includes(field));
 
 export function makeEnvelope(code, data) {
@@ -1760,7 +1770,7 @@ export function makeAdminApiFixture() {
       requests.creates += 1;
       await new Promise((resolve) => setTimeout(resolve, 100));
       const body = await jsonBody(request);
-      if (REFUSED_ENTITLEMENT_FIELDS.some((field) => Object.hasOwn(body, field))) {
+      if (REFUSED_ENTITLEMENT_CREATE_FIELDS.some((field) => Object.hasOwn(body, field))) {
         return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-entitlement-refused-field" });
       }
       now += 1;

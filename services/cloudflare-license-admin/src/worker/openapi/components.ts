@@ -5,11 +5,7 @@ import {
   CATALOG_IMPORT_MAX_MUTABLE_ACTIONS,
   CATALOG_IMPORT_TOO_LARGE_GUIDANCE,
 } from "@licensecc/licensing-domain/catalog/import_preview";
-import {
-  ENTITLEMENT_BATCH_MAX_IDS,
-  ENTITLEMENT_BATCH_TOO_LARGE_CODE,
-  ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE,
-} from "../../shared/api.js";
+import { ENTITLEMENT_BATCH_MAX_IDS, ENTITLEMENT_BATCH_TOO_LARGE_CODE, ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE, MAX_DEVICE_LIMIT } from "../../shared/api.js";
 import { DEFAULT_PAGINATION_OPTIONS } from "../query.js";
 import type { PaginationOptions } from "../query.js";
 
@@ -567,7 +563,7 @@ export const openApiComponents: LabeledComponentFragment = {
           policy_id: { type: ["string", "null"], maxLength: 128 },
           status: { type: "string", enum: ["active", "disabled"], default: "active" },
           display_order: { type: "integer", minimum: 0, default: 0 },
-          max_active_devices: { type: ["integer", "null"], minimum: 0 },
+          max_active_devices: { type: ["integer", "null"], minimum: 0, maximum: MAX_DEVICE_LIMIT },
         },
       }],
       ["CatalogPlanImport", {

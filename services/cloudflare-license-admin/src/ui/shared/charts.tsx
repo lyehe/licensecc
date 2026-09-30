@@ -30,22 +30,6 @@ export function pointXs(count: number, width: number): number[] {
   return Array.from({ length: count }, (_, index) => Math.round(index * step * 1000) / 1000);
 }
 
-export function linePath(values: ReadonlyArray<number>, width: number, height: number, pad = 2): string {
-  if (values.length === 0) {
-    return "";
-  }
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const xs = pointXs(values.length, width);
-  if (values.length === 1) {
-    const y = round(scaleY(values[0] ?? 0, min, max, height, pad));
-    return `M 0 ${y} L ${round(width)} ${y}`;
-  }
-  return values
-    .map((value, index) => `${index === 0 ? "M" : "L"} ${round(xs[index] ?? 0)} ${round(scaleY(value, min, max, height, pad))}`)
-    .join(" ");
-}
-
 export function linePathScaled(
   values: ReadonlyArray<number>,
   scaleMin: number,
@@ -65,17 +49,6 @@ export function linePathScaled(
   return values
     .map((value, index) => `${index === 0 ? "M" : "L"} ${round(xs[index] ?? 0)} ${round(scaleY(value, scaleMin, scaleMax, height, pad))}`)
     .join(" ");
-}
-
-export function areaPath(values: ReadonlyArray<number>, width: number, height: number, pad = 2): string {
-  const line = linePath(values, width, height, pad);
-  if (line === "") {
-    return "";
-  }
-  const xs = pointXs(values.length, width);
-  const lastX = values.length === 1 ? width : (xs[xs.length - 1] ?? 0);
-  const firstX = values.length === 1 ? 0 : (xs[0] ?? 0);
-  return `${line} L ${round(lastX)} ${round(height)} L ${round(firstX)} ${round(height)} Z`;
 }
 
 export function areaPathScaled(

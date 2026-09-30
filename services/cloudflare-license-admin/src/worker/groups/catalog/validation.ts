@@ -6,6 +6,7 @@ import {
 } from "@licensecc/licensing-domain/catalog/plan_projection";
 import { isCatalogImportPreviewId, type CatalogImportApplyInput } from "@licensecc/licensing-domain/catalog/import_preview";
 import { safeString } from "@licensecc/cloudflare-runtime/http/kit";
+import { MAX_DEVICE_LIMIT } from "../../../shared/api.js";
 
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
 export const MAX_PROJECT_SIZE = 127;
@@ -256,7 +257,7 @@ export function hasOnlyKeys(input: Record<string, unknown>, allowed: ReadonlySet
   return Object.keys(input).every((key) => allowed.has(key));
 }
 
-export function readNullableNonNegativeInt(input: Record<string, unknown>, field: string, max = 1_000_000_000): number | null | typeof INVALID {
+export function readNullableNonNegativeInt(input: Record<string, unknown>, field: string, max = MAX_DEVICE_LIMIT): number | null | typeof INVALID {
   if (input[field] === undefined || input[field] === null || input[field] === "") {
     return null;
   }

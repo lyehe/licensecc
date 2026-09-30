@@ -735,8 +735,7 @@ limit/cursor contract and are not snapshot reads.
 The customer Apps & access section consumes these pages and opens a selected
 grant's existing editor/lifecycle workflow inline. Customer-scoped mode fixes the
 exact grant/owner, hides global filtering and bulk actions, and retains confirmation,
-unsaved-draft protection and idempotent recovery. Advanced device/seat operations
-remain in the global entitlement workspace. Browse apps in the catalog reads the
+unsaved-draft protection and idempotent recovery. Browse apps in the catalog reads the
 complete configuration/business-record inventory, including apps with no plans.
 
 Entitlement PATCH, individual disable/reenable/revoke, and batch transition rows each

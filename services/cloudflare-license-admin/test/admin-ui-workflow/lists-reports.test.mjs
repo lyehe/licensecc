@@ -163,15 +163,6 @@ test("admin UI workflow pointXs spreads N points across the width", async () => 
   assert.deepEqual(workflow.pointXs(5, 600), [0, 150, 300, 450, 600]);
 });
 
-test("admin UI workflow linePath emits a min/max-scaled polyline 'd' string", async () => {
-  const workflow = await loadWorkflowModule("shared/charts.tsx");
-  assert.equal(workflow.linePath([], 600, 100), "");
-  assert.equal(workflow.linePath([5], 600, 100, 0), "M 0 50 L 600 50");
-  assert.equal(workflow.linePath([0, 10], 600, 100, 0), "M 0 100 L 600 0");
-  assert.equal(workflow.linePath([0, 5, 10], 600, 100, 0), "M 0 100 L 300 50 L 600 0");
-  assert.equal(workflow.linePath([4, 4, 4], 600, 100, 0), "M 0 50 L 300 50 L 600 50");
-});
-
 test("admin UI workflow linePathScaled draws a series on an external shared y-scale", async () => {
   const workflow = await loadWorkflowModule("shared/charts.tsx");
   assert.equal(workflow.linePathScaled([0, 5], 0, 10, 600, 100, 0), "M 0 100 L 600 50");
@@ -180,11 +171,10 @@ test("admin UI workflow linePathScaled draws a series on an external shared y-sc
   assert.equal(workflow.linePathScaled([], 0, 10, 600, 100), "");
 });
 
-test("admin UI workflow areaPath closes the line down to the baseline", async () => {
+test("admin UI workflow areaPathScaled closes the line down to the baseline on an external shared y-scale", async () => {
   const workflow = await loadWorkflowModule("shared/charts.tsx");
-  assert.equal(workflow.areaPath([], 600, 100), "");
-  assert.equal(workflow.areaPath([0, 10], 600, 100, 0), "M 0 100 L 600 0 L 600 100 L 0 100 Z");
-  assert.equal(workflow.areaPath([5], 600, 100, 0), "M 0 50 L 600 50 L 600 100 L 0 100 Z");
+  assert.equal(workflow.areaPathScaled([], 0, 10, 600, 100), "");
+  assert.equal(workflow.areaPathScaled([0, 10], 0, 10, 600, 100, 0), "M 0 100 L 600 0 L 600 100 L 0 100 Z");
   assert.equal(workflow.areaPathScaled([0, 5], 0, 10, 600, 100, 0), "M 0 100 L 600 50 L 600 100 L 0 100 Z");
 });
 

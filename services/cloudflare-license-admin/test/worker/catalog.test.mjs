@@ -66,3 +66,24 @@ test("a plan feature with pool_size is refused", async () => {
     assert.deepEqual(db.statements, [], `an imported ${JSON.stringify(field)} never reaches D1`);
   }
 });
+
+test("a plan feature's max_active_devices is capped at MAX_DEVICE_LIMIT (1,000,000), like the entitlement device limit", async () => {
+  const db = recordingDb();
+  const response = await worker.fetch(authed("/api/admin/catalog/plans/plan_1/features", {
+    method: "POST",
+    body: JSON.stringify({ project: "APP", feature_key: "PRO", max_active_devices: 1_000_001 }),
+  }), baseEnv(db));
+  assert.equal(response.status, 400);
+  assert.equal((await json(response)).code, "invalid_request");
+  assert.deepEqual(db.statements, [], "a device limit over the cap never reaches D1");
+
+  const manifest = {
+    format_version: 1,
+    features: [{ project: "APP", feature_key: "PRO", name: "Pro" }],
+    plans: [{ project: "APP", plan_key: "basic", name: "Basic", features: [{ project: "APP", feature_key: "PRO", max_active_devices: 1_000_001 }] }],
+  };
+  const preview = await worker.fetch(authed("/api/admin/catalog/import?dry_run=1", { method: "POST", body: JSON.stringify(manifest) }), baseEnv(db));
+  assert.equal(preview.status, 400);
+  assert.equal((await json(preview)).code, "invalid_request");
+  assert.deepEqual(db.statements, [], "an imported device limit over the cap never reaches D1");
+});

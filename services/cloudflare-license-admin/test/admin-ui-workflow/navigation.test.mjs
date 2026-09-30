@@ -27,7 +27,7 @@ test("admin customer addresses round trip full opaque identifiers and supported 
 
 test("admin navigation rejects malformed addresses and ambiguous customer sections safely", async () => {
   const navigation = await loadWorkflowModule("app/navigationState.ts");
-  for (const hash of ["#outside", "#/unknown", "#/customers/", "#/customers/a/b", "#/customers/%ZZ", "#/customers/%C3%28", "#/customers/%00", "#/customers/a?section=unknown", "#/customers?section=access", "#/plans?view=unknown", "#/entitlements?status=active&status=revoked", "#/reports?x=1?y=2"]) {
+  for (const hash of ["#outside", "#/unknown", "#/customers/", "#/customers/a/b", "#/customers/%ZZ", "#/customers/%C3%28", "#/customers/%00", "#/customers/a?section=unknown", "#/customers/a?section=tokens", "#/customers?section=access", "#/plans?view=unknown", "#/entitlements?status=active&status=revoked", "#/reports?x=1?y=2"]) {
     assert.deepEqual(navigation.parseAdminHash(hash), { route: { tab: "overview", filter: {} }, invalid: true }, hash);
   }
 });
