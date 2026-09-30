@@ -73,12 +73,12 @@ test('list read reports device-limit capacity and recent refused connections, sc
     INSERT INTO customers(id,name,created_at,updated_at) VALUES('foreign','Foreign',1,1);
     INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,max_active_devices,created_at,updated_at)
       VALUES('FOREIGN','DEFAULT','${'c'.repeat(64)}','foreign','active','device_bound_v1',1,1,1);
-    INSERT INTO usage_events(project,feature,license_fingerprint,event_type,device_key_id,reason,ts)
-      VALUES('FOREIGN','DEFAULT','${'c'.repeat(64)}','denied','key-foreign','device_limit_reached',3000);
-    INSERT INTO usage_events(project,feature,license_fingerprint,event_type,device_key_id,reason,ts)
-      VALUES('OTHER','DEFAULT','${'b'.repeat(64)}','denied','key-other','device_limit_reached',2000);`);
-  for(let i=0;i<6;i++) f.sql.prepare(`INSERT INTO usage_events(project,feature,license_fingerprint,event_type,device_key_id,reason,ts)
-    VALUES('APP','DEFAULT',?,'denied',?,'device_limit_reached',?)`).run('a'.repeat(64),`key-denied-${i}`,1000+i);
+    INSERT INTO device_bound_denials(project,feature,license_fingerprint,key_id,reason,ts)
+      VALUES('FOREIGN','DEFAULT','${'c'.repeat(64)}','key-foreign','device_limit_reached',3000);
+    INSERT INTO device_bound_denials(project,feature,license_fingerprint,key_id,reason,ts)
+      VALUES('OTHER','DEFAULT','${'b'.repeat(64)}','key-other','device_limit_reached',2000);`);
+  for(let i=0;i<6;i++) f.sql.prepare(`INSERT INTO device_bound_denials(project,feature,license_fingerprint,key_id,reason,ts)
+    VALUES('APP','DEFAULT',?,?,'device_limit_reached',?)`).run('a'.repeat(64),`key-denied-${i}`,1000+i);
 
   const page=await result(authed(path),f.env,200,'customer_bindings');
   assert.deepEqual(page.capacity,[

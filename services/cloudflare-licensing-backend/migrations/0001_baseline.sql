@@ -526,15 +526,13 @@ CREATE TABLE IF NOT EXISTS rate_limit_counters (
   PRIMARY KEY (namespace, rate_key, window_start)
 );
 
-CREATE TABLE IF NOT EXISTS usage_events (
+CREATE TABLE IF NOT EXISTS device_bound_denials (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project TEXT NOT NULL,
   feature TEXT NOT NULL,
   license_fingerprint TEXT NOT NULL,
-  event_type TEXT NOT NULL CHECK (event_type IN ('checkout', 'release', 'reclaim', 'denied')),
-  seat_id TEXT NULL,
-  device_key_id TEXT NULL,
-  reason TEXT NULL,
+  key_id TEXT NOT NULL,
+  reason TEXT NOT NULL CHECK (reason IN ('device_limit_reached')),
   ts INTEGER NOT NULL
 );
 
@@ -742,11 +740,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_sessions_hmac ON portal_sessions(se
 CREATE INDEX IF NOT EXISTS idx_rate_limit_counters_expires_at
   ON rate_limit_counters(expires_at);
 
-CREATE INDEX IF NOT EXISTS idx_usage_events_ts
-  ON usage_events(ts);
-
-CREATE INDEX IF NOT EXISTS idx_usage_events_window
-  ON usage_events(project, feature, license_fingerprint, ts);
+CREATE INDEX IF NOT EXISTS idx_device_bound_denials_window ON device_bound_denials(project, feature, license_fingerprint, key_id, ts);
+CREATE INDEX IF NOT EXISTS idx_device_bound_denials_ts ON device_bound_denials(ts);
 
 CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_due
   ON webhook_deliveries(status, next_attempt_at);

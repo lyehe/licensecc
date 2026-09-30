@@ -20,7 +20,7 @@ const MAX_BACKUP_MANIFEST_BYTES = 16 * 1024;
 const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const MAX_MANIFEST_STRING_LENGTH = 2048;
 const SQL_HASH_CHUNK_BYTES = 64 * 1024;
-const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "8aef91774616fbbb428e9963721519cfe815fb2c8a3a5c0c59438a339d422b36";
+const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "af18db6420440c1ee872761bde0cae33ca4e2c2e9ed95b7d59c8e890a5b5b505";
 const SNAPSHOT_INVENTORY_ALGORITHM = "d1-export-sql-insert-count-v1";
 const DEFAULT_BACKEND_MIGRATIONS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -68,7 +68,7 @@ const PRESENCE_ONLY_TABLES = [
   "device_bound_commit_checks",
   "rate_limit_counters",
   "order_ingest_nonces",
-  "usage_events",
+  "device_bound_denials",
   "portal_otp",
   "portal_sessions",
   "portal_passwords",
@@ -169,8 +169,8 @@ const EXPECTED_INDEXES = {
   idx_portal_sessions_expires: "portal_sessions",
   idx_portal_sessions_hmac: "portal_sessions",
   idx_rate_limit_counters_expires_at: "rate_limit_counters",
-  idx_usage_events_ts: "usage_events",
-  idx_usage_events_window: "usage_events",
+  idx_device_bound_denials_window: "device_bound_denials",
+  idx_device_bound_denials_ts: "device_bound_denials",
   idx_webhook_deliveries_due: "webhook_deliveries",
   idx_webhook_endpoints_status: "webhook_endpoints",
   idx_webhook_events_endpoint: "webhook_events",

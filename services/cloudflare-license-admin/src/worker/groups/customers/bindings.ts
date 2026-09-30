@@ -70,13 +70,13 @@ export async function adminBindings(request:Request,env:Env,actor:Actor,customer
       capacity=capacityRows.results.map(row=>({project:String(row.project),feature:String(row.feature),license_fingerprint:String(row.license_fingerprint),
         in_use:Number(row.in_use),limit:Number(row.max_active_devices)}));
       // Driven from entitlements (idx_entitlements_customer_project on customer_id,project,feature,
-      // license_fingerprint) into usage_events (idx_usage_events_window on the same three columns),
-      // not the reverse: starting from usage_events would scan every customer's rows for a project
-      // before checking ownership.
-      const deniedRows=await db.prepare(`SELECT u.project,u.feature,u.license_fingerprint,u.device_key_id,u.ts
+      // license_fingerprint) into device_bound_denials (idx_device_bound_denials_window on the same
+      // three columns), not the reverse: starting from device_bound_denials would scan every
+      // customer's rows for a project before checking ownership.
+      const deniedRows=await db.prepare(`SELECT u.project,u.feature,u.license_fingerprint,u.key_id AS device_key_id,u.ts
         FROM entitlements e
-        JOIN usage_events u ON u.project=e.project AND u.feature=e.feature AND u.license_fingerprint=e.license_fingerprint
-        WHERE e.customer_id=? AND e.enforcement_mode='device_bound_v1' AND u.event_type='denied' AND u.reason='device_limit_reached'
+        JOIN device_bound_denials u ON u.project=e.project AND u.feature=e.feature AND u.license_fingerprint=e.license_fingerprint
+        WHERE e.customer_id=? AND e.enforcement_mode='device_bound_v1'
           ${project===null?"":"AND e.project=?"}
         ORDER BY u.ts DESC,u.id DESC LIMIT 5`)
         .bind(customer,...(project===null?[]:[project])).all<Record<string,unknown>>();

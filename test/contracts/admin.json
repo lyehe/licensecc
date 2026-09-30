@@ -3151,7 +3151,7 @@
           "type": "object"
         },
         "TimeseriesData": {
-          "description": "Refused connections and fulfillment events bucketed over [from,to). `buckets` is a dense, fixed-length array (zero-filled gaps); each bucket counts the protected device-limit refusals (usage_events by ts) and order_events (by received_at), and nothing else.",
+          "description": "Refused connections and fulfillment events bucketed over [from,to). `buckets` is a dense, fixed-length array (zero-filled gaps); each bucket counts the protected device-limit refusals (device_bound_denials by ts) and order_events (by received_at), and nothing else.",
           "properties": {
             "bucket_seconds": {
               "description": "Nominal bucket width; the last bucket absorbs any integer remainder of the span.",

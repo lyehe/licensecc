@@ -42,15 +42,15 @@ test("cloudflare access jwt admin can read admin summary", async (t) => {
   assert.equal((await json(response)).code, "summary");
 });
 
-test("timeseries reports protected denials and no checkout series", async () => {
-  // D1 answers the usage query with every column the old checkout-series query named; the report
-  // must read only the protected refusal count and fulfillment events from it.
+test("timeseries reports protected denials and no other series", async () => {
+  // device_bound_denials holds only protected device-limit refusals (its reason column is
+  // CHECK-constrained to 'device_limit_reached'), so the report needs no filter beyond the window.
   const queries = [];
   const db = {
     prepare(sql) {
       queries.push(sql);
-      const rows = sql.includes("FROM usage_events")
-        ? [{ bucket: 0, checkouts: 3, releases: 2, denials: 1 }]
+      const rows = sql.includes("FROM device_bound_denials")
+        ? [{ bucket: 0, denials: 1 }]
         : [{ bucket: 1, fulfillment_events: 4 }];
       const statement = { bind: () => statement, all: async () => ({ results: rows }) };
       return statement;
@@ -63,8 +63,7 @@ test("timeseries reports protected denials and no checkout series", async () => 
     { start: 0, denials: 1, fulfillment_events: 0 },
     { start: 100, denials: 0, fulfillment_events: 4 },
   ]);
-  const usage = queries.find((sql) => sql.includes("FROM usage_events"));
+  const usage = queries.find((sql) => sql.includes("FROM device_bound_denials"));
   assert.ok(usage, "the report reads the refusal audit");
-  assert.doesNotMatch(usage, /checkout|release|reclaim/, "no checkout or release series is read");
-  assert.match(usage, /event_type = 'denied' AND reason = 'device_limit_reached'/, "only protected device-limit refusals count");
+  assert.doesNotMatch(usage, /checkout|release|reclaim|event_type/, "no checkout, release or event-type series is read");
 });

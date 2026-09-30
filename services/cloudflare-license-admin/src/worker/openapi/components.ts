@@ -1101,7 +1101,7 @@ export const openApiComponents: LabeledComponentFragment = {
       ["TimeseriesData", {
         type: "object",
         description:
-          "Refused connections and fulfillment events bucketed over [from,to). `buckets` is a dense, fixed-length array (zero-filled gaps); each bucket counts the protected device-limit refusals (usage_events by ts) and order_events (by received_at), and nothing else.",
+          "Refused connections and fulfillment events bucketed over [from,to). `buckets` is a dense, fixed-length array (zero-filled gaps); each bucket counts the protected device-limit refusals (device_bound_denials by ts) and order_events (by received_at), and nothing else.",
         properties: {
           from: { type: "integer", description: "Window start (epoch seconds)." },
           to: { type: "integer", description: "Window end (epoch seconds, exclusive)." },

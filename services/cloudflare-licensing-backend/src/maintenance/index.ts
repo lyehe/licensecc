@@ -4,7 +4,7 @@ import { appendAuditDigest } from "@licensecc/cloudflare-runtime/d1/audit_digest
 import type { Env, ExecutionContextLike } from "../env.js";
 import { logEvent } from "../observability/index.js";
 
-const USAGE_EVENT_RETENTION_SEC = 90 * 24 * 60 * 60; // usage_events rows are kept for 90 days
+const DEVICE_DENIAL_RETENTION_SEC = 90 * 24 * 60 * 60; // device_bound_denials rows are kept for 90 days
 
 // Cron Trigger: protected-device cleanup, retention on the append-only logs, portal auth sweeps,
 // webhook delivery and the audit digest. Wire via [triggers] crons in wrangler.toml.
@@ -12,7 +12,7 @@ export async function scheduled(_event: unknown, env: Env, _ctx?: ExecutionConte
     const now = Math.floor(Date.now() / 1000);
     await runBoundDeviceCleanup(env.DB);
     try {
-      await env.DB.prepare("DELETE FROM usage_events WHERE ts < ?").bind(now - USAGE_EVENT_RETENTION_SEC).run();
+      await env.DB.prepare("DELETE FROM device_bound_denials WHERE ts < ?").bind(now - DEVICE_DENIAL_RETENTION_SEC).run();
     } catch {
       // best-effort
     }

@@ -377,7 +377,7 @@ export interface WebhookTestResult {
 // entitlement list.
 
 // GET /api/admin/report/timeseries — one row per bucket over the [from,to] window. denials counts
-// the protected device-limit refusals recorded in usage_events.ts; fulfillment_events counts
+// the protected device-limit refusals recorded in device_bound_denials.ts; fulfillment_events counts
 // order_events.received_at.
 export interface TimeseriesBucket {
   start: number;

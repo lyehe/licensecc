@@ -770,12 +770,12 @@ test("restore inventory pins all migrated tables in the baseline schema", () => 
     "catalog_events", "catalog_features", "catalog_import_previews", "catalog_plan_features", "catalog_plans",
     "customer_events", "customers",
     "device_bound_authorizations", "device_bound_bindings", "device_bound_challenges", "device_bound_commit_checks",
-    "device_bound_devices", "device_bound_events", "device_bound_leases", "device_bound_operations",
+    "device_bound_denials", "device_bound_devices", "device_bound_events", "device_bound_leases", "device_bound_operations",
     "entitlement_events", "entitlement_policies", "entitlements",
     "license_plan_assignment_events", "license_plan_assignments",
     "license_plan_projection_generations", "license_plan_projection_previews", "licenses", "mutation_idempotency",
     "order_events", "order_ingest_nonces", "orders", "policy_events", "portal_bootstrap_events", "portal_identities", "portal_oauth_states", "portal_otp", "portal_password_actions", "portal_passwords",
-    "portal_sessions", "rate_limit_counters", "usage_events",
+    "portal_sessions", "rate_limit_counters",
     "webhook_cursor", "webhook_deliveries", "webhook_endpoints", "webhook_events",
   ];
   assert.deepEqual([...ALL_RESTORE_TABLES].sort(), migratedTables);
@@ -813,7 +813,7 @@ test("remote count inspection avoids compound SELECT limits and retains every ta
 test("high-churn and internal tables are presence-only and disjoint from durable count checks", () => {
   for (const table of [
     "rate_limit_counters", "order_ingest_nonces",
-    "usage_events",
+    "device_bound_denials",
     "portal_otp", "portal_sessions", "portal_bootstrap_events",
     "webhook_deliveries", "webhook_cursor",
     "license_plan_projection_generations", "license_plan_projection_previews", "catalog_import_previews",

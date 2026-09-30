@@ -85,10 +85,10 @@ async function authority(db, purpose, request, verified, operation) {
       // connections: a telemetry failure must never change this refusal. Deduped for 15 minutes so
       // a retrying client cannot flood the audit trail with one ongoing refusal.
       try {
-        await db.prepare(`INSERT INTO usage_events (project,feature,license_fingerprint,event_type,device_key_id,reason,ts)
-          SELECT ?,?,?,'denied',?,'device_limit_reached',unixepoch()
-          WHERE NOT EXISTS (SELECT 1 FROM usage_events WHERE project=? AND feature=? AND license_fingerprint=?
-            AND device_key_id=? AND reason='device_limit_reached' AND ts>unixepoch()-900)`)
+        await db.prepare(`INSERT INTO device_bound_denials (project,feature,license_fingerprint,key_id,reason,ts)
+          SELECT ?,?,?,?,'device_limit_reached',unixepoch()
+          WHERE NOT EXISTS (SELECT 1 FROM device_bound_denials WHERE project=? AND feature=? AND license_fingerprint=?
+            AND key_id=? AND reason='device_limit_reached' AND ts>unixepoch()-900)`)
           .bind(subject.project, subject.feature, subject.license_fingerprint, subject.key_id,
             subject.project, subject.feature, subject.license_fingerprint, subject.key_id).run();
       } catch { /* best-effort analytics */ }

@@ -64,7 +64,7 @@ for(const failure of ['read','malformed','session']) test(`backlog ${failure} fa
   };
   await scheduled({}, {DB:db});
   assert.deepEqual(logs.filter(entry=>entry.event.startsWith('device.cleanup_backlog')),[{event:'device.cleanup_backlog_failed',severity:'warn'}]);
-  assert.ok(statements.some(sql=>sql.includes('DELETE FROM usage_events')));
+  assert.ok(statements.some(sql=>sql.includes('DELETE FROM device_bound_denials')));
   assert.doesNotMatch(JSON.stringify(logs),/private-/);
 });
 
@@ -118,7 +118,7 @@ test("scheduled is directly callable and retains each best-effort retention swee
   const statements = [];
   await scheduled({ cron: "0 * * * *" }, { DB: recordingDb(statements) }, { waitUntil() {} });
   assert.ok(statements.some(sql => sql.includes("SET approval_ciphertext = NULL") && sql.includes("LIMIT 1000")));
-  for (const table of ["usage_events", "portal_otp", "portal_sessions", "device_bound_challenges", "device_bound_authorizations", "device_bound_leases"]) {
+  for (const table of ["device_bound_denials", "portal_otp", "portal_sessions", "device_bound_challenges", "device_bound_authorizations", "device_bound_leases"]) {
     assert.ok(statements.some((sql) => sql.includes(`DELETE FROM ${table}`)), `expected scheduled retention for ${table}`);
   }
   assert.equal(statements.some(sql=>/DELETE\s+FROM\s+device_bound_events/i.test(sql)),false);
@@ -140,7 +140,7 @@ test("approval maintenance bounds backlog work, stops after draining and isolate
     };
     await scheduled({}, {DB:db});
     assert.equal(calls,expected);
-    assert.ok(statements.some(sql=>sql.includes("DELETE FROM usage_events")));
+    assert.ok(statements.some(sql=>sql.includes("DELETE FROM device_bound_denials")));
   }
   assert.ok(logs.some(line=>JSON.parse(line).event==="device.approval_cleanup_failed"));
   assert.equal(logs.some(line=>line.includes("private database detail")),false);
@@ -174,7 +174,7 @@ test(`${source} cleanup failure does not stop other scheduled retention or discl
     return statement;
   };
   await scheduled({}, {DB:db});
-  assert.ok(statements.some(sql=>sql.includes('DELETE FROM usage_events')));
+  assert.ok(statements.some(sql=>sql.includes('DELETE FROM device_bound_denials')));
   assert.ok(logs.some(line=>JSON.parse(line).event===`device.${source}_cleanup_failed`));
   assert.equal(logs.some(line=>line.includes('private cleanup detail')),false);
 });

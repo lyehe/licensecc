@@ -169,15 +169,13 @@ async function body(response) {
 }
 
 // --- Seed helpers ------------------------------------------------------------
-function insertUsage(db, fp, eventType, ts, { seatId = null, deviceKeyId = null, reason = null } = {}) {
-  db.prepare(
-    "INSERT INTO usage_events (project, feature, license_fingerprint, event_type, seat_id, device_key_id, reason, ts) VALUES ('DEFAULT','DEFAULT',?,?,?,?,?,?)",
-  ).run(fp, eventType, seatId, deviceKeyId, reason, ts);
-}
-
 // The row protected issuance records when it refuses a device because the grant's limit is reached.
-function insertRefusal(db, fp, ts) {
-  insertUsage(db, fp, "denied", ts, { deviceKeyId: "key", reason: "device_limit_reached" });
+// device_bound_denials holds only this kind of row (its reason column is CHECK-constrained to
+// 'device_limit_reached'), so there is no other event type to seed here any more.
+function insertRefusal(db, fp, ts, keyId = "key") {
+  db.prepare(
+    "INSERT INTO device_bound_denials (project, feature, license_fingerprint, key_id, reason, ts) VALUES ('DEFAULT','DEFAULT',?,?,'device_limit_reached',?)",
+  ).run(fp, keyId, ts);
 }
 
 function insertOrderEvent(db, eventId, receivedAt, status = "accepted") {
@@ -207,14 +205,9 @@ test("timeseries: each bucket counts only protected refusals and fulfillment eve
   const db = freshDb();
   const env = devEnv(db);
   // A fixed, deterministic window: 4 buckets of 1000s each over [0, 4000).
-  // Bucket 0 [0,1000): one protected refusal among seat checkouts and a seat-pool denial.
-  insertUsage(db, FP_A, "checkout", 10);
-  insertUsage(db, FP_A, "checkout", 500);
-  insertUsage(db, FP_A, "denied", 600, { reason: "pool_exhausted" });
+  // Bucket 0 [0,1000): one protected refusal.
   insertRefusal(db, FP_A, 100);
-  // Bucket 1 [1000,2000): seat releases only, so no refusal.
-  insertUsage(db, FP_A, "release", 1200);
-  insertUsage(db, FP_A, "reclaim", 1800);
+  // Bucket 1 [1000,2000): empty, so no refusal.
   // Bucket 2 [2000,3000): two protected refusals.
   insertRefusal(db, FP_A, 2100);
   insertRefusal(db, FP_B, 2900);

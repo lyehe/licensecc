@@ -311,14 +311,14 @@ test("HTTP capacity refusal still returns device_limit_reached when the best-eff
   const prepare=f.db.prepare;
   f.db.prepare=query=>{
     const statement=prepare(query);
-    if(!query.includes("INSERT INTO usage_events"))return statement;
+    if(!query.includes("INSERT INTO device_bound_denials"))return statement;
     const bind=statement.bind.bind(statement);
     statement.bind=(...values)=>{const bound=bind(...values);bound.run=async()=>{throw new Error("simulated telemetry failure");};return bound;};
     return statement;
   };
   const denied=await f.call("/v2/device-authorizations/exchange",await signed(f,second,"exchange"));
   assert.equal(denied.status,409); assert.equal(denied.body.code,"device_limit_reached");
-  assert.equal(f.sql.prepare("SELECT count(*) n FROM usage_events").get().n,0);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_denials").get().n,0);
 });
 
 test("HTTP recovery refreshes an approval consumed during proof verification",async t=>{

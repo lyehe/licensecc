@@ -75,7 +75,7 @@ function epochParam(url: URL, name: string): number | null {
 
 // GET /api/admin/report/timeseries?from=&to=&buckets= (reader+admin). Bucket [from,to] into N
 // equal buckets and count, per bucket, the protected refusals (a device-limit refusal is the only
-// usage_events row a protected grant records) and order_events (fulfillment_events by
+// device_bound_denials row a protected grant records) and order_events (fulfillment_events by
 // received_at), each in a SINGLE-PASS GROUP BY over a computed bucket index. The bucket index is
 // CAST((ts - from) * buckets / span) clamped to [0, buckets-1]; the time window itself bounds the
 // scan (indexed on ts / received_at).
@@ -104,9 +104,10 @@ export async function reportTimeseries(request: Request, env: Env, requestIdValu
     `MIN(CAST((${tsColumn} - ?) * ? / ? AS INTEGER), ?)`;
 
   // Protected refusals: the device-limit refusals protected issuance records, one GROUP BY over the window.
+  // device_bound_denials holds only device_limit_reached refusals, so no further filter is needed.
   const denialRows = await env.DB.prepare(
     `SELECT ${bucketIndexExpr("ts")} AS bucket, COUNT(*) AS denials
-     FROM usage_events WHERE ts >= ? AND ts < ? AND event_type = 'denied' AND reason = 'device_limit_reached' GROUP BY bucket`,
+     FROM device_bound_denials WHERE ts >= ? AND ts < ? GROUP BY bucket`,
   ).bind(from, buckets, span, buckets - 1, from, to).all<{ bucket: number; denials: number }>();
 
   // Fulfillment events: order_events bucketed by received_at over the same window.

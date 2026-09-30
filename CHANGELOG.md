@@ -80,8 +80,8 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   `protected_creation_conflict` (`data.reason`) on create (remediation).
 - Admin: `GET /api/admin/customers/{id}/bindings` also reports each
   `device_bound_v1` entitlement's device-limit `capacity` and the customer's 5
-  most recent denied connection attempts, backed by new `usage_events`
-  `'denied'` rows with `reason='device_limit_reached'` (remediation).
+  most recent denied connection attempts, backed by new `device_bound_denials`
+  rows (`reason='device_limit_reached'`) (remediation).
 - Admin: `GET /api/admin/events` accepts `project`/`feature`/
   `entitlement_id`/`event_type`/`actor`/`since`/`until` filters and keyset
   `cursor` paging, instead of returning every event unfiltered (remediation).
