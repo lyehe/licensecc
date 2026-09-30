@@ -864,6 +864,26 @@ test("table and named schema-object checks cover migrated identity", () => {
     : row)), /restored_schema_signature_mismatch/);
 });
 
+test("the baseline has no legacy-only tables", () => {
+  const legacyOnlyTables = [
+    "account_token_events", "account_token_revocations", "account_tokens",
+    "entitlement_devices", "lease_issuance", "request_proof_nonces",
+    "seat_checkouts", "usage_meters",
+  ];
+  for (const table of legacyOnlyTables) {
+    assert.ok(!ALL_RESTORE_TABLES.includes(table), `${table} is still in ALL_RESTORE_TABLES`);
+  }
+  const snapshot = readFileSync(new URL("../../cloudflare-licensing-backend/schema.sql", import.meta.url), "utf8");
+  const rows = schemaRowsFromGeneratedSnapshot(snapshot);
+  for (const table of legacyOnlyTables) {
+    assert.ok(!rows.some((row) => row.name === table), `${table} is still in the generated schema snapshot`);
+  }
+  assert.ok(
+    !rows.some((row) => row.type === "trigger" && row.name.startsWith("tr_bound_reject_legacy_")),
+    "a tr_bound_reject_legacy_* trigger is still in the generated schema snapshot",
+  );
+});
+
 test("sensitive tables are a real subset of restored tables (so they are presence-asserted)", () => {
   assert.ok(SENSITIVE_TABLES.length > 0);
   for (const table of SENSITIVE_TABLES) {
