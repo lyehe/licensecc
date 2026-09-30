@@ -44,7 +44,8 @@ export function boundDeviceConfig(env) {
   } catch { throw new BoundRequestError("temporarily_unavailable", 503); }
 }
 
-function pemBytes(pem, label) {
+// Exported so the deploy materializer refuses exactly the PEMs this Worker would refuse.
+export function pemBytes(pem, label) {
   if (typeof pem !== "string" || pem.length > 8192) throw new Error("invalid_signer");
   const match = new RegExp(`^-----BEGIN ${label}-----\\r?\\n([A-Za-z0-9+/=\\r\\n]+)\\r?\\n-----END ${label}-----$`).exec(pem.trim());
   if (!match) throw new Error("invalid_signer");

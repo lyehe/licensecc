@@ -288,6 +288,15 @@ also sets `global_fetch_private_origin`. Update the base64
 next deploy; an unmigrated existing config now fails materialization instead of
 deploying silently.
 
+The materializer also refuses a backend config whose `vars` lack a valid
+`BOUND_DEVICE_CONFIG` or an RSA-3072 `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM`.
+Add both to `LICENSECC_BACKEND_WRANGLER_CONFIG_B64` in both the `staging` and
+`production` environments before any protected workflow runs: every workflow
+that materializes the backend config (`deploy-production.yml`,
+`deploy-staging.yml`, `rollback-workers.yml`, `recovery-drill.yml` and
+`capacity.yml`) fails at materialization until they are there, including an
+emergency rollback.
+
 The required deployed secret names are:
 
 - `ACCOUNT_TOKEN_PEPPERS`

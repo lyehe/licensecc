@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 
 import { experimental_readRawConfig as readRawWranglerConfig } from "wrangler";
 
-// The protected device registry shape is backend-owned; validate it with the backend's own parser.
-import { boundDeviceConfig } from "../services/cloudflare-licensing-backend/src/device/bound_config.mjs";
+// The protected device registry and lease-key PEM shapes are backend-owned; validate them with the
+// backend's own parsers.
+import { boundDeviceConfig, pemBytes } from "../services/cloudflare-licensing-backend/src/device/bound_config.mjs";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
@@ -377,15 +378,13 @@ function validateBackend(config, target, profile, profileName) {
   } catch {
     fail(target, "must set vars.BOUND_DEVICE_CONFIG to a valid protected device registry");
   }
-  const leasePublicKeyPem = vars.BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM;
+  // The backend's own PEM parser, so a key the Worker would refuse is refused here too.
   let leasePublicKey = null;
-  if (typeof leasePublicKeyPem === "string" && leasePublicKeyPem.length <= 8192
-      && /^-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=\r\n]+\r?\n-----END PUBLIC KEY-----\r?\n?$/u.test(leasePublicKeyPem)) {
-    try {
-      leasePublicKey = createPublicKey({ key: leasePublicKeyPem, format: "pem" });
-    } catch {
-      // Reported below without reflecting the value.
-    }
+  try {
+    const spki = pemBytes(vars.BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM, "PUBLIC KEY");
+    leasePublicKey = createPublicKey({ key: Buffer.from(spki), format: "der", type: "spki" });
+  } catch {
+    // Reported below without reflecting the value.
   }
   if (leasePublicKey?.asymmetricKeyType !== "rsa" || leasePublicKey.asymmetricKeyDetails?.modulusLength !== 3072) {
     fail(target, "must set vars.BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM to an RSA-3072 PEM PUBLIC KEY");

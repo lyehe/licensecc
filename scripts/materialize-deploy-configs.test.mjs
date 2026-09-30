@@ -41,6 +41,17 @@ const profileValues = Object.freeze({
 // The protected lease signer is RSA-3072; only its public half is deployment configuration.
 const spkiPem = (modulusLength) => generateKeyPairSync("rsa", { modulusLength }).publicKey.export({ type: "spki", format: "pem" });
 const boundLeasePublicKeyPem = spkiPem(3072);
+
+// Sets an unused low bit in the base64 character before the padding. The bytes still decode the
+// same, so a lenient PEM reader accepts it, but it is not the canonical encoding the backend requires.
+function nonCanonicalBase64Pem(pem) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const at = pem.indexOf("=") - 1;
+  assert.ok(at > 0, "an RSA-3072 SPKI body ends in base64 padding");
+  const changed = alphabet[alphabet.indexOf(pem[at]) | 1];
+  assert.notEqual(changed, pem[at], "canonical base64 leaves the unused bits clear");
+  return pem.slice(0, at) + changed + pem.slice(at + 1);
+}
 const tomlString = (value) => JSON.stringify(value);
 
 function boundDeviceConfig(values) {
@@ -456,6 +467,7 @@ test("backend config without a valid BOUND_DEVICE_CONFIG is refused", () => {
     ["RSA-2048 public key", withPublicKey(spkiPem(2048)), publicKeyError],
     ["EC public key", withPublicKey(ecPem), publicKeyError],
     ["corrupt public key body", withPublicKey("-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n"), publicKeyError],
+    ["non-canonical base64 public key", withPublicKey(nonCanonicalBase64Pem(boundLeasePublicKeyPem)), publicKeyError],
   ];
   for (const [name, mutation, pattern] of cases) {
     const root = mkdtempSync(join(tmpdir(), "licensecc-deploy-configs-bound-"));

@@ -411,7 +411,13 @@ command currently accepts JSON configuration, not TOML or JSONC.
 The protected deploy materializer also refuses a backend Wrangler config whose
 `vars` lack a valid `BOUND_DEVICE_CONFIG` or an RSA-3072 PEM
 `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM`. Put both in the deploy config
-`vars`; the private signer and the approval key ring stay Worker secrets.
+`vars`; the private signer and the approval key ring stay Worker secrets. Add
+them to `LICENSECC_BACKEND_WRANGLER_CONFIG_B64` in both the `staging` and
+`production` environments before any protected workflow runs: every workflow
+that materializes the backend config (`deploy-production.yml`,
+`deploy-staging.yml`, `rollback-workers.yml`, `recovery-drill.yml` and
+`capacity.yml`) fails at materialization until they are there, including an
+emergency rollback.
 
 The deployed backend runs the same check for `GET /health`, once per Worker
 isolate. A healthy `200` carries `protected_device_ready: true`; a failed check
