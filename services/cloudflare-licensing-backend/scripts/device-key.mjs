@@ -197,7 +197,7 @@ async function generate(options, positionals) {
 
   console.log(`wrote device key material to ${outDir}`);
   console.log(`key id: ${keyId}`);
-  console.log("register device_public_key.json with scripts/entitlement.mjs device-upsert");
+  console.log("request-proof device registration is not available for protected device_bound_v1 grants");
 }
 
 async function sign(options) {

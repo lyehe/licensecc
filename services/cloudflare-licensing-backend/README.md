@@ -120,37 +120,7 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
    device limit and trial state, never a seat pool, as documented in
    `../cloudflare-license-admin/README.md`.
 
-7. Optional: enroll a device signing key for request proof-of-possession.
-   Generate the key on the client/device side, keep the private key in that
-   app's platform key store, and register only the generated public SPKI record:
-
-   ```console
-   npm run device-key -- generate --out-dir .device-key
-   npm run entitlement -- device-upsert --fingerprint FINGERPRINT_64_HEX --device-key-id sha256:KEY_ID_64_HEX --public-key-spki-der-base64 PUBLIC_KEY_SPKI_DER_BASE64 --actor operator@example.com --reason "initial device enrollment" --remote
-   ```
-
-   Replace the uppercase values with the entitlement fingerprint and the
-   generated public-key record before running the command.
-
-   The generated private-key file is for local integration tests and bootstrap
-   only. Production hosts should create or import the P-256 key through their
-   own platform key-store or secure-enclave integration when available, then
-   persist only the public SPKI and `sha256:<spki der>` key id. The optional
-   request-proof protocol is available for integration. The C++ client runtime
-   provides conditional Windows Platform KSP and Ubuntu TPM2/OpenSSL provider
-   surfaces, but they remain platform-specific and are not a universal client
-   integration or a hosted-service feature. This service does not claim TPM
-   support; callers must provision and configure their provider locally.
-
-   To smoke-test the signed request body fields during integration:
-
-   ```console
-   npm run device-key -- sign --private-key .device-key/device_private_key.pkcs8.pem --device-key-id sha256:KEY_ID_64_HEX --fingerprint FINGERPRINT_64_HEX --nonce NONCE_64_HEX
-   ```
-
-   Replace the uppercase values with the exact registration and request values.
-
-8. Deploy:
+7. Deploy:
 
    ```console
    npx --yes npm@10.9.8 ci
@@ -163,7 +133,7 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
    After the root install, the same `npm run <script>` commands also work from
    this service directory; do not create a package-local lockfile.
 
-9. Validate the public verifier abuse controls against a staging Worker:
+8. Validate the public verifier abuse controls against a staging Worker:
 
    ```console
    npm run validate:public-verifier --url=https://licensecc-online-verifier.example.workers.dev --expect-rate-limit --json
@@ -419,7 +389,16 @@ duplicate check as crash-redrive evidence.
   `request_signature_algorithm=ecdsa-p256-sha256`, and a base64
   `request_signature` over the canonical request payload. The public key is
   loaded from `entitlement_devices.public_key_spki_der_base64` for the exact
-  project/feature/license fingerprint and device key id.
+  project/feature/license fingerprint and device key id. Device key material
+  is generated on the client/device side (`npm run device-key -- generate`).
+  Production hosts should create or import the P-256 key through their own
+  platform key-store or secure-enclave integration when available, then
+  persist only the public SPKI and `sha256:<spki der>` key id. The optional
+  request-proof protocol is available for integration. The C++ client runtime
+  provides conditional Windows Platform KSP and Ubuntu TPM2/OpenSSL provider
+  surfaces, but they remain platform-specific and are not a universal client
+  integration or a hosted-service feature. This service does not claim TPM
+  support; callers must provision and configure their provider locally.
 - `REQUEST_SIGNATURE_MAX_SKEW_SECONDS` bounds request timestamp skew for proof
   verification. Keep the default small for production, and use `soft` mode to
   learn whether customer clocks or proxies need product-specific handling before
@@ -480,9 +459,10 @@ duplicate check as crash-redrive evidence.
   *disabled* entitlement. To intentionally reactivate a *revoked* entitlement
   (e.g. a mistaken revoke), run `upsert --allow-revoked-override --reason <text>`:
   it requires a reason and records a distinct `revoked-override` audit event so
-  the override is unmistakable in the log. `upsert` also accepts optional
-  `--customer-id`/`--license-id`; unspecified mutable fields use command defaults
-  and reset to their defaults on conflict.
+  the override is unmistakable in the log. `upsert` requires `--customer-id` and
+  `--license-id`: every entitlement it writes is a protected `device_bound_v1`
+  grant with a named owner, and neither field is cleared or reassigned on a
+  later conflict — ownership is set once, at creation.
 - This reference service does not prevent local binary patching or API hooking.
 
 ## Order ingest (`POST /v1/orders`)

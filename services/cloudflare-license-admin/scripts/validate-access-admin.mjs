@@ -216,17 +216,39 @@ function assertRejected(response, label) {
   }
 }
 
-function entitlementPayload(options) {
+function entitlementPayload(options, customerId, licenseId) {
   return {
     project: options.project,
     feature: options.feature,
     license_fingerprint: options.fingerprint,
     status: "active",
-    assertion_ttl_seconds: 120,
-    customer_id: "access-validator",
-    license_id: `access-validator-${randomUUID().slice(0, 8)}`,
+    enforcement_mode: "device_bound_v1",
+    customer_id: customerId,
+    license_id: licenseId,
     notes: "Cloudflare Access staging validation scratch row",
   };
+}
+
+// Every admin create is a protected grant: it names an active customer and that customer's own
+// license for the project. Create both through the admin API first, the same way a real operator
+// would, rather than assuming a pre-provisioned fixture customer exists in the target environment.
+async function createValidationCustomer(options) {
+  const email = `access-validator-${randomUUID()}@example.invalid`;
+  const created = assertEnvelope(await requestJson(options.baseUrl, "/api/admin/customers", {
+    method: "POST",
+    headers: accessHeaders(options.accessJwt, { "idempotency-key": `access-customer-${randomUUID()}` }),
+    body: JSON.stringify({ email, name: "Access Validator" }),
+  }), "customer_created", "Access JWT customer create");
+  return created.data.id;
+}
+
+async function createValidationLicense(options, customerId) {
+  const created = assertEnvelope(await requestJson(options.baseUrl, `/api/admin/customers/${encodeURIComponent(customerId)}/licenses`, {
+    method: "POST",
+    headers: accessHeaders(options.accessJwt, { "idempotency-key": `access-license-${randomUUID()}` }),
+    body: JSON.stringify({ project: options.project }),
+  }), "license_created", "Access JWT license create");
+  return created.data.id;
 }
 
 async function runAccessAdminValidation(options) {
@@ -243,7 +265,8 @@ async function runAccessAdminValidation(options) {
     nonAdmin = await requestJson(options.baseUrl, "/api/admin/entitlements", {
       method: "POST",
       headers: accessHeaders(options.nonAdminAccessJwt),
-      body: JSON.stringify(entitlementPayload(options)),
+      // The actor's role is checked before the body is ever read, so placeholder owner ids are fine here.
+      body: JSON.stringify(entitlementPayload(options, "non-admin-check", "non-admin-check")),
     });
     assertRejected(nonAdmin, "non-admin Access JWT mutation");
   }
@@ -280,8 +303,11 @@ async function runAccessAdminValidation(options) {
     };
   }
 
+  const customerId = await createValidationCustomer(options);
+  const licenseId = await createValidationLicense(options, customerId);
+
   const createIdempotency = `access-create-${randomUUID()}`;
-  const payload = entitlementPayload(options);
+  const payload = entitlementPayload(options, customerId, licenseId);
   const create = assertEnvelope(await requestJson(options.baseUrl, "/api/admin/entitlements", {
     method: "POST",
     headers: accessHeaders(options.accessJwt, { "idempotency-key": createIdempotency }),

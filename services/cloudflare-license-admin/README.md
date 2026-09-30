@@ -596,7 +596,10 @@ policy, or a PATCH, can set the device limit directly
 The shared D1 helper `../cloudflare-licensing-backend/scripts/entitlement.mjs` is an
 operator break-glass path that **bypasses Cloudflare Access**. It stamps
 `actor_type='cli'`, `source='cli'`, requires `--actor`, and computes
-`revocation_seq` server-side. Like the admin Worker it treats revoked as terminal:
+`revocation_seq` server-side. `upsert` requires `--customer-id` and
+`--license-id`: every entitlement it creates is a protected `device_bound_v1`
+grant with a named owner, and neither field is cleared or reassigned on a
+later conflict. Like the admin Worker it treats revoked as terminal:
 `upsert`/`disable`/`reenable` will not change a revoked row, and a guarded no-op
 writes no audit event (the helper exits non-zero on `--remote`). To deliberately
 reactivate a revoked entitlement, run `upsert --allow-revoked-override --reason

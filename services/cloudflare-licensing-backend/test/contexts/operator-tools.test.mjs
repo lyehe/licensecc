@@ -37,7 +37,13 @@ test("key generator emits PKCS#1 public key records for the C++ verifier", () =>
 });
 
 test("break-glass CLI upsert does not update revoked entitlements", () => {
-  const sql = sqlFor("upsert", { fingerprint: "a".repeat(64), actor: "operator", status: "active" });
+  const sql = sqlFor("upsert", {
+    fingerprint: "a".repeat(64),
+    actor: "operator",
+    status: "active",
+    "customer-id": "cus_1",
+    "license-id": "lic_1",
+  });
   assert.match(sql, /ON CONFLICT\(project, feature, license_fingerprint\) DO UPDATE SET/);
   assert.match(sql, /WHERE entitlements\.status != 'revoked'/);
   assert.match(sql, /INSERT INTO entitlement_events/);
@@ -70,6 +76,8 @@ test("break-glass CLI upsert --allow-revoked-override drops the guard and stamps
     status: "active",
     reason: "mistaken revoke, ticket #123",
     "allow-revoked-override": true,
+    "customer-id": "cus_1",
+    "license-id": "lic_1",
   });
   assert.doesNotMatch(sql, /WHERE entitlements\.status != 'revoked'/);
   assert.match(sql, /'revoked-override'/);
@@ -78,7 +86,14 @@ test("break-glass CLI upsert --allow-revoked-override drops the guard and stamps
 
 test("break-glass CLI upsert override requires a reason", () => {
   assert.throws(
-    () => sqlFor("upsert", { fingerprint: "a".repeat(64), actor: "operator", "allow-revoked-override": true }),
+    () =>
+      sqlFor("upsert", {
+        fingerprint: "a".repeat(64),
+        actor: "operator",
+        "allow-revoked-override": true,
+        "customer-id": "cus_1",
+        "license-id": "lic_1",
+      }),
     /reason is required/,
   );
 });
@@ -90,17 +105,23 @@ test("break-glass CLI upsert sets customer_id and license_id when provided", () 
     "customer-id": "cus_123",
     "license-id": "lic_123",
   });
-  assert.match(sql, /customer_id, license_id, created_at, updated_at/);
+  assert.match(sql, /customer_id, license_id, enforcement_mode, created_at, updated_at/);
   assert.match(sql, /'cus_123'/);
   assert.match(sql, /'lic_123'/);
-  assert.match(sql, /customer_id = excluded\.customer_id, license_id = excluded\.license_id/);
+  assert.match(sql, /'device_bound_v1'/);
+  assert.doesNotMatch(sql, /customer_id = excluded\.customer_id/);
+  assert.doesNotMatch(sql, /license_id = excluded\.license_id/);
 });
 
-test("break-glass CLI upsert leaves customer_id and license_id NULL when unset", () => {
-  const sql = sqlFor("upsert", { fingerprint: "a".repeat(64), actor: "operator" });
-  // unset customer_id/license_id must be SQL NULL (not ''), matching the admin Worker's nullable columns:
-  // ...valid_from, valid_until, customer_id, license_id, created_at, updated_at -> ..., NULL, NULL, unixepoch(), unixepoch())
-  assert.match(sql, /, NULL, NULL, unixepoch\(\), unixepoch\(\)\)/);
+test("upsert requires --customer-id and --license-id", () => {
+  assert.throws(
+    () => sqlFor("upsert", { fingerprint: "a".repeat(64), actor: "operator" }),
+    /customer-id is required/,
+  );
+  assert.throws(
+    () => sqlFor("upsert", { fingerprint: "a".repeat(64), actor: "operator", "customer-id": "cus_1" }),
+    /license-id is required/,
+  );
 });
 
 test("schema permits the revoked-override audit event type", () => {

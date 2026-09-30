@@ -88,6 +88,22 @@ function mockAdminHandler() {
       json(response, 200, { ok: true, code: "summary", data: { entitlements: { total: row === null ? 0 : 1 } } });
       return;
     }
+    if (request.method === "POST" && url.pathname === "/api/admin/customers") {
+      json(response, 200, {
+        ok: true,
+        code: "customer_created",
+        data: { id: "cust_1", name: "Access Validator", email: "", login_email: "", status: "active", external_ref: "", created_at: 0, updated_at: 0 },
+      });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/admin/customers/cust_1/licenses") {
+      json(response, 200, {
+        ok: true,
+        code: "license_created",
+        data: { id: "lic_1", customer_id: "cust_1", project: "DEFAULT", label: "", created_at: 0 },
+      });
+      return;
+    }
     if (request.method === "POST" && url.pathname === "/api/admin/entitlements") {
       const key = request.headers["idempotency-key"];
       if (typeof key === "string" && idempotency.has(key)) {
@@ -263,10 +279,13 @@ test("access validator builds a safe active entitlement payload", () => {
     project: "DEFAULT",
     feature: "DEFAULT",
     fingerprint,
-  });
+  }, "cust_1", "lic_1");
   assert.equal(payload.status, "active");
   assert.equal(payload.license_fingerprint, fingerprint);
-  assert.equal(payload.customer_id, "access-validator");
+  assert.equal(payload.enforcement_mode, "device_bound_v1");
+  assert.equal(payload.customer_id, "cust_1");
+  assert.equal(payload.license_id, "lic_1");
+  assert.equal("assertion_ttl_seconds" in payload, false);
 });
 
 test("access validator sends Access token as origin header and edge cookie", () => {

@@ -137,6 +137,7 @@ export default {
 
     const project = "D1_ATOMICITY";
     const feature = "BATCH";
+    const customerId = "atomicity";
     const cleanupEntitlements = env.DB.prepare(
       "DELETE FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ?",
     ).bind(project, feature, fingerprint);
@@ -146,9 +147,15 @@ export default {
     await cleanupEvents.run();
     await cleanupEntitlements.run();
 
+    // Every protected grant has an owner: ensure the probe's customer row exists (idempotent across
+    // repeated runs) before the batch under test writes a grant against it.
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO customers (id, name, email, metadata_json, created_at, updated_at, status, external_ref) VALUES (?, 'D1 Atomicity Probe', '', '{}', unixepoch(), unixepoch(), 'active', '')",
+    ).bind(customerId).run();
+
     const entitlementWrite = env.DB.prepare(
-      "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at) VALUES (?, ?, ?, '', 'active', 60, 60, 1, NULL, NULL, 'remote d1 batch atomicity probe', 'atomicity', 'atomicity', unixepoch(), unixepoch())",
-    ).bind(project, feature, fingerprint);
+      "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, enforcement_mode, created_at, updated_at) VALUES (?, ?, ?, '', 'active', 60, 60, 1, NULL, NULL, 'remote d1 batch atomicity probe', ?, 'atomicity', 'device_bound_v1', unixepoch(), unixepoch())",
+    ).bind(project, feature, fingerprint, customerId);
     const failingAuditWrite = env.DB.prepare(
       "INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at) VALUES (?, ?, ?, '', 'invalid_event_type_for_atomicity_probe', 'active', 1, 'probe', 'remote-d1-atomicity', 'system', 'system', 'probe', '', '', '', 'probe', NULL, unixepoch())",
     ).bind(project, feature, fingerprint);
