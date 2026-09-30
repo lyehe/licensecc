@@ -18,7 +18,19 @@ function auxiliaryIdentityMatches(row, order) {
     (licenseId === null || row.license_id === null || row.license_id === licenseId);
 }
 
+// Every gate below is read before any order state is written. A fingerprint belongs to
+// exactly ONE subscription (409 fingerprint_owned), a subscription's own identity cannot
+// be contradicted (400 invalid_order), and an order may act only on a grant its own
+// customer already owns, or create a new one: a grant owned by another customer, or by
+// no one, refuses every intent, withdrawals included (409 entitlement_owner_mismatch).
+// That keeps a customer-scoped signer that supplies a fingerprint away from any other
+// customer's grant, and keeps orders from moving a grant an operator reassigned. The
+// apply batch re-checks the grant owner.
 export async function establishOrderIdentity(env, order, fingerprint, fingerprintOrigin, now) {
+  const owner = await env.DB.prepare(
+    "SELECT subscription_id FROM orders WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
+  ).bind(order.project, order.feature, fingerprint).first();
+  if (owner !== null && owner.subscription_id !== order.subscription_id) return conflict(409, "fingerprint_owned");
   const existing = await env.DB.prepare(
     "SELECT license_fingerprint, fingerprint_origin, customer_id, license_id FROM orders " +
       "WHERE subscription_id = ? AND project = ? AND feature = ? LIMIT 1",
@@ -42,6 +54,10 @@ export async function establishOrderIdentity(env, order, fingerprint, fingerprin
         (order.customer?.id && license.customer_id !== null && license.customer_id !== order.customer.id))
     ) return conflict(400, "invalid_order");
   }
+  const grant = await env.DB.prepare(
+    "SELECT customer_id FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
+  ).bind(order.project, order.feature, fingerprint).first();
+  if (grant !== null && grant.customer_id !== order.customer.id) return conflict(409, "entitlement_owner_mismatch");
 
   // Generic DO NOTHING covers both the subscription primary key and the unique
   // fingerprint owner index. The read immediately after classifies either conflict

@@ -9,8 +9,9 @@
 //   1. apply-time monotonic floor (last_applied_order_{epoch,seq}) + in-batch
 //      order_events processed-mark (exactly-once; kills accept-vs-apply race and
 //      revocation_seq double-bump);
-//   2. fingerprint ownership invariant (a fingerprint belongs to exactly one
-//      subscription) — the Step-2 409 fingerprint_owned guard.
+//   2. ownership invariants: a fingerprint belongs to exactly one subscription (409
+//      fingerprint_owned), and an order acts only on its own customer's grant (409
+//      entitlement_owner_mismatch) — checked before admission and again in the apply batch.
 //
 // The apply path builds its OWN floor-guarded entitlement statements off the shared
 // ENTITLEMENT_COLUMNS / REVOCATION_SEQ_BUMP (single source of truth) so the admin
@@ -35,11 +36,13 @@ import {
   orderIdentityConflictsAfterFailedAccept,
 } from "./order_identity_store.mjs";
 import {
+  buildForeignOwnerOrderEventMark,
   buildRevokedOrderEventMark,
   claimStaleOrderOutcome,
   loadTerminalOrderOutcome,
   resultBody,
   terminalizeDefensiveNoEntitlement,
+  terminalizeForeignOwnerOrderEvent,
   terminalizeInvalidOrderEvent,
   terminalizeMissingEntitlementOrderEvent,
   terminalizeRevokedOrderEvent,
@@ -319,8 +322,9 @@ const FLOOR_PREDICATE_UPDATE =
  * Floor-guarded CREATE upsert for subscription.active. Mirrors createEntitlement's
  * INSERT...ON CONFLICT body columns, adds the floor columns + floor predicate, and
  * also writes max_active_devices from the order's quantity. A new row is a protected
- * device_bound_v1 grant owned by the order's customer. RETURNING yields the row iff
- * the insert OR a floor-advancing update landed.
+ * device_bound_v1 grant owned by the order's customer; an existing row is updated only
+ * when that customer already owns it. RETURNING yields the row iff the insert OR a
+ * floor-advancing update landed.
  */
 function buildCreateStatement(env, key, fields, order, floor, now) {
   return env.DB.prepare(
@@ -329,10 +333,10 @@ function buildCreateStatement(env, key, fields, order, floor, now) {
       `ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET ` +
       `device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, ` +
       `revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, ` +
-      `valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, ` +
+      `valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, license_id = excluded.license_id, ` +
       `max_active_devices = excluded.max_active_devices, ` +
       `last_applied_order_epoch = excluded.last_applied_order_epoch, last_applied_order_seq = excluded.last_applied_order_seq, updated_at = excluded.updated_at ` +
-      `WHERE (${FLOOR_PREDICATE_CONFLICT}) AND entitlements.status <> 'revoked' ` +
+      `WHERE (${FLOOR_PREDICATE_CONFLICT}) AND entitlements.status <> 'revoked' AND entitlements.customer_id = excluded.customer_id ` +
       `RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     key.project,
@@ -360,15 +364,15 @@ function buildCreateStatement(env, key, fields, order, floor, now) {
 
 /**
  * Floor-guarded PATCH (renew / cancel_at_period_end). Updates the entitlement body
- * (valid window + customer/license; a cancellation keeps the stored ones), bumps
- * revocation_seq, advances the floor, all under the floor predicate in the WHERE.
+ * (valid window + license; a cancellation keeps the stored license), bumps
+ * revocation_seq, advances the floor, all under the floor and owner predicates.
  */
-function buildPatchStatement(env, key, fields, floor, now) {
+function buildPatchStatement(env, key, fields, owner, floor, now) {
   return env.DB.prepare(
     `UPDATE entitlements SET device_hash = ?, assertion_ttl_seconds = ?, cache_ttl_seconds = ?, ${REVOCATION_SEQ_BUMP}, ` +
-      `valid_from = ?, valid_until = ?, notes = ?, customer_id = ?, license_id = ?, ` +
+      `valid_from = ?, valid_until = ?, notes = ?, license_id = ?, ` +
       `last_applied_order_epoch = ?, last_applied_order_seq = ?, updated_at = ? ` +
-      `WHERE project = ? AND feature = ? AND license_fingerprint = ? AND entitlements.status <> 'revoked' AND ${FLOOR_PREDICATE_UPDATE} ` +
+      `WHERE project = ? AND feature = ? AND license_fingerprint = ? AND entitlements.customer_id = ? AND entitlements.status <> 'revoked' AND ${FLOOR_PREDICATE_UPDATE} ` +
       `RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     fields.device_hash,
@@ -377,7 +381,6 @@ function buildPatchStatement(env, key, fields, floor, now) {
     fields.valid_from,
     fields.valid_until,
     fields.notes,
-    fields.customer_id,
     fields.license_id,
     floor.epoch,
     floor.seq,
@@ -385,6 +388,7 @@ function buildPatchStatement(env, key, fields, floor, now) {
     key.project,
     key.feature,
     key.license_fingerprint,
+    owner,
     floor.epoch,
     floor.epoch,
     floor.seq,
@@ -393,14 +397,14 @@ function buildPatchStatement(env, key, fields, floor, now) {
 
 /**
  * Floor-guarded status TRANSITION (disable / reenable / revoke). Only status +
- * revocation_seq + floor move; the body is untouched.
+ * revocation_seq + floor move, on the order customer's own grant; the body is untouched.
  */
-function buildTransitionStatement(env, key, status, floor, now) {
+function buildTransitionStatement(env, key, status, owner, floor, now) {
   const terminalGuard = status === "revoked" ? "" : "AND entitlements.status <> 'revoked' ";
   return env.DB.prepare(
     `UPDATE entitlements SET status = ?, ${REVOCATION_SEQ_BUMP}, ` +
       `last_applied_order_epoch = ?, last_applied_order_seq = ?, updated_at = ? ` +
-      `WHERE project = ? AND feature = ? AND license_fingerprint = ? ${terminalGuard}AND ${FLOOR_PREDICATE_UPDATE} ` +
+      `WHERE project = ? AND feature = ? AND license_fingerprint = ? AND entitlements.customer_id = ? ${terminalGuard}AND ${FLOOR_PREDICATE_UPDATE} ` +
       `RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     status,
@@ -410,6 +414,7 @@ function buildTransitionStatement(env, key, status, floor, now) {
     key.project,
     key.feature,
     key.license_fingerprint,
+    owner,
     floor.epoch,
     floor.epoch,
     floor.seq,
@@ -418,9 +423,9 @@ function buildTransitionStatement(env, key, status, floor, now) {
 
 /**
  * Floor-guarded CAPACITY change (quantity.changed). Writes only the device limit
- * (a non-negative integer) + revocation_seq + floor.
+ * (a non-negative integer) + revocation_seq + floor, on the order customer's own grant.
  */
-function buildCapacityStatement(env, key, capacity, floor, now) {
+function buildCapacityStatement(env, key, capacity, owner, floor, now) {
   const assignments = [];
   const values = [];
   const allowed = ["max_active_devices"];
@@ -442,7 +447,7 @@ function buildCapacityStatement(env, key, capacity, floor, now) {
   ].join(", ");
   return env.DB.prepare(
     `UPDATE entitlements SET ${setClause} ` +
-      `WHERE project = ? AND feature = ? AND license_fingerprint = ? AND entitlements.status <> 'revoked' AND ${FLOOR_PREDICATE_UPDATE} ` +
+      `WHERE project = ? AND feature = ? AND license_fingerprint = ? AND entitlements.customer_id = ? AND entitlements.status <> 'revoked' AND ${FLOOR_PREDICATE_UPDATE} ` +
       `RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     ...values,
@@ -452,6 +457,7 @@ function buildCapacityStatement(env, key, capacity, floor, now) {
     key.project,
     key.feature,
     key.license_fingerprint,
+    owner,
     floor.epoch,
     floor.epoch,
     floor.seq,
@@ -586,6 +592,8 @@ function firstBatchRow(result) {
 export async function applyOrderEvent(env, order, fingerprint, fingerprintOrigin, now) {
   const key = { project: order.project, feature: order.feature, license_fingerprint: fingerprint };
   const prev = await findEntitlement(env, key);
+  // An order acts only on its own customer's grant; the batch below re-checks this.
+  if (prev !== null && prev.customer_id !== order.customer.id) return terminalizeForeignOwnerOrderEvent(env, order, key, fingerprintOrigin, now);
   const descriptor = mapIntentToMutation(order, prev);
   const floor = { epoch: order.order_epoch, seq: order.seq };
 
@@ -612,13 +620,13 @@ export async function applyOrderEvent(env, order, fingerprint, fingerprintOrigin
   } else if (descriptor.kind === "patch") {
     eventType = "update";
     const fields = patchFields(order, prev, descriptor);
-    writeStatement = buildPatchStatement(env, key, fields, floor, now);
+    writeStatement = buildPatchStatement(env, key, fields, order.customer.id, floor, now);
   } else if (descriptor.kind === "transition") {
     eventType = descriptor.eventType === "revoke" ? "revoke" : descriptor.eventType === "disable" ? "disable" : "reenable";
-    writeStatement = buildTransitionStatement(env, key, descriptor.status, floor, now);
+    writeStatement = buildTransitionStatement(env, key, descriptor.status, order.customer.id, floor, now);
   } else if (descriptor.kind === "capacity") {
     eventType = "update";
-    writeStatement = buildCapacityStatement(env, key, descriptor.capacity, floor, now);
+    writeStatement = buildCapacityStatement(env, key, descriptor.capacity, order.customer.id, floor, now);
   } else {
     // Defensive: unknown descriptor kind -> treat as no-op no_entitlement.
     return terminalizeDefensiveNoEntitlement(env, order, key, fingerprintOrigin, now);
@@ -642,7 +650,9 @@ export async function applyOrderEvent(env, order, fingerprint, fingerprintOrigin
   const revokedMark = requireNonRevoked
     ? buildRevokedOrderEventMark(env, order, key, fingerprintOrigin, now)
     : null;
-  const extraStatements = revokedMark === null ? [markStatement] : [revokedMark.statement, markStatement];
+  // A guarded write that no-op'd because another customer now owns the grant is rejected.
+  const ownerMark = buildForeignOwnerOrderEventMark(env, order, key, fingerprintOrigin, now).statement;
+  const extraStatements = revokedMark === null ? [ownerMark, markStatement] : [ownerMark, revokedMark.statement, markStatement];
 
   let result;
   try {
@@ -766,9 +776,8 @@ function patchFields(order, prev, descriptor) {
     valid_from: validFrom,
     valid_until: validUntil,
     notes: prev.notes,
-    // A renewal names the subscription's customer; an omitted license keeps the prev
-    // value (never nulled). A cancellation is a withdrawal and never moves the owner.
-    customer_id: descriptor.keepOwner ? prev.customer_id : order.customer.id,
+    // An omitted license keeps the prev value (never nulled); a cancellation is a
+    // withdrawal and keeps the stored license. The owner is never written here.
     license_id: descriptor.keepOwner ? prev.license_id : order.license_id ?? prev.license_id,
   };
 }
@@ -942,20 +951,7 @@ export async function runExactlyOnce(env, order, keyId, digest, rawPayload, now)
     return jsonResponse({ ok: false, code: "invalid_order" }, 400);
   }
 
-  // Ownership gate: a fingerprint belongs to exactly ONE subscription.
-  try {
-    const owner = await env.DB.prepare(
-      "SELECT subscription_id FROM orders WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
-    )
-      .bind(order.project, order.feature, fingerprint)
-      .first();
-    if (owner !== null && owner.subscription_id !== order.subscription_id) {
-      return jsonResponse({ ok: false, code: "fingerprint_owned" }, 409);
-    }
-  } catch {
-    return jsonResponse({ ok: false, code: "write_failed" }, 503);
-  }
-
+  // Ownership gates (fingerprint_owned, entitlement_owner_mismatch), then identity.
   let identity;
   try {
     identity = await establishOrderIdentity(env, order, fingerprint, fingerprintOrigin, now);

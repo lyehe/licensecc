@@ -33,8 +33,8 @@ const ordersPath: Record<string, unknown> = {
       ),
       "404": errorResponse("not_found: ORDER_INGEST_MODE=off.", "not_found"),
       "409": errorResponse(
-        "Conflict: event_id_conflict (same event_id, different digest), seq_conflict (same subscription epoch/sequence with a different payload), fingerprint_owned (fingerprint belongs to a different subscription), entitlement_revoked (targets a revoked terminal entitlement), or the original stored conflict result for a freshly signed matching replay of a rejected event.",
-        ["event_id_conflict", "seq_conflict", "fingerprint_owned", "entitlement_revoked"],
+        "Conflict: event_id_conflict (same event_id, different digest), seq_conflict (same subscription epoch/sequence with a different payload), fingerprint_owned (fingerprint belongs to a different subscription), entitlement_owner_mismatch (an entitlement already exists for the fingerprint and is owned by another customer or by no one; refused for every intent, withdrawals included, and nothing is written), entitlement_revoked (targets a revoked terminal entitlement), or the original stored conflict result for a freshly signed matching replay of a rejected event.",
+        ["event_id_conflict", "seq_conflict", "fingerprint_owned", "entitlement_owner_mismatch", "entitlement_revoked"],
       ),
       "413": errorResponse(
         "payload_too_large: declared Content-Length over 16384 or accumulated raw wire bytes over 16384. The stream is cancelled on rejection; Content-Length is only an early hint and cannot bypass the raw-byte cap.",

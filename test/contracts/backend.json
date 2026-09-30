@@ -3120,6 +3120,12 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "entitlement_owner_mismatch": {
+                      "value": {
+                        "code": "entitlement_owner_mismatch",
+                        "ok": false
+                      }
+                    },
                     "entitlement_revoked": {
                       "value": {
                         "code": "entitlement_revoked",
@@ -3150,7 +3156,7 @@
                   }
                 }
               },
-              "description": "Conflict: event_id_conflict (same event_id, different digest), seq_conflict (same subscription epoch/sequence with a different payload), fingerprint_owned (fingerprint belongs to a different subscription), entitlement_revoked (targets a revoked terminal entitlement), or the original stored conflict result for a freshly signed matching replay of a rejected event."
+              "description": "Conflict: event_id_conflict (same event_id, different digest), seq_conflict (same subscription epoch/sequence with a different payload), fingerprint_owned (fingerprint belongs to a different subscription), entitlement_owner_mismatch (an entitlement already exists for the fingerprint and is owned by another customer or by no one; refused for every intent, withdrawals included, and nothing is written), entitlement_revoked (targets a revoked terminal entitlement), or the original stored conflict result for a freshly signed matching replay of a rejected event."
             },
             "413": {
               "content": {

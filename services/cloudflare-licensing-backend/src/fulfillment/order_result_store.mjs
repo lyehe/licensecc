@@ -104,15 +104,18 @@ export async function terminalizeInvalidOrderEvent(env, eventId, now) {
   return marked === null ? loadTerminalOrderOutcome(env, eventId) : { status: 400, body };
 }
 
-export function buildRevokedOrderEventMark(env, order, key, fingerprintOrigin, now) {
-  const body = resultBody("entitlement_revoked", {
+// Reject a still-accepted event with a 409 `code` when the entitlement matches `condition`
+// (SQL over the entitlements row, binding `conditionValues`). Run inside the apply batch,
+// after the guarded write, it arbitrates a concurrent change the advisory read missed.
+function buildRejectedOrderEventMark(env, order, key, fingerprintOrigin, now, code, condition, conditionValues) {
+  const body = resultBody(code, {
     license_fingerprint: key.license_fingerprint,
     fingerprint_origin: fingerprintOrigin,
   });
   const statement = env.DB.prepare(
     "UPDATE order_events SET status = 'rejected', result_json = ?, processed_at = ? " +
       "WHERE event_id = ? AND status = 'accepted' " +
-      "AND EXISTS (SELECT 1 FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? AND status = 'revoked') " +
+      `AND EXISTS (SELECT 1 FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? AND ${condition}) ` +
       "RETURNING event_id",
   ).bind(
     JSON.stringify(body),
@@ -121,14 +124,34 @@ export function buildRevokedOrderEventMark(env, order, key, fingerprintOrigin, n
     key.project,
     key.feature,
     key.license_fingerprint,
+    ...conditionValues,
   );
   return { body, statement };
 }
 
+async function terminalizeWith(env, order, mark) {
+  const marked = await mark.statement.first();
+  return marked === null ? loadTerminalOrderOutcome(env, order.event_id) : { status: 409, body: mark.body };
+}
+
+export function buildRevokedOrderEventMark(env, order, key, fingerprintOrigin, now) {
+  return buildRejectedOrderEventMark(env, order, key, fingerprintOrigin, now, "entitlement_revoked", "status = 'revoked'", []);
+}
+
 export async function terminalizeRevokedOrderEvent(env, order, key, fingerprintOrigin, now) {
-  const { body, statement } = buildRevokedOrderEventMark(env, order, key, fingerprintOrigin, now);
-  const marked = await statement.first();
-  return marked === null ? loadTerminalOrderOutcome(env, order.event_id) : { status: 409, body };
+  return terminalizeWith(env, order, buildRevokedOrderEventMark(env, order, key, fingerprintOrigin, now));
+}
+
+// An order may act only on a grant its own customer owns (or create a new one). A grant
+// owned by another customer, or by no one, rejects the event whatever its intent.
+export function buildForeignOwnerOrderEventMark(env, order, key, fingerprintOrigin, now) {
+  return buildRejectedOrderEventMark(
+    env, order, key, fingerprintOrigin, now, "entitlement_owner_mismatch", "customer_id IS NOT ?", [order.customer.id],
+  );
+}
+
+export async function terminalizeForeignOwnerOrderEvent(env, order, key, fingerprintOrigin, now) {
+  return terminalizeWith(env, order, buildForeignOwnerOrderEventMark(env, order, key, fingerprintOrigin, now));
 }
 
 export async function terminalizeMissingEntitlementOrderEvent(env, order, key, fingerprintOrigin, now) {

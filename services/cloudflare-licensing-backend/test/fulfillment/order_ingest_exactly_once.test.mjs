@@ -249,11 +249,11 @@ for (const state of ["active", "retiring"]) {
     const { db, env } = freshEnv(); t.after(() => db.close());
     const rejected = makeOrder({ seq: 1, intent: "quantity.changed", quantity: { max_active_devices: 0 } });
     const fingerprint = await fpOf(rejected);
-    db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('owner','Owner',1,1),('other','Other',1,1);
+    db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_order','Owner',1,1);
       INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,enforcement_mode,max_active_devices,created_at,updated_at)
-        VALUES('${PROJECT}','${FEATURE}','${fingerprint}','active','owner','device_bound_v1',1,1,1);
+        VALUES('${PROJECT}','${FEATURE}','${fingerprint}','active','cus_order','device_bound_v1',1,1,1);
       INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
-        VALUES('device','owner','${PROJECT}','key','synthetic-public',1,1);
+        VALUES('device','cus_order','${PROJECT}','key','synthetic-public',1,1);
       INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,generation,revision,hold_until,created_at,updated_at)
         VALUES('binding','${PROJECT}','${FEATURE}','${fingerprint}','device','${state}',2,3,4102444800,1,1);`);
     const authority = () => ["entitlements", "device_bound_bindings", "entitlement_events"]
@@ -271,7 +271,7 @@ for (const state of ["active", "retiring"]) {
     assert.equal(applied.status, 200); assert.equal(applied.body.code, "applied");
     const row = entRow(db, fingerprint);
     assert.equal(row.enforcement_mode, "device_bound_v1");
-    assert.equal(row.customer_id, "owner");
+    assert.equal(row.customer_id, "cus_order");
     assert.equal(row.max_active_devices, 2);
     assert.equal(row.authority_revision, 1);
     assert.equal(row.last_applied_order_seq, 2);
@@ -282,13 +282,6 @@ for (const state of ["active", "retiring"]) {
     assert.equal(replay.status, 200); assert.deepEqual(authority(), committed);
     const superseded = await submit(env, rejected, { now: NOW + 4 });
     assert.equal(superseded.status, 200); assert.deepEqual(authority(), committed);
-    // The subscription's customer (cus_order) is not the grant's seeded owner, so a refresh
-    // would move the owner of a grant with a bound device.
-    const reassignment = makeOrder({ seq: 3 });
-    const ownerFailure = await submit(env, reassignment, { now: NOW + 5 });
-    assert.equal(ownerFailure.status, 503); assert.equal(ownerFailure.body.code, "write_failed");
-    assert.equal(eventRow(db, reassignment.event_id).status, "accepted");
-    assert.deepEqual(authority(), committed);
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   });
 }

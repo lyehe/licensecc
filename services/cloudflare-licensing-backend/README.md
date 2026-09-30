@@ -527,12 +527,22 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
 - **Grants.** `subscription.active` creates or refreshes a protected
   (`device_bound_v1`) grant owned by the order's customer, with no pool and a
   device limit of `quantity.max_active_devices` (default 1); `quantity.changed`
-  changes only that device limit. The withdrawals (`subscription.past_due`,
-  `subscription.paused`, `subscription.payment_failed`,
-  `subscription.canceled_at_period_end`, `fraud.confirmed`, `chargeback`)
-  always apply: a disabled customer, a grant moved to another owner, or a period
-  that ended long ago never refuses them, and they never change the grant's owner
-  or license. A withdrawal for a subscription with no grant returns `200
+  changes only that device limit.
+- **Grant ownership.** An order may act only on a grant its own `customer.id`
+  already owns, or create a new one. If a grant already exists for the order's
+  project, feature and fingerprint and another customer owns it, or no one does,
+  the order is refused with `409 entitlement_owner_mismatch` for every intent,
+  withdrawals included, and writes nothing. A customer-scoped signer therefore
+  cannot reach another customer's grant by supplying its fingerprint, and after an
+  operator reassigns a grant, orders naming the old customer are refused rather
+  than moving it back. Orders never change a grant's owner. The apply batch
+  re-checks the owner, so a reassignment racing an accepted order also refuses it.
+- **Withdrawals always apply** for the grant's own customer. The withdrawals
+  (`subscription.past_due`, `subscription.paused`,
+  `subscription.payment_failed`, `subscription.canceled_at_period_end`,
+  `fraud.confirmed`, `chargeback`) are never refused because that customer is
+  disabled or the period they concern ended long ago, and they never change the
+  grant's license. A withdrawal for a subscription with no grant returns `200
   no_entitlement` and creates nothing.
 - **Exactly-once.** Accept-then-apply: a durable cursor advance on
   `orders(order_epoch, last_seq)` + an event claim into `order_events` commit in
@@ -541,7 +551,8 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   per-entitlement monotonic floor `last_applied_order_{epoch,seq}`. A stale order
   is observably `stale_ignored`; a crashed `accepted` row re-drives idempotently
   (the floor makes re-apply self-superseding). A fingerprint belongs to exactly
-  one subscription (`409 fingerprint_owned`).
+  one subscription (`409 fingerprint_owned`), and its grant to exactly one
+  customer (`409 entitlement_owner_mismatch`, above).
   The subscription fingerprint/origin pair, its customer id, and any established
   license id are immutable after first use. Omitting `license_id` carries the
   established license forward; a contradictory customer or license id is not a
@@ -552,7 +563,7 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   the stored application result for a freshly signed matching-event retry
   (`cached` is the neutral fallback when terminal result finalization did not
   complete or a legacy terminal row has no stored result), `200 stale_ignored`, `409 seq_conflict`,
-  `409 event_id_conflict`, `409 fingerprint_owned`, `200 no_entitlement`
+  `409 event_id_conflict`, `409 fingerprint_owned`, `409 entitlement_owner_mismatch`, `200 no_entitlement`
   (modify on a never-activated subscription — never materializes access),
   `409 entitlement_revoked` (terminal), `401` (auth family), `400 invalid_order`,
   `503 config_error`, or `503 write_failed`. The body is read once as a bounded raw-byte stream and
