@@ -84,3 +84,15 @@ for (const state of ["active", "retiring"]) {
     assert.deepEqual(f.sql.prepare("PRAGMA foreign_key_check").all(), []);
   });
 }
+
+// A protected grant carries no device hash: its device key proves the device. The shared PATCH writer
+// refuses one, as createEntitlement never writes one, whatever its caller validated.
+test("patchEntitlement refuses a device hash on a protected grant", async t => {
+  const f = fixture(t, "active"), before = f.snapshot();
+  await assert.rejects(patchEntitlement(f.env, key, { device_hash: "d".repeat(64) }, ctx, idempotency), /invalid_patch/);
+  await assert.rejects(patchEntitlement(f.env, key, { device_hash: "d".repeat(64), notes: "with a hash" }, ctx, idempotency), /invalid_patch/);
+  assert.deepEqual(f.snapshot(), before);
+  const result = await patchEntitlement(f.env, key, { device_hash: "", notes: "no hash" }, ctx, idempotency);
+  assert.equal(result.data.device_hash, "");
+  assert.equal(result.data.notes, "no hash");
+});

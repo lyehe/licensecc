@@ -219,11 +219,73 @@ test("sync runs the protected create checks and never yields a legacy grant", as
   f.sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,enforcement_mode,created_at,updated_at) VALUES('APP','OLD',?,'active','owner','license','legacy',1,1)")
     .run(input.license_fingerprint);
   const legacy = f.snapshot();
-  for (const [payload, key] of [[{ ...body, feature: "OLD" }, "legacy-unchanged"], [{ ...body, feature: "OLD", notes: "changed" }, "legacy-changed"]]) {
+  for (const [payload, key] of [[{ ...body, feature: "OLD" }, "legacy-unchanged"], [{ ...body, feature: "OLD", notes: "changed" }, "legacy-changed"],
+    [{ ...body, feature: "OLD", status: "revoked", reason: "ended" }, "legacy-revoked"]]) {
     const conflict = await sync(payload, key);
     assert.equal(conflict.status, 409, key); assert.equal((await conflict.json()).code, "enforcement_mode_conflict");
   }
   assert.deepEqual(f.snapshot(), legacy);
+});
+
+// A synced disable or revocation of an existing protected grant always applies, whatever the state
+// of its owner, license or row: it changes only the status, as an operator's transition does.
+const WITHDRAWAL_CASES = [
+  ["the customer is disabled", "UPDATE customers SET status='disabled' WHERE id='owner'"],
+  ["the license moved to another customer", "UPDATE licenses SET customer_id='other' WHERE id='license'"],
+  ["the license is detached", "UPDATE licenses SET customer_id=NULL WHERE id='license'"],
+  ["its from_issue trial has expired", "UPDATE entitlements SET is_trial=1, trial_expiration_basis='from_issue', valid_until=100"],
+  ["the protected row carries a seat pool", "UPDATE entitlements SET pool_size=5"],
+  ["the protected row carries a stale device hash", `UPDATE entitlements SET device_hash='${"d".repeat(64)}'`],
+];
+const KEPT_COLUMNS = "customer_id, license_id, notes, valid_from, valid_until, is_trial, pool_size, device_hash, enforcement_mode";
+
+for (const [name, change] of WITHDRAWAL_CASES) {
+  for (const status of ["disabled", "revoked"]) {
+    test(`a synced ${status === "revoked" ? "revocation" : "disable"} applies when ${name}`, async t => {
+      const f = fixture(t), { enforcement_mode: _mode, ...body } = input;
+      const sync = (payload, key) => worker.fetch(syncAuthed(payload, { headers: { "idempotency-key": key } }), syncEnv(f.db));
+      assert.equal((await sync(body, "create")).status, 200);
+      f.sql.exec(change);
+      const kept = f.sql.prepare(`SELECT ${KEPT_COLUMNS} FROM entitlements`).get();
+      const withdrawn = await sync({ ...body, status, notes: "not written", reason: "subscription ended" }, "withdraw");
+      assert.equal(withdrawn.status, 200, await withdrawn.clone().text());
+      assert.equal((await withdrawn.json()).data.status, status);
+      assert.equal(f.sql.prepare("SELECT status FROM entitlements").get().status, status);
+      assert.deepEqual({ ...f.sql.prepare(`SELECT ${KEPT_COLUMNS} FROM entitlements`).get() }, { ...kept }, "only the status changes");
+      const event = f.sql.prepare("SELECT event_type, source, reason FROM entitlement_events ORDER BY id DESC LIMIT 1").get();
+      assert.deepEqual({ ...event }, { event_type: status === "revoked" ? "revoke" : "disable", source: "sync", reason: "subscription ended" });
+    });
+  }
+}
+
+test("a synced disable or revocation naming another owner keeps the grant's owner and license", async t => {
+  const f = fixture(t), { enforcement_mode: _mode, ...body } = input;
+  const sync = (payload, key) => worker.fetch(syncAuthed(payload, { headers: { "idempotency-key": key } }), syncEnv(f.db));
+  f.sql.exec("INSERT INTO licenses(id,customer_id,project,created_at,updated_at) VALUES('license-other','other','APP',1,1)");
+  assert.equal((await sync(body, "create")).status, 200);
+  const moved = { ...body, customer_id: "other", license_id: "license-other", reason: "subscription ended" };
+  for (const status of ["disabled", "revoked"]) {
+    const withdrawn = await sync({ ...moved, status }, status);
+    assert.equal(withdrawn.status, 200, await withdrawn.clone().text());
+    const data = (await withdrawn.json()).data;
+    assert.deepEqual([data.status, data.customer_id, data.license_id], [status, "owner", "license"]);
+    assert.deepEqual({ ...f.sql.prepare("SELECT status, customer_id, license_id FROM entitlements").get() }, { status, customer_id: "owner", license_id: "license" });
+  }
+});
+
+// Only a withdrawal skips the checks: a sync that creates a grant, or that leaves or makes one active,
+// still has to meet every protected rule.
+test("a synced create or reactivation still runs the protected checks", async t => {
+  const f = fixture(t), { enforcement_mode: _mode, ...body } = input;
+  const sync = (payload, key) => worker.fetch(syncAuthed(payload, { headers: { "idempotency-key": key } }), syncEnv(f.db));
+  assert.equal((await sync(body, "create")).status, 200);
+  f.sql.exec("UPDATE customers SET status='disabled' WHERE id='owner'");
+  await refusedFor(await sync({ ...body, notes: "changed" }, "active-update"), "customer_inactive");
+  await refusedFor(await sync({ ...body, feature: "NEW", status: "revoked", reason: "never issued" }, "revoked-create"), "customer_inactive");
+  assert.equal((await sync({ ...body, status: "disabled", reason: "paused" }, "disable")).status, 200);
+  const disabled = f.snapshot();
+  await refusedFor(await sync(body, "reenable"), "customer_inactive");
+  assert.deepEqual(f.snapshot(), disabled, "a refused reactivation writes nothing");
 });
 
 test("protected identifiers and policy dates must fit the v2 wire contract", async t => {
@@ -304,6 +366,12 @@ const REASON_CASES = [
   // A policy window pushed past the largest safe time breaks only the integrity rule.
   { reason: "unknown", setup: "UPDATE entitlement_policies SET duration_sec=100", body: { policy_id: "policy", valid_from: Number.MAX_SAFE_INTEGER - 1 },
     fixedBody: { policy_id: "policy" } },
+  // A re-create keeps the stored device hash, so a stale one breaks the integrity rule; the diagnostic
+  // must read it from the stored row rather than from the create's empty input.
+  { reason: "unknown", name: "a stored stale device hash",
+    setup: `INSERT INTO entitlements(project,feature,license_fingerprint,device_hash,status,customer_id,license_id,enforcement_mode,created_at,updated_at)
+      VALUES('APP','PRO','${fp}','${"d".repeat(64)}','active','owner','license','device_bound_v1',1,1)`,
+    fix: "UPDATE entitlements SET device_hash=''" },
 ];
 
 for (const { reason, name = reason, setup, race, body = {}, fix, fixedBody = body } of REASON_CASES) {
