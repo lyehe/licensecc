@@ -6,6 +6,7 @@ import test from "node:test";
 import { BOUND_LEASE_COMMIT_SQL, commitBoundDeviceLease } from "../../src/device/bound_store.mjs";
 import { BOUND_RECOVERY_SQL, recoverBoundDeviceLease } from "../../src/device/bound_recovery.mjs";
 import { EXPIRE_BOUND_RECOVERY_SQL } from "../../src/device/bound_cleanup.mjs";
+import { boundTrialState } from "@licensecc/cloudflare-runtime/device/bound_trial";
 
 const fp = "a".repeat(64);
 function fixture() {
@@ -338,7 +339,7 @@ test("entitlement authority revision advances for every authority column", t => 
   const authority=[["status","'disabled'"],["customer_id","'second'"],["valid_from","900"],["valid_until","5000"],
     ["max_active_devices","2"],["lease_seconds","86400"],["revocation_seq","1"],["is_trial","1"],["trial_started_at","1000"],
     ["trial_duration_sec","604800"],["trial_expiration_basis","'from_first_activation'"],["trial_one_per_device","1"],
-    ["trial_device_hash",`'${"b".repeat(64)}'`]];
+    ["trial_device_key_id",`'sha256:${"b".repeat(64)}'`]];
   for (const [column,value] of authority) {
     const before=revision();
     f.sql.exec(`UPDATE entitlements SET ${column}=${value}`);
@@ -351,9 +352,9 @@ test("entitlement authority revision advances for every authority column", t => 
 
 // The exact column lists: any seat, meter, TTL or device-hash column left in
 // the baseline makes these fail, without the test naming those columns.
-const ENTITLEMENT_COLUMNS=["authority_revision","created_at","customer_id","enforcement_mode","feature","is_trial",
+const ENTITLEMENT_COLUMNS=["authority_revision","created_at","customer_id","feature","is_trial",
   "last_applied_order_epoch","last_applied_order_seq","lease_seconds","license_fingerprint","license_id","max_active_devices",
-  "notes","policy_id","project","revocation_seq","status","trial_device_hash","trial_duration_sec","trial_expiration_basis",
+  "notes","policy_id","project","revocation_seq","status","trial_device_key_id","trial_duration_sec","trial_expiration_basis",
   "trial_one_per_device","trial_started_at","updated_at","valid_from","valid_until"];
 function columns(f,table) { return f.sql.prepare(`PRAGMA table_info(${table})`).all().map(c=>c.name).sort(); }
 
@@ -366,6 +367,43 @@ test("a grant inserted without enforcement_mode is protected by default", async 
   await commitBoundDeviceLease(f.db,c);
   assert.deepEqual(f.sql.prepare("SELECT feature,state FROM device_bound_bindings").all().map(r=>({...r})),[{feature:"DEFAULTED",state:"active"}]);
   assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_leases").get().n,1);
+});
+
+test("an entitlement without a customer is refused by the schema", t => {
+  const f=fixture(); t.after(()=>f.sql.close());
+  const insert=owner=>()=>f.sql.exec(`INSERT INTO entitlements(project,feature,license_fingerprint,status,created_at,updated_at${owner===undefined ? "" : ",customer_id"})
+    VALUES('APP','OWNERLESS','${fp}','active',1000,1000${owner===undefined ? "" : `,${owner}`})`);
+  assert.throws(insert("NULL"),/NOT NULL constraint failed: entitlements\.customer_id/);
+  assert.throws(insert(undefined),/NOT NULL constraint failed: entitlements\.customer_id/);
+  assert.throws(()=>f.sql.exec("UPDATE entitlements SET customer_id=NULL"),/NOT NULL constraint failed: entitlements\.customer_id/);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM entitlements WHERE feature='OWNERLESS'").get().n,0);
+  assert.equal(f.sql.prepare("SELECT customer_id FROM entitlements").get().customer_id,"customer");
+});
+
+test("a protected trial locks to the proven key in trial_device_key_id", async t => {
+  const f=fixture(); t.after(()=>f.sql.close());
+  f.sql.exec(`UPDATE entitlements SET is_trial=1,trial_expiration_basis='from_first_activation',trial_duration_sec=1200,
+    trial_one_per_device=1,max_active_devices=2`);
+  const first={...candidate("a"),trialStamp:1,entitlementRevision:1}; seed(f,first);
+  await commitBoundDeviceLease(f.db,first);
+  const row=f.sql.prepare("SELECT * FROM entitlements").get();
+  assert.equal(row.trial_device_key_id,first.keyId);
+  assert.equal(row.trial_started_at,1000);
+  // bound_trial.mjs admits only the key the trial is locked to, and the commit enforces the same rule.
+  const second={...candidate("b"),trialStamp:0,entitlementRevision:row.authority_revision}; seed(f,second);
+  assert.deepEqual(boundTrialState(row,first.keyId,1000),{stamp:0,expiresAt:2200});
+  assert.equal(boundTrialState(row,second.keyId,1000),null);
+  await assert.rejects(commitBoundDeviceLease(f.db,second),/CHECK/);
+  assert.equal(f.sql.prepare("SELECT trial_device_key_id FROM entitlements").get().trial_device_key_id,first.keyId);
+  assert.equal(count(f,"device_bound_bindings"),1);
+  assert.equal(count(f,"device_bound_leases"),1);
+});
+
+test("a new grant's lease_seconds defaults to 86400", t => {
+  const f=fixture(); t.after(()=>f.sql.close());
+  f.sql.exec(`INSERT INTO entitlements(project,feature,license_fingerprint,status,created_at,updated_at,customer_id)
+    VALUES('APP','LEASED','${fp}','active',1000,1000,'customer')`);
+  assert.equal(f.sql.prepare("SELECT lease_seconds FROM entitlements WHERE feature='LEASED'").get().lease_seconds,86400);
 });
 
 test("the entitlements table has no seat, meter, TTL or device-hash column", t => {

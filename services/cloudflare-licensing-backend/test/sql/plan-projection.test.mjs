@@ -370,6 +370,27 @@ test("plan apply creates protected rows", async (t) => {
   assert.deepEqual(rows.map((row) => ({ ...row })), [protectedRow("core", 1), protectedRow("export", 1), protectedRow("team", 7)]);
 });
 
+test("plan projection refuses an entitlement input without an owner", async (t) => {
+  for (const customerId of [undefined, null, "   "]) {
+    const db = freshDb(); t.after(() => db.close()); seedCatalog(db);
+    const env = { DB: new D1Like(db) };
+    const preview = await previewPlanProjection(env, projectionInput({ customer_id: customerId }), "admin", NOW);
+    assert.deepEqual(preview.will_create.map((row) => row.feature), ["core", "export", "team"]);
+    const key = `ownerless-${String(customerId)}`;
+    const before = projectionApplyState(db, preview.preview_id, key);
+    const batches = env.DB.batchSizes.length;
+    await assert.rejects(
+      applyPlanProjection(env, preview.preview_id, ctx({ idempotencyKey: key }), { scope: "ownerless", responseCode: "license_plan_projection_applied" }, NOW),
+      /^Error: invalid_patch$/,
+    );
+    // Refused before the apply batch runs: nothing is claimed, created, audited or assigned.
+    assert.equal(env.DB.batchSizes.length, batches, String(customerId));
+    assert.deepEqual(projectionApplyState(db, preview.preview_id, key), before, String(customerId));
+    assert.equal(before.entitlements, 0);
+    assert.equal(before.preview.claim_token, null);
+  }
+});
+
 test("legacy entitlement identity fence uses the project-license-fingerprint index", () => {
   const db = freshDb();
   const plan = db
