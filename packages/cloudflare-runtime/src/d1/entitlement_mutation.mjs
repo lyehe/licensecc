@@ -409,6 +409,8 @@ export async function patchEntitlement(env, key, patch, ctx, idempotency) {
   if (prev.status === "revoked") {
     throw new Error("revoked_terminal");
   }
+  // A protected grant carries no device hash: its device key proves the device.
+  if (prev.enforcement_mode === "device_bound_v1" && (patch.device_hash ?? "") !== "") throw new Error("invalid_patch");
   const assertionTtl = patch.assertion_ttl_seconds ?? prev.assertion_ttl_seconds;
   const validFrom = patch.valid_from !== undefined ? patch.valid_from : prev.valid_from;
   const validUntil = patch.valid_until !== undefined ? patch.valid_until : prev.valid_until;
@@ -532,24 +534,21 @@ export async function transitionEntitlementDevice(env, key, deviceKeyId, deviceS
   return classifyDeviceTransitionGuardMiss(env, key, deviceKeyId, deviceStatus);
 }
 
-// Sync yields only protected grants, so even an unchanged grant of another mode is a conflict, not a
-// no-op. extraStatements ride the write's batch (the admin sync adds its protected assertion); a
-// no-op writes nothing, so it runs none of them.
+// Sync yields only protected grants: an unchanged grant of another mode is a conflict, not a no-op.
+// A disable or revocation of an existing grant always applies as an operator's status-only
+// transition (stored owner, license, notes and validity kept; terminal revocation; no-op when
+// unchanged). extraStatements, the admin sync's protected assertion, ride only a create or an
+// active write.
 export async function syncEntitlement(env, input, reason, ctx, idempotency, extraStatements = []) {
-  const key = {
-    project: input.project,
-    feature: input.feature,
-    license_fingerprint: input.license_fingerprint,
-  };
+  const key = { project: input.project, feature: input.feature, license_fingerprint: input.license_fingerprint };
   const prev = await findEntitlement(env, key);
   if (prev !== null && prev.enforcement_mode !== "device_bound_v1") throw new Error("enforcement_mode_conflict");
   if (prev !== null && entitlementMatchesInput(prev, input)) {
     return { data: prev, idempotencyRecorded: false };
   }
   const targetStatus = input.status ?? "active";
-  if (prev?.status === "revoked" && targetStatus === "revoked") {
-    return { data: prev, idempotencyRecorded: false };
-  }
+  const withdrawal = targetStatus === "revoked" ? "revoke" : "disable";
+  if (prev !== null && targetStatus !== "active") return transitionEntitlement(env, key, targetStatus, withdrawal, reason, ctx, idempotency);
   return createEntitlement(env, input, ctx, reason, syncEventType(prev, targetStatus), idempotency, extraStatements);
 }
 

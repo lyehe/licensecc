@@ -16,6 +16,7 @@ import {
   readAccessJwt,
   validateDrillOptions,
 } from "../scripts/access-admin-drill.mjs";
+import { buildSyncPayload } from "../scripts/sync-entitlement.mjs";
 
 const fingerprint = "b".repeat(64);
 
@@ -443,4 +444,32 @@ test("access validator rejects oversized responses without reporting their conte
         && !error.message.includes(secret),
     );
   });
+});
+
+// Every synced grant is protected: the CLI names its customer and license, and never sends a device
+// hash or an assertion TTL, which the Worker refuses.
+const syncOptions = { fingerprint: "A".repeat(64), "customer-id": "cus_1", "license-id": "lic_1" };
+
+test("sync CLI payload names the grant's owner and license, and nothing a protected grant lacks", () => {
+  assert.deepEqual(buildSyncPayload(syncOptions), {
+    project: "DEFAULT", feature: "DEFAULT", license_fingerprint: "a".repeat(64), status: "active", valid_from: null, valid_until: null,
+    customer_id: "cus_1", license_id: "lic_1", notes: "", reason: "",
+  });
+  const revoked = buildSyncPayload({ ...syncOptions, status: "revoked", reason: "chargeback", "valid-until": "2000" });
+  assert.deepEqual([revoked.status, revoked.reason, revoked.valid_until], ["revoked", "chargeback", 2000]);
+});
+
+test("sync CLI refuses a payload without a customer or license, or with a device hash or assertion TTL", () => {
+  for (const [option, pattern] of [["customer-id", /customer-id is required/u], ["license-id", /license-id is required/u]]) {
+    for (const value of [undefined, ""]) {
+      const options = { ...syncOptions, [option]: value };
+      if (value === undefined) delete options[option];
+      assert.throws(() => buildSyncPayload(options), pattern, `${option}=${String(value)}`);
+    }
+  }
+  for (const option of ["device-hash", "assertion-ttl"]) {
+    assert.throws(() => buildSyncPayload({ ...syncOptions, [option]: option === "device-hash" ? "b".repeat(64) : "300" }),
+      new RegExp(`--${option} is not a sync field`, "u"));
+  }
+  assert.throws(() => buildSyncPayload({ ...syncOptions, status: "revoked" }), /reason is required/u);
 });

@@ -62,7 +62,7 @@ export const entitlementCreateSchema = {
 // A sync writes the same protected grant as an admin create: it names the grant's customer and that
 // customer's license, and the Worker supplies the protected mode.
 export const entitlementSyncSchema = {
-  description: "Every synced grant is protected. The body names the customer who owns it and that customer's license for the project; the grant passes the same protected checks as an admin create (409 protected_creation_conflict names a failed rule). The body cannot choose the mode, and an existing grant of another mode is 409 enforcement_mode_conflict, even when unchanged.",
+  description: "Every synced grant is protected. The body names the customer who owns it and that customer's license for the project. A sync that creates a grant, or leaves or makes one active, passes the same protected checks as an admin create (409 protected_creation_conflict names a failed rule). A sync with status disabled or revoked for an existing grant always applies: it is a status-only transition that keeps the stored owner, license, notes and validity, whatever the body names. The body cannot choose the mode, and an existing grant of another mode is 409 enforcement_mode_conflict, even when unchanged.",
   not: { required: ["enforcement_mode"] },
   allOf: [
     { $ref: "#/components/schemas/EntitlementInput" },

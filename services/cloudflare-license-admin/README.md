@@ -640,15 +640,26 @@ or one that names `enforcement_mode`, `device_hash` or `assertion_ttl_seconds`,
 returns `400 invalid_request`, as do identifiers outside the protected rules
 (see [Create protected application access](#create-protected-application-access)).
 
-The endpoint runs the same protected checks, D1 batch write, audit event,
-idempotency and revoked-terminal rules as an admin create. A refused check
-returns `409 protected_creation_conflict` with `data.reason` naming the rule, as
-in the create reason table, and writes nothing. An existing grant of another
-mode is never converted and is not a no-op either: sync returns `409
-enforcement_mode_conflict`. Repeated identical projections return the current
-row without advancing `revocation_seq`. Disabled and revoked sync payloads
-require `reason`; a synced revocation stops the grant's enrolled devices from
-renewing.
+A sync that creates a grant, or that leaves or makes one active, runs the same
+protected checks, D1 batch write, audit event, idempotency and revoked-terminal
+rules as an admin create. A refused check returns `409
+protected_creation_conflict` with `data.reason` naming the rule, as in the
+create reason table, and writes nothing.
+
+Revocations and disables always apply. A sync with status `disabled` or
+`revoked` for an existing grant is the same status-only transition an operator
+makes: no state of the customer, license, trial or row can block it, and it
+keeps the grant's stored owner, license, notes and validity window, whatever the
+body names. It records a `disable` or `revoke` audit event with the body's
+`reason`, which such a payload requires. A synced revocation stops the grant's
+enrolled devices from renewing, even if the customer is later restored.
+Reactivating a disabled grant is an active write, so it runs every protected
+check again; a revoked grant stays terminal.
+
+An existing grant of another mode is never converted and is not a no-op either:
+sync returns `409 enforcement_mode_conflict`, whatever the status. Repeated
+identical projections return the current row without advancing
+`revocation_seq`.
 
 CLI smoke example (`--customer-id` and `--license-id` are required;
 `--device-hash` and `--assertion-ttl` are refused):

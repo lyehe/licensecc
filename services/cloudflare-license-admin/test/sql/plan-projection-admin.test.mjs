@@ -741,14 +741,14 @@ test("license-plan Preview reports license_fingerprint_conflict without changing
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_projection_previews").get().c, 0);
 });
 
-test("license-plan Preview rejects a legacy entitlement identity conflict without an assignment", async () => {
+test("license-plan Preview rejects an unassigned protected grant that pairs the license with another fingerprint", async () => {
   const db = freshDb();
   seedCatalog(db);
   const env = devEnv(db);
   const oldFingerprint = "1".repeat(64);
   // The conflicting grant is protected, as every writer now creates it; the fence does not depend on mode.
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, enforcement_mode, created_at, updated_at) VALUES ('DEFAULT', 'legacy_unmanaged', ?, 'active', 'lic_plan', 'device_bound_v1', ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, enforcement_mode, created_at, updated_at) VALUES ('DEFAULT', 'unassigned', ?, 'active', 'lic_plan', 'device_bound_v1', ?, ?)",
   ).run(oldFingerprint, NOW, NOW);
 
   const preview = await worker.fetch(
@@ -797,7 +797,7 @@ test("license-plan Apply atomically reports license_fingerprint_conflict after a
   assert.equal(persisted.consumed_at, null);
 });
 
-test("license-plan Apply reports a post-Preview legacy entitlement identity conflict with zero writes", async () => {
+test("license-plan Apply reports a protected grant that pairs the license with another fingerprint after Preview, with zero writes", async () => {
   const db = freshDb();
   seedCatalog(db);
   const env = devEnv(db);
@@ -809,13 +809,13 @@ test("license-plan Apply reports a post-Preview legacy entitlement identity conf
   const oldFingerprint = "2".repeat(64);
   // The racing grant is protected, as every writer now creates it; the fence does not depend on mode.
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, enforcement_mode, created_at, updated_at) VALUES ('DEFAULT', 'legacy_race', ?, 'active', 'lic_plan', 'device_bound_v1', ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, enforcement_mode, created_at, updated_at) VALUES ('DEFAULT', 'race', ?, 'active', 'lic_plan', 'device_bound_v1', ?, ?)",
   ).run(oldFingerprint, NOW, NOW);
 
   const apply = await worker.fetch(
     devReq("/api/admin/license-plans/apply", {
       method: "POST",
-      headers: { "idempotency-key": "legacy-identity-race" },
+      headers: { "idempotency-key": "identity-race" },
       body: JSON.stringify({ preview_id: previewId }),
     }),
     env,
@@ -826,7 +826,7 @@ test("license-plan Apply reports a post-Preview legacy entitlement identity conf
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements WHERE license_fingerprint = ?").get(FP).c, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_assignments WHERE license_id = 'lic_plan'").get().c, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events").get().c, 0);
-  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM mutation_idempotency WHERE idempotency_key = 'legacy-identity-race'").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM mutation_idempotency WHERE idempotency_key = 'identity-race'").get().c, 0);
   const persisted = db.prepare("SELECT claim_token, consumed_at, applied_response_json FROM license_plan_projection_previews WHERE id = ?").get(previewId);
   assert.equal(persisted.claim_token, null);
   assert.equal(persisted.consumed_at, null);

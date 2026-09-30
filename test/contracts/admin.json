@@ -2172,7 +2172,7 @@
               "type": "object"
             }
           ],
-          "description": "Every synced grant is protected. The body names the customer who owns it and that customer's license for the project; the grant passes the same protected checks as an admin create (409 protected_creation_conflict names a failed rule). The body cannot choose the mode, and an existing grant of another mode is 409 enforcement_mode_conflict, even when unchanged.",
+          "description": "Every synced grant is protected. The body names the customer who owns it and that customer's license for the project. A sync that creates a grant, or leaves or makes one active, passes the same protected checks as an admin create (409 protected_creation_conflict names a failed rule). A sync with status disabled or revoked for an existing grant always applies: it is a status-only transition that keeps the stored owner, license, notes and validity, whatever the body names. The body cannot choose the mode, and an existing grant of another mode is 409 enforcement_mode_conflict, even when unchanged.",
           "not": {
             "required": [
               "enforcement_mode"
@@ -20290,7 +20290,7 @@
                   }
                 }
               },
-              "description": "Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry); a stored grant of another mode, which sync never converts; or a protected eligibility failure (data.reason names the failed rule)."
+              "description": "Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry); a stored grant of another mode, which sync never converts; or a protected eligibility failure on a create or an active write (data.reason names the failed rule). A disable or revocation of an existing protected grant is never refused for eligibility."
             },
             "413": {
               "content": {

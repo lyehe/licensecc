@@ -120,6 +120,7 @@ export function createEntitlement(
   extraStatements?: D1PreparedStatementLike[],
 ): Promise<MutationResult<EntitlementRecord> | null>;
 
+/** A non-empty device hash on a protected grant is `invalid_patch`: its device key proves the device. */
 export function patchEntitlement(
   env: MutationEnv,
   key: EntitlementKey,
@@ -150,7 +151,10 @@ export function transitionEntitlementDevice(
 ): Promise<MutationResult<EntitlementRecord> | null>;
 /**
  * Creates or updates a protected grant from an external projection; an unchanged grant is a no-op.
- * A stored grant of another mode is `enforcement_mode_conflict`, even when unchanged.
+ * A stored grant of another mode is `enforcement_mode_conflict`, even when unchanged. A disable or
+ * revocation of an existing grant is a status-only transition that always applies and keeps the
+ * stored owner, license, notes and validity. `extraStatements` ride only a write that creates the
+ * grant or leaves it active.
  */
 export function syncEntitlement(
   env: MutationEnv,

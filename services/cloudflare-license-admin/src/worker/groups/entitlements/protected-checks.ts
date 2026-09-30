@@ -103,7 +103,8 @@ export function protectedCreateAssertion(env: Env, input: CreateInput, policy?: 
 /**
  * The row a create would have written, as a CTE named `e`: its input columns, its policy stamp or
  * its own device limit, and otherwise what an existing protected grant with this key keeps (or the
- * schema default). Values travel as one JSON document so json_extract types numbers the way an
+ * schema default). The writer never writes a device hash, so an update keeps the stored one (empty
+ * for a new grant). Values travel as one JSON document so json_extract types numbers the way an
  * INTEGER column stores them.
  * A create that writes another column before the assertion must model it here too; the SQL suite
  * compares this row with the committed one after real creates.
@@ -111,7 +112,7 @@ export function protectedCreateAssertion(env: Env, input: CreateInput, policy?: 
 export function protectedWouldBeRowQuery(input: CreateInput, policy?: Policy): { sql: string; binds: unknown[] } {
   const stamp = stampColumns(input, policy);
   const written = {
-    project: input.project, feature: input.feature, license_fingerprint: input.license_fingerprint, device_hash: input.device_hash ?? "",
+    project: input.project, feature: input.feature, license_fingerprint: input.license_fingerprint,
     valid_from: input.valid_from ?? null, valid_until: input.valid_until ?? null, customer_id: input.customer_id ?? null, license_id: input.license_id ?? null,
     ...stamp,
   };
@@ -119,8 +120,8 @@ export function protectedWouldBeRowQuery(input: CreateInput, policy?: Policy): {
     .map(([column, fallback]) => `${fallback === null ? `x.${column}` : `coalesce(x.${column}, ${fallback})`} AS ${column}`);
   return {
     sql: `WITH w(doc) AS (SELECT ?),
-    x AS (SELECT ${Object.keys(STAMP_COLUMN_DEFAULTS).join(", ")} FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=? AND enforcement_mode='device_bound_v1'),
-    e AS (SELECT ${[...Object.keys(written).map((column) => `json_extract(w.doc,'$.${column}') AS ${column}`), ...kept].join(", ")} FROM w LEFT JOIN x ON 1)`,
+    x AS (SELECT device_hash, ${Object.keys(STAMP_COLUMN_DEFAULTS).join(", ")} FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=? AND enforcement_mode='device_bound_v1'),
+    e AS (SELECT ${[...Object.keys(written).map((column) => `json_extract(w.doc,'$.${column}') AS ${column}`), "coalesce(x.device_hash, '') AS device_hash", ...kept].join(", ")} FROM w LEFT JOIN x ON 1)`,
     binds: [JSON.stringify(written), input.project, input.feature, input.license_fingerprint],
   };
 }

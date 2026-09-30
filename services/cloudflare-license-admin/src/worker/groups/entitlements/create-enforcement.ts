@@ -37,8 +37,10 @@ export async function createWithEnforcement(env: Env, input: ProtectedCreateInpu
 }
 
 /**
- * A sync writes the same protected grant as an admin create, under the same checks. An unchanged
- * grant is a no-op: it writes nothing, so it needs no assertion.
+ * A sync that creates a grant, or leaves or makes one active, writes the same protected grant as an
+ * admin create, under the same checks. A disable or revocation of an existing grant always applies:
+ * syncEntitlement makes it a status-only transition that keeps the stored owner and runs no
+ * assertion, so no owner or row state can block it. An unchanged grant is a no-op.
  */
 export function syncWithEnforcement(env: Env, input: ProtectedCreateInput, reason: string, ctx: MutationContext,
   idempotency: IdempotencyCommit | null): Promise<MutationResult<EntitlementRecord> | Response | null> {

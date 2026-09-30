@@ -36,7 +36,7 @@ export const syncPaths: LabeledPathFragment = {
         "401": errorResponse("Sync token not configured on the Worker.", "sync_auth_not_configured"),
         "403": errorResponse("Bearer token did not match SYNC_API_TOKEN.", "invalid_sync_token"),
         "404": errorResponse("Referenced resource not found.", "not_found"),
-        "409": protectedCreationConflictResponse("Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry); a stored grant of another mode, which sync never converts; or a protected eligibility failure (data.reason names the failed rule).", "revoked_entitlement_is_terminal", "stale_transition", "enforcement_mode_conflict", "protected_creation_conflict"),
+        "409": protectedCreationConflictResponse("Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry); a stored grant of another mode, which sync never converts; or a protected eligibility failure on a create or an active write (data.reason names the failed rule). A disable or revocation of an existing protected grant is never refused for eligibility.", "revoked_entitlement_is_terminal", "stale_transition", "enforcement_mode_conflict", "protected_creation_conflict"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed.", "mutation_failed"),
       },
