@@ -83,3 +83,41 @@ test('devices: an app that is not in the account says so and links back to all a
   await expect(page.locator('.protectedNodes tr').filter({hasText:'Warehouse Scanner'})).toHaveCount(1);
   await expect(page.getByText('No app named',{exact:false})).toHaveCount(0);
 });
+
+// The unknown-app message reads the entitlements list; while that read is still loading (or has
+// failed), entitlements is [] -- indistinguishable from a real empty account -- so the page must
+// never claim a valid app is unknown just because the read has not resolved yet.
+test('devices: a delayed entitlements read never claims a valid app is unknown while loading',async({page})=>{
+  let releaseEntitlements;
+  const gate=new Promise(resolve=>{releaseEntitlements=resolve;});
+  await page.route('**/api/portal/**', async route => {
+    const url=new URL(route.request().url());
+    if(url.pathname.endsWith('/me'))return route.fulfill({json:envelope('me',{customer_id:'A'})});
+    if(url.pathname.endsWith('/device-bindings'))return route.fulfill({json:envelope('device_bindings',{customer_id:'A',items:[bindingWarehouse],has_more:false,next_cursor:null})});
+    if(url.pathname.endsWith('/entitlements')){await gate;return route.fulfill({json:envelope('entitlements',{items:[entitlementDefault]})});}
+    return route.fulfill({json:envelope('ok',{items:[]})});
+  });
+  await page.goto('/#/nodes/DEFAULT');
+  // Connected devices already render (they do not wait on entitlements); the unknown-app message
+  // must not appear while the entitlements read for a REAL app is still in flight.
+  await expect(page.locator('.protectedNodes tr').filter({hasText:'Warehouse Scanner'})).toHaveCount(1);
+  await expect(page.getByText('No app named',{exact:false})).toHaveCount(0);
+  releaseEntitlements();
+  await expect(page.getByText('App: DEFAULT',{exact:false})).toBeVisible();
+  await expect(page.getByText('No app named',{exact:false})).toHaveCount(0);
+});
+
+// A permanently failed entitlements read must show the failure, not misreport a real app as unknown.
+test('devices: a failed entitlements read shows the failure without claiming the app is unknown',async({page})=>{
+  await page.route('**/api/portal/**', async route => {
+    const url=new URL(route.request().url());
+    if(url.pathname.endsWith('/me'))return route.fulfill({json:envelope('me',{customer_id:'A'})});
+    if(url.pathname.endsWith('/device-bindings'))return route.fulfill({json:envelope('device_bindings',{customer_id:'A',items:[bindingWarehouse],has_more:false,next_cursor:null})});
+    if(url.pathname.endsWith('/entitlements'))return route.fulfill({status:503,json:{ok:false,code:'temporarily_unavailable',request_id:'devices-search-fail'}});
+    return route.fulfill({json:envelope('ok',{items:[]})});
+  });
+  await page.goto('/#/nodes/DEFAULT');
+  await expect(page.getByRole('status').filter({hasText:'This is temporarily unavailable. Try again shortly.'})).toBeVisible();
+  await expect(page.getByText('No app named',{exact:false})).toHaveCount(0);
+  await expect(page.locator('.protectedNodes tr').filter({hasText:'Warehouse Scanner'})).toHaveCount(1);
+});
