@@ -215,8 +215,7 @@ For work outside that deterministic gate, use the dedicated commands:
 Doxygen; `npm run check:docs:links` is network-sensitive and scheduled/manual.
 
 `npm run check:review` is a convenience aggregate for the deterministic PR,
-SDK, Worker dry-run, and documentation gates. The legacy `npm run check:all`
-name remains as a compatibility alias to that exact aggregate; neither command
-includes browser E2E, browser installation, native build purity, or network
-link validation. Follow the task-packet and handoff convention in
-`CONTRIBUTING.md` so status reports name the exact gates and omitted surfaces.
+SDK, Worker dry-run, and documentation gates. It does not include browser
+E2E, browser installation, native build purity, or network link validation.
+Follow the task-packet and handoff convention in `CONTRIBUTING.md` so status
+reports name the exact gates and omitted surfaces.

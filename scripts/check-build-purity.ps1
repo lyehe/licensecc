@@ -7,7 +7,6 @@ param(
         "dev-release",
         "ci-linux-debug",
         "ci-linux-release",
-        "ci-linux-core",
         "ci-linux-arm64",
         "ci-linux-device-identity-test",
         "ci-linux-debug-tpm2-capability",
@@ -22,7 +21,6 @@ param(
         "ci-windows-msvc-debug-static-tpm",
         "ci-windows-msvc-release-dynamic-tpm",
         "ci-windows-msvc-release-static-tpm",
-        "ci-windows-msvc",
         "ci-windows-device-identity-test"
     )]
     [string]$Preset = "dev-debug",

@@ -259,11 +259,14 @@ for (const profile of ["production", "staging"]) {
   });
 }
 
-test("keeps the omitted profile backward-compatible with production", () => {
+test("an omitted deploy profile is refused", () => {
   const root = mkdtempSync(join(tmpdir(), "licensecc-deploy-configs-default-"));
   try {
-    materializeDeploymentConfigs({ root, environment: validEnvironment() });
-    assert.equal(JSON.parse(readFileSync(join(root, "services/cloudflare-d1-backup/wrangler.jsonc"), "utf8")).name, "licensecc-d1-backup");
+    assert.throws(
+      () => materializeDeploymentConfigs({ root, environment: validEnvironment() }),
+      /deployment profile must be one of: production, staging/u,
+    );
+    assertNoConfigsWritten(root, "omitted deploy profile");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -273,7 +276,7 @@ test("binds every credential-bearing drill origin to the validated Worker route"
   const acceptedRoot = mkdtempSync(join(tmpdir(), "licensecc-deploy-bound-origins-ok-"));
   try {
     const environment = bindExpectedOrigins(validEnvironment());
-    assert.equal(materializeDeploymentConfigs({ root: acceptedRoot, environment }).length, 4);
+    assert.equal(materializeDeploymentConfigs({ root: acceptedRoot, environment, profile: "production" }).length, 4);
   } finally {
     rmSync(acceptedRoot, { recursive: true, force: true });
   }
@@ -289,7 +292,7 @@ test("binds every credential-bearing drill origin to the validated Worker route"
     try {
       const environment = bindExpectedOrigins(validEnvironment());
       mutation(environment);
-      assert.throws(() => materializeDeploymentConfigs({ root, environment }), expected, name);
+      assert.throws(() => materializeDeploymentConfigs({ root, environment, profile: "production" }), expected, name);
       assertNoConfigsWritten(root, name);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -380,7 +383,7 @@ test("rejects unsafe identities, routes, origins, assets, Access, and observabil
     try {
       const environment = validEnvironment();
       mutate(environment);
-      assert.throws(() => materializeDeploymentConfigs({ root, environment }), pattern, name);
+      assert.throws(() => materializeDeploymentConfigs({ root, environment, profile: "production" }), pattern, name);
       assertNoConfigsWritten(root, name);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -418,7 +421,7 @@ test("rejects D1 split-brain and unsafe backend or backup operations", () => {
     try {
       const environment = validEnvironment();
       mutate(environment);
-      assert.throws(() => materializeDeploymentConfigs({ root, environment }), pattern, name);
+      assert.throws(() => materializeDeploymentConfigs({ root, environment, profile: "production" }), pattern, name);
       assertNoConfigsWritten(root, name);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -438,7 +441,7 @@ test("rejects a backend config that does not route webhook fetches strictly thro
     try {
       const environment = validEnvironment();
       mutate(environment);
-      assert.throws(() => materializeDeploymentConfigs({ root, environment }), /global_fetch_strictly_public/u, name);
+      assert.throws(() => materializeDeploymentConfigs({ root, environment, profile: "production" }), /global_fetch_strictly_public/u, name);
       assertNoConfigsWritten(root, name);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -474,7 +477,7 @@ test("backend config without a valid BOUND_DEVICE_CONFIG is refused", () => {
     try {
       const environment = validEnvironment();
       mutateBackend(environment, mutation);
-      assert.throws(() => materializeDeploymentConfigs({ root, environment }), pattern, name);
+      assert.throws(() => materializeDeploymentConfigs({ root, environment, profile: "production" }), pattern, name);
       assertNoConfigsWritten(root, name);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -581,7 +584,7 @@ test("rejects a support contact that is not a credential-free https URL or a sin
     try {
       const environment = validEnvironment();
       mutateJson(environment, "LICENSECC_PORTAL_WRANGLER_CONFIG_B64", (config) => { config.vars.PORTAL_SUPPORT_CONTACT = value; });
-      assert.throws(() => materializeDeploymentConfigs({ root, environment }), /PORTAL_SUPPORT_CONTACT/u, name);
+      assert.throws(() => materializeDeploymentConfigs({ root, environment, profile: "production" }), /PORTAL_SUPPORT_CONTACT/u, name);
       assertNoConfigsWritten(root, name);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -601,7 +604,7 @@ test("accepts a support contact left unset or empty, or set to a credential-free
     try {
       const environment = validEnvironment();
       mutateJson(environment, "LICENSECC_PORTAL_WRANGLER_CONFIG_B64", mutate);
-      assert.equal(materializeDeploymentConfigs({ root, environment }).length, 4, name);
+      assert.equal(materializeDeploymentConfigs({ root, environment, profile: "production" }).length, 4, name);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -623,7 +626,7 @@ test("rejects plaintext Worker secrets in every service while ignoring comment-o
     try {
       const environment = validEnvironment();
       mutate(environment);
-      assert.throws(() => materializeDeploymentConfigs({ root, environment }), pattern, name);
+      assert.throws(() => materializeDeploymentConfigs({ root, environment, profile: "production" }), pattern, name);
       assertNoConfigsWritten(root, name);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -635,7 +638,7 @@ test("rejects plaintext Worker secrets in every service while ignoring comment-o
     const environment = validEnvironment();
     const admin = decoded(environment.LICENSECC_ADMIN_WRANGLER_CONFIG_B64).replace('{', '{\n// "SYNC_API_TOKEN": "comment-only",\n');
     environment.LICENSECC_ADMIN_WRANGLER_CONFIG_B64 = encoded(admin);
-    assert.equal(materializeDeploymentConfigs({ root, environment }).length, 4);
+    assert.equal(materializeDeploymentConfigs({ root, environment, profile: "production" }).length, 4);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -647,7 +650,7 @@ test("rolls back only files created by a partial write failure", () => {
     const blocked = join(root, "services/cloudflare-license-admin/wrangler.jsonc");
     mkdirSync(blocked, { recursive: true });
     writeFileSync(join(blocked, "owned-by-fixture"), "keep", "utf8");
-    assert.throws(() => materializeDeploymentConfigs({ root, environment: validEnvironment() }));
+    assert.throws(() => materializeDeploymentConfigs({ root, environment: validEnvironment(), profile: "production" }));
     assert.equal(existsSync(join(root, "services/cloudflare-licensing-backend/wrangler.toml")), false);
     assert.equal(readFileSync(join(blocked, "owned-by-fixture"), "utf8"), "keep");
   } finally {

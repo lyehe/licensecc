@@ -27,8 +27,7 @@ hoisting cannot select a different API on another platform.
 | Command | Exact scope | Intentionally separate |
 | --- | --- | --- |
 | `npm run check:pr` | Deterministic secret, repository, version, capability, lint, type, architecture, contract, and service checks used by pull requests. | SDKs, Worker dry-runs, rendered docs, browsers/E2E, native build purity, network links, staging, and production evidence. |
-| `npm run check:review` | `check:pr`, `test:sdks`, `check:dry-run`, and `check:docs`. | Browser setup/E2E, native build purity, the offline docs quickstart, network link validation, staging, and production evidence. |
-| `npm run check:all` | Deprecated compatibility alias for `check:review`; retained so existing callers keep the same behavior. | The same surfaces excluded from `check:review`; “all” is not a literal completeness claim. |
+| `npm run check:review` | `check:pr`, `test:sdks`, `check:dry-run`, and `check:docs`. | Browser setup/E2E, native build purity, the offline docs quickstart, network link validation, staging, and production evidence; “review” is not a literal completeness claim. |
 | `npm run test:docs-quickstart` | Disposable offline native integration journey: configure/build/install Licensecc, issue a local license, build `examples/minimal` against the install, and require `license OK`. | Cloudflare services, network access, browser/E2E, and production deployment. |
 
 Run the dedicated command for every excluded surface affected by a change.

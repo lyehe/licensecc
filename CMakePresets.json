@@ -119,21 +119,6 @@
       }
     },
     {
-      "name": "ci-linux-core",
-      "displayName": "CI Linux Core",
-      "description": "Compatibility alias for the Linux CI debug configure shape.",
-      "binaryDir": "${sourceDir}/build/ci-linux-core",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-core/install",
-        "LCC_PROJECT_NAME": "test",
-        "LCC_ENABLE_DEVICE_IDENTITY": "FALSE",
-        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
-        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
-        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE"
-      }
-    },
-    {
       "name": "ci-linux-arm64",
       "inherits": "ci-linux-debug",
       "displayName": "CI Linux ARM64",
@@ -355,21 +340,6 @@
       }
     },
     {
-      "name": "ci-windows-msvc",
-      "displayName": "CI Windows MSVC",
-      "description": "Compatibility alias for the Windows MSVC debug dynamic configure shape.",
-      "generator": "Visual Studio 17 2022",
-      "architecture": "x64",
-      "binaryDir": "${sourceDir}/build/ci-windows-msvc",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-msvc/install",
-        "LCC_PROJECT_NAME": "test",
-        "STATIC_RUNTIME": "FALSE"
-      }
-    },
-    {
       "name": "ci-windows-device-identity-test",
       "inherits": "ci-windows-msvc-debug-dynamic",
       "displayName": "CI Windows Device Identity Software Test",
@@ -426,12 +396,6 @@
       "name": "ci-linux-release",
       "configurePreset": "ci-linux-release",
       "configuration": "Release",
-      "targets": ["install"]
-    },
-    {
-      "name": "ci-linux-core",
-      "configurePreset": "ci-linux-core",
-      "configuration": "Debug",
       "targets": ["install"]
     },
     {
@@ -514,12 +478,6 @@
       "name": "ci-windows-msvc-release-static-tpm",
       "configurePreset": "ci-windows-msvc-release-static-tpm",
       "configuration": "Release",
-      "targets": ["install"]
-    },
-    {
-      "name": "ci-windows-msvc",
-      "configurePreset": "ci-windows-msvc",
-      "configuration": "Debug",
       "targets": ["install"]
     },
     {
@@ -623,17 +581,6 @@
       }
     },
     {
-      "name": "ci-linux-core",
-      "configurePreset": "ci-linux-core",
-      "configuration": "Debug",
-      "output": {
-        "outputOnFailure": true
-      },
-      "environment": {
-        "VIRTUAL_ENV": "VM"
-      }
-    },
-    {
       "name": "ci-linux-arm64",
       "configurePreset": "ci-linux-arm64",
       "configuration": "Debug",
@@ -780,17 +727,6 @@
       "name": "ci-windows-msvc-release-static-tpm",
       "configurePreset": "ci-windows-msvc-release-static-tpm",
       "configuration": "Release",
-      "output": {
-        "outputOnFailure": true
-      },
-      "environment": {
-        "VIRTUAL_ENV": "VM"
-      }
-    },
-    {
-      "name": "ci-windows-msvc",
-      "configurePreset": "ci-windows-msvc",
-      "configuration": "Debug",
       "output": {
         "outputOnFailure": true
       },

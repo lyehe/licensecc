@@ -7,7 +7,6 @@ param(
         "dev-release",
         "ci-linux-debug",
         "ci-linux-release",
-        "ci-linux-core",
         "ci-linux-arm64",
         "ci-linux-device-identity-test",
         "ci-linux-debug-tpm2-capability",
@@ -22,7 +21,6 @@ param(
         "ci-windows-msvc-debug-static-tpm",
         "ci-windows-msvc-release-dynamic-tpm",
         "ci-windows-msvc-release-static-tpm",
-        "ci-windows-msvc",
         "ci-windows-device-identity-test"
     )]
     [string]$Preset = "dev-debug",
@@ -30,8 +28,6 @@ param(
     [switch]$SkipCore,
 
     [switch]$SkipTests,
-
-    [switch]$IncludeBackend,
 
     [switch]$IncludeServices,
 
@@ -155,7 +151,7 @@ try {
     }
 
     $backendDir = $null
-    if ($IncludeBackend -or $IncludeServices -or $IncludeUi -or $IncludeSchemaParity -or $IncludeE2E -or $IncludeDryRun) {
+    if ($IncludeServices -or $IncludeUi -or $IncludeSchemaParity -or $IncludeE2E -or $IncludeDryRun) {
         $backendDir = Ensure-NpmPackage "Backend" "services/cloudflare-licensing-backend"
     }
 
@@ -192,7 +188,7 @@ try {
         }
     }
 
-    if ($IncludeBackend -or $IncludeServices) {
+    if ($IncludeServices) {
         Invoke-NpmScript "Backend" $backendDir "test"
         Invoke-NpmScript "Backend" $backendDir "test:sql"
     }
@@ -234,12 +230,8 @@ try {
         Write-Host "==> Skipped core CTest only; package checks still run when their Include* switches are set."
     }
 
-    if ($SkipCore -and -not ($IncludeBackend -or $IncludeServices -or $IncludeSdks -or $IncludeUi -or $IncludeE2E -or $IncludeDryRun -or $IncludeSchemaParity)) {
+    if ($SkipCore -and -not ($IncludeServices -or $IncludeSdks -or $IncludeUi -or $IncludeE2E -or $IncludeDryRun -or $IncludeSchemaParity)) {
         Write-Warning "No checks were selected because -SkipCore was used without any Include* switches."
-    }
-
-    if ($IncludeBackend -and -not $IncludeServices) {
-        Write-Host "==> -IncludeBackend is kept as a backend-only compatibility alias. Use -IncludeServices for all service packages."
     }
 
     if ($IncludeE2E -and -not $IncludeUi) {

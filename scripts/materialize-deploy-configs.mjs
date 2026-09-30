@@ -612,7 +612,7 @@ function validateExpectedResourceBindings(records, environment) {
   }
 }
 
-export function materializeDeploymentConfigs({ root = repositoryRoot, environment = process.env, profile: profileName = "production" } = {}) {
+export function materializeDeploymentConfigs({ root = repositoryRoot, environment = process.env, profile: profileName } = {}) {
   const profile = normalizeProfile(profileName);
   const prepared = targets.map((target) => {
     const bytes = strictBase64(environment[target.env], target.env);
@@ -648,10 +648,9 @@ export function materializeDeploymentConfigs({ root = repositoryRoot, environmen
 }
 
 function profileFromArguments(arguments_) {
-  if (arguments_.length === 0) return "production";
   if (arguments_.length === 1 && arguments_[0].startsWith("--profile=")) return arguments_[0].slice("--profile=".length);
   if (arguments_.length === 2 && arguments_[0] === "--profile") return arguments_[1];
-  throw new Error("usage: node scripts/materialize-deploy-configs.mjs [--profile production|staging]");
+  throw new Error("usage: node scripts/materialize-deploy-configs.mjs --profile production|staging");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -58,8 +58,8 @@ npm run check:pr
 ```
 
 `npm run check:review` additionally runs the SDK, Worker dry-run, and strict
-documentation gates. `npm run check:all` is its legacy compatibility alias;
-neither includes browser E2E, native build purity, or network link validation.
+documentation gates. It does not include browser E2E, native build purity, or
+network link validation.
 
 Add only the gates required by the affected surface:
 

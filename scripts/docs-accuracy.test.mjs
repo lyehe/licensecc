@@ -363,7 +363,7 @@ test("ownership, task packets, and validation status have one evidence contract"
   assert.match(scriptsReadme, /not a literal completeness claim/iu);
   assert.match(contributing, /all green/iu);
 
-  assert.equal(packageJson.scripts["check:all"], "npm run check:review");
+  assert.equal(packageJson.scripts["check:all"], undefined);
   assert.equal(
     packageJson.scripts["check:review"],
     "npm run check:pr && npm run test:sdks && npm run check:dry-run && npm run check:docs",

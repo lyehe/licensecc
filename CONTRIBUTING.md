@@ -69,11 +69,10 @@ npm run check:architecture
 ```
 
 For a portable review aggregate, `npm run check:review` runs `check:pr`, all
-three SDK suites, all Worker dry-runs, and the strict documentation build. The
-legacy `npm run check:all` command is a compatibility alias for that same
-scope. Neither name includes browser setup/E2E, native build purity, the
-offline documentation quickstart, or the network-sensitive documentation link
-check; run those explicitly when the affected surface requires them.
+three SDK suites, all Worker dry-runs, and the strict documentation build. It
+does not include browser setup/E2E, native build purity, the offline
+documentation quickstart, or the network-sensitive documentation link check;
+run those explicitly when the affected surface requires them.
 
 For C++ changes, first validate the vendored generator and then run the
 non-mutating source-purity gate:

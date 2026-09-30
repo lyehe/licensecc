@@ -412,7 +412,7 @@ test("Ubuntu TPM2 production integration is explicit and remains opt-in", () => 
   const productionTest = source("test/library/device_identity/tpm2_openssl_test.cpp");
   const workflow = source(".github/workflows/linux.yml");
 
-  for (const name of ["ci-linux-debug", "ci-linux-release", "ci-linux-core"]) {
+  for (const name of ["ci-linux-debug", "ci-linux-release"]) {
     const configure = presets.configurePresets.find((preset) => preset.name === name);
     assert.equal(configure.cacheVariables.LCC_ENABLE_TPM2_OPENSSL, "FALSE", `${name} TPM2 OFF pin`);
   }

@@ -92,7 +92,7 @@ test("CodeQL scans JavaScript/TypeScript and the maintained native build path", 
   assert.match(workflow, /language:\s*javascript-typescript\s*\n\s*build_mode:\s*none/iu);
   assert.match(workflow, /language:\s*c-cpp\s*\n\s*build_mode:\s*manual/iu);
   assert.match(workflow, /scripts\/bootstrap\.ps1 -CheckOnly/iu);
-  assert.match(workflow, /scripts\/check-build-purity\.ps1[\s\S]*-Preset ci-linux-core[\s\S]*-SkipTests/iu);
+  assert.match(workflow, /scripts\/check-build-purity\.ps1[\s\S]*-Preset ci-linux-debug[\s\S]*-SkipTests/iu);
   assert.doesNotMatch(workflow, /codeql-action\/autobuild/iu);
   assert.match(workflow, /persist-credentials:\s*false/iu);
   assert.doesNotMatch(workflow, /^\s+(?:contents|actions|packages|pull-requests):\s*write\s*$/mu);
