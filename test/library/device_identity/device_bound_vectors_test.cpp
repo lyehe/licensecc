@@ -2,6 +2,7 @@
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/test/unit_test.hpp>
 #include "bound_protocol.hpp"
+#include "bound_wire.hpp"
 #include "p256_crypto.hpp"
 #include <sstream>
 #include <fstream>
@@ -154,4 +155,19 @@ BOOST_AUTO_TEST_CASE(feature_intent_matches_independent_comparison_vector) {
 	BOOST_CHECK_NE(code, changed);
 	input.requested_feature = "feature too long";
 	BOOST_CHECK(!enrollment_comparison_code(input, key, changed));
+}
+
+BOOST_AUTO_TEST_CASE(registration_with_an_empty_requested_feature_is_an_encoding_error) {
+	const auto request = fixture("registration_wire.json").get_child("request");
+	BoundAuthorizationInput input{request.get<std::string>("client_id"),		request.get<std::string>("project"),
+								  request.get<std::string>("public_key_spki"), request.get<std::string>("device_label"),
+								  request.get<std::string>("redirect_uri"),	request.get<std::string>("state"),
+								  request.get<std::string>("code_challenge")};
+	SensitiveVector out;
+	BOOST_CHECK(!encode_bound_authorization(input, out));
+	BOOST_CHECK(out.value.empty());
+	input.requested_feature = "EXPORT";
+	BOOST_REQUIRE(encode_bound_authorization(input, out));
+	const std::string wire(out.value.begin(), out.value.end());
+	BOOST_CHECK(wire.find(",\"requested_feature\":\"EXPORT\",") != std::string::npos);
 }

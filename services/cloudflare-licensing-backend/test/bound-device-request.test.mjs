@@ -136,6 +136,16 @@ test("enrollment validates exact schema, canonical secrets and trimmed Unicode l
   assert.equal(validateBoundRequest("authorize", { ...enrollment(), device_label: "🚀".repeat(80) }).device_label.length, 160);
 });
 
+test("an authorization without requested_feature is refused", () => {
+  const request = enrollment();
+  delete request.requested_feature;
+  assert.throws(() => validateBoundRequest("authorize", request), error => error.code === "invalid_request" && error.status === 400);
+  for (const requested_feature of [null, "", 7, "TOO_LONG_FEATURE", "bad feature"]) {
+    assert.throws(() => validateBoundRequest("authorize", { ...request, requested_feature }), error => error.code === "invalid_request" && error.status === 400);
+  }
+  assert.equal(validateBoundRequest("authorize", { ...request, requested_feature: "EXPORT" }).requested_feature, "EXPORT");
+});
+
 test("callback policy rejects normalization tricks and unregistered apps or destinations", () => {
   const registry = [{ client_id: "desktop", project: "APP", callbacks: [{ host: "127.0.0.1", path: "/callback" }, { host: "[::1]", path: "/callback" }] }];
   for (const uri of ["http://127.0.0.1:45678/callback", "http://[::1]:56789/callback"]) {

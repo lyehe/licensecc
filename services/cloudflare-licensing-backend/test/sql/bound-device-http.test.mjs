@@ -393,6 +393,20 @@ test("HTTP rejects unsigned URL queries",async t=>{
   assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_leases").get().n,0);
 });
 
+test("HTTP registration without requested_feature is refused before any attempt is stored",async t=>{
+  const f=fixture(t);
+  const keys=await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign","verify"]);
+  const spki=encodeBase64url(new Uint8Array(await crypto.subtle.exportKey("spki",keys.publicKey)));
+  const request={client_id:"desktop",project:"APP",public_key_spki:spki,device_label:"My PC",redirect_uri:"http://127.0.0.1:45678/callback",
+    state:boundRandomId(32),code_challenge:boundRandomId(32),code_challenge_method:"S256"};
+  const refused=await f.call("/v2/device-authorizations",request);
+  assert.equal(refused.status,400); assert.equal(refused.body.code,"invalid_request");
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_authorizations").get().n,0);
+  const accepted=await f.call("/v2/device-authorizations",{...request,requested_feature:"DEFAULT"});
+  assert.equal(accepted.status,200,JSON.stringify(accepted.body));
+  assert.equal(f.sql.prepare("SELECT requested_feature FROM device_bound_authorizations").get().requested_feature,"DEFAULT");
+});
+
 test("HTTP current denial is not hidden by a competing successful operation",async t=>{
   const f=fixture(t),d=await enrollment(f);
   const first=await signed(f,d,"exchange"),second=await signed(f,d,"exchange");
