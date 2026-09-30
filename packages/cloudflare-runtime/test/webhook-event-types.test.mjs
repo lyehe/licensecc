@@ -55,3 +55,29 @@ test("WEBHOOK_EVENT_TYPES.customer matches the customer_events CHECK exactly (sc
   const checkList = eventTypeCheckList(schemaText, "customer_events");
   assert.deepEqual(WEBHOOK_EVENT_TYPES.customer, checkList);
 });
+
+/**
+ * The quoted token list a webhook_endpoints event-type trigger accepts: its
+ * `value NOT IN (...)` clause, scoped to that ONE trigger's `CREATE TRIGGER ... END;` statement.
+ */
+function triggerTokenList(schemaText, triggerName) {
+  const triggerRe = new RegExp(`CREATE TRIGGER IF NOT EXISTS ${triggerName}\\s[\\s\\S]*?\\bEND;`, "m");
+  const triggerMatch = triggerRe.exec(schemaText);
+  assert.ok(triggerMatch, `schema.sql must define trigger ${triggerName}`);
+  const listMatch = /\bvalue\s+NOT\s+IN\s*\(([^)]*)\)/.exec(triggerMatch[0]);
+  assert.ok(listMatch, `schema.sql ${triggerName} must refuse tokens outside a NOT IN list`);
+  return listMatch[1].split(",").map((token) => token.trim().replace(/^'(.*)'$/, "$1"));
+}
+
+// The database refuses an unknown event_types token with two triggers (webhook_endpoints has no CSV
+// CHECK). Their lists must be exactly the union the admin validator allows, or the admin and the
+// database would disagree about which filters are valid.
+test("the webhook_endpoints event-type triggers accept exactly the union of WEBHOOK_EVENT_TYPES (schema.sql)", () => {
+  const schemaText = readFileSync(schemaPath, "utf8");
+  const union = [...new Set([...WEBHOOK_EVENT_TYPES.entitlement, ...WEBHOOK_EVENT_TYPES.customer, ...WEBHOOK_EVENT_TYPES.order])];
+  for (const trigger of ["tr_webhook_event_types_known_insert", "tr_webhook_event_types_known_update"]) {
+    const tokens = triggerTokenList(schemaText, trigger);
+    assert.equal(new Set(tokens).size, tokens.length, `${trigger} names each token once`);
+    assert.deepEqual([...tokens].sort(), [...union].sort(), trigger);
+  }
+});

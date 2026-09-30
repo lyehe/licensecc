@@ -243,6 +243,55 @@ test("endpoint scope filters events to the matching tenant dimension (R2.2)", as
   db.close();
 });
 
+// The endpoint rows as the dispatcher reads them, with `edit` applied to each one: models a row the
+// schema would refuse, to prove the dispatcher decides from scope_kind alone.
+function d1WithEndpointReads(db, edit) {
+  const base = new D1Like(db);
+  return {
+    prepare(sql) {
+      const prepared = base.prepare(sql);
+      if (!sql.includes("FROM webhook_endpoints WHERE status = 'active'")) return prepared;
+      return { all: async () => ({ results: (await prepared.all()).results.map((row) => edit({ ...row })) }) };
+    },
+  };
+}
+
+test("a global endpoint receives every event only when scope_kind is global", async () => {
+  const db = freshDb();
+  const insert = db.prepare(
+    "INSERT INTO webhook_endpoints (id, url, event_types, status, description, created_at, updated_at, scope_kind, scope_project, scope_customer_id) " +
+      "VALUES (?, ?, '', 'active', '', 1000, 1000, ?, ?, ?)",
+  );
+  insert.run("global", "https://hook.test/global", "global", null, null);
+  insert.run("projP", "https://hook.test/projP", "project", "P", null);
+  insert.run("custC", "https://hook.test/custC", "customer", null, "cust_1");
+  addEntitlementEvent(db, "create", 100); // project P
+  addOrderEvent(db, "evt_1", "subscription.active", 101); // project P
+  addCustomerEvent(db, "cust_1", "disable", 102); // customer cust_1
+
+  await enqueueWebhooks({ DB: new D1Like(db) }, 200);
+  assert.equal(countDeliveries(db, "WHERE endpoint_id = 'global'"), 3, "the global endpoint gets every event");
+  assert.equal(countDeliveries(db, "WHERE endpoint_id = 'projP'"), 2, "the project endpoint gets only project P's events");
+  assert.equal(countDeliveries(db, "WHERE endpoint_id = 'custC'"), 1, "the customer endpoint gets only cust_1's customer event");
+
+  // A row read without a usable scope_kind receives nothing, even with both scope values empty: an
+  // endpoint is operator-wide only because it says so, never because it names no project or customer.
+  const unscoped = freshDb();
+  const unscopedInsert = unscoped.prepare(
+    "INSERT INTO webhook_endpoints (id, url, event_types, status, description, created_at, updated_at, scope_kind, scope_project, scope_customer_id) " +
+      "VALUES (?, ?, '', 'active', '', 1000, 1000, 'global', NULL, NULL)",
+  );
+  for (const id of ["noKind", "projectKind", "unknownKind"]) unscopedInsert.run(id, `https://hook.test/${id}`);
+  addEntitlementEvent(unscoped, "create", 100);
+  addOrderEvent(unscoped, "evt_1", "subscription.active", 101);
+  addCustomerEvent(unscoped, "cust_1", "disable", 102);
+  const kinds = { noKind: undefined, projectKind: "project", unknownKind: "all" };
+  await enqueueWebhooks({ DB: d1WithEndpointReads(unscoped, (row) => ({ ...row, scope_kind: kinds[row.id] })) }, 200);
+  assert.equal(countDeliveries(unscoped), 0, "no endpoint without scope_kind 'global' is treated as global");
+  db.close();
+  unscoped.close();
+});
+
 test("event_types CSV filter selects which endpoints receive a delivery", async () => {
   const db = freshDb();
   const env = { DB: new D1Like(db) };

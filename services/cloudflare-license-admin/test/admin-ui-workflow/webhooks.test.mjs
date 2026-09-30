@@ -41,48 +41,99 @@ test("admin UI workflow webhook action rules match the disable/reenable invarian
 
 test("admin UI workflow normalizes the webhook create form (mirrors the Worker validators)", async () => {
   const workflow = await loadWorkflowModule("features/webhooks/workflow.ts");
+  const globalForm = { ...workflow.emptyWebhookForm, scope_kind: "global" };
   assert.deepEqual(
-    workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://hooks.example.com/lcc" }),
-    { url: "https://hooks.example.com/lcc", event_types: "", description: "", scope_project: "", scope_customer_id: "" },
+    workflow.normalizeWebhookForm({ ...globalForm, url: "https://hooks.example.com/lcc" }),
+    { url: "https://hooks.example.com/lcc", event_types: "", description: "", scope_kind: "global", scope_project: "", scope_customer_id: "" },
   );
   const scoped = workflow.normalizeWebhookForm({
     ...workflow.emptyWebhookForm,
     url: "https://hooks.example.com/lcc",
-    event_types: " entitlement.revoked , , customer.disabled ",
+    event_types: " revoke , , subscription.active ",
     description: "prod alerts",
-    scope_project: "DEFAULT",
+    scope_kind: "project",
+    scope_project: " DEFAULT ",
   });
-  assert.equal(scoped.event_types, "entitlement.revoked,customer.disabled");
+  assert.equal(scoped.event_types, "revoke,subscription.active");
+  assert.equal(scoped.scope_kind, "project");
   assert.equal(scoped.scope_project, "DEFAULT");
   assert.equal(scoped.scope_customer_id, "");
 
-  assert.throws(() => workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "http://x.example.com" }), /url_must_be_https/);
-  assert.throws(() => workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "" }), /url_must_be_a_single_https_url/);
-  assert.throws(() => workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://a b.example.com" }), /url_must_be_a_single_https_url/);
+  assert.throws(() => workflow.normalizeWebhookForm({ ...globalForm, url: "http://x.example.com" }), /url_must_be_https/);
+  assert.throws(() => workflow.normalizeWebhookForm({ ...globalForm, url: "" }), /url_must_be_a_single_https_url/);
+  assert.throws(() => workflow.normalizeWebhookForm({ ...globalForm, url: "https://a b.example.com" }), /url_must_be_a_single_https_url/);
   assert.throws(
-    () => workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://x.example.com", event_types: "a b" }),
+    () => workflow.normalizeWebhookForm({ ...globalForm, url: "https://x.example.com", event_types: "a b" }),
     /event_types_token_has_whitespace/,
   );
+  // Only the event types the dispatcher emits: an unknown token never reaches the server.
   assert.throws(
-    () => workflow.normalizeWebhookForm({
-      ...workflow.emptyWebhookForm,
-      url: "https://x.example.com",
-      scope_project: "DEFAULT",
-      scope_customer_id: "cus_1",
-    }),
-    /scope_set_project_or_customer_not_both/,
+    () => workflow.normalizeWebhookForm({ ...globalForm, url: "https://x.example.com", event_types: "create,entitlement.revoked" }),
+    /invalid_event_types/,
   );
   assert.throws(
-    () => workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://x.example.com", description: "line1\nline2" }),
+    () => workflow.normalizeWebhookForm({ ...globalForm, url: "https://x.example.com", description: "line1\nline2" }),
     /description_invalid/,
   );
   assert.throws(
-    () => workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://x.example.com", scope_project: "a\nb" }),
+    () => workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://x.example.com", scope_kind: "project", scope_project: "a\nb" }),
     /scope_project_must_be_a_single_value/,
   );
   assert.throws(
-    () => workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://x.example.com", event_types: "a,\nb" }),
+    () => workflow.normalizeWebhookForm({ ...globalForm, url: "https://x.example.com", event_types: "a,\nb" }),
     /event_types_invalid/,
+  );
+});
+
+test("the webhook form sends an explicit scope: a chosen kind and only that kind's value", async () => {
+  const workflow = await loadWorkflowModule("features/webhooks/workflow.ts");
+  const form = { ...workflow.emptyWebhookForm, url: "https://hooks.example.com/lcc" };
+  // A new endpoint starts with no scope; the operator must choose one.
+  assert.equal(workflow.emptyWebhookForm.scope_kind, "");
+  assert.throws(() => workflow.normalizeWebhookForm(form), /scope_kind_required/);
+  assert.throws(() => workflow.normalizeWebhookForm({ ...form, scope_kind: "project", scope_project: "  " }), /scope_project_required/);
+  assert.throws(() => workflow.normalizeWebhookForm({ ...form, scope_kind: "customer" }), /scope_customer_id_required/);
+  // A value typed for another kind is never sent: the chosen kind decides.
+  const scope = (value) => {
+    const body = workflow.normalizeWebhookForm({ ...form, scope_project: "DEFAULT", scope_customer_id: "cus_1", ...value });
+    return [body.scope_kind, body.scope_project, body.scope_customer_id];
+  };
+  assert.deepEqual(scope({ scope_kind: "global" }), ["global", "", ""]);
+  assert.deepEqual(scope({ scope_kind: "project" }), ["project", "DEFAULT", ""]);
+  assert.deepEqual(scope({ scope_kind: "customer" }), ["customer", "", "cus_1"]);
+
+  assert.deepEqual(workflow.WEBHOOK_SCOPE_OPTIONS.map((option) => [option.kind, option.label]), [
+    ["global", "Every event (operator-wide)"],
+    ["project", "One project"],
+    ["customer", "One customer"],
+  ]);
+  assert.equal(workflow.webhookScopeLabel({ scope_kind: "global", scope_project: null, scope_customer_id: null }), "operator-wide");
+  assert.equal(workflow.webhookScopeLabel({ scope_kind: "project", scope_project: "DEFAULT", scope_customer_id: null }), "project:DEFAULT");
+  assert.equal(workflow.webhookScopeLabel({ scope_kind: "customer", scope_project: null, scope_customer_id: "cus_1" }), "customer:cus_1");
+  assert.equal("unknownWebhookEventTypes" in workflow, false);
+});
+
+test("an edited webhook PATCHes only what changed, and its scope as a whole", async () => {
+  const workflow = await loadWorkflowModule("features/webhooks/workflow.ts");
+  const baseline = workflow.webhookFormFromEndpoint({
+    id: "wh_1", url: "https://hooks.example.com/lcc", event_types: "create", status: "active", description: "",
+    scope_kind: "project", scope_project: "DEFAULT", scope_customer_id: null, created_at: 1, updated_at: 1,
+  });
+  assert.deepEqual(baseline, { url: "https://hooks.example.com/lcc", event_types: "create", description: "", scope_kind: "project", scope_project: "DEFAULT", scope_customer_id: "" });
+  assert.deepEqual(workflow.normalizeWebhookPatch(baseline, baseline), {});
+  assert.deepEqual(workflow.normalizeWebhookPatch({ ...baseline, event_types: "create,update" }, baseline), { event_types: "create,update" });
+  // Moving to another kind names the kind and both values, so the old value is cleared.
+  assert.deepEqual(
+    workflow.normalizeWebhookPatch({ ...baseline, scope_kind: "customer", scope_customer_id: "cus_1" }, baseline),
+    { scope_kind: "customer", scope_project: "", scope_customer_id: "cus_1" },
+  );
+  assert.deepEqual(
+    workflow.normalizeWebhookPatch({ ...baseline, scope_project: "OTHER" }, baseline),
+    { scope_kind: "project", scope_project: "OTHER", scope_customer_id: "" },
+  );
+  assert.deepEqual(
+    workflow.normalizeWebhookPatch({ ...baseline, scope_kind: "global" }, baseline),
+    { scope_kind: "global", scope_project: "", scope_customer_id: "" },
   );
 });
 
@@ -174,7 +225,7 @@ test("each webhook validation code names the field it belongs to, and whole-form
   const [workflow, messages] = await Promise.all([loadWorkflowModule("features/webhooks/workflow.ts"), loadWorkflowModule("shared/messages.ts")]);
   const codeFor = (patch) => {
     try {
-      workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://hooks.example.com/lcc", ...patch });
+      workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://hooks.example.com/lcc", scope_kind: "global", ...patch });
     } catch (error) {
       return error.message;
     }
@@ -184,10 +235,14 @@ test("each webhook validation code names the field it belongs to, and whole-form
     [{ url: "http://hooks.example.com/lcc" }, "url", "The URL must start with https://."],
     [{ url: "https://a b.example.com" }, "url", "Enter a single https:// URL without spaces."],
     [{ description: "a\nb" }, "description", "Use one line of at most 500 characters."],
-    [{ scope_project: "a,b" }, "scope_project", "Enter one value of at most 128 characters, without commas or line breaks."],
-    [{ scope_customer_id: "a\nb" }, "scope_customer_id", "Enter one value of at most 128 characters, without commas or line breaks."],
+    [{ scope_kind: "" }, "scope_kind", "Choose which events this endpoint receives."],
+    [{ scope_kind: "project", scope_project: "" }, "scope_project", "Enter the project this endpoint receives events for."],
+    [{ scope_kind: "customer", scope_customer_id: "" }, "scope_customer_id", "Enter the customer ID this endpoint receives events for."],
+    [{ scope_kind: "project", scope_project: "a,b" }, "scope_project", "Enter one value of at most 128 characters, without commas or line breaks."],
+    [{ scope_kind: "customer", scope_customer_id: "a\nb" }, "scope_customer_id", "Enter one value of at most 128 characters, without commas or line breaks."],
     [{ event_types: "a b" }, "event_types", "An event type can't contain spaces."],
     [{ event_types: "a,\nb" }, "event_types", "The event type list is too long or contains a line break."],
+    [{ event_types: "create,bogus" }, "event_types", "One or more event types aren't recognized. Choose from the listed event types."],
   ];
   for (const [patch, field, text] of cases) {
     const code = codeFor(patch);
@@ -196,9 +251,7 @@ test("each webhook validation code names the field it belongs to, and whole-form
   }
   assert.equal(workflow.webhookFieldForCode("invalid_url"), "url");
   assert.equal(workflow.webhookFieldForCode("invalid_event_types"), "event_types");
-  const both = codeFor({ scope_project: "DEFAULT", scope_customer_id: "cus_1" });
-  assert.equal(both, "scope_set_project_or_customer_not_both");
-  for (const code of [both, "invalid_request", "mutation_failed", "constructor", "definitely_not_a_code"]) {
+  for (const code of ["invalid_request", "mutation_failed", "constructor", "definitely_not_a_code"]) {
     assert.equal(workflow.webhookFieldForCode(code), null, code);
   }
 });

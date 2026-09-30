@@ -247,6 +247,62 @@ test("webhook: create/patch reject both project and customer scopes", async () =
   assert.equal(moved.data.scope_customer_id, null);
 });
 
+// A raw INSERT straight into webhook_endpoints, bypassing the admin validators, naming only the
+// columns the row object carries.
+function insertRawEndpoint(db, id, row) {
+  const values = { url: `https://hooks.example.com/${id}`, event_types: "", created_at: 1, updated_at: 1, ...row };
+  const columns = ["id", ...Object.keys(values)];
+  db.prepare(`INSERT INTO webhook_endpoints (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`)
+    .run(id, ...Object.values(values));
+}
+
+test("the schema refuses a webhook with no scope_kind or an unknown event type", () => {
+  const db = freshDb();
+  const refused = [
+    ["no scope_kind", {}, /NOT NULL constraint failed: webhook_endpoints\.scope_kind/],
+    ["a NULL scope_kind", { scope_kind: null }, /NOT NULL constraint failed: webhook_endpoints\.scope_kind/],
+    ["an unknown scope_kind", { scope_kind: "all" }, /CHECK constraint failed/],
+    ["an unknown event token", { scope_kind: "global", event_types: "create,bogus" }, /invalid_event_types/],
+    ["a padded event token", { scope_kind: "global", event_types: "create, update" }, /invalid_event_types/],
+    ["an empty event entry", { scope_kind: "global", event_types: "create,,update" }, /invalid_event_types/],
+    ["a quoted event token", { scope_kind: "global", event_types: 'create,"' }, /malformed JSON|invalid_event_types/],
+    ["project with a NULL scope_project", { scope_kind: "project", scope_project: null }, /CHECK constraint failed/],
+    ["project with an empty scope_project", { scope_kind: "project", scope_project: "" }, /CHECK constraint failed/],
+    ["project with a customer too", { scope_kind: "project", scope_project: "P", scope_customer_id: "cus_1" }, /CHECK constraint failed/],
+    ["customer with a NULL scope_customer_id", { scope_kind: "customer", scope_customer_id: null }, /CHECK constraint failed/],
+    ["customer with an empty scope_customer_id", { scope_kind: "customer", scope_customer_id: "" }, /CHECK constraint failed/],
+    ["customer with a project too", { scope_kind: "customer", scope_customer_id: "cus_1", scope_project: "P" }, /CHECK constraint failed/],
+    ["global with a project set", { scope_kind: "global", scope_project: "P" }, /CHECK constraint failed/],
+    ["global with a customer set", { scope_kind: "global", scope_customer_id: "cus_1" }, /CHECK constraint failed/],
+    ["global with an empty project", { scope_kind: "global", scope_project: "" }, /CHECK constraint failed/],
+  ];
+  for (const [label, row, error] of refused) {
+    assert.throws(() => insertRawEndpoint(db, `refused_${label.replaceAll(" ", "_")}`, row), error, label);
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM webhook_endpoints").get().c, 0);
+
+  // Each kind with exactly its own value, and every canonical event token, is accepted.
+  insertRawEndpoint(db, "global", { scope_kind: "global", event_types: "create,revoked-override,disable,subscription.canceled_at_period_end,chargeback" });
+  insertRawEndpoint(db, "project", { scope_kind: "project", scope_project: "P" });
+  insertRawEndpoint(db, "customer", { scope_kind: "customer", scope_customer_id: "cus_1" });
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM webhook_endpoints").get().c, 3);
+
+  // The update trigger checks every change to event_types; a scope change must keep the row consistent.
+  const setEventTypes = db.prepare("UPDATE webhook_endpoints SET event_types = ? WHERE id = 'global'");
+  assert.throws(() => setEventTypes.run("create,bogus"), /invalid_event_types/);
+  assert.throws(() => setEventTypes.run("Create"), /invalid_event_types/);
+  setEventTypes.run("");
+  setEventTypes.run("update,quantity.changed");
+  assert.equal(db.prepare("SELECT event_types FROM webhook_endpoints WHERE id = 'global'").get().event_types, "update,quantity.changed");
+  assert.throws(() => db.prepare("UPDATE webhook_endpoints SET scope_kind = 'customer' WHERE id = 'project'").run(), /CHECK constraint failed/);
+  assert.throws(() => db.prepare("UPDATE webhook_endpoints SET scope_kind = NULL WHERE id = 'global'").run(), /NOT NULL constraint failed/);
+  db.prepare("UPDATE webhook_endpoints SET scope_kind = 'customer', scope_project = NULL, scope_customer_id = 'cus_2' WHERE id = 'project'").run();
+  assert.deepEqual(
+    { ...db.prepare("SELECT scope_kind, scope_project, scope_customer_id FROM webhook_endpoints WHERE id = 'project'").get() },
+    { scope_kind: "customer", scope_project: null, scope_customer_id: "cus_2" },
+  );
+});
+
 test("webhook: a non-https URL is 400 invalid_url and persists nothing", async () => {
   const db = freshDb();
   const env = devEnv(db);
