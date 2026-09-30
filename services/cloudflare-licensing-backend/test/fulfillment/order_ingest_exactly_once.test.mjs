@@ -134,6 +134,7 @@ function makeOrder(overrides = {}) {
     seq: overrides.seq ?? 1,
     order_epoch: overrides.order_epoch ?? 0,
     current_period_end: overrides.current_period_end ?? NOW + 30 * 86400,
+    customer: { id: "cus_order" },
     ...overrides,
   };
   const order = normalizeOrderEvent(raw, NOW);
@@ -239,20 +240,6 @@ function eventRow(db, eventId) {
   return db.prepare("SELECT * FROM order_events WHERE event_id = ?").get(eventId);
 }
 
-function liveSeats(db, fingerprint, now = NOW) {
-  return db
-    .prepare("SELECT COUNT(*) AS c FROM seat_checkouts WHERE license_fingerprint = ? AND heartbeat_deadline > ?")
-    .get(fingerprint, now).c;
-}
-
-function seedSeats(db, fingerprint, count, { now = NOW, deadline = NOW + 100000 } = {}) {
-  for (let i = 0; i < count; i += 1) {
-    db.prepare(
-      "INSERT INTO seat_checkouts (project, feature, license_fingerprint, seat_id, client_instance_id, mode, checked_out_at, heartbeat_deadline) VALUES (?, ?, ?, ?, ?, 'live', ?, ?)",
-    ).run(PROJECT, FEATURE, fingerprint, `seat_${i}`, `inst_${i}`, now, deadline + i);
-  }
-}
-
 // =============================================================================
 // CASE 1 — fresh apply
 // =============================================================================
@@ -294,7 +281,9 @@ for (const state of ["active", "retiring"]) {
     assert.equal(replay.status, 200); assert.deepEqual(authority(), committed);
     const superseded = await submit(env, rejected, { now: NOW + 4 });
     assert.equal(superseded.status, 200); assert.deepEqual(authority(), committed);
-    const reassignment = makeOrder({ seq: 3, customer: { id: "other" } });
+    // The subscription's customer (cus_order) is not the grant's seeded owner, so a refresh
+    // would move the owner of a grant with a bound device.
+    const reassignment = makeOrder({ seq: 3 });
     const ownerFailure = await submit(env, reassignment, { now: NOW + 5 });
     assert.equal(ownerFailure.status, 503); assert.equal(ownerFailure.body.code, "write_failed");
     assert.equal(eventRow(db, reassignment.event_id).status, "accepted");
@@ -698,27 +687,6 @@ test("case 8b: a late superseded fraud event cannot emit a false revoke audit", 
 });
 
 // =============================================================================
-// CASE 9 — orthogonal axis: seq5 quantity.changed + seq6 renewed both survive
-// =============================================================================
-test("case 9: a quantity change and a later renew on disjoint axes both survive", async () => {
-  const { db, env } = freshEnv();
-  const create = makeOrder({ seq: 1, event_id: "evt_1", intent: "subscription.active", quantity: { pool_size: 10 }, current_period_end: NOW + 30 * 86400 });
-  const fp = await fpOf(create);
-  await submit(env, create);
-  assert.equal(entRow(db, fp).pool_size, 10);
-
-  const qty = makeOrder({ seq: 5, event_id: "evt_5", intent: "quantity.changed", quantity: { pool_size: 25 } });
-  await submit(env, qty);
-  assert.equal(entRow(db, fp).pool_size, 25, "quantity change applied");
-
-  const renew = makeOrder({ seq: 6, event_id: "evt_6", intent: "subscription.renewed", current_period_end: NOW + 90 * 86400 });
-  await submit(env, renew);
-  assert.equal(entRow(db, fp).valid_until, NOW + 90 * 86400, "renew window applied");
-  assert.equal(entRow(db, fp).pool_size, 25, "the seq5 pool_size survives the seq6 renew (disjoint axes)");
-  db.close();
-});
-
-// =============================================================================
 // CASE 10 — seq reset: low seq with no epoch bump is stale_ignored; with an order_epoch
 // bump it applies.
 // =============================================================================
@@ -782,49 +750,6 @@ test("case 12: a backdated period_end on renew does not regress/expire an active
   assert.equal(body.code, "applied");
   assert.equal(entRow(db, fp).valid_until, NOW + 60 * 86400, "monotone clamp kept the later window");
   assert.equal(entRow(db, fp).status, "active", "still active, not expired");
-  db.close();
-});
-
-// =============================================================================
-// CASE 13 — seat reclaim: downgrade 50->5 with 50 live seats -> 45 evicted + usage_events('reclaim')
-// =============================================================================
-test("case 13: a 50->5 downgrade with 50 live seats evicts 45 in-batch + logs reclaim", async () => {
-  const { db, env } = freshEnv();
-  const create = makeOrder({ seq: 1, event_id: "evt_1", quantity: { pool_size: 50 }, current_period_end: NOW + 30 * 86400 });
-  const fp = await fpOf(create);
-  await submit(env, create);
-  assert.equal(entRow(db, fp).pool_size, 50);
-  seedSeats(db, fp, 50);
-  assert.equal(liveSeats(db, fp), 50);
-
-  // Downgrade to 5. The prior applied event (seq 1) had pool_size 50 -> diff 45.
-  const downgrade = makeOrder({ seq: 2, event_id: "evt_2", intent: "quantity.changed", quantity: { pool_size: 5 } });
-  const { body } = await submit(env, downgrade);
-  assert.equal(body.code, "applied");
-  assert.equal(entRow(db, fp).pool_size, 5);
-  assert.equal(liveSeats(db, fp), 5, "exactly 45 live seats evicted to fit the new pool");
-
-  const reclaims = db.prepare("SELECT COUNT(*) AS c FROM usage_events WHERE license_fingerprint = ? AND event_type = 'reclaim'").get(fp).c;
-  assert.equal(reclaims, 45, "45 reclaim usage_events recorded");
-  db.close();
-});
-
-test("case 13b: a downgrade with FEWER live seats than the prior pool never over-evicts below the new pool", async () => {
-  const { db, env } = freshEnv();
-  const create = makeOrder({ seq: 1, event_id: "evt_1", quantity: { pool_size: 50 }, current_period_end: NOW + 30 * 86400 });
-  const fp = await fpOf(create);
-  await submit(env, create);
-  // Only 8 live seats exist (well below the prior pool of 50).
-  seedSeats(db, fp, 8);
-  assert.equal(liveSeats(db, fp), 8);
-
-  // Downgrade 50 -> 5. The prior-payload diff is 45, but only 8 are live -> we must
-  // evict exactly 3 (8 - 5), leaving the new pool of 5 intact (NOT all 8).
-  const downgrade = makeOrder({ seq: 2, event_id: "evt_2", intent: "quantity.changed", quantity: { pool_size: 5 } });
-  await submit(env, downgrade);
-  assert.equal(liveSeats(db, fp), 5, "evicted only down to the new pool, never below it");
-  const reclaims = db.prepare("SELECT COUNT(*) AS c FROM usage_events WHERE license_fingerprint = ? AND event_type = 'reclaim'").get(fp).c;
-  assert.equal(reclaims, 3, "exactly 3 reclaim events");
   db.close();
 });
 
@@ -1048,66 +973,43 @@ test("case 11g: a failed invalid-order terminal write returns retryable write_fa
   db.close();
 });
 
-test("case 11h: a later explicit identity fills null once and then remains immutable", async () => {
-  const { db, env } = freshEnv();
-  const first = makeOrder({ seq: 1, event_id: "evt_null_identity" });
-  assert.equal((await submit(env, first)).body.code, "applied");
-  assert.equal(orderRow(db, "sub_A").customer_id, null);
-  assert.equal(orderRow(db, "sub_A").license_id, null);
+test("case 11h: an order naming no customer id is refused and cannot open a null identity", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  for (const customer of [undefined, { email: "buyer@example.test" }]) {
+    const refused = await ingest(env, wireOrder({ event_id: "evt_null_identity", customer, license_id: "lic_late" }));
+    assert.equal(refused.status, 400);
+    assert.equal(refused.body.code, "invalid_order");
+  }
+  assert.equal(orderRow(db, "sub_A"), undefined, "a refused order leaves no subscription identity to fill later");
+  assert.equal(countRows(db, "licenses"), 0);
 
-  const establish = makeOrder({
-    seq: 2,
-    event_id: "evt_fill_identity",
-    customer: { id: "cus_late" },
-    license_id: "lic_late",
-  });
-  assert.equal((await submit(env, establish)).body.code, "applied");
+  const establish = await ingest(env, wireOrder({ event_id: "evt_fill_identity", seq: 2, customer: { id: "cus_late" }, license_id: "lic_late" }));
+  assert.equal(establish.body.code, "applied");
   assert.equal(orderRow(db, "sub_A").customer_id, "cus_late");
   assert.equal(orderRow(db, "sub_A").license_id, "lic_late");
 
-  const transfer = makeOrder({
-    seq: 3,
-    event_id: "evt_change_identity",
-    customer: { id: "cus_other" },
-    license_id: "lic_other",
-  });
-  const rejected = await submit(env, transfer);
-  assert.equal(rejected.status, 400);
-  assert.equal(rejected.body.code, "invalid_order");
-  assert.equal(eventRow(db, transfer.event_id), undefined);
+  const transfer = await ingest(env, wireOrder({ event_id: "evt_change_identity", seq: 3, customer: { id: "cus_other" }, license_id: "lic_other" }));
+  assert.equal(transfer.status, 400);
+  assert.equal(transfer.body.code, "invalid_order");
+  assert.equal(eventRow(db, "evt_change_identity"), undefined);
   assert.equal(orderRow(db, "sub_A").customer_id, "cus_late");
   assert.equal(orderRow(db, "sub_A").license_id, "lic_late");
-  db.close();
 });
 
-test("case 11i: a stale event cannot claim a previously-null auxiliary identity", async () => {
-  const { db, env } = freshEnv();
-  const first = makeOrder({ seq: 5, event_id: "evt_identity_floor" });
-  assert.equal((await submit(env, first)).body.code, "applied");
+test("case 11i: a refused customer-less order cannot consume the order floor", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  const refused = await ingest(env, wireOrder({ event_id: "evt_identity_floor", seq: 5 }));
+  assert.equal(refused.status, 400);
+  assert.equal(refused.body.code, "invalid_order");
+  assert.equal(orderRow(db, "sub_A"), undefined);
 
-  const stale = makeOrder({
-    seq: 4,
-    event_id: "evt_stale_identity",
-    customer: { id: "cus_stale" },
-    license_id: "lic_stale",
-  });
-  const staleResult = await submit(env, stale);
-  assert.equal(staleResult.status, 200);
-  assert.equal(staleResult.body.code, "stale_ignored");
-  assert.equal(orderRow(db, "sub_A").customer_id, null);
-  assert.equal(orderRow(db, "sub_A").license_id, null);
-  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM licenses WHERE id = 'lic_stale'").get().c, 0);
-
-  const current = makeOrder({
-    seq: 6,
-    event_id: "evt_current_identity",
-    customer: { id: "cus_current" },
-    license_id: "lic_current",
-  });
-  assert.equal((await submit(env, current)).body.code, "applied");
+  // A lower seq that names its customer is the first admitted order, not a stale one.
+  const named = await ingest(env, wireOrder({ event_id: "evt_named_identity", seq: 4, customer: { id: "cus_current" }, license_id: "lic_current" }));
+  assert.equal(named.status, 200);
+  assert.equal(named.body.code, "applied");
+  assert.equal(orderRow(db, "sub_A").last_seq, 4);
   assert.equal(orderRow(db, "sub_A").customer_id, "cus_current");
   assert.equal(orderRow(db, "sub_A").license_id, "lic_current");
-  db.close();
 });
 
 test("case 11k: a compatible existing same-project license reservation is admitted", async () => {
@@ -1129,44 +1031,24 @@ test("case 11k: a compatible existing same-project license reservation is admitt
   db.close();
 });
 
-test("case 11j: concurrent identity claims belong only to an admitted event", async () => {
+test("case 11j: concurrent license claims belong only to an admitted event", async () => {
   const { db, env } = freshEnv();
+  // The first order fixes the customer; the license is still unset.
   assert.equal((await submit(env, makeOrder({ seq: 1, event_id: "evt_identity_seed" }))).body.code, "applied");
   const candidates = [
-    makeOrder({ seq: 2, event_id: "evt_identity_low", customer: { id: "cus_low" }, license_id: "lic_low" }),
-    makeOrder({ seq: 3, event_id: "evt_identity_high", customer: { id: "cus_high" }, license_id: "lic_high" }),
+    makeOrder({ seq: 2, event_id: "evt_identity_low", license_id: "lic_low" }),
+    makeOrder({ seq: 3, event_id: "evt_identity_high", license_id: "lic_high" }),
   ];
   const outcomes = await Promise.all(candidates.map((candidate) => submit(env, candidate)));
   assert.equal(outcomes.filter((outcome) => outcome.body.code === "applied").length, 1);
   assert.equal(outcomes.filter((outcome) => outcome.body.code === "invalid_order").length, 1);
   const identity = orderRow(db, "sub_A");
-  const ownerIndex = identity.customer_id === "cus_low" ? 0 : 1;
+  assert.equal(identity.customer_id, "cus_order");
+  const ownerIndex = identity.license_id === "lic_low" ? 0 : 1;
   assert.equal(identity.license_id, ownerIndex === 0 ? "lic_low" : "lic_high");
   assert.equal(outcomes[ownerIndex].body.code, "applied");
   assert.notEqual(eventRow(db, candidates[ownerIndex].event_id), undefined);
   assert.equal(eventRow(db, candidates[1 - ownerIndex].event_id), undefined);
-  db.close();
-});
-
-test("case 13d: an intervening order without quantity cannot hide a later downgrade reclaim", async () => {
-  const { db, env } = freshEnv();
-  const create = makeOrder({ seq: 1, event_id: "evt_1", quantity: { pool_size: 50 } });
-  const fp = await fpOf(create);
-  await submit(env, create);
-  seedSeats(db, fp, 50);
-
-  const renew = makeOrder({ seq: 2, event_id: "evt_2", intent: "subscription.renewed" });
-  const renewed = await submit(env, renew);
-  assert.equal(renewed.body.code, "applied");
-  assert.equal(entRow(db, fp).pool_size, 50);
-
-  const downgrade = makeOrder({ seq: 3, event_id: "evt_3", intent: "quantity.changed", quantity: { pool_size: 5 } });
-  const applied = await submit(env, downgrade);
-  assert.equal(applied.body.code, "applied");
-  assert.equal(entRow(db, fp).pool_size, 5);
-  assert.equal(liveSeats(db, fp), 5);
-  const reclaims = db.prepare("SELECT COUNT(*) AS c FROM usage_events WHERE license_fingerprint = ? AND event_type = 'reclaim'").get(fp).c;
-  assert.equal(reclaims, 45, "the live pool, not an unrelated prior payload, drives reclaim");
   db.close();
 });
 
@@ -1197,33 +1079,6 @@ test("case 8b: a newer missing-entitlement intent waits for an earlier accepted 
   assert.equal(entRow(db, fp).last_applied_order_seq, 2);
   assert.equal(eventRow(db, pastDue.event_id).status, "processed");
   assert.notEqual(JSON.parse(eventRow(db, pastDue.event_id).result_json).code, "no_entitlement");
-  db.close();
-});
-
-test("case 13c: a stale accepted capacity event cannot reclaim seats below a newer floor", async () => {
-  const { db, env } = freshEnv();
-  const create = makeOrder({ seq: 1, event_id: "evt_1", quantity: { pool_size: 50 } });
-  const fp = await fpOf(create);
-  await submit(env, create);
-  seedSeats(db, fp, 50);
-
-  const downgrade5 = makeOrder({ seq: 5, event_id: "evt_5", intent: "quantity.changed", quantity: { pool_size: 5 } });
-  const downgrade20 = makeOrder({ seq: 6, event_id: "evt_6", intent: "quantity.changed", quantity: { pool_size: 20 } });
-  await env.DB.batch(buildAcceptBatch(env, downgrade5, KEY_ID, digestOf(downgrade5), JSON.stringify(downgrade5), NOW, fp, "derived"));
-  await env.DB.batch(buildAcceptBatch(env, downgrade20, KEY_ID, digestOf(downgrade20), JSON.stringify(downgrade20), NOW, fp, "derived"));
-
-  const newer = await applyOrderEvent(env, downgrade20, fp, "derived", NOW, create);
-  assert.equal(newer.body.code, "applied");
-  assert.equal(entRow(db, fp).pool_size, 20);
-  assert.equal(liveSeats(db, fp), 20);
-
-  const stale = await applyOrderEvent(env, downgrade5, fp, "derived", NOW, create);
-  assert.equal(stale.body.code, "superseded");
-  assert.equal(entRow(db, fp).pool_size, 20);
-  assert.equal(entRow(db, fp).last_applied_order_seq, 6);
-  assert.equal(liveSeats(db, fp), 20, "the stale event cannot reclaim to its lower target");
-  const reclaims = db.prepare("SELECT COUNT(*) AS c FROM usage_events WHERE license_fingerprint = ? AND event_type = 'reclaim'").get(fp).c;
-  assert.equal(reclaims, 30, "only the winning 50->20 downgrade emits reclaim analytics");
   db.close();
 });
 
@@ -1263,7 +1118,7 @@ const TERMINAL_REVOCATION_RACE_CASES = [
   {
     label: "active refresh",
     intent: "subscription.active",
-    overrides: { current_period_end: NOW + 90 * 86400, quantity: { pool_size: 10 } },
+    overrides: { current_period_end: NOW + 90 * 86400, quantity: { max_active_devices: 10 } },
   },
   {
     label: "renewal",
@@ -1282,7 +1137,7 @@ const TERMINAL_REVOCATION_RACE_CASES = [
   {
     label: "quantity downgrade",
     intent: "quantity.changed",
-    overrides: { quantity: { pool_size: 1 } },
+    overrides: { quantity: { max_active_devices: 1 } },
   },
 ];
 
@@ -1292,11 +1147,10 @@ for (const scenario of TERMINAL_REVOCATION_RACE_CASES) {
     const active = makeOrder({
       seq: 1,
       event_id: `evt_seed_${scenario.intent}`,
-      quantity: { pool_size: 4 },
+      quantity: { max_active_devices: 4 },
     });
     const fp = await fpOf(active);
     assert.equal((await submit(env, active)).body.code, "applied");
-    seedSeats(db, fp, 4);
 
     const fraud = makeOrder({ seq: 2, event_id: `evt_fraud_${scenario.intent}`, intent: "fraud.confirmed" });
     const candidate = makeOrder({
@@ -1341,7 +1195,7 @@ for (const scenario of TERMINAL_REVOCATION_RACE_CASES) {
     assert.equal(candidateOutcome.body.code, "entitlement_revoked");
 
     const finalEntitlement = entRow(db, fp);
-    for (const field of ["status", "revocation_seq", "last_applied_order_epoch", "last_applied_order_seq", "valid_until", "pool_size"]) {
+    for (const field of ["status", "revocation_seq", "last_applied_order_epoch", "last_applied_order_seq", "valid_until", "max_active_devices"]) {
       assert.equal(finalEntitlement[field], afterFraud[field], `${field} remains at the revocation winner`);
     }
     const candidateEvent = eventRow(db, candidate.event_id);
@@ -1357,12 +1211,6 @@ for (const scenario of TERMINAL_REVOCATION_RACE_CASES) {
       1,
       "the winning revoke emits exactly one audit",
     );
-    assert.equal(liveSeats(db, fp), 4, "terminal arbitration cannot reclaim seats");
-    assert.equal(
-      db.prepare("SELECT COUNT(*) AS c FROM usage_events WHERE license_fingerprint = ? AND event_type = 'reclaim'").get(fp).c,
-      0,
-      "terminal arbitration emits no reclaim analytics",
-    );
 
     const cachedRetry = await submit(env, candidate);
     assert.equal(cachedRetry.status, 409);
@@ -1373,9 +1221,9 @@ for (const scenario of TERMINAL_REVOCATION_RACE_CASES) {
 }
 
 // =============================================================================
-// CASE 15 — renew carry-forward: customer/license not nulled on a renew omitting them.
+// CASE 15 — renew carry-forward: an omitted license is not nulled on a renew.
 // =============================================================================
-test("case 15: a renew omitting customer/license carries the prior values forward (not nulled)", async () => {
+test("case 15: a renew names its customer and carries an omitted license forward (not nulled)", async () => {
   const { db, env } = freshEnv();
   const create = makeOrder({
     seq: 1,
@@ -1389,11 +1237,12 @@ test("case 15: a renew omitting customer/license carries the prior values forwar
   assert.equal(entRow(db, fp).customer_id, "cus_1");
   assert.equal(entRow(db, fp).license_id, "lic_1");
 
-  // Renew with NO customer/license fields -> they must be carried forward, not nulled.
-  const renew = makeOrder({ seq: 2, event_id: "evt_2", intent: "subscription.renewed", current_period_end: NOW + 90 * 86400 });
-  await submit(env, renew);
-  assert.equal(entRow(db, fp).customer_id, "cus_1", "customer_id carried forward");
+  // Renew with the customer but NO license -> the license is carried forward, not nulled.
+  const renew = makeOrder({ seq: 2, event_id: "evt_2", intent: "subscription.renewed", customer: { id: "cus_1" }, current_period_end: NOW + 90 * 86400 });
+  assert.equal((await submit(env, renew)).body.code, "applied");
+  assert.equal(entRow(db, fp).customer_id, "cus_1");
   assert.equal(entRow(db, fp).license_id, "lic_1", "license_id carried forward");
+  assert.equal(entRow(db, fp).enforcement_mode, "device_bound_v1");
 
   // The customer email was normalized (trim + lowercase) at upsert time.
   const cust = db.prepare("SELECT email FROM customers WHERE id = 'cus_1'").get();
@@ -1403,11 +1252,11 @@ test("case 15: a renew omitting customer/license carries the prior values forwar
 
 // =============================================================================
 // CASE 16 — intent coverage: past_due->disabled reversible; resumed->active;
-// quantity->capacity-only; fraud->revoked terminal.
+// quantity->device-limit only; fraud->revoked terminal.
 // =============================================================================
 test("case 16: intent coverage (disable reversible, resume, quantity-only, fraud terminal)", async () => {
   const { db, env } = freshEnv();
-  const create = makeOrder({ seq: 1, event_id: "evt_1", quantity: { pool_size: 3 }, current_period_end: NOW + 30 * 86400 });
+  const create = makeOrder({ seq: 1, event_id: "evt_1", quantity: { max_active_devices: 3 }, current_period_end: NOW + 30 * 86400 });
   const fp = await fpOf(create);
   await submit(env, create);
   assert.equal(entRow(db, fp).status, "active");
@@ -1421,9 +1270,10 @@ test("case 16: intent coverage (disable reversible, resume, quantity-only, fraud
   await submit(env, makeOrder({ seq: 3, event_id: "evt_3", intent: "subscription.resumed" }));
   assert.equal(entRow(db, fp).status, "active", "resume re-enabled a reversibly-disabled entitlement");
 
-  // quantity.changed -> capacity only (status + window untouched)
-  await submit(env, makeOrder({ seq: 4, event_id: "evt_4", intent: "quantity.changed", quantity: { pool_size: 9 } }));
-  assert.equal(entRow(db, fp).pool_size, 9);
+  // quantity.changed -> device limit only (status + window untouched)
+  await submit(env, makeOrder({ seq: 4, event_id: "evt_4", intent: "quantity.changed", quantity: { max_active_devices: 9 } }));
+  assert.equal(entRow(db, fp).max_active_devices, 9);
+  assert.equal(entRow(db, fp).pool_size, 0);
   assert.equal(entRow(db, fp).status, "active");
   assert.equal(entRow(db, fp).valid_until, windowAfterCreate, "quantity change did not touch the window");
 

@@ -241,10 +241,11 @@ between durable accept and apply. Controlled crash redrive therefore remains
 explicitly blocked external evidence, and the order artifact remains partial
 and non-promotable despite the cached-retry pass.
 
-Backend contract tests separately require that, once the durable order row has
-non-null customer/license links, contradictory explicit values for the same
-subscription/project/feature return terminal `400 invalid_order`, including on
-replay; omission carries the existing values forward. The protected staging
+Backend contract tests separately require that every order names its customer,
+and that, once the durable order row has customer/license links, contradictory
+explicit values for the same subscription/project/feature return terminal
+`400 invalid_order`, including on replay; an omitted license carries the
+existing value forward. The protected staging
 sequence above does not exercise that conflict path and must not be cited as
 its deployed proof.
 

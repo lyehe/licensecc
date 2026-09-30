@@ -14,6 +14,7 @@
 // KNOWN_INTENTS is shared with the admin console's webhook event-types validator (a different
 // deployable), so it lives in the licensing-domain package -- imported here, never duplicated.
 import { KNOWN_INTENTS } from "@licensecc/licensing-domain/orders/intents";
+import { DISABLE_INTENTS, REVOKE_INTENTS } from "./order_mutation.mjs";
 
 export { clampValidUntil, mapIntentToMutation } from "./order_mutation.mjs";
 
@@ -34,20 +35,26 @@ const ORDER_FIELDS = new Set([
   "event_id", "subscription_id", "project", "feature", "intent", "seq", "order_epoch",
   "license_fingerprint", "current_period_end", "occurred_at", "license_id", "quantity", "customer",
 ]);
-const QUANTITY_FIELDS = new Set(["pool_size", "max_active_devices"]);
+const QUANTITY_FIELDS = new Set(["max_active_devices"]);
 const CUSTOMER_FIELDS = new Set(["id", "external_ref", "name", "email"]);
 
-// Grace window (seconds) tolerated past current_period_end before a non-cancel
-// intent is rejected as invalid_order. Absorbs provider/clock skew so a renewal
+// Grace window (seconds) tolerated past current_period_end before an intent that
+// grants access is rejected as invalid_order. Absorbs provider/clock skew so a renewal
 // landing slightly after the old period end is not spuriously refused, while a
 // clearly-historical period_end (replayed/forged) is still rejected. Resolved
 // ambiguity: the blueprint names GRACE but not a value; 1 day matches the order
 // of magnitude of provider webhook retry/redrive windows.
 const GRACE_SECONDS = 86400;
 
-// Intents that are allowed to carry a backdated current_period_end (a cancellation
-// at/after period end is the WHOLE point of these intents).
-const CANCEL_INTENTS = new Set(["subscription.canceled_at_period_end"]);
+// Withdrawals may carry a backdated current_period_end. A cancellation at/after period
+// end is the whole point of that intent, and a disable or revoke never reads the period
+// end: a chargeback or dunning notice routinely arrives after the period it concerns,
+// and a withdrawal must always apply.
+const PERIOD_EXEMPT_INTENTS = new Set([
+  "subscription.canceled_at_period_end",
+  ...DISABLE_INTENTS,
+  ...REVOKE_INTENTS,
+]);
 
 /**
  * A bounded, single-line, separator-free string id (matches src/routes/verify.ts safeString
@@ -98,7 +105,7 @@ export function orderPeriodIsAcceptable(order, now) {
   if (safeUnixSeconds(now) === null || typeof order !== "object" || order === null) return false;
   return !(
     order.current_period_end !== undefined &&
-    !CANCEL_INTENTS.has(order.intent) &&
+    !PERIOD_EXEMPT_INTENTS.has(order.intent) &&
     order.current_period_end <= now - GRACE_SECONDS
   );
 }
@@ -109,8 +116,8 @@ export function orderPeriodIsAcceptable(order, now) {
  * Shape (blueprint):
  *   OrderEvent { event_id, subscription_id, order_epoch?=0, seq, intent, project,
  *     feature?, license_fingerprint?, current_period_end?,
- *     quantity?{pool_size?,max_active_devices?},
- *     customer?{id?,external_ref?,name?,email?}, license_id?, occurred_at? }
+ *     quantity?{max_active_devices},
+ *     customer{id,external_ref?,name?,email?}, license_id?, occurred_at? }
  *
  * Rules:
  *   - event_id / subscription_id / project are required safeString ids.
@@ -119,9 +126,10 @@ export function orderPeriodIsAcceptable(order, now) {
  *   - seq is a required non-negative integer; order_epoch defaults to 0.
  *   - license_fingerprint, when present, must be 64-hex.
  *   - current_period_end / occurred_at, when present, are safe unix seconds.
- *   - quantity pool_size / max_active_devices, when present, are non-negative ints.
+ *   - quantity.max_active_devices, when quantity is present, is a non-negative int.
+ *   - customer.id is required on every intent, withdrawals included.
  *   - unknown intent -> invalid_order.
- *   - current_period_end <= now - GRACE for a non-cancel intent -> invalid_order
+ *   - current_period_end <= now - GRACE for an intent that grants access -> invalid_order
  *     (a backdated period end can never expire/deny an active customer here).
  */
 function normalizeOrderEventInternal(parsedBody, now, enforceHistoricalPeriodEnd) {
@@ -213,75 +221,55 @@ function normalizeOrderEventInternal(parsedBody, now, enforceHistoricalPeriodEnd
     }
   }
 
-  // Optional quantity { pool_size?, max_active_devices? } -- non-negative ints.
-  /** @type {{pool_size?: number, max_active_devices?: number} | undefined} */
+  // Optional quantity { max_active_devices } -- a non-negative int. A pool size is not
+  // an order field: every order grant is a protected, device-bound grant.
+  /** @type {{max_active_devices: number} | undefined} */
   let quantity = undefined;
   if (parsedBody.quantity !== undefined && parsedBody.quantity !== null) {
     const q = parsedBody.quantity;
     if (typeof q !== "object" || Array.isArray(q) || !hasOnlyFields(q, QUANTITY_FIELDS)) {
       return { error: "invalid_order" };
     }
-    const out = {};
-    if (q.pool_size !== undefined && q.pool_size !== null) {
-      if (!isNonNegativeInteger(q.pool_size)) {
-        return { error: "invalid_order" };
-      }
-      out.pool_size = q.pool_size;
-    }
-    if (q.max_active_devices !== undefined && q.max_active_devices !== null) {
-      if (!isNonNegativeInteger(q.max_active_devices)) {
-        return { error: "invalid_order" };
-      }
-      out.max_active_devices = q.max_active_devices;
-    }
-    if (Object.keys(out).length === 0) return { error: "invalid_order" };
-    quantity = out;
+    if (!isNonNegativeInteger(q.max_active_devices)) return { error: "invalid_order" };
+    quantity = { max_active_devices: q.max_active_devices };
   }
   if (intent === "quantity.changed" && quantity === undefined) return { error: "invalid_order" };
 
-  // Optional customer { id?, external_ref?, name?, email? }. ids are bounded safe
-  // strings; name/email are looser (not embedded into any signed line) but bounded.
-  /** @type {{id?: string, external_ref?: string, name?: string, email?: string} | undefined} */
-  let customer = undefined;
-  if (parsedBody.customer !== undefined && parsedBody.customer !== null) {
-    const c = parsedBody.customer;
-    if (typeof c !== "object" || Array.isArray(c) || !hasOnlyFields(c, CUSTOMER_FIELDS)) {
+  // Required customer { id, external_ref?, name?, email? } on every intent: a grant always
+  // has an owner, and a withdrawal names the same customer as the subscription it ends.
+  // ids are bounded safe strings; name/email are looser (not embedded into any signed
+  // line) but bounded.
+  const c = parsedBody.customer;
+  if (typeof c !== "object" || c === null || Array.isArray(c) || !hasOnlyFields(c, CUSTOMER_FIELDS)) {
+    return { error: "invalid_order" };
+  }
+  const customerId = safeString(c.id, MAX_ID_SIZE);
+  if (customerId === null) return { error: "invalid_order" };
+  /** @type {{id: string, external_ref?: string, name?: string, email?: string}} */
+  const customer = { id: customerId };
+  if (c.external_ref !== undefined && c.external_ref !== null) {
+    const ref = safeString(c.external_ref, MAX_ID_SIZE);
+    if (ref === null) {
       return { error: "invalid_order" };
     }
-    const out = {};
-    if (c.id !== undefined && c.id !== null) {
-      const id = safeString(c.id, MAX_ID_SIZE);
-      if (id === null) {
-        return { error: "invalid_order" };
-      }
-      out.id = id;
+    customer.external_ref = ref;
+  }
+  if (c.name !== undefined && c.name !== null) {
+    if (typeof c.name !== "string" || c.name.length > MAX_ID_SIZE) {
+      return { error: "invalid_order" };
     }
-    if (c.external_ref !== undefined && c.external_ref !== null) {
-      const ref = safeString(c.external_ref, MAX_ID_SIZE);
-      if (ref === null) {
-        return { error: "invalid_order" };
-      }
-      out.external_ref = ref;
+    customer.name = c.name;
+  }
+  if (c.email !== undefined && c.email !== null) {
+    if (typeof c.email !== "string" || c.email.length > MAX_ID_SIZE) {
+      return { error: "invalid_order" };
     }
-    if (c.name !== undefined && c.name !== null) {
-      if (typeof c.name !== "string" || c.name.length > MAX_ID_SIZE) {
-        return { error: "invalid_order" };
-      }
-      out.name = c.name;
-    }
-    if (c.email !== undefined && c.email !== null) {
-      if (typeof c.email !== "string" || c.email.length > MAX_ID_SIZE) {
-        return { error: "invalid_order" };
-      }
-      out.email = c.email;
-    }
-    if (Object.keys(out).length === 0) return { error: "invalid_order" };
-    customer = out;
+    customer.email = c.email;
   }
 
   // A backdated period end may not deny/expire an active customer. Reject a clearly
-  // historical period_end for non-cancel intents; cancellations are exempt (their
-  // whole purpose is to wind down at/after a past period end).
+  // historical period_end for an intent that grants access; withdrawals are exempt
+  // (see PERIOD_EXEMPT_INTENTS).
   if (enforceHistoricalPeriodEnd && !orderPeriodIsAcceptable({ current_period_end, intent }, now)) {
     return { error: "invalid_order" };
   }
@@ -298,7 +286,7 @@ function normalizeOrderEventInternal(parsedBody, now, enforceHistoricalPeriodEnd
   if (license_fingerprint !== undefined) order.license_fingerprint = license_fingerprint;
   if (current_period_end !== undefined) order.current_period_end = current_period_end;
   if (quantity !== undefined) order.quantity = quantity;
-  if (customer !== undefined) order.customer = customer;
+  order.customer = customer;
   if (license_id !== undefined) order.license_id = license_id;
   if (occurred_at !== undefined) order.occurred_at = occurred_at;
   return order;

@@ -503,8 +503,8 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   `ORDER_SIGNER_SCOPES` entry containing at least one non-empty `project` or
   `customer_id` constraint and no other fields. Empty entries, misspellings,
   inherited property names, and malformed values fail configuration closed.
-  A customer-scoped sender must include that customer id on every event,
-  including events whose entitlement mutation would otherwise carry it forward.
+  A customer-scoped signer is checked against the `customer.id` every event
+  carries.
 - **Mode.** `ORDER_INGEST_MODE`: `required` (default), `soft` (verify + observe,
   never mutates), `off` (dev-only, 404). `ORDER_INGEST_AUDIENCE` blocks
   cross-environment replay and is asserted non-empty in `required`.
@@ -515,11 +515,25 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   replayed`, while a freshly signed same-event retry can reach the durable
   event cache. A nonce-store error is a fail-closed `503`.
 - **Request shape.** The body is a closed object: `event_id`,
-  `subscription_id`, `project`, `intent`, and non-negative `seq` are required;
+  `subscription_id`, `project`, `intent`, non-negative `seq`, and
+  `customer.id` are required on every intent, revocations included;
   `feature` defaults to `project`. Unknown top-level, `customer`, or `quantity`
-  fields return `400 invalid_order`. Quantity supports only non-negative
-  `pool_size` and `max_active_devices`, must be non-empty when present, and is
-  required for `quantity.changed`, so a typo cannot consume the monotonic floor.
+  fields return `400 invalid_order`. Quantity carries only a non-negative
+  `max_active_devices` and is required for `quantity.changed`, so a typo cannot
+  consume the monotonic floor; `quantity.pool_size` returns `400 invalid_order`.
+  A billing integration must therefore send the customer id on every event,
+  including a revocation or cancellation for which its provider supplies only the
+  subscription id.
+- **Grants.** `subscription.active` creates or refreshes a protected
+  (`device_bound_v1`) grant owned by the order's customer, with no pool and a
+  device limit of `quantity.max_active_devices` (default 1); `quantity.changed`
+  changes only that device limit. The withdrawals (`subscription.past_due`,
+  `subscription.paused`, `subscription.payment_failed`,
+  `subscription.canceled_at_period_end`, `fraud.confirmed`, `chargeback`)
+  always apply: a disabled customer, a grant moved to another owner, or a period
+  that ended long ago never refuses them, and they never change the grant's owner
+  or license. A withdrawal for a subscription with no grant returns `200
+  no_entitlement` and creates nothing.
 - **Exactly-once.** Accept-then-apply: a durable cursor advance on
   `orders(order_epoch, last_seq)` + an event claim into `order_events` commit in
   one atomic batch (Step 3); the entitlement mutation and the `order_events`
@@ -528,10 +542,10 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   is observably `stale_ignored`; a crashed `accepted` row re-drives idempotently
   (the floor makes re-apply self-superseding). A fingerprint belongs to exactly
   one subscription (`409 fingerprint_owned`).
-  The subscription fingerprint/origin pair and any established non-null
-  customer/license ids are immutable after first use. Omitting customer/license
-  fields carries the established entitlement values forward; contradictory
-  explicit values are not a transfer operation and return `400 invalid_order`.
+  The subscription fingerprint/origin pair, its customer id, and any established
+  license id are immutable after first use. Omitting `license_id` carries the
+  established license forward; a contradictory customer or license id is not a
+  transfer operation and returns `400 invalid_order`.
   A global license id also cannot be rebound across projects or contradictory
   explicit customers. These identities are rechecked before admission.
 - **Responses.** `200 applied` (with the entitlement snapshot + `license_fingerprint`),

@@ -231,11 +231,12 @@ test("OrderRequest matches the runtime normalizer's closed contract", () => {
     "subscription.payment_failed", "subscription.canceled_at_period_end", "subscription.resumed",
     "quantity.changed", "fraud.confirmed", "chargeback",
   ];
-  assert.deepEqual([...schema.required].sort(), ["event_id", "intent", "project", "seq", "subscription_id"]);
+  assert.deepEqual([...schema.required].sort(), ["customer", "event_id", "intent", "project", "seq", "subscription_id"]);
+  assert.deepEqual(schema.properties.customer.required, ["id"]);
   assert.equal(schema.properties.feature.description, "Defaults to project when omitted.");
   assert.equal(schema.properties.ts, undefined);
   assert.deepEqual(schema.properties.intent.enum, intents);
-  assert.deepEqual(Object.keys(schema.properties.quantity.properties).sort(), ["max_active_devices", "pool_size"]);
+  assert.deepEqual(Object.keys(schema.properties.quantity.properties), ["max_active_devices"]);
   assert.equal(schema.additionalProperties, false);
   assert.equal(schema.properties.quantity.additionalProperties, false);
   assert.equal(schema.properties.customer.additionalProperties, false);
@@ -248,10 +249,17 @@ test("OrderRequest matches the runtime normalizer's closed contract", () => {
       project: "DEFAULT",
       intent,
       seq: 1,
-      ...(intent === "quantity.changed" ? { quantity: { pool_size: 1 } } : {}),
+      customer: { id: "cus_A" },
+      ...(intent === "quantity.changed" ? { quantity: { max_active_devices: 1 } } : {}),
     };
     const normalized = normalizeOrderEventForReplay(body, now);
     assert.equal(normalized.error, undefined, intent);
     assert.equal(normalized.feature, "DEFAULT", intent);
+    const { customer: _omitted, ...withoutCustomer } = body;
+    assert.equal(normalizeOrderEventForReplay(withoutCustomer, now).error, "invalid_order", intent);
   }
+  assert.equal(normalizeOrderEventForReplay({
+    event_id: "evt_pool", subscription_id: "sub_A", project: "DEFAULT", intent: "quantity.changed", seq: 1,
+    customer: { id: "cus_A" }, quantity: { pool_size: 1 },
+  }, now).error, "invalid_order");
 });

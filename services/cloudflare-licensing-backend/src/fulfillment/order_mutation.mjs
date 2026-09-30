@@ -2,14 +2,14 @@
 // module stays reviewable while remaining Worker-safe and side-effect-free.
 
 // Reversible "soft disable" intents (a payment problem the customer can fix).
-const DISABLE_INTENTS = new Set([
+export const DISABLE_INTENTS = new Set([
   "subscription.past_due",
   "subscription.paused",
   "subscription.payment_failed",
 ]);
 
 // Terminal revoke intents (fraud) -- the ONLY path that revokes.
-const REVOKE_INTENTS = new Set(["fraud.confirmed", "chargeback"]);
+export const REVOKE_INTENTS = new Set(["fraud.confirmed", "chargeback"]);
 
 /**
  * Monotone-forward valid_until clamp: max(currentPeriodEnd ?? 0, prevValidUntil ?? 0).
@@ -26,16 +26,14 @@ export function clampValidUntil(currentPeriodEnd, prevValidUntil) {
  * Stage-4 handler turns the descriptor into a shared-mutator call inside the atomic
  * accept/apply batch.
  *
- *   prev = the current entitlement row (or null if none exists yet). Capacity
- *          downgrade reclaim is derived from this authoritative live row; the
- *          caller's floor guard makes a stale or duplicate redrive reclaim-inert.
+ *   prev = the current entitlement row (or null if none exists yet).
  *
  * Descriptor shape:
  *   {
- *     kind: 'create'|'patch'|'transition'|'capacity'|'reclaim'|'none',
+ *     kind: 'create'|'patch'|'transition'|'capacity'|'none',
  *     status?, valid_until?, valid_from?, capacity?, eventType?,
  *     terminal?: 'no_entitlement'|'revoked',
- *     reclaim?: { from, to },
+ *     keepOwner?: true,
  *   }
  *
  * Invariants enforced here:
@@ -93,10 +91,11 @@ export function mapIntentToMutation(order, prev) {
     case "subscription.canceled_at_period_end": {
       // Keep active until period end; NEVER create. valid_until clamps to the
       // (monotone) period end so access winds down exactly when the period ends.
+      // Like every withdrawal it keeps the stored owner and license.
       if (prev === null || prev === undefined) {
         return { kind: "none", terminal: "no_entitlement" };
       }
-      return withWindow({ kind: "patch", status: "active", eventType: "update" });
+      return withWindow({ kind: "patch", status: "active", eventType: "update", keepOwner: true });
     }
 
     case "subscription.resumed": {
@@ -108,26 +107,11 @@ export function mapIntentToMutation(order, prev) {
     }
 
     case "quantity.changed": {
-      // Capacity change on an existing entitlement (never creates). A downgrade
-      // (new pool_size below the authoritative current entitlement pool_size) also
-      // emits a reclaim descriptor. The apply batch conditions deletion on this
-      // event winning the entitlement floor and accepted->processed transition, so
-      // stale and duplicate redrives cannot lose or double-apply the reclaim.
+      // Device-limit change on an existing entitlement (never creates).
       if (prev === null || prev === undefined) {
         return { kind: "none", terminal: "no_entitlement" };
       }
-      const capacity = order.quantity ?? {};
-      const newPool = capacity.pool_size;
-      const priorPool = typeof prev.pool_size === "number" ? prev.pool_size : undefined;
-      const descriptor = { kind: "capacity", capacity, eventType: "update" };
-      if (
-        typeof newPool === "number" &&
-        typeof priorPool === "number" &&
-        newPool < priorPool
-      ) {
-        descriptor.reclaim = { from: priorPool, to: newPool };
-      }
-      return descriptor;
+      return { kind: "capacity", capacity: order.quantity ?? {}, eventType: "update" };
     }
 
     default:

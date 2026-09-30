@@ -102,7 +102,7 @@ repository-owned third-party `src/library/ini/` sources are excluded.
 | --- | ---: | --- |
 | `src/library/licensecc.cpp` | 916 | C++ public API orchestration; changes pair with public ABI tests and CMake packaging. |
 | `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 1,260 | Admin contract components; API-contract ownership stays with the admin deployable. |
-| `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,147 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
+| `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,079 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
 | `services/cloudflare-licensing-backend/src/routes/verify.ts` | 933 | Backend verification route and abuse controls; it is not a shared package concern. |
 | `services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx` | 733 | Catalog list/mutation coordinator; consequence-heavy import/projection workflows and presentation stay in sibling catalog modules. |
 | `services/cloudflare-customer-portal/src/ui/features/devices/DevicesFeature.tsx` | 404 | Portal device/floating-seat workflow; portal-local state and consequences remain feature-owned. |
@@ -118,7 +118,7 @@ Composition roots remain intentionally small. Current counts are:
 | Portal Worker `src/worker/index.ts` / `src/worker/app.ts` | 2 | 84 |
 | Portal UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 6 | 348 |
 
-Current production-source totals are 23,648 lines for license-admin, 8,889 lines for licensing-backend, 8,482 lines for customer-portal, and 1,348 lines for D1-backup. These counts include tracked and non-ignored, untracked
+Current production-source totals are 23,648 lines for license-admin, 8,792 lines for licensing-backend, 8,482 lines for customer-portal, and 1,348 lines for D1-backup. These counts include tracked and non-ignored, untracked
 TypeScript, TSX, JavaScript, and MJS under each service's `src` tree. They are
 evidence for responsibility review, not a reason
 to move code without a behavioral or ownership boundary.

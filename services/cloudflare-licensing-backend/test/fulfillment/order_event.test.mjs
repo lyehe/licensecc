@@ -28,6 +28,7 @@ function baseBody(overrides = {}) {
     intent: "subscription.active",
     seq: 1,
     current_period_end: NOW + 30 * 86400,
+    customer: { id: "cus_1" },
     ...overrides,
   };
 }
@@ -53,11 +54,11 @@ test("normalizeOrderEvent defaults feature to project when omitted", () => {
   assert.equal(out.feature, "DEFAULT", "feature falls back to project");
 });
 
-test("normalizeOrderEvent accepts optional quantity/customer/license_id/occurred_at", () => {
+test("normalizeOrderEvent accepts quantity, customer details, license_id and occurred_at", () => {
   const out = normalizeOrderEvent(
     baseBody({
       intent: "quantity.changed",
-      quantity: { pool_size: 5, max_active_devices: 3 },
+      quantity: { max_active_devices: 3 },
       customer: { id: "cus_1", external_ref: "ext_1", name: "Acme", email: "a@b.co" },
       license_id: "lic_1",
       occurred_at: NOW - 10,
@@ -65,7 +66,7 @@ test("normalizeOrderEvent accepts optional quantity/customer/license_id/occurred
     NOW,
   );
   assert.equal(out.error, undefined);
-  assert.deepEqual(out.quantity, { pool_size: 5, max_active_devices: 3 });
+  assert.deepEqual(out.quantity, { max_active_devices: 3 });
   assert.deepEqual(out.customer, { id: "cus_1", external_ref: "ext_1", name: "Acme", email: "a@b.co" });
   assert.equal(out.license_id, "lic_1");
   assert.equal(out.occurred_at, NOW - 10);
@@ -121,7 +122,7 @@ test("normalizeOrderEvent accepts every documented intent", () => {
     "quantity.changed", "fraud.confirmed", "chargeback",
   ];
   for (const intent of intents) {
-    const overrides = intent === "quantity.changed" ? { intent, quantity: { pool_size: 1 } } : { intent };
+    const overrides = intent === "quantity.changed" ? { intent, quantity: { max_active_devices: 1 } } : { intent };
     assert.equal(normalizeOrderEvent(baseBody(overrides), NOW).error, undefined, intent);
   }
 });
@@ -129,7 +130,7 @@ test("normalizeOrderEvent accepts every documented intent", () => {
 test("normalizeOrderEvent rejects unknown request, customer, and quantity fields", () => {
   assert.equal(normalizeOrderEvent(baseBody({ typo: true }), NOW).error, "invalid_order");
   assert.equal(normalizeOrderEvent(baseBody({ customer: { id: "cus_1", emali: "x@example.test" } }), NOW).error, "invalid_order");
-  assert.equal(normalizeOrderEvent(baseBody({ quantity: { pool_size: 1, lease_seconds: 60 } }), NOW).error, "invalid_order");
+  assert.equal(normalizeOrderEvent(baseBody({ quantity: { max_active_devices: 1, lease_seconds: 60 } }), NOW).error, "invalid_order");
 });
 
 test("normalizeOrderEvent rejects non-non-negative-integer seq/order_epoch", () => {
@@ -154,12 +155,12 @@ test("normalizeOrderEvent rejects bad times", () => {
 });
 
 test("normalizeOrderEvent rejects bad quantity values", () => {
-  assert.equal(normalizeOrderEvent(baseBody({ quantity: { pool_size: -1 } }), NOW).error, "invalid_order");
-  assert.equal(normalizeOrderEvent(baseBody({ quantity: { pool_size: 1.5 } }), NOW).error, "invalid_order");
+  assert.equal(normalizeOrderEvent(baseBody({ quantity: { max_active_devices: -1 } }), NOW).error, "invalid_order");
+  assert.equal(normalizeOrderEvent(baseBody({ quantity: { max_active_devices: 1.5 } }), NOW).error, "invalid_order");
   assert.equal(normalizeOrderEvent(baseBody({ quantity: { max_active_devices: "3" } }), NOW).error, "invalid_order");
   assert.equal(normalizeOrderEvent(baseBody({ quantity: [] }), NOW).error, "invalid_order");
   assert.equal(normalizeOrderEvent(baseBody({ quantity: {} }), NOW).error, "invalid_order");
-  assert.equal(normalizeOrderEvent(baseBody({ quantity: { pool_size: null } }), NOW).error, "invalid_order");
+  assert.equal(normalizeOrderEvent(baseBody({ quantity: { max_active_devices: null } }), NOW).error, "invalid_order");
   assert.equal(normalizeOrderEvent(baseBody({ intent: "quantity.changed", quantity: undefined }), NOW).error, "invalid_order");
   assert.equal(normalizeOrderEvent(baseBody({ intent: "quantity.changed", quantity: {} }), NOW).error, "invalid_order");
 });
@@ -347,11 +348,14 @@ test("map: past_due / paused / payment_failed -> reversible disable", () => {
   }
 });
 
-test("map: canceled_at_period_end -> patch, keep active, never creates", () => {
+test("map: canceled_at_period_end -> patch, keep active and the owner, never creates", () => {
   const d = mapIntentToMutation(order({ intent: "subscription.canceled_at_period_end", current_period_end: 1500 }), ACTIVE_PREV, null);
   assert.equal(d.kind, "patch");
   assert.equal(d.status, "active", "cancel keeps active until period end");
   assert.equal(d.valid_until, 1500);
+  assert.equal(d.keepOwner, true, "a cancellation is a withdrawal and never moves the owner");
+  const renewal = mapIntentToMutation(order({ intent: "subscription.renewed", current_period_end: 1500 }), ACTIVE_PREV, null);
+  assert.equal(renewal.keepOwner, undefined);
 
   const missing = mapIntentToMutation(order({ intent: "subscription.canceled_at_period_end" }), null, null);
   assert.deepEqual(missing, { kind: "none", terminal: "no_entitlement" }, "cancel NEVER creates");
@@ -367,35 +371,17 @@ test("map: subscription.resumed -> reenable (missing -> no_entitlement)", () => 
   assert.deepEqual(missing, { kind: "none", terminal: "no_entitlement" });
 });
 
-test("map: quantity.changed -> capacity, plus reclaim against the live entitlement pool", () => {
-  // No prior live pool -> capacity only.
-  const flat = mapIntentToMutation(
-    order({ intent: "quantity.changed", quantity: { pool_size: 5 } }),
-    ACTIVE_PREV,
-  );
-  assert.equal(flat.kind, "capacity");
-  assert.deepEqual(flat.capacity, { pool_size: 5 });
-  assert.equal(flat.reclaim, undefined, "no authoritative prior pool -> no reclaim");
-
-  // Upgrade -> capacity only, no reclaim.
-  const up = mapIntentToMutation(
-    order({ intent: "quantity.changed", quantity: { pool_size: 10 } }),
-    { ...ACTIVE_PREV, pool_size: 5 },
-  );
-  assert.equal(up.kind, "capacity");
-  assert.equal(up.reclaim, undefined, "upgrade does not reclaim");
-
-  // Downgrade -> capacity + reclaim diff from the current persisted pool_size.
-  const down = mapIntentToMutation(
-    order({ intent: "quantity.changed", quantity: { pool_size: 3 } }),
-    { ...ACTIVE_PREV, pool_size: 8 },
-  );
-  assert.equal(down.kind, "capacity");
-  assert.deepEqual(down.capacity, { pool_size: 3 });
-  assert.deepEqual(down.reclaim, { from: 8, to: 3 }, "downgrade reclaims from authoritative persisted capacity");
+test("map: quantity.changed -> a device-limit capacity change only", () => {
+  for (const [limit, prevLimit] of [[5, 1], [10, 5], [3, 8]]) {
+    const d = mapIntentToMutation(
+      order({ intent: "quantity.changed", quantity: { max_active_devices: limit } }),
+      { ...ACTIVE_PREV, max_active_devices: prevLimit },
+    );
+    assert.deepEqual(d, { kind: "capacity", capacity: { max_active_devices: limit }, eventType: "update" });
+  }
 
   // quantity.changed on a missing entitlement never materializes capacity.
-  const missing = mapIntentToMutation(order({ intent: "quantity.changed", quantity: { pool_size: 3 } }), null, null);
+  const missing = mapIntentToMutation(order({ intent: "quantity.changed", quantity: { max_active_devices: 3 } }), null, null);
   assert.deepEqual(missing, { kind: "none", terminal: "no_entitlement" });
 });
 
@@ -423,7 +409,7 @@ test("map: a revoked prev is terminal for every non-revoke intent", () => {
     "subscription.resumed",
     "quantity.changed",
   ]) {
-    const d = mapIntentToMutation(order({ intent, quantity: { pool_size: 1 }, current_period_end: 9999 }), REVOKED_PREV, null);
+    const d = mapIntentToMutation(order({ intent, quantity: { max_active_devices: 1 }, current_period_end: 9999 }), REVOKED_PREV, null);
     assert.deepEqual(d, { kind: "none", terminal: "revoked" }, `${intent} on revoked prev -> revoked terminal`);
   }
 });

@@ -154,6 +154,7 @@ function validBody(overrides = {}) {
     intent: "subscription.active",
     seq: 1,
     current_period_end: Math.floor(Date.now() / 1000) + 30 * 86400,
+    customer: { id: "cus_order" },
     ...overrides,
   });
 }
@@ -226,7 +227,7 @@ test("chunked body is assembled as raw bytes and accepts the canonical signer", 
 test("a UTF-8 code point split across chunks remains raw-byte authenticated and decodes only after assembly", async () => {
   const { db, calls } = stubDb();
   const env = baseEnv({ DB: db, ORDER_INGEST_MODE: "soft" });
-  const bodyBytes = textEncoder.encode(validBody({ customer: { name: "€" } }));
+  const bodyBytes = textEncoder.encode(validBody({ customer: { id: "cus_order", name: "€" } }));
   const euroStart = bodyBytes.indexOf(0xe2);
   assert.ok(euroStart >= 0);
   const ts = String(Math.floor(Date.now() / 1000));
@@ -403,7 +404,7 @@ test("valid HMAC but unknown intent -> 400 invalid_order (no mutation)", async (
   assert.equal(calls.batch, 0, "invalid_order never reaches the mutator");
 });
 
-test("empty or misspelled quantity cannot consume the order floor", async () => {
+test("empty, misspelled or pool quantity cannot consume the order floor", async () => {
   for (const quantity of [{}, { lease_seconds: 60 }, { pool_szie: 5 }, { pool_size: 5 }, { pool_size: 5, max_active_devices: 2 }]) {
     const { db, calls } = stubDb({ failBatch: true });
     const env = baseEnv({ DB: db });

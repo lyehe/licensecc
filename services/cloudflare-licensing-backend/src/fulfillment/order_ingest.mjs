@@ -7,8 +7,8 @@
 // (order_hmac.mjs) into the durable, monotone, atomic accept→apply pipeline. The two
 // structural hardenings from the blueprint are realized HERE:
 //   1. apply-time monotonic floor (last_applied_order_{epoch,seq}) + in-batch
-//      order_events processed-mark (exactly-once; kills accept-vs-apply race,
-//      revocation_seq double-bump, seat-reclaim RMW loss);
+//      order_events processed-mark (exactly-once; kills accept-vs-apply race and
+//      revocation_seq double-bump);
 //   2. fingerprint ownership invariant (a fingerprint belongs to exactly one
 //      subscription) — the Step-2 409 fingerprint_owned guard.
 //
@@ -56,10 +56,6 @@ import {
 // stream bytes before any decoding; never re-stringify a parsed object.
 export const MAX_ORDER_BODY_BYTES = 16384;
 const DEFAULT_ASSERTION_TTL_SECONDS = 300;
-// Default seat capacity (pool_size) used when materializing a fresh entitlement from
-// a subscription.active order that carries a quantity. createEntitlement does NOT own
-// the capacity columns (they default in the schema), so a create with quantity sets
-// pool_size on the INSERT path explicitly below.
 // --- small helpers (self-contained; Worker-safe) -----------------------------
 function jsonResponse(body, status) {
   return new Response(JSON.stringify(body), {
@@ -322,19 +318,19 @@ const FLOOR_PREDICATE_UPDATE =
 /**
  * Floor-guarded CREATE upsert for subscription.active. Mirrors createEntitlement's
  * INSERT...ON CONFLICT body columns, adds the floor columns + floor predicate, and
- * also writes pool_size/max_active_devices when the order carries quantity (so a
- * create with a seat pool materializes capacity in one shot). RETURNING yields the
- * row iff the insert OR a floor-advancing update landed.
+ * also writes max_active_devices from the order's quantity. A new row is a protected
+ * device_bound_v1 grant owned by the order's customer. RETURNING yields the row iff
+ * the insert OR a floor-advancing update landed.
  */
 function buildCreateStatement(env, key, fields, order, floor, now) {
   return env.DB.prepare(
-    `INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, pool_size, max_active_devices, last_applied_order_epoch, last_applied_order_seq, created_at, updated_at) ` +
-      `VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+    `INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, max_active_devices, enforcement_mode, last_applied_order_epoch, last_applied_order_seq, created_at, updated_at) ` +
+      `VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, 'device_bound_v1', ?, ?, ?, ?) ` +
       `ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET ` +
       `device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, ` +
       `revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, ` +
       `valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, ` +
-      `pool_size = excluded.pool_size, max_active_devices = excluded.max_active_devices, ` +
+      `max_active_devices = excluded.max_active_devices, ` +
       `last_applied_order_epoch = excluded.last_applied_order_epoch, last_applied_order_seq = excluded.last_applied_order_seq, updated_at = excluded.updated_at ` +
       `WHERE (${FLOOR_PREDICATE_CONFLICT}) AND entitlements.status <> 'revoked' ` +
       `RETURNING ${ENTITLEMENT_COLUMNS}`,
@@ -354,7 +350,6 @@ function buildCreateStatement(env, key, fields, order, floor, now) {
     fields.notes,
     fields.customer_id,
     fields.license_id,
-    fields.pool_size,
     fields.max_active_devices,
     floor.epoch,
     floor.seq,
@@ -365,8 +360,8 @@ function buildCreateStatement(env, key, fields, order, floor, now) {
 
 /**
  * Floor-guarded PATCH (renew / cancel_at_period_end). Updates the entitlement body
- * (valid window + carry-forward customer/license), bumps revocation_seq, advances
- * the floor, all under the floor predicate in the WHERE.
+ * (valid window + customer/license; a cancellation keeps the stored ones), bumps
+ * revocation_seq, advances the floor, all under the floor predicate in the WHERE.
  */
 function buildPatchStatement(env, key, fields, floor, now) {
   return env.DB.prepare(
@@ -422,13 +417,13 @@ function buildTransitionStatement(env, key, status, floor, now) {
 }
 
 /**
- * Floor-guarded CAPACITY change (quantity.changed). Writes only the provided
- * non-negative-integer capacity columns + revocation_seq + floor.
+ * Floor-guarded CAPACITY change (quantity.changed). Writes only the device limit
+ * (a non-negative integer) + revocation_seq + floor.
  */
 function buildCapacityStatement(env, key, capacity, floor, now) {
   const assignments = [];
   const values = [];
-  const allowed = ["max_active_devices", "lease_seconds", "rebind_window_sec", "pool_size", "heartbeat_grace_sec", "max_borrow_sec", "allow_overdraft"];
+  const allowed = ["max_active_devices"];
   for (const column of allowed) {
     const value = capacity?.[column];
     if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
@@ -480,7 +475,7 @@ function buildOrderEventStatement(env, key, eventType, order, now, requireNonRev
   return env.DB.prepare(
     `INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at) ` +
       `SELECT project, feature, license_fingerprint, device_hash, ?, status, revocation_seq, ?, ?, ?, '${ORDER_CTX_SOURCE}', ?, ?, '', ` +
-      `json_object('project', project, 'feature', feature, 'license_fingerprint', license_fingerprint, 'status', status, 'revocation_seq', revocation_seq, 'valid_from', valid_from, 'valid_until', valid_until, 'pool_size', pool_size, 'id', ?), ` +
+      `json_object('project', project, 'feature', feature, 'license_fingerprint', license_fingerprint, 'status', status, 'revocation_seq', revocation_seq, 'valid_from', valid_from, 'valid_until', valid_until, 'max_active_devices', max_active_devices, 'id', ?), ` +
       `?, ?, ? ` +
       `FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? ${terminalGuard}` +
       `AND last_applied_order_epoch = ? AND last_applied_order_seq = ? ` +
@@ -581,7 +576,7 @@ function firstBatchRow(result) {
 /**
  * Apply an accepted order event: map intent→mutation, build the floor-guarded
  * entitlement statement, and commit it together with the order_events processed-mark
- * (and any seat-reclaim) in one atomic D1 batch.
+ * in one atomic D1 batch.
  *
  * Returns the response object for the response matrix:
  *   { status, body } where body.code ∈
@@ -629,43 +624,6 @@ export async function applyOrderEvent(env, order, fingerprint, fingerprintOrigin
     return terminalizeDefensiveNoEntitlement(env, order, key, fingerprintOrigin, now);
   }
 
-  // Seat reclaim (quantity downgrade): in the SAME batch, evict the longest-held live
-  // seats down to the NEW pool and log a 'reclaim'. The descriptor's authoritative
-  // pre-mutation entitlement diff only DECIDES that a downgrade happened; the
-  // eviction COUNT is computed from LIVE seats minus the new pool so we never evict
-  // below the new ceiling even if fewer than `from` seats are actually live (the
-  // blueprint's `LIMIT (live_seats - pool_size)`). A negative diff clamps to 0.
-  const reclaimStatements = [];
-  if (descriptor.kind === "capacity" && descriptor.reclaim) {
-    const newPool = descriptor.reclaim.to;
-    reclaimStatements.push(
-      env.DB.prepare(
-        "DELETE FROM seat_checkouts WHERE rowid IN (" +
-          "SELECT sc.rowid FROM seat_checkouts AS sc WHERE sc.project = ? AND sc.feature = ? AND sc.license_fingerprint = ? AND sc.heartbeat_deadline > ? " +
-          "AND EXISTS (SELECT 1 FROM entitlements AS e WHERE e.project = sc.project AND e.feature = sc.feature " +
-          "AND e.license_fingerprint = sc.license_fingerprint AND e.status <> 'revoked' " +
-          "AND e.last_applied_order_epoch = ? AND e.last_applied_order_seq = ?) " +
-          "AND EXISTS (SELECT 1 FROM order_events AS oe WHERE oe.event_id = ? AND oe.status = 'accepted') " +
-          "ORDER BY heartbeat_deadline DESC LIMIT max(0, " +
-          "(SELECT COUNT(*) FROM seat_checkouts WHERE project = ? AND feature = ? AND license_fingerprint = ? AND heartbeat_deadline > ?) - ?" +
-          ")) RETURNING seat_id",
-      ).bind(
-        order.project,
-        order.feature,
-        fingerprint,
-        now,
-        floor.epoch,
-        floor.seq,
-        order.event_id,
-        order.project,
-        order.feature,
-        fingerprint,
-        now,
-        newPool,
-      ),
-    );
-  }
-
   // The processed-mark commits in the SAME batch as the mutation (atomic exactly-once).
   // Whether the floor advanced (applied) or no-op'd (superseded) is known only from the
   // mutation's RETURNING row after the batch lands, so seed a truthful neutral cache
@@ -684,16 +642,12 @@ export async function applyOrderEvent(env, order, fingerprint, fingerprintOrigin
   const revokedMark = requireNonRevoked
     ? buildRevokedOrderEventMark(env, order, key, fingerprintOrigin, now)
     : null;
-  const extraStatements = [...reclaimStatements];
-  const reclaimResultIndex = reclaimStatements.length === 0 ? null : 2;
-  if (revokedMark !== null) extraStatements.push(revokedMark.statement);
-  extraStatements.push(markStatement);
+  const extraStatements = revokedMark === null ? [markStatement] : [revokedMark.statement, markStatement];
 
   let result;
   try {
     result = await writeEntitlementWithAuditFloor(
-      env, key, writeStatement, eventType, prev, order, now, extraStatements,
-      { requireNonRevoked, reclaimResultIndex },
+      env, key, writeStatement, eventType, prev, order, now, extraStatements, requireNonRevoked,
     );
   } catch (error) {
     if (error instanceof Error && error.message === "write_failed") {
@@ -713,19 +667,6 @@ export async function applyOrderEvent(env, order, fingerprint, fingerprintOrigin
   // result.data is the post-mutation row when the floor advanced; null when the floor
   // no-op'd (superseded — a newer event already applied).
   if (result.applied) {
-    // Reclaim usage_events ('reclaim') are best-effort analytics, emitted AFTER the
-    // atomic batch lands (a missed analytics row must never fail the apply).
-    if (descriptor.kind === "capacity" && descriptor.reclaim && Array.isArray(result.reclaimedSeats)) {
-      for (const seat of result.reclaimedSeats) {
-        try {
-          await env.DB.prepare(
-            "INSERT INTO usage_events (project, feature, license_fingerprint, event_type, seat_id, device_key_id, reason, ts) VALUES (?, ?, ?, 'reclaim', ?, NULL, 'quantity_downgrade', ?)",
-          ).bind(order.project, order.feature, fingerprint, seat, now).run();
-        } catch {
-          // best-effort analytics
-        }
-      }
-    }
     const body = { ...appliedBody, entitlement: result.data };
     // Finalize the cached result_json with the entitlement snapshot.
     await env.DB.prepare("UPDATE order_events SET result_json = ? WHERE event_id = ? AND status = 'processed'")
@@ -757,37 +698,28 @@ export async function applyOrderEvent(env, order, fingerprint, fingerprintOrigin
 
 /**
  * Run the floor-guarded mutation + extras in one batch, then report whether the
- * mutation actually landed (RETURNING row present) plus any reclaimed seats. We can
- * A floor no-op (empty RETURNING) is a valid `superseded` outcome here, not write_failed.
+ * mutation actually landed (RETURNING row present) and whether this batch owns the
+ * processed mark. A floor no-op (empty RETURNING) is a valid `superseded` outcome
+ * here, not write_failed.
  */
 async function writeEntitlementWithAuditFloor(
-  env, key, writeStatement, eventType, prev, order, now, extraStatements,
-  { requireNonRevoked, reclaimResultIndex },
+  env, key, writeStatement, eventType, prev, order, now, extraStatements, requireNonRevoked,
 ) {
   if (env.DB.batch === undefined) {
     throw new Error("write_failed");
   }
-  // Audit event reads post-mutation row; processed-mark + reclaim are in extras.
+  // Audit event reads post-mutation row; the processed-mark is the last extra.
   const eventStatement = buildOrderEventStatement(env, key, eventType, order, now, requireNonRevoked);
   const statements = [writeStatement, eventStatement, ...extraStatements];
   const results = await env.DB.batch(statements);
   const mutated = firstBatchRow(results[0]);
   const marked = firstBatchRow(results[statements.length - 1]) !== null;
-  // The reclaim DELETE (if any) has an explicit absolute batch index; terminal-state
-  // arbitration may insert another statement before the final processed mark.
-  let reclaimedSeats = [];
-  if (reclaimResultIndex !== null) {
-    const reclaimResult = results[reclaimResultIndex];
-    if (reclaimResult && typeof reclaimResult === "object" && "results" in reclaimResult && Array.isArray(reclaimResult.results)) {
-      reclaimedSeats = reclaimResult.results.map((r) => r.seat_id);
-    }
-  }
   if (mutated === null) {
     // Floor no-op: a newer event already applied. The processed-mark still committed
     // (the event row was 'accepted'), so the event is exactly-once accounted.
-    return { applied: false, marked, data: prev ? withId(prev) : null, reclaimedSeats };
+    return { applied: false, marked, data: prev ? withId(prev) : null };
   }
-  return { applied: true, marked, data: withId(mutated), reclaimedSeats };
+  return { applied: true, marked, data: withId(mutated) };
 }
 
 // --- field assembly for create / patch ---------------------------------------
@@ -813,15 +745,14 @@ function createFields(order, prev, descriptor, now) {
     valid_from: validFrom,
     valid_until: validUntil,
     notes: prev?.notes ?? "",
-    customer_id: order.customer?.id ?? prev?.customer_id ?? null,
+    customer_id: order.customer.id,
     license_id: order.license_id ?? prev?.license_id ?? null,
-    pool_size: typeof quantity.pool_size === "number" ? quantity.pool_size : prev?.pool_size ?? 0,
     max_active_devices: typeof quantity.max_active_devices === "number" ? quantity.max_active_devices : prev?.max_active_devices ?? 1,
     created_at: prev?.created_at ?? now,
   };
 }
 
-/** Assemble the UPDATE fields for renew / cancel_at_period_end (carry-forward). */
+/** Assemble the UPDATE fields for renew / cancel_at_period_end. */
 function patchFields(order, prev, descriptor) {
   const validUntil = descriptor.valid_until === undefined ? prev.valid_until : descriptor.valid_until;
   let validFrom = descriptor.valid_from !== undefined ? descriptor.valid_from : prev.valid_from;
@@ -835,9 +766,10 @@ function patchFields(order, prev, descriptor) {
     valid_from: validFrom,
     valid_until: validUntil,
     notes: prev.notes,
-    // carry-forward: omitted customer/license keep the prev values (never null them).
-    customer_id: order.customer?.id ?? prev.customer_id,
-    license_id: order.license_id ?? prev.license_id,
+    // A renewal names the subscription's customer; an omitted license keeps the prev
+    // value (never nulled). A cancellation is a withdrawal and never moves the owner.
+    customer_id: descriptor.keepOwner ? prev.customer_id : order.customer.id,
+    license_id: descriptor.keepOwner ? prev.license_id : order.license_id ?? prev.license_id,
   };
 }
 

@@ -228,9 +228,9 @@ export const openApiComponents: LabeledComponentFragment = {
       }],
       ["OrderRequest", {
         type: "object",
-        required: ["event_id", "subscription_id", "project", "intent", "seq"],
+        required: ["event_id", "subscription_id", "project", "intent", "seq", "customer"],
         description:
-          "Signed subscription order event (raw wire body <= 16384 bytes), strictly UTF-8 decoded only after raw-byte HMAC verification and normalized/validated per order_event.mjs.",
+          "Signed subscription order event (raw wire body <= 16384 bytes), strictly UTF-8 decoded only after raw-byte HMAC verification and normalized/validated per order_event.mjs. Every intent, revocations included, names customer.id. subscription.active creates or refreshes a protected (device_bound_v1) grant owned by that customer.",
         properties: {
           event_id: { type: "string", minLength: 1, maxLength: 255 },
           subscription_id: { type: "string", minLength: 1, maxLength: 255 },
@@ -259,7 +259,7 @@ export const openApiComponents: LabeledComponentFragment = {
           license_id: { type: "string", minLength: 1, maxLength: 255 },
           customer: {
             type: "object",
-            minProperties: 1,
+            required: ["id"],
             properties: {
               id: { type: "string", minLength: 1, maxLength: 255 },
               email: { type: "string", maxLength: 255 },
@@ -270,9 +270,8 @@ export const openApiComponents: LabeledComponentFragment = {
           },
           quantity: {
             type: "object",
-            minProperties: 1,
+            required: ["max_active_devices"],
             properties: {
-              pool_size: { type: "integer", minimum: 0 },
               max_active_devices: { type: "integer", minimum: 0 },
             },
             additionalProperties: false,

@@ -424,7 +424,7 @@
               }
             }
           ],
-          "description": "Signed subscription order event (raw wire body <= 16384 bytes), strictly UTF-8 decoded only after raw-byte HMAC verification and normalized/validated per order_event.mjs.",
+          "description": "Signed subscription order event (raw wire body <= 16384 bytes), strictly UTF-8 decoded only after raw-byte HMAC verification and normalized/validated per order_event.mjs. Every intent, revocations included, names customer.id. subscription.active creates or refreshes a protected (device_bound_v1) grant owned by that customer.",
           "properties": {
             "current_period_end": {
               "description": "Unix seconds.",
@@ -433,7 +433,6 @@
             },
             "customer": {
               "additionalProperties": false,
-              "minProperties": 1,
               "properties": {
                 "email": {
                   "maxLength": 255,
@@ -454,6 +453,9 @@
                   "type": "string"
                 }
               },
+              "required": [
+                "id"
+              ],
               "type": "object"
             },
             "event_id": {
@@ -509,17 +511,15 @@
             },
             "quantity": {
               "additionalProperties": false,
-              "minProperties": 1,
               "properties": {
                 "max_active_devices": {
                   "minimum": 0,
                   "type": "integer"
-                },
-                "pool_size": {
-                  "minimum": 0,
-                  "type": "integer"
                 }
               },
+              "required": [
+                "max_active_devices"
+              ],
               "type": "object"
             },
             "seq": {
@@ -537,7 +537,8 @@
             "subscription_id",
             "project",
             "intent",
-            "seq"
+            "seq",
+            "customer"
           ],
           "type": "object"
         },
@@ -3041,7 +3042,7 @@
                   }
                 }
               },
-              "description": "invalid_order: validly signed bytes that are malformed UTF-8, malformed JSON, invalid normalize result, a license id that conflicts with its immutable project/customer identity, an explicit customer/license id that contradicts the subscription's established identity, or Step 5 redrive failure. Omitting customer/license fields carries established entitlement values forward; it does not transfer them."
+              "description": "invalid_order: validly signed bytes that are malformed UTF-8, malformed JSON, invalid normalize result (including a missing customer.id or a quantity.pool_size), a license id that conflicts with its immutable project/customer identity, a customer/license id that contradicts the subscription's established identity, or Step 5 redrive failure. Omitting license_id carries the established license forward; it does not transfer it."
             },
             "401": {
               "content": {
