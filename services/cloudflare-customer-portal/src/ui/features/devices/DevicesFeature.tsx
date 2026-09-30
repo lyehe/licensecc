@@ -14,6 +14,7 @@ export function DevicesFeature({
   onSessionExpired,
   project,
   entitlements,
+  accountDataState,
 }: {
   customer: string;
   busy: boolean;
@@ -21,10 +22,15 @@ export function DevicesFeature({
   onSessionExpired(): Promise<boolean>;
   project: string | null;
   entitlements: EntitlementRow[];
+  accountDataState: "loading" | "ready" | "error";
 }): React.ReactElement {
   const [query, setQuery] = useState("");
   // An app filter naming no app in this account would otherwise show only "No matching ..." sections.
-  const unknownApp = project !== null && !entitlements.some((item) => item.project === project);
+  // entitlements starts (and stays) [] while accountDataState is "loading" or "error", which is
+  // indistinguishable from a real empty account -- so a real app must never be called unknown until
+  // the read has actually succeeded. While loading or failed, the app filter chip below shows
+  // optimistically instead (App.tsx's own page-level feedback line reports a read failure).
+  const unknownApp = project !== null && accountDataState === "ready" && !entitlements.some((item) => item.project === project);
   return (
     <div>
       <div className="pageHeading"><div><h1>Devices</h1><p>Manage the devices using your licenses.</p></div></div>

@@ -190,7 +190,7 @@ function PortalShell(): React.ReactElement {
         <div className="feedback">
           <StatusLine message={message} fallback="" />
         </div>
-        {location.page === "nodes" && <DevicesFeature key={auth.customerId} customer={auth.customerId??""} busy={controlsBusy} runOnce={runOnce} onSessionExpired={auth.retrySession} project={location.project} entitlements={entitlements} />}
+        {location.page === "nodes" && <DevicesFeature key={auth.customerId} customer={auth.customerId??""} busy={controlsBusy} runOnce={runOnce} onSessionExpired={auth.retrySession} project={location.project} entitlements={entitlements} accountDataState={readState} />}
         {location.page === "account" && <AccountFeature customerId={auth.customerId} />}
         {location.page === "apps" && (readState !== "ready" ? <section className="emptyState"><h2>{readState === "loading" ? "Loading your account…" : "Account data unavailable"}</h2><p>{readState === "loading" ? "Fetching your licenses and devices." : "We could not refresh your account. Retry to see current access."}</p>{readState === "error" && <button disabled={controlsBusy} onClick={() => void refreshPortalData()}>Retry</button>}</section> : <AppsFeature entitlements={entitlements} project={location.project} email={auth.email} />)}
       </div>
