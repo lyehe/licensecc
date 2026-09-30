@@ -22,6 +22,14 @@ async function setup(page,options={}) {
   return calls;
 }
 
+test('nodes: shows only connected devices, never the retired seat/legacy-device/download surfaces',async({page})=>{
+  await setup(page);await page.goto('/#/nodes');
+  await expect(page.getByRole('heading',{name:'Connected devices'})).toBeVisible();
+  await expect(page.getByText('Activated devices')).toHaveCount(0);
+  await expect(page.getByText('Browser seats')).toHaveCount(0);
+  await expect(page.getByText('Download',{exact:false})).toHaveCount(0);
+});
+
 test('nodes: retirement confirmation preserves hold, refreshes status and explains transfer',async({page},testInfo)=>{
   const calls=await setup(page);await page.goto('/#/nodes');
   await expect(page.getByRole('heading',{name:'Connected devices'})).toBeVisible();
@@ -89,10 +97,10 @@ test('nodes: mobile layout, dialog focus and escape remain usable',async({page},
   await page.screenshot({path:testInfo.outputPath('nodes-mobile-list.png'),fullPage:true});
 });
 
-test('nodes: protected recovery remains available when legacy account data fails',async({page})=>{
+test('nodes: protected recovery remains available when the entitlements read fails',async({page})=>{
   await setup(page);
   await page.route('**/api/portal/entitlements',route=>route.fulfill({status:503,json:{ok:false,code:'temporarily_unavailable'}}));
-  await page.goto('/#/nodes');await expect(page.getByRole('heading',{name:'Activated devices and seats unavailable'})).toBeVisible();
+  await page.goto('/#/nodes');await expect(page.getByRole('heading',{name:'Connected devices'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Disconnect',exact:true})).toBeEnabled();
   await page.getByRole('button',{name:'Disconnect',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible();
 });

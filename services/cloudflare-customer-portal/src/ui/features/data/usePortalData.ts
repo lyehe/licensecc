@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { devicesPath, entitlementsPath, usagePath } from "../../portalWorkflow";
+import { entitlementsPath } from "../../portalWorkflow";
 import { api, localMessage, resultMessage } from "../../shared/api";
-import type { DeviceRow, EntitlementRow, StatusMessage, UsageRow } from "../../types";
+import type { EntitlementRow, StatusMessage } from "../../types";
 
 interface PortalDataOptions {
   active: boolean;
@@ -10,21 +10,15 @@ interface PortalDataOptions {
 }
 
 export interface PortalData {
-  usageAvailable: boolean;
   stale: boolean;
   readState: "loading" | "ready" | "error";
   entitlements: EntitlementRow[];
-  devices: DeviceRow[];
-  usage: UsageRow[];
   refreshData(): Promise<boolean>;
   clear(): void;
 }
 
 export function usePortalData({ active, setMessage }: PortalDataOptions): PortalData {
   const [entitlements, setEntitlements] = useState<EntitlementRow[]>([]);
-  const [devices, setDevices] = useState<DeviceRow[]>([]);
-  const [usage, setUsage] = useState<UsageRow[]>([]);
-  const [usageAvailable, setUsageAvailable] = useState(false);
   const [readState, setReadState] = useState<"loading" | "ready" | "error">("loading");
   const [stale, setStale] = useState(false);
   const generation = useRef(0);
@@ -33,24 +27,15 @@ export function usePortalData({ active, setMessage }: PortalDataOptions): Portal
     const requestGeneration = generation.current;
     setReadState((current) => current === "ready" ? current : "loading");
     try {
-      const [entitlementResponse, deviceResponse, usageResponse] = await Promise.all([
-        api<{ items: EntitlementRow[] }>(entitlementsPath()),
-        api<{ items: DeviceRow[] }>(devicesPath()),
-        api<{ items: UsageRow[] }>(usagePath()).catch(() => ({ ok: false, code: "usage_unavailable", request_id: "", data: undefined })),
-      ]);
+      const result = await api<{ items: EntitlementRow[] }>(entitlementsPath());
       if (requestGeneration !== generation.current) return false;
-      const usageOk = usageResponse.ok && Array.isArray(usageResponse.data?.items);
-      setUsageAvailable(usageOk);
-      if (usageOk) setUsage(usageResponse.data!.items);
-      const failed = [entitlementResponse, deviceResponse].find((item) => !item.ok || !Array.isArray(item.data?.items));
-      if (failed) {
-        setMessage(failed.ok ? localMessage("invalid_response", false) : resultMessage(failed));
+      if (!result.ok || !Array.isArray(result.data?.items)) {
+        setMessage(result.ok ? localMessage("invalid_response", false) : resultMessage(result));
         setStale(true);
         setReadState((current) => current === "ready" ? current : "error");
         return false;
       }
-      setEntitlements(entitlementResponse.data!.items);
-      setDevices(deviceResponse.data!.items);
+      setEntitlements(result.data.items);
       setStale(false);
       setReadState("ready");
       return true;
@@ -73,10 +58,7 @@ export function usePortalData({ active, setMessage }: PortalDataOptions): Portal
     setReadState("loading");
     setStale(false);
     setEntitlements([]);
-    setDevices([]);
-    setUsage([]);
-    setUsageAvailable(false);
   }, []);
 
-  return { entitlements, devices, usage, usageAvailable, readState, stale, refreshData, clear };
+  return { entitlements, readState, stale, refreshData, clear };
 }

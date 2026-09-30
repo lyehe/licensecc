@@ -3,14 +3,11 @@ import { LICENSE_ATTENTION_COPY, licenseNeedsAttention } from "../../portalWorkf
 import { appLocation, devicesLocation } from "../../shared/navigation";
 import { useLicenseClock } from "../../shared/useLicenseClock";
 import { EntitlementsFeature } from "../entitlements/EntitlementsFeature";
-import { type LicenseDownloads } from "../downloads/DownloadsFeature";
-import { UsageFeature } from "../usage/UsageFeature";
-import type { EntitlementRow, UsageRow } from "../../types";
+import type { EntitlementRow } from "../../types";
 
-export function AppsFeature({ entitlements, usage, usageAvailable, retry, downloads, busy, project, email }: {
-  usageAvailable: boolean; retry(): Promise<void>;
-  entitlements: EntitlementRow[]; usage: UsageRow[]; downloads: LicenseDownloads;
-  busy: boolean; project: string | null; email: string | null;
+export function AppsFeature({ entitlements, project, email }: {
+  entitlements: EntitlementRow[];
+  project: string | null; email: string | null;
 }): React.ReactElement {
   const now = useLicenseClock();
   const accessByProject = new Map<string, EntitlementRow[]>();
@@ -25,10 +22,7 @@ export function AppsFeature({ entitlements, usage, usageAvailable, retry, downlo
     return <div className="appDetail">
       <a className="backLink" href="#/apps">← Back to apps</a>
       <div className="pageHeading"><div><h1>{project}</h1></div><a className="button" href={devicesLocation(project)}>View devices</a></div>
-      {access.length === 0 ? <div className="emptyState"><h2>App not found</h2><p>This app is not in the access returned for your account.</p></div> : <>
-        <EntitlementsFeature entitlements={access} downloads={downloads} busy={busy} />
-        <UsageFeature available={usageAvailable} busy={busy} retry={retry} usage={usage.filter((item) => item.project === project)} />
-      </>}
+      {access.length === 0 ? <div className="emptyState"><h2>App not found</h2><p>This app is not in the access returned for your account.</p></div> : <EntitlementsFeature entitlements={access} />}
     </div>;
   }
   return <>

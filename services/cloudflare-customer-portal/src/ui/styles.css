@@ -437,40 +437,8 @@ code {
   gap:8px
 }
 
-.seatGrid {
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));
-  gap:16px;
-  margin-top:32px
-}
-
-.seatHeading {
-  grid-column:1/-1
-}
-
-.seatCard {
-  background:var(--surface);
-  border:1px solid var(--border);
-  border-radius:var(--radius);
-  padding:20px;
-  display:grid;
-  gap:16px;
-  overflow-wrap:anywhere
-}
-
-.seatGrid>.emptyState {
-  grid-column:1/-1
-}
-
 .muted {
   color:var(--muted)
-}
-
-/* The live seat-state text ("Active until…"/"Uses 1 of N shared
-   seats…") is not secondary copy, so it gets its own class instead of `.muted` and stays at the
-   default text colour. */
-.seatState {
-  color:inherit
 }
 
 .authPane {
@@ -662,14 +630,11 @@ code {
 .protectedNodes { margin-bottom: 32px; }
 .protectedNodes .sectionHeading { display: flex; align-items: start; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; }
 .protectedNodes td small { display: block; margin-top: 4px; font-size: inherit; color: var(--muted); overflow-wrap: anywhere; }
-.retirementDialog, .confirmDialog { width: min(560px, calc(100% - 32px)); max-height: calc(100vh - 48px); overflow: auto; box-sizing: border-box; padding: 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface, white); color: inherit; }
-.retirementDialog::backdrop, .confirmDialog::backdrop { background: rgb(15 23 42 / 35%); }
-.retirementDialog p, .confirmDialog p { margin-top: 12px; }
+.retirementDialog { width: min(560px, calc(100% - 32px)); max-height: calc(100vh - 48px); overflow: auto; box-sizing: border-box; padding: 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface, white); color: inherit; }
+.retirementDialog::backdrop { background: rgb(15 23 42 / 35%); }
+.retirementDialog p { margin-top: 12px; }
 .retirementIdentity { display: block; color: var(--muted); overflow-wrap: anywhere; }
-.retirementDialog .dialogActions, .confirmDialog .dialogActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-top: 24px; }
-/* The legacy-release and floating-seat-release confirms share this dialog styling with
-   ProtectedNodes' own retirement confirm -- one visual treatment for the one native <dialog> pattern. */
-.confirmDialog button.danger { color: var(--status-danger-ink); }
+.retirementDialog .dialogActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-top: 24px; }
 
 .referenceDetails { margin-top:8px; color:var(--muted); font-size:var(--text-body); }
 .referenceDetails summary { cursor:pointer; width:fit-content; padding:4px 0; }
@@ -693,17 +658,9 @@ code {
   .protectedNodes .tablePane { padding:0 16px; }
 }
 
-.licenseDownload { min-width:0; max-width:340px; }
-.licenseDownload summary,.appActivity summary,.browserSessions>summary { cursor:pointer; padding:12px 0; min-height:44px; }
-.licenseDownload label { display:grid; gap:8px; margin-top:12px; }
-.licenseDownload button { margin-top:12px; }
-.licenseDownload input { width:100%; min-width:0; }
 .licenseReference { display:block; color:var(--muted); overflow-wrap:anywhere; }
-.appActivity,.browserSessions { margin-top:24px; }
 
 .signOutControl { text-align:right; max-width:240px; }
-
-@media(max-width:1023px) { .licenseAction:has(.licenseDownload) { display:block; } .licenseAction:has(.licenseDownload)::before { display:none; } .licenseDownload { max-width:none; } }
 
 /* An inactive license offers no action. In the stacked phone layout, drop its empty cell rather than
    show an "Action" label with nothing after it. */

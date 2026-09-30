@@ -86,31 +86,16 @@ export function resultMessage(result: ApiEnvelope<unknown>): StatusMessage {
   return { code: result.code, request_id: result.request_id, ok: result.ok, retryAfter: result.retryAfter };
 }
 
-export function localMessage(code: string, ok: boolean, params?: Record<string, number>): StatusMessage {
-  return params === undefined ? { code, request_id: "", ok } : { code, request_id: "", ok, params };
+export function localMessage(code: string, ok: boolean): StatusMessage {
+  return { code, request_id: "", ok };
 }
 
 // The "Technical details" line -- the raw code, plus the request id in
-// parentheses when one is present -- shared verbatim between StatusLine (below, the page-level line)
-// and ActionResult.tsx (every local per-row/card line), so the two never drift apart. Lives here
-// rather than in portalWorkflow.ts: it needs no React, but api.tsx (not the pure RESULT_CODE_COPY
-// module) is where both callers already look for shared StatusLine-adjacent helpers.
+// parentheses when one is present -- used by StatusLine below. Lives here rather than in
+// portalWorkflow.ts: it needs no React, but api.tsx (not the pure RESULT_CODE_COPY module) is
+// where StatusLine-adjacent helpers already live.
 export function formatMessageDetail(message: Pick<StatusMessage, "code" | "request_id">): string {
   return message.request_id === "" ? message.code : `${message.code} (${message.request_id})`;
-}
-
-// The sign-in screen's one summary sentence for sign-out's best-effort seat release, built from
-// the released/failed counts (App.tsx's logout()) at render time -- exactly like rateLimitMessage
-// above, StatusLine special-cases the "seats_released_on_signout" code to call this instead of the
-// static RESULT_CODE_COPY entry, since the wording needs singular/plural nouns and an optional second
-// sentence a static string cannot express. Lives here (not portalWorkflow.ts): it needs no React or
-// DOM, but portal-ui-api.test.mjs slices this file down to everything ABOVE StatusLine and asserts
-// ZERO remaining runtime imports, so nothing above that line may depend on a new cross-file import.
-export function seatsReleasedMessage(released: number, failed: number): string {
-  const parts: string[] = [];
-  if (released > 0) parts.push(`Released ${released} browser seat${released === 1 ? "" : "s"}.`);
-  if (failed > 0) parts.push(`${failed} seat${failed === 1 ? "" : "s"} couldn't be released; they'll be listed after you sign in again.`);
-  return parts.join(" ");
 }
 
 // Human-readable status text for the SPA: describeResultCode's copy when the code is mapped, else the
@@ -124,18 +109,8 @@ export function StatusLine({ message, fallback }: { message: StatusMessage | nul
   // rate_limited gets the one dynamic sentence ONLY when a real retry-after header reached this
   // specific call (the auth 429s in the header rollout); every other rate_limited (e.g. self-service's
   // own 429, which never carries the header) keeps the existing generic RESULT_CODE_COPY text.
-  // seats_released_on_signout gets the same treatment for the released/failed counts App.tsx's
-  // logout() attaches as params -- see seatsReleasedMessage above. A FAILED
-  // sign-out (logout_failed) that still released seats first -- the release POSTs are independent of
-  // the sign-out POST -- carries those same params too, so the customer is told both facts instead of
-  // "logout_failed" implying nothing happened; describeResultCode's plain logout_failed sentence is
-  // reused verbatim (never duplicated here) with the seat summary appended.
   const human = message.code === "rate_limited" && typeof message.retryAfter === "number"
     ? rateLimitMessage(message.retryAfter)
-    : message.code === "seats_released_on_signout" && message.params !== undefined
-    ? seatsReleasedMessage(message.params.released ?? 0, message.params.failed ?? 0)
-    : message.code === "logout_failed" && message.params !== undefined
-    ? `${describeResultCode("logout_failed")} ${seatsReleasedMessage(message.params.released ?? 0, message.params.failed ?? 0)}`.trim()
     : describeResultCode(message.code) ?? describeUnknownResult(message.request_id);
   const detail = formatMessageDetail(message);
   return (

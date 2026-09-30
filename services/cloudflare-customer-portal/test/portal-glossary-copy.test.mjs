@@ -16,7 +16,7 @@ const SOURCE_EXTENSIONS = new Set([".ts", ".tsx"]);
 const RETIRED_TERMS = [
   { name: "'Binding:' identifier label (protected binding)", pattern: /\bBinding:/, useInstead: '"Connection ID:"' },
   { name: "'Retire connection' action (protected binding)", pattern: /Retire connection/, useInstead: '"Disconnect"' },
-  { name: "'Registered nodes' list label (legacy device)", pattern: /Registered nodes/, useInstead: '"Activated devices"' },
+  { name: "'Activated devices' list label (removed self-service device list)", pattern: /Activated devices/, useInstead: '"Connected devices" (the only device list the portal shows)' },
   { name: "'Registered machines' section label (activated devices and seats)", pattern: /Registered machines/, useInstead: '"Activated devices and seats"' },
   { name: "'Floating sessions' list label (floating seat)", pattern: /Floating sessions/, useInstead: '"Floating seats"' },
   { name: '\'"enabled"\' as a displayed status', pattern: /"enabled"/, useInstead: '"active"' },

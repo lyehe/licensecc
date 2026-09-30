@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 // Network failures are visible. Each test below aborts exactly ONE request the same way the main
-// fixture already does for a seat release / status refresh (route.abort("failed"), simulating offline
-// or a DNS failure) and checks that the customer sees a plain-language message -- never a stuck
-// screen, a raw code, or a silent failure -- with zero pageerror escaping to the page (a rejected
-// fetch that nobody catches becomes an unhandled promise rejection, which Playwright reports as one).
+// fixture already does for an account refresh (route.abort("failed"), simulating offline or a DNS
+// failure) and checks that the customer sees a plain-language message -- never a stuck screen, a
+// raw code, or a silent failure -- with zero pageerror escaping to the page (a rejected fetch that
+// nobody catches becomes an unhandled promise rejection, which Playwright reports as one).
 const VALID_CODE = "80315426";
 const NETWORK_UNAVAILABLE_COPY = "Couldn't reach the portal. Check your connection and try again.";
 const LOGOUT_FAILED_COPY = "Sign-out didn't complete. You're still signed in — try again.";
@@ -14,8 +14,8 @@ function makeEnvelope(code, data) {
 }
 
 const ENTITLEMENTS = [
-  { id: "ent_floating", project: "DEFAULT", feature: "pro", status: "active", license_fingerprint: "a".repeat(64), valid_from: 1_710_000_000, valid_until: null, license_mode: "floating", pool_size: 5, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_float" },
-  { id: "ent_node", project: "DEFAULT", feature: "solo", status: "active", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: 2_100_000_000, license_mode: "node_locked", pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_node" },
+  { id: "ent_pro", project: "DEFAULT", feature: "pro", status: "active", license_fingerprint: "a".repeat(64), valid_from: 1_710_000_000, valid_until: null, enforcement_mode: "device_bound_v1", license_mode: "trial", pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_pro", trial_ends_at: null, trial_starts_on_activation: false },
+  { id: "ent_node", project: "DEFAULT", feature: "solo", status: "active", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: 2_100_000_000, enforcement_mode: "device_bound_v1", license_mode: "node_locked", pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_node", trial_ends_at: null, trial_starts_on_activation: false },
 ];
 
 function jsonBody(request) {
@@ -56,28 +56,6 @@ function setup(page, abortPath) {
     if (method === "GET" && path === "/api/portal/entitlements") {
       if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "network-e2e-401" });
       return fulfill(200, makeEnvelope("entitlements", { items: ENTITLEMENTS.map((item) => ({ ...item })) }));
-    }
-    if (method === "GET" && path === "/api/portal/devices") {
-      if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "network-e2e-401" });
-      return fulfill(200, makeEnvelope("devices", { items: [] }));
-    }
-    if (method === "GET" && path === "/api/portal/usage") {
-      if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "network-e2e-401" });
-      return fulfill(200, makeEnvelope("usage", { items: [] }));
-    }
-    if (method === "POST" && path === "/api/portal/checkout") {
-      return fulfill(200, makeEnvelope("checkout_ok", { seat_id: "seat-net", expires_at: 0 }));
-    }
-    if (method === "POST" && path === "/api/portal/release") {
-      return fulfill(200, makeEnvelope("release_ok", { seat_id: "seat-net" }));
-    }
-    if (method === "POST" && path === "/api/portal/download") {
-      return route.fulfill({
-        status: 200,
-        contentType: "application/octet-stream",
-        headers: { "content-disposition": "attachment; filename=\"DEFAULT-solo.lic\"" },
-        body: "[license]\nsigned-license-bytes-not-a-key\n",
-      });
     }
     return fulfill(404, { ok: false, code: "not_found", request_id: "network-e2e-unhandled" });
   };
@@ -162,66 +140,10 @@ test("an aborted logout call keeps the customer signed in and explains the failu
   expect(pageErrors).toEqual([]);
 });
 
-// The seat-release POSTs sign-out sends are independent of the sign-out POST
-// itself -- a seat can genuinely be released even though the final sign-out request then fails. The
-// customer must be told BOTH facts, not just "logout_failed" (which would wrongly imply nothing at all
-// happened).
-test("an aborted logout call after a successful seat release explains both the release and the failure", async ({ page }) => {
-  const pageErrors = [];
-  page.on("pageerror", (error) => pageErrors.push(error));
-  setup(page, "/portal/v1/auth/logout");
-  await page.goto("/");
-  await signInThroughCode(page);
-  await page.getByRole("link", { name: "Devices", exact: true }).click();
-  await page.getByText("Browser seats", { exact: true }).click();
-  const seatCard = page.locator(".seatCard").filter({ hasText: "pro" }).first();
-  await seatCard.getByRole("button", { name: "Start seat" }).click();
-  await expect(seatCard.getByRole("status")).toContainText("Seat started.");
-
-  await page.getByRole("button", { name: "Sign out" }).click();
-  await expect(page.getByText(`${LOGOUT_FAILED_COPY} Released 1 browser seat.`, { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Devices", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
-  await expect(page.getByText("logout_failed", { exact: false })).not.toBeVisible();
-  expect(pageErrors).toEqual([]);
-});
-
-test("an aborted download call shows the network message with no page error", async ({ page }) => {
-  const pageErrors = [];
-  page.on("pageerror", (error) => pageErrors.push(error));
-  setup(page, "/api/portal/download");
-  await page.goto("/");
-  await signInThroughCode(page);
-  await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
-  await page.locator("tr").filter({ has: page.getByLabel("Device key for DEFAULT solo") }).getByText("Activate and download", { exact: true }).click();
-  await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
-  await page.getByRole("button", { name: "Activate and download .lic" }).click();
-  await expect(page.getByText(NETWORK_UNAVAILABLE_COPY, { exact: true })).toBeVisible();
-  await expect(page.getByText("network_unavailable", { exact: false })).not.toBeVisible();
-  expect(pageErrors).toEqual([]);
-});
-
-test("an aborted seat-start call shows the network message and leaves the seat startable again", async ({ page }) => {
-  const pageErrors = [];
-  page.on("pageerror", (error) => pageErrors.push(error));
-  setup(page, "/api/portal/checkout");
-  await page.goto("/");
-  await signInThroughCode(page);
-  await page.getByRole("link", { name: "Devices", exact: true }).click();
-  await page.getByText("Browser seats", { exact: true }).click();
-  const seatCard = page.locator(".seatCard").filter({ hasText: "pro" }).first();
-  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
-  await seatCard.getByRole("button", { name: "Start seat" }).click();
-  await expect(page.getByText(NETWORK_UNAVAILABLE_COPY, { exact: true })).toBeVisible();
-  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
-  await expect(page.getByText("network_unavailable", { exact: false })).not.toBeVisible();
-  expect(pageErrors).toEqual([]);
-});
-
 test("an aborted account refresh shows the failure message with exactly one retry button", async ({ page }) => {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error));
-  let deviceRequestCount = 0;
+  let entitlementsRequestCount = 0;
   let authed = false;
   const handler = (route) => {
     const request = route.request();
@@ -243,21 +165,13 @@ test("an aborted account refresh shows the failure message with exactly one retr
     }
     if (method === "GET" && path === "/api/portal/entitlements") {
       if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "refresh-e2e-401" });
-      return fulfill(200, makeEnvelope("entitlements", { items: ENTITLEMENTS.map((item) => ({ ...item })) }));
-    }
-    if (method === "GET" && path === "/api/portal/devices") {
-      if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "refresh-e2e-401" });
-      deviceRequestCount += 1;
+      entitlementsRequestCount += 1;
       // First two requests fail; third and onwards succeed.
-      if (deviceRequestCount <= 2) {
+      if (entitlementsRequestCount <= 2) {
         return route.abort("failed");
       } else {
-        return fulfill(200, makeEnvelope("devices", { items: [] }));
+        return fulfill(200, makeEnvelope("entitlements", { items: ENTITLEMENTS.map((item) => ({ ...item })) }));
       }
-    }
-    if (method === "GET" && path === "/api/portal/usage") {
-      if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "refresh-e2e-401" });
-      return fulfill(200, makeEnvelope("usage", { items: [] }));
     }
     return fulfill(404, { ok: false, code: "not_found", request_id: "refresh-e2e-unhandled" });
   };
@@ -272,12 +186,12 @@ test("an aborted account refresh shows the failure message with exactly one retr
   await page.getByRole("button", { name: "Verify", exact: true }).click();
   // Initial load fails; shows error state with Retry button.
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
-  // Click Retry: this second devices request fails too (deviceRequestCount === 2), so the failure copy
-  // shows with exactly one retry control.
+  // Click Retry: this second entitlements request fails too (entitlementsRequestCount === 2), so the
+  // failure copy shows with exactly one retry control.
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByText("Account refresh failed")).toBeVisible();
   // Exactly one button should match the retry patterns.
-  await expect(page.getByRole("button", { name: /Retry|Refresh account|Refresh status/ })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: /Retry|Refresh account/ })).toHaveCount(1);
   await expect(page.getByText("account_refresh_failed", { exact: false })).not.toBeVisible();
   expect(pageErrors).toEqual([]);
 });

@@ -30,6 +30,7 @@ export interface PortalEntitlementSummary {
   status: string;
   valid_from: number | null;
   valid_until: number | null;
+  enforcement_mode: "device_bound_v1";
   license_mode: "trial" | "node_locked" | "floating";
   pool_size: number;
   max_active_devices: number;

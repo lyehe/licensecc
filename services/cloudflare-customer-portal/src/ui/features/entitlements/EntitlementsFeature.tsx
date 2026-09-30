@@ -1,7 +1,6 @@
 import React from "react";
 
 import {
-  canDownloadLicense,
   formatWindow,
   licenseDisplayStatus,
   licenseModeLabel,
@@ -13,8 +12,6 @@ import {
 import { SupportContact } from "../../shared/SupportContact";
 import { useLicenseClock } from "../../shared/useLicenseClock";
 import type { EntitlementRow } from "../../types";
-
-import { LicenseDownloadAction, type LicenseDownloads } from "../downloads/DownloadsFeature";
 
 // Every date the lifecycle copy prints is a UTC YYYY-MM-DD (formatEpoch). Each one renders as a
 // <time> that does not wrap: left alone, a narrow column breaks "2025-06-15" at a hyphen. The line
@@ -41,14 +38,13 @@ export function LicenseNextStep({ state }: { state: LicenseDisplayStatus }): Rea
 }
 
 // Only an active license offers something to do here. An inactive one (expired, suspended, revoked,
-// not yet valid) offers no download or other action: its status already says what happens next.
-function LicenseAction({ item, state, downloads, busy }: { item: EntitlementRow; state: LicenseDisplayStatus; downloads: LicenseDownloads; busy: boolean }): React.ReactElement | null {
+// not yet valid) offers no action: its status already says what happens next.
+function LicenseAction({ state }: { state: LicenseDisplayStatus }): React.ReactElement | null {
   if (state !== "active") return null;
-  if (canDownloadLicense(item)) return <LicenseDownloadAction item={item} downloads={downloads} busy={busy} />;
-  return <span>{item.enforcement_mode === "device_bound_v1" ? "Connect from your app" : "Start a session in your app"}</span>;
+  return <span>Connect from your app</span>;
 }
 
-export function EntitlementsFeature({ entitlements, downloads, busy }: { entitlements: EntitlementRow[]; downloads:LicenseDownloads; busy:boolean }): React.ReactElement {
+export function EntitlementsFeature({ entitlements }: { entitlements: EntitlementRow[] }): React.ReactElement {
   const now = useLicenseClock();
   return (
     <section className="tablePane full">
@@ -66,7 +62,7 @@ export function EntitlementsFeature({ entitlements, downloads, busy }: { entitle
                 <td data-label="Capacity">{item.license_mode === "floating" ? `${item.pool_size} seats` : `${item.max_active_devices} ${item.max_active_devices === 1 ? "device" : "devices"}`}</td>
                 <td data-label="Status"><span className="licenseStatus"><span className={`status ${state}`}><DatedText text={licenseStatusLead(item, now)} /></span><LicenseNextStep state={state} /></span></td>
                 <td data-label="Valid"><DatedText text={formatWindow(item.valid_from, item.valid_until)} /></td>
-                <td data-label="Action" className="licenseAction"><LicenseAction item={item} state={state} downloads={downloads} busy={busy} /></td>
+                <td data-label="Action" className="licenseAction"><LicenseAction state={state} /></td>
               </tr>
             );
           })}

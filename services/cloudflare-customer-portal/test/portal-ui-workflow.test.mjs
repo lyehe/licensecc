@@ -34,41 +34,10 @@ test("portal UI workflow builds same-origin auth paths", async () => {
   assert.equal(workflow.logoutPath(), "/portal/v1/auth/logout");
 });
 
-test("portal UI workflow builds session-scoped read + action paths", async () => {
+test("portal UI workflow builds session-scoped read paths", async () => {
   const workflow = await loadWorkflowModule();
   assert.equal(workflow.mePath(), "/api/portal/me");
   assert.equal(workflow.entitlementsPath(), "/api/portal/entitlements");
-  assert.equal(workflow.devicesPath(), "/api/portal/devices");
-  assert.equal(workflow.downloadPath(), "/api/portal/download");
-  assert.equal(workflow.checkoutPath(), "/api/portal/checkout");
-  assert.equal(workflow.heartbeatPath(), "/api/portal/heartbeat");
-  assert.equal(workflow.releasePath(), "/api/portal/release");
-});
-
-test("portal UI workflow exposes the self-serve device-release path + copy", async () => {
-  const workflow = await loadWorkflowModule();
-  assert.equal(workflow.deviceReleasePath(), "/api/portal/devices/release");
-  assert.equal(workflow.DEVICE_RELEASE_ACTION_LABEL, "Release");
-  // The confirm copy MUST state the consequence so a customer cannot release a device by reflex.
-  assert.match(workflow.DEVICE_RELEASE_CONFIRM_COPY, /frees one device slot/);
-  assert.match(workflow.DEVICE_RELEASE_CONFIRM_COPY, /activate again/);
-});
-
-test("portal UI workflow maps floating-seat release confirmation copy to its consequences", async () => {
-  const workflow = await loadWorkflowModule();
-  assert.equal(workflow.FLOATING_SEAT_RELEASE_CONFIRM_TITLE, "Release seat?");
-  assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /cannot be undone/i);
-  assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /available to another user/i);
-  assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /browser must check out a new seat/i);
-  assert.match(workflow.FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY, /outcome is unknown/i);
-  assert.match(workflow.FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY, /check the seat status/i);
-  assert.equal(workflow.FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, "floating_seat_release_refresh_failed");
-  assert.match(workflow.FLOATING_SEAT_RELEASE_REFRESH_ERROR_COPY, /released; status refresh failed/i);
-  assert.equal(
-    workflow.describeResultCode(workflow.FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE),
-    workflow.FLOATING_SEAT_RELEASE_REFRESH_ERROR_COPY,
-  );
-  assert.equal(workflow.PORTAL_STATUS_REFRESH_ACTION_LABEL, "Refresh status");
 });
 
 test("portal UI workflow exposes the OTP 10-minute expiry copy", async () => {
@@ -93,34 +62,17 @@ test("portal UI workflow builds the single rate-limit sentence from retryAfter, 
   assert.equal(workflow.rateLimitMessage(900), "Too many attempts. Try again in 15 minutes.");
 });
 
-test("portal UI workflow exposes empty-state copy for every tab", async () => {
+test("portal UI workflow exposes empty-state copy for the entitlements table", async () => {
   const workflow = await loadWorkflowModule();
   assert.match(workflow.NO_ENTITLEMENTS_EMPTY_COPY, /No licenses yet/);
   assert.match(workflow.NO_ENTITLEMENTS_EMPTY_COPY, /after purchase/);
-  assert.match(workflow.NO_DEVICES_EMPTY_COPY, /No devices/i);
 });
 
 test("portal UI workflow maps raw result codes to human-readable copy", async () => {
   const workflow = await loadWorkflowModule();
-  // pool_exhausted is deliberately absent from this pure string map: its copy links out via
-  // <SupportContact/>, a React node, so it is mapped instead in ui/shared/ActionResult.tsx -- see the
-  // dedicated coverage test below, which checks that file directly.
-  assert.equal(workflow.describeResultCode("pool_exhausted"), null);
-  assert.equal(
-    workflow.describeResultCode("device_limit_exceeded"),
-    "This license's device limit is reached — release a device under Devices.",
-  );
-  assert.equal(
-    workflow.describeResultCode("expired_subscription"),
-    "This subscription has expired — renew it to continue.",
-  );
   assert.equal(
     workflow.describeResultCode("invalid_otp"),
     "That code is wrong or expired — request a new one.",
-  );
-  assert.equal(
-    workflow.describeResultCode("seat_reclaimed"),
-    "Your seat was reclaimed after inactivity — check out again.",
   );
   assert.equal(
     workflow.describeResultCode("rate_limited"),
@@ -146,15 +98,6 @@ test("portal UI workflow gives StatusLine a reference fallback for any unmapped 
   assert.equal(workflow.describeUnknownResult(""), "Something went wrong. Try again.");
   // A request id: always carry it, so support can trace the exact failed request.
   assert.equal(workflow.describeUnknownResult("req-123"), "Something went wrong. Reference req-123.");
-});
-
-test("portal UI workflow maps the download_failed_<status> family by prefix, status hidden from the sentence", async () => {
-  const workflow = await loadWorkflowModule();
-  assert.equal(workflow.describeResultCode(`${workflow.DOWNLOAD_FAILED_PREFIX}500`), workflow.DOWNLOAD_FAILED_COPY);
-  assert.equal(workflow.describeResultCode(`${workflow.DOWNLOAD_FAILED_PREFIX}404`), workflow.DOWNLOAD_FAILED_COPY);
-  assert.equal(workflow.describeResultCode("download_failed_0"), workflow.DOWNLOAD_FAILED_COPY);
-  // The status code itself never appears in the main sentence (it stays in Technical details only).
-  assert.doesNotMatch(workflow.DOWNLOAD_FAILED_COPY, /[0-9]/);
 });
 
 test("portal UI workflow gives every StatusLine-reachable result code human copy", async () => {
@@ -212,64 +155,49 @@ test("portal UI workflow gives every StatusLine-reachable result code human copy
     for (const match of text.matchAll(localMessageLiteralRe)) localCodes.add(match[1]);
     for (const match of text.matchAll(localMessageIdentifierRe)) identifierUsages.add(match[1]);
   }
-  // Identifier calls (localMessage(CONST, ...)) resolve through the explicit imports below: most UI
-  // constants are portalWorkflow.ts's own exports, reachable here as workflow.<NAME> since it is the
-  // exact module already loaded above. DEVICES_REFRESH_FAILURE_CODE (DevicesFeature.tsx) is the one
-  // exception -- a re-exported alias of FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE defined locally
-  // rather than in portalWorkflow.ts -- so it is asserted textually below (rather than transpiling a
-  // React/JSX file just for one string) so a future rename cannot silently drift the two apart.
-  const devicesFeatureSource = readFileSync(new URL("features/devices/DevicesFeature.tsx", uiRoot), "utf8");
-  assert.match(
-    devicesFeatureSource,
-    /export const DEVICES_REFRESH_FAILURE_CODE = FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE;/,
-    "DEVICES_REFRESH_FAILURE_CODE must stay a plain alias of FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE",
-  );
-  const KNOWN_LOCAL_ALIASES = { DEVICES_REFRESH_FAILURE_CODE: "FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE" };
+  // Identifier calls (localMessage(CONST, ...)) resolve through portalWorkflow.ts's own exports,
+  // reachable here as workflow.<NAME> since it is the exact module already loaded above.
   for (const identifier of identifierUsages) {
-    const aliasTarget = KNOWN_LOCAL_ALIASES[identifier];
-    const resolved = typeof workflow[identifier] === "string"
-      ? workflow[identifier]
-      : typeof workflow[aliasTarget] === "string" ? workflow[aliasTarget] : undefined;
+    const resolved = typeof workflow[identifier] === "string" ? workflow[identifier] : undefined;
     assert.ok(
       resolved !== undefined,
-      `localMessage(${identifier}, ...) uses a constant this coverage test cannot resolve -- ` +
-      "export it from portalWorkflow.ts (preferred) or extend KNOWN_LOCAL_ALIASES",
+      `localMessage(${identifier}, ...) uses a constant this coverage test cannot resolve -- export it from portalWorkflow.ts`,
     );
     localCodes.add(resolved);
   }
 
-  // ---- 3) pure data-payload codes StatusLine never renders -----------------------------------------
-  // Each is a GET envelope's 200 `data` payload consumed as fields/rows elsewhere, never handed to
-  // setMessage -- confirmed by grepping resultMessage( call sites (usePortalData.ts, AuthFeature.tsx):
-  // none of them pass a "me"/"entitlements" result to it.
+  // ---- 3) codes StatusLine never renders, or renders no better than its own generic fallback ------
+  // DATA_ONLY_CODES are a GET envelope's 200 `data` payload, consumed as fields/rows elsewhere, never
+  // handed to setMessage -- confirmed by grepping resultMessage( call sites (usePortalData.ts,
+  // AuthFeature.tsx): neither passes a "me"/"entitlements" result to it.
   const DATA_ONLY_CODES = new Set([
     "me", // GET /api/portal/me: PortalMe read off result.data in AuthFeature's loadMe(), never given to setMessage
     "entitlements", // GET /api/portal/entitlements: { items } consumed as table rows in usePortalData.ts, never given to setMessage
     "bootstrap_otp", // POST /portal/v1/admin/bootstrap-otp: operator break-glass payload; the customer SPA has no caller for this route at all, so it never reaches setMessage
   ]);
+  // portal_error (app.ts's catch-all for any unhandled exception) IS handed to StatusLine, unlike the
+  // codes above, but is deliberately left unmapped: describeUnknownResult()'s generic reference
+  // sentence names the request id for support, which a static string here cannot do.
+  const GENERIC_FALLBACK_CODES = new Set(["portal_error"]);
 
   const allCodes = new Set([...routeCodes, ...localCodes]);
   const uncovered = [...allCodes].filter(
-    (code) => !DATA_ONLY_CODES.has(code) && workflow.describeResultCode(code) === null,
+    (code) => !DATA_ONLY_CODES.has(code) && !GENERIC_FALLBACK_CODES.has(code) && workflow.describeResultCode(code) === null,
   );
-  assert.deepEqual(uncovered, [], `every StatusLine-reachable code needs RESULT_CODE_COPY copy; missing: ${uncovered.join(", ")}`);
+  assert.deepEqual(uncovered, [], `every StatusLine-reachable code needs RESULT_CODE_COPY copy or an explicit exclusion; missing: ${uncovered.join(", ")}`);
 
-  // Every DATA_ONLY_CODES entry must actually be one of the collected codes, or the exclusion is
-  // dead (and may be hiding a code that should really be covered).
-  const deadExclusions = [...DATA_ONLY_CODES].filter((code) => !allCodes.has(code));
-  assert.deepEqual(deadExclusions, [], `DATA_ONLY_CODES entries never collected -- remove them: ${deadExclusions.join(", ")}`);
+  // Every excluded code must actually be one of the collected codes, or the exclusion is dead (and
+  // may be hiding a code that should really be covered).
+  const deadExclusions = [...DATA_ONLY_CODES, ...GENERIC_FALLBACK_CODES].filter((code) => !allCodes.has(code));
+  assert.deepEqual(deadExclusions, [], `excluded codes never collected -- remove them: ${deadExclusions.join(", ")}`);
 
   // The verbatim success copy pinned by the brief.
   assert.equal(workflow.describeResultCode("otp_requested"), "Check your email for a sign-in code.");
   assert.equal(workflow.describeResultCode("logged_out"), "You're signed out.");
-  assert.equal(workflow.describeResultCode("checkout_ok"), "Seat started.");
-  assert.equal(workflow.describeResultCode("release_ok"), "Seat released.");
-  assert.equal(workflow.describeResultCode("device_released"), "Device released.");
-  assert.equal(workflow.describeResultCode("download_started"), "Download started.");
 
   // No copy anywhere in the map leaks a raw snake_case code as its own text.
   for (const code of allCodes) {
-    if (DATA_ONLY_CODES.has(code)) continue;
+    if (DATA_ONLY_CODES.has(code) || GENERIC_FALLBACK_CODES.has(code)) continue;
     const copy = workflow.describeResultCode(code);
     assert.ok(copy === null || !copy.includes(code), `copy for "${code}" must not embed the raw code: ${copy}`);
   }
@@ -300,29 +228,6 @@ test("portal UI workflow maps the session-ended copy verbatim", async () => {
   );
 });
 
-// Sign-out's best-effort seat release. StatusLine (api.tsx) special-cases this code to interpolate
-// the released/failed counts via seatsReleasedMessage() instead of this static string -- this is only
-// the fallback for the (never expected in practice) case where the message carries no params, and it
-// must still be non-null and never leak the raw code itself.
-test("portal UI workflow maps the seats-released-on-signout fallback copy, never the raw code", async () => {
-  const workflow = await loadWorkflowModule();
-  const copy = workflow.describeResultCode("seats_released_on_signout");
-  assert.equal(typeof copy, "string");
-  assert.doesNotMatch(copy, /seats_released_on_signout/);
-});
-
-test("portal UI workflow builds filtered usage paths", async () => {
-  const workflow = await loadWorkflowModule();
-  assert.equal(workflow.usagePath(), "/api/portal/usage");
-  assert.equal(workflow.usagePath({}), "/api/portal/usage");
-  assert.equal(workflow.usagePath({ project: "", feature: "" }), "/api/portal/usage");
-  assert.equal(workflow.usagePath({ project: "DEFAULT" }), "/api/portal/usage?project=DEFAULT");
-  assert.equal(
-    workflow.usagePath({ project: "DEFAULT", feature: "pro seats" }),
-    "/api/portal/usage?project=DEFAULT&feature=pro+seats",
-  );
-});
-
 test("portal UI workflow shortens fingerprints like admin", async () => {
   const workflow = await loadWorkflowModule();
   assert.equal(workflow.shortHash("short"), "short");
@@ -330,16 +235,10 @@ test("portal UI workflow shortens fingerprints like admin", async () => {
   assert.equal(workflow.shortHash("a".repeat(64)), "aaaaaaaa...aaaaaaaa");
 });
 
-test("portal UI workflow copy discloses account-safe auth and activation download", async () => {
+test("portal UI workflow copy discloses account-safe auth", async () => {
   const workflow = await loadWorkflowModule();
   assert.match(workflow.LOGIN_CODE_SENT_COPY, /If this email is registered/);
   assert.doesNotMatch(workflow.LOGIN_CODE_SENT_COPY, /We sent.*to/);
-  assert.equal(workflow.ACTIVATION_DOWNLOAD_ACTION_LABEL, "Activate and download .lic");
-  assert.match(workflow.ACTIVATION_DOWNLOAD_DISCLOSURE, /activates this license/);
-  assert.match(workflow.ACTIVATION_DOWNLOAD_DISCLOSURE, /trial time/);
-  // The download form asks for a raw "device key id"; the UI must say where it comes from.
-  assert.match(workflow.DEVICE_KEY_HELP_COPY, /device key id/i);
-  assert.match(workflow.DEVICE_KEY_HELP_COPY, /Devices/);
 });
 
 test("portal UI workflow formats epoch windows and timestamps", async () => {
@@ -393,48 +292,8 @@ test("portal UI workflow accepts only 8-digit OTP codes", async () => {
   assert.equal(workflow.isValidCode(""), false);
 });
 
-test("portal UI workflow persists seat sessions across reload", async () => {
-  const workflow = await loadWorkflowModule();
-  const now = 1_000_000;
-
-  // The localStorage key is a stable, versioned namespace so a schema change is a new key, not a
-  // silent misread of stale shapes.
-  assert.equal(workflow.SEATS_KEY, "licensecc.portal.seats.v1");
-
-  // Round-trip: a live lease (expires_at strictly in the future) survives serialize -> hydrate.
-  const live = {
-    "ent-live": { seat_id: "seat-1", client_instance_id: "cid-1", expires_at: now + 3600 },
-  };
-  const json = workflow.serializeSeatSessions(live);
-  assert.deepEqual(workflow.hydrateSeatSessions(json, now), live);
-
-  // Expired lease (expires_at <= now) is dropped so its Release/Refresh buttons don't re-enable
-  // against a seat the server already reclaimed.
-  const mixed = workflow.serializeSeatSessions({
-    "ent-live": { seat_id: "seat-1", client_instance_id: "cid-1", expires_at: now + 10 },
-    "ent-dead": { seat_id: "seat-2", client_instance_id: "cid-2", expires_at: now },
-    "ent-past": { seat_id: "seat-3", client_instance_id: "cid-3", expires_at: now - 1 },
-  });
-  assert.deepEqual(workflow.hydrateSeatSessions(mixed, now), {
-    "ent-live": { seat_id: "seat-1", client_instance_id: "cid-1", expires_at: now + 10 },
-  });
-
-  // Garbage / absent storage tolerated -> empty map (never throws).
-  assert.deepEqual(workflow.hydrateSeatSessions(null, now), {});
-  assert.deepEqual(workflow.hydrateSeatSessions("", now), {});
-  assert.deepEqual(workflow.hydrateSeatSessions("not json", now), {});
-  assert.deepEqual(workflow.hydrateSeatSessions("[1,2,3]", now), {});
-  assert.deepEqual(workflow.hydrateSeatSessions('{"bad":123}', now), {});
-  // Entries missing required string fields are skipped, not partially hydrated.
-  assert.deepEqual(
-    workflow.hydrateSeatSessions('{"ent":{"seat_id":"s","expires_at":2000000}}', now),
-    {},
-  );
-});
-
-
 test("license display preserves explicit status and handles exact date boundaries", async () => {
-  const { licenseDisplayStatus: status, canDownloadLicense: downloadable } = await loadWorkflowModule();
+  const { licenseDisplayStatus: status } = await loadWorkflowModule();
   const row = { status: "active", valid_from: 100, valid_until: 200 };
   assert.equal(status(row, 99), "not_started");
   assert.equal(status(row, 100), "active");
@@ -442,9 +301,6 @@ test("license display preserves explicit status and handles exact date boundarie
   assert.equal(status(row, 200), "expired");
   assert.equal(status({ ...row, status: "disabled" }, 300), "disabled");
   assert.equal(status({ ...row, status: "revoked" }, 300), "revoked");
-  assert.equal(downloadable({ license_mode: "node_locked", enforcement_mode: "device_bound_v1" }), false);
-  assert.equal(downloadable({ license_mode: "trial", enforcement_mode: "legacy" }), true);
-  assert.equal(downloadable({ license_mode: "floating" }), false);
 });
 
 // A trial the rule that enforces it has ended is expired like any other ended license, and a
@@ -455,8 +311,8 @@ test("license display treats an ended trial as expired and never passes an unkno
   assert.equal(status(trial, 149), "active");
   assert.equal(status(trial, 150), "expired");
   assert.equal(status({ ...trial, trial_ends_at: null, trial_starts_on_activation: true }, 10_000), "active", "an unstarted trial has not ended");
-  // A trial with no end of its own (a zero-duration legacy trial, the admin's default from_issue
-  // trial with no end date) never reads as expired: nothing enforces an end on it.
+  // A trial with no end of its own (a zero-duration trial, the admin's default from_issue trial
+  // with no end date) never reads as expired: nothing enforces an end on it.
   assert.equal(status({ ...trial, trial_ends_at: null, trial_starts_on_activation: false }, 10_000), "active");
   assert.equal(status({ ...trial, trial_ends_at: undefined }, 10_000), "active", "a row without the field claims nothing");
   assert.equal(status({ ...trial, valid_until: 120 }, 130), "expired", "whichever end comes first ends the license");
@@ -491,21 +347,17 @@ test("license mode names a trial's end, says the first activation starts it, or 
   const now = 1_700_000_000;
   const usable = { status: "active", valid_from: null, valid_until: null };
   const protectedTrial = { ...usable, enforcement_mode: "device_bound_v1", license_mode: "trial", trial_starts_on_activation: false };
-  const legacyTrial = { ...usable, enforcement_mode: "legacy", license_mode: "trial", trial_starts_on_activation: false };
   // 1) An end: "ends" ahead of it, "ended" once it has passed.
   assert.equal(mode({ ...protectedTrial, trial_ends_at: 1_800_000_000 }, now), "Protected device · Trial · ends 2027-01-15");
   assert.equal(mode({ ...protectedTrial, trial_ends_at: 1_600_000_000 }, now), "Protected device · Trial · ended 2020-09-13");
   assert.equal(mode({ ...protectedTrial, trial_ends_at: now }, now), "Protected device · Trial · ended 2023-11-14");
-  assert.equal(mode({ ...legacyTrial, trial_ends_at: 1_800_000_000 }, now), "Trial · ends 2027-01-15");
   // 2) No end yet, and the first activation starts the clock.
   assert.equal(mode({ ...protectedTrial, trial_ends_at: null, trial_starts_on_activation: true }, now), "Protected device · Trial starts when you activate");
-  assert.equal(mode({ ...legacyTrial, trial_ends_at: null, trial_starts_on_activation: true }, now), "Trial starts when you activate");
-  // 3) No end and no activation clock -- a zero-duration legacy trial, or the admin's default
-  //    from_issue trial with no end date: just "Trial" (the Valid column already says "No end date").
-  assert.equal(mode({ ...legacyTrial, trial_ends_at: null }, now), "Trial");
+  // 3) No end and no activation clock -- a zero-duration trial, or the admin's default from_issue
+  //    trial with no end date: just "Protected device · Trial" (the Valid column already says "No
+  //    end date").
   assert.equal(mode({ ...protectedTrial, trial_ends_at: null }, now), "Protected device · Trial");
-  // A row from a Worker that predates these fields makes no claim about the trial clock.
-  assert.equal(mode({ ...usable, enforcement_mode: "device_bound_v1", license_mode: "trial" }, now), "Protected device · Trial");
+  // A row with no enforcement_mode field makes no "Protected device" claim.
   assert.equal(mode({ ...usable, license_mode: "trial" }, now), "Trial");
   assert.equal(mode({ ...usable, enforcement_mode: "device_bound_v1", license_mode: "node_locked", trial_ends_at: null }, now), "Protected device");
   assert.equal(mode({ ...usable, license_mode: "node_locked", trial_ends_at: null }, now), "Node-locked");
@@ -525,7 +377,7 @@ test("license mode says the first activation starts a trial only while the licen
   assert.equal(mode({ ...pending, status: "revoked" }, now), "Protected device · Trial", "revoked");
   assert.equal(mode({ ...pending, status: "disabled" }, now), "Protected device · Trial", "suspended");
   assert.equal(mode({ ...pending, valid_until: now - 86_400 }, now), "Protected device · Trial", "expired, with an unstarted trial");
-  assert.equal(mode({ ...pending, enforcement_mode: "legacy", valid_until: now - 86_400 }, now), "Trial", "an expired legacy row too");
+  assert.equal(mode({ ...pending, enforcement_mode: undefined, valid_until: now - 86_400 }, now), "Trial", "an expired row with no enforcement_mode");
   assert.equal(mode({ ...pending, status: "paused" }, now), "Protected device · Trial", "a status the portal does not know is not usable");
 });
 

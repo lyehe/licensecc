@@ -636,19 +636,16 @@ test("Account explains that the last sign-in method cannot be disconnected, with
 function makePortalApiFixture() {
   const VALID_CODE = "80315426";
   let authed = false;
-  const controls = { rejectUsage: false, failMe: false, failNextRelease: false, failNextDeviceRelease: false, deferNextRelease: false, rejectNextRelease: false, rejectRefreshes: 0, resolveRelease: null, email: null };
-  const requests = { authRequests: 0, verifies: 0, checkouts: 0, heartbeats: 0, releases: 0, deviceReleases: 0, refreshRejects: 0, downloads: 0, logouts: 0, seatActions: [] };
+  const controls = { failMe: false, rejectRefreshes: 0, email: null };
+  const requests = { authRequests: 0, verifies: 0, refreshRejects: 0, logouts: 0, retires: [] };
 
   const entitlements = [
-    { id: "ent_floating", project: "DEFAULT", feature: "pro", status: "active", license_fingerprint: "a".repeat(64), valid_from: 1_710_000_000, valid_until: null, license_mode: "floating", pool_size: 5, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_float" },
-    { id: "ent_node", project: "DEFAULT", feature: "solo", status: "active", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: 2_100_000_000, license_mode: "node_locked", pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_node" },
+    { id: "ent_pro", project: "DEFAULT", feature: "pro", status: "active", license_fingerprint: "a".repeat(64), valid_from: 1_710_000_000, valid_until: null, enforcement_mode: "device_bound_v1", license_mode: "trial", pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_pro", trial_ends_at: null, trial_starts_on_activation: false },
+    { id: "ent_node", project: "DEFAULT", feature: "solo", status: "active", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: 2_100_000_000, enforcement_mode: "device_bound_v1", license_mode: "node_locked", pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_node", trial_ends_at: null, trial_starts_on_activation: false },
   ];
-  const devices = [
-    { project: "DEFAULT", feature: "pro", license_fingerprint: "a".repeat(64), device_key_id: "d".repeat(40), created_at: 1_710_000_500 },
-  ];
-  const usage = [
-    { project: "DEFAULT", feature: "pro", event_type: "checkout", count: 12 },
-    { project: "DEFAULT", feature: "pro", event_type: "heartbeat", count: 87 },
+  const bindingNow = 1_800_000_000;
+  const bindings = [
+    { binding_id: Buffer.alloc(16, 9).toString("base64url"), project: "DEFAULT", feature: "pro", revision: 0, hold_until: bindingNow + 3600, state: "active", label: "Primary workstation", last_proof_at: bindingNow - 30, created_at: bindingNow - 3600, server_time: bindingNow },
   ];
 
   async function jsonBody(request) {
@@ -708,86 +705,27 @@ function makePortalApiFixture() {
       if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "portal-e2e-401" });
       return fulfill(200, makeEnvelope("entitlements", { items: entitlements.map((item) => ({ ...item })) }));
     }
-    if (method === "GET" && path === "/api/portal/devices") {
-      if (controls.rejectRefreshes > 0) {
-        controls.rejectRefreshes -= 1;
-        requests.refreshRejects += 1;
-        return route.abort("failed");
-      }
+    // ---- Connected devices (protected bindings) ----
+    if (method === "GET" && path === "/api/portal/device-bindings") {
       if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "portal-e2e-401" });
-      return fulfill(200, makeEnvelope("devices", { items: devices.map((item) => ({ ...item })) }));
+      return fulfill(200, makeEnvelope("device_bindings", { customer_id: "cus_self", items: bindings.map((item) => ({ ...item })), has_more: false, next_cursor: null }));
     }
-    if (method === "GET" && path === "/api/portal/usage") {
-      if (controls.rejectUsage) return route.abort("failed");
-      if (controls.rejectRefreshes > 0) {
-        controls.rejectRefreshes -= 1;
-        requests.refreshRejects += 1;
-        return route.abort("failed");
-      }
-      if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "portal-e2e-401" });
-      return fulfill(200, makeEnvelope("usage", { items: usage.map((item) => ({ ...item })) }));
-    }
-
-    if (method === "POST" && path === "/api/portal/devices/release") {
-      requests.deviceReleases += 1;
-      if (controls.failNextDeviceRelease) {
-        controls.failNextDeviceRelease = false;
-        return fulfill(503, { ok: false, code: "temporarily_unavailable", request_id: "portal-e2e-device-release-failure" });
-      }
+    if (method === "POST" && path === "/api/portal/device-bindings/retire") {
       const body = await jsonBody(request);
-      const index = devices.findIndex((item) => item.device_key_id === body.device_key_id);
-      if (index >= 0) devices.splice(index, 1);
-      return fulfill(200, makeEnvelope("device_released"));
-    }
-
-    // ---- Per-seat actions: body MUST target an entitlement id, never a raw fingerprint. ----
-    if (method === "POST" && (path === "/api/portal/checkout" || path === "/api/portal/heartbeat" || path === "/api/portal/release")) {
-      const body = await jsonBody(request);
-      // Assert the client never supplies the fingerprint (invariant 4: server-resolved).
-      if ("license_fingerprint" in body || body.entitlement_id !== "ent_floating" || typeof body.client_instance_id !== "string" || typeof body.nonce !== "string") {
-        return fulfill(400, { ok: false, code: "fingerprint_must_not_be_client_supplied", request_id: "portal-e2e-leak" });
+      requests.retires.push(body);
+      const target = bindings.find((item) => item.binding_id === body.binding_id);
+      if (target === undefined || target.revision !== body.expected_revision) {
+        return fulfill(409, { ok: false, code: "revision_conflict", request_id: "portal-e2e-retire-conflict" });
       }
-      const op = path.split("/").pop();
-      if ((op === "heartbeat" || op === "release") && body.seat_id !== "seat-e2e") {
-        return fulfill(400, { ok: false, code: "seat_id_required", request_id: "portal-e2e-seat" });
-      }
-      requests[`${op}s`] += 1;
-      requests.seatActions.push({ op, body });
-      if (op === "release" && controls.deferNextRelease) {
-        controls.deferNextRelease = false;
-        await new Promise((resolve) => { controls.resolveRelease = resolve; });
-        controls.resolveRelease = null;
-      }
-      if (op === "release" && controls.rejectNextRelease) {
-        controls.rejectNextRelease = false;
-        return route.abort("failed");
-      }
-      if (op === "release" && controls.failNextRelease) {
-        controls.failNextRelease = false;
-        return fulfill(503, { ok: false, code: "verification_error", request_id: "portal-e2e-release-failure" });
-      }
-      return fulfill(200, makeEnvelope(`${op}_ok`, { seat_id: "seat-e2e", mode: "live" }));
-    }
-
-    // ---- Download: stream a signed-looking attachment (NOT a private key) ----
-    if (method === "POST" && path === "/api/portal/download") {
-      requests.downloads += 1;
-      const body = await jsonBody(request);
-      if ("license_fingerprint" in body || body.entitlement_id !== "ent_node" || typeof body.device_key_id !== "string" || body.device_key_id === "") {
-        return fulfill(400, { ok: false, code: "fingerprint_must_not_be_client_supplied", request_id: "portal-e2e-leak" });
-      }
-      return route.fulfill({
-        status: 200,
-        contentType: "application/octet-stream",
-        headers: { "content-disposition": "attachment; filename=\"DEFAULT-solo.lic\"" },
-        body: "[license]\nsigned-license-bytes-not-a-key\n",
-      });
+      target.state = "retiring";
+      target.revision += 1;
+      return fulfill(200, makeEnvelope("binding_retired", { binding_id: target.binding_id, state: "retiring", effective_release_at: target.hold_until, revision: target.revision, generation: 2 }));
     }
 
     return fulfill(404, { ok: false, code: "not_found", request_id: "portal-e2e-unhandled" });
   }
 
-  return { route, requests, VALID_CODE, controls, entitlements, devices };
+  return { route, requests, VALID_CODE, controls, entitlements, bindings };
 }
 
 test("customer portal signs in with an 8-digit code and walks every screen without leaking secrets", async ({ page }) => {
@@ -833,263 +771,45 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(page).toHaveTitle("Apps · Licensecc");
   await expect.poll(() => api.requests.verifies).toBe(1);
 
-  // --- Per-app access (read-only) ---
+  // --- Per-app access (read-only): the active protected license offers no download, only the
+  // instruction to connect from the licensed application itself. ---
   await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
   await expect(page.locator(".tablePane tbody tr").filter({hasText:"pro"}).first()).toBeVisible();
   await expect(page.locator(".status.active").first()).toHaveText("Active");
   await expect(page.getByText("aaaaaaaa...aaaaaaaa").first()).toBeVisible();
+  await expect(page.getByText("Connect from your app").first()).toBeVisible();
 
-  // --- My devices/seats: floating seat checkout/heartbeat/release ---
+  // --- Connected devices (protected bindings): the Devices page shows only this section, with a
+  // Disconnect action -- no browser seats, no legacy "Activated devices" list, no download. ---
   await page.getByRole("link", { name: "Devices", exact: true }).click();
   await expect(page).toHaveTitle("Devices · Licensecc");
-  await page.getByText("Browser seats", {exact:true}).click();
-  const seatCard = page.locator(".seatCard").filter({ hasText: "pro" }).first();
-  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
-  await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeDisabled();
-  await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeDisabled();
+  await expect(page.getByRole("heading", { name: "Connected devices" })).toBeVisible();
+  await expect(page.getByText("Browser seats", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Activated devices", { exact: false })).toHaveCount(0);
+  const deviceRow = page.locator("tr").filter({ hasText: "Primary workstation" });
+  await expect(deviceRow.getByRole("cell", { name: "Connected", exact: true })).toBeVisible();
 
-  await seatCard.getByRole("button", { name: "Start seat" }).click();
-  await expect.poll(() => api.requests.checkouts).toBe(1);
-  const checkout = api.requests.seatActions.at(-1);
-  expect(checkout).toMatchObject({ op: "checkout", body: { entitlement_id: "ent_floating" } });
-  expect(checkout.body).not.toHaveProperty("seat_id");
-  expect(checkout.body.client_instance_id).toMatch(/^[0-9a-f-]{36}$/);
-  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
-  await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeEnabled();
-  await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeEnabled();
-  // Starting the seat flips hasBrowserSession and remounts the panel (<details> -> <section>),
-  // unmounting the just-clicked Start seat button; focus must land on the seat's Release button,
-  // never fall through to <body>.
-  await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeFocused();
-  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
+  // Opening the confirmation must not send a request; Cancel is a no-op.
+  await deviceRow.getByRole("button", { name: "Disconnect", exact: true }).click();
+  const disconnectDialog = page.getByRole("dialog");
+  await expect(disconnectDialog).toBeVisible();
+  await expect(disconnectDialog).toContainText("DEFAULT");
+  await expect(disconnectDialog).toContainText("pro");
+  await expect(disconnectDialog).toContainText("Primary workstation");
+  await expect(disconnectDialog).toContainText("This connection cannot be restored");
+  await disconnectDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(disconnectDialog).toHaveCount(0);
+  expect(api.requests.retires).toHaveLength(0);
 
-  await seatCard.getByRole("button", { name: "Renew seat" }).click();
-  await expect.poll(() => api.requests.heartbeats).toBe(1);
-  const heartbeat = api.requests.seatActions.at(-1);
-  expect(heartbeat).toMatchObject({ op: "heartbeat", body: { entitlement_id: "ent_floating", seat_id: "seat-e2e" } });
-  expect(heartbeat.body.client_instance_id).toBe(checkout.body.client_instance_id);
-  // Seats persist per customer id ("cus_self" throughout this fixture), not under one shared key.
-  const storedSeatSessionBeforeReleaseConfirm = await page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"));
-
-  // Release is destructive: opening the confirmation must not send a request or change the live
-  // session. The dialog names the exact app, feature and this browser, plus the availability impact
-  // (no longer the seat id or license fingerprint -- the dialog is pinned to app/feature/
-  // "This browser" only).
-  await page.setViewportSize({ width: 320, height: 240 });
-  await seatCard.getByRole("button", { name: "Release seat" }).click();
-  const releaseDialog = page.getByRole("dialog");
-  await expect(releaseDialog).toBeVisible();
-  await expect(releaseDialog).toContainText("DEFAULT");
-  await expect(releaseDialog).toContainText("pro");
-  await expect(releaseDialog).toContainText("This browser");
-  await expect(releaseDialog).toContainText(checkout.body.client_instance_id);
-  await expect(releaseDialog).toContainText("cannot be undone");
-  await expect(releaseDialog).toContainText("available to another user");
-  // A native <dialog> (no separate overlay/backdrop div to inspect) -- still scrollable and
-  // clipped at a small viewport, and the page itself never gains horizontal scroll.
-  const compactModalLayout = await page.evaluate(() => {
-    const modal = document.querySelector("dialog[open]");
-    return {
-      modalScrollable: modal !== null && modal.scrollHeight > modal.clientHeight,
-      modalOverflow: modal === null ? "" : getComputedStyle(modal).overflow,
-      bodyHasHorizontalOverflow: document.body.scrollWidth > window.innerWidth,
-    };
-  });
-  expect(compactModalLayout.modalScrollable).toBe(true);
-  expect(compactModalLayout.modalOverflow).toBe("auto");
-  expect(compactModalLayout.bodyHasHorizontalOverflow).toBe(false);
-  const cancelRelease = releaseDialog.getByRole("button", { name: "Cancel" });
-  const confirmRelease = releaseDialog.getByRole("button", { name: "Confirm release" });
-  const releaseTitle = releaseDialog.getByRole("heading", { name: "Release seat?" });
-  await releaseTitle.scrollIntoViewIfNeeded();
-  const titleInViewport = await releaseTitle.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    return rect.top >= 0 && rect.bottom <= window.innerHeight;
-  });
-  expect(titleInViewport).toBe(true);
-  await confirmRelease.scrollIntoViewIfNeeded();
-  const actionsInViewport = await confirmRelease.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    return rect.top >= 0 && rect.bottom <= window.innerHeight;
-  });
-  expect(actionsInViewport).toBe(true);
-  // A native dialog's own default: showModal() focuses the first focusable descendant (Cancel), no
-  // explicit autofocus code needed.
-  await expect(cancelRelease).toBeFocused();
-  // A modal <dialog> alone does not reliably keep the rest of the page out of the
-  // accessibility tree in every engine, so App.tsx still makes `main` inert by hand while either new
-  // confirm dialog is pending -- verified directly against this Chromium build, not assumed.
-  await expect(page.locator("main")).toHaveAttribute("aria-hidden", "true");
-  await expect(page.locator("main")).toHaveAttribute("inert", "");
-  await expect(page.locator("main").getByRole("button", { name: "Renew seat" })).toHaveCount(0);
-  await page.keyboard.press("Tab");
-  await expect(confirmRelease).toBeFocused();
-  // This Chromium's native modal-dialog Tab cycle makes a transient stop on <body> between the
-  // dialog's last and first controls (verified directly) rather than wrapping in a single Tab --
-  // background content is still never reached either way, which the next two checks confirm.
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Tab");
-  await expect(cancelRelease).toBeFocused();
-  // Inert content cannot even take focus programmatically.
-  const backgroundFocused = await page.locator("main").evaluate((main) => {
-    const button = Array.from(main.querySelectorAll("button")).find((candidate) => candidate.textContent === "Refresh");
-    button?.focus();
-    return document.activeElement === button;
-  });
-  expect(backgroundFocused).toBe(false);
-  await expect(cancelRelease).toBeFocused();
-  await expect.poll(() => api.requests.releases).toBe(0);
-
-  // Cancel is a no-op for the session and backend.
-  await cancelRelease.click();
-  await expect(releaseDialog).toHaveCount(0);
-  await expect.poll(() => api.requests.releases).toBe(0);
-  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"))).toBe(storedSeatSessionBeforeReleaseConfirm);
-  await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeEnabled();
-  await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeEnabled();
-  // Every close -- Cancel here -- returns focus to the "Browser seats" section heading, matching
-  // ProtectedNodes' own heading-focus pattern.
-  await expect(page.getByRole("heading", { name: "Browser seats" })).toBeFocused();
-  await page.setViewportSize({ width: 1280, height: 720 });
-
-  // Escape is the keyboard cancellation path and likewise must not release the seat.
-  await seatCard.getByRole("button", { name: "Release seat" }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect.poll(() => api.requests.releases).toBe(0);
-  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"))).toBe(storedSeatSessionBeforeReleaseConfirm);
-  await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeEnabled();
-  await expect(page.getByRole("heading", { name: "Browser seats" })).toBeFocused();
-
-  // A deferred failed confirmation keeps focus inside the busy dialog, blocks Escape/Cancel, and
-  // then preserves the active seat, leaves the error visible, and returns focus to the heading.
-  api.controls.failNextRelease = true;
-  api.controls.deferNextRelease = true;
-  await seatCard.getByRole("button", { name: "Release seat" }).click();
-  const failedReleaseDialog = page.getByRole("dialog");
-  await expect(failedReleaseDialog).toBeVisible();
-  await failedReleaseDialog.getByRole("button", { name: "Confirm release" }).click();
-  await expect.poll(() => api.requests.releases).toBe(1);
-  await expect(failedReleaseDialog).toHaveAttribute("aria-busy", "true");
-  await expect(failedReleaseDialog.getByText("Releasing…")).toBeVisible();
-  await expect(failedReleaseDialog.getByRole("button", { name: "Cancel" })).toBeDisabled();
-  await expect(failedReleaseDialog.getByRole("button", { name: "Confirm release" })).toBeDisabled();
-  await expect.poll(() => page.evaluate(() => document.activeElement?.closest("dialog") !== null)).toBe(true);
-  await page.keyboard.press("Escape");
-  await expect(failedReleaseDialog).toBeVisible();
-  await expect.poll(() => page.evaluate(() => document.activeElement?.closest("dialog") !== null)).toBe(true);
-  await expect.poll(() => typeof api.controls.resolveRelease).toBe("function");
-  api.controls.resolveRelease();
-  await expect(failedReleaseDialog).toHaveCount(0);
-  // Human text, not the raw code: the code stays available, but only inside the collapsed
-  // "Technical details" disclosure.
-  await expect(page.getByText("We couldn't verify that request. Try again.", { exact: true })).toBeVisible();
-  await expect(page.getByText("verification_error", { exact: false })).not.toBeVisible();
-  await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeEnabled();
-  await expect(page.getByRole("heading", { name: "Browser seats" })).toBeFocused();
-  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"))).toBe(storedSeatSessionBeforeReleaseConfirm);
-
-  // A rejected fetch keeps the context/modal present with an explicit failure, then Escape closes
-  // it through the normal policy path and returns focus to the heading.
-  api.controls.rejectNextRelease = true;
-  await seatCard.getByRole("button", { name: "Release seat" }).click();
-  const networkErrorDialog = page.getByRole("dialog");
-  await networkErrorDialog.getByRole("button", { name: "Confirm release" }).click();
-  await expect(networkErrorDialog).toContainText("service was unreachable");
-  await expect(networkErrorDialog).toContainText("outcome is unknown");
-  await expect(networkErrorDialog).toContainText(/check the seat status/i);
-  await expect(networkErrorDialog).toContainText(checkout.body.client_instance_id);
-  await expect(networkErrorDialog.getByRole("alert")).toBeVisible();
-  await expect.poll(() => page.evaluate(() => document.activeElement?.closest("dialog") !== null)).toBe(true);
-  await expect(networkErrorDialog.getByRole("button", { name: "Cancel" })).toBeEnabled();
-  await expect(networkErrorDialog.getByRole("button", { name: "Confirm release" })).toBeDisabled();
-  await page.keyboard.press("Escape");
-  await expect(networkErrorDialog).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Browser seats" })).toBeFocused();
-  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"))).toBe(storedSeatSessionBeforeReleaseConfirm);
-
-  // Only the explicit confirmation sends the original request, and a double click remains one
-  // release while the existing busy guard is active. Releasing the last live seat used to always
-  // collapse the panel into a plain <details>; now it instead shows this seat's own result
-  // (its role="status" line) and stays expanded so that result is visible without reopening
-  // anything. Focus after this close goes to the "Browser seats" heading, not the re-enabled
-  // Start seat button.
-  await seatCard.getByRole("button", { name: "Release seat" }).click();
-  const confirmReleaseDialog = page.getByRole("dialog");
-  await expect(confirmReleaseDialog).toBeVisible();
-  await confirmReleaseDialog.getByRole("button", { name: "Confirm release" }).dblclick();
-  await expect.poll(() => api.requests.releases).toBe(3);
-  const release = api.requests.seatActions.at(-1);
-  expect(release).toMatchObject({ op: "release", body: { entitlement_id: "ent_floating", seat_id: "seat-e2e" } });
-  expect(release.body).toEqual({
-    entitlement_id: "ent_floating",
-    client_instance_id: checkout.body.client_instance_id,
-    nonce: expect.any(String),
-    seat_id: "seat-e2e",
-  });
-  expect(release.body.client_instance_id).toBe(checkout.body.client_instance_id);
-  // Human text, not the raw code: Technical details stay collapsed. This is the SEAT's own
-  // local result line now, not the page-level one.
-  await expect(seatCard.getByRole("status")).toContainText("Seat released.");
-  await expect(page.getByText("release_ok", { exact: false })).not.toBeVisible();
-  await expect(page.getByRole("heading", { name: "Browser seats" })).toBeFocused();
-  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
-  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
-  await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeDisabled();
-  await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeDisabled();
-
-  // A valid release is authoritative even when the follow-up status refresh rejects. The local
-  // session is already gone, the dialog closes once, and manual status refresh remains available;
-  // no second release POST is offered or sent.
-  await seatCard.getByRole("button", { name: "Start seat" }).click();
-  await expect.poll(() => api.requests.checkouts).toBe(2);
-  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
-  await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeEnabled();
-  const refreshFailureReleaseCount = api.requests.releases;
-  const refreshFailureStoredSession = await page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"));
-  expect(refreshFailureStoredSession).not.toBeNull();
-  api.controls.rejectRefreshes = 3;
-  await seatCard.getByRole("button", { name: "Release seat" }).click();
-  const refreshFailedDialog = page.getByRole("dialog");
-  await refreshFailedDialog.getByRole("button", { name: "Confirm release" }).click();
-  await expect.poll(() => api.requests.releases).toBe(refreshFailureReleaseCount + 1);
-  await expect(refreshFailedDialog).toHaveCount(0);
-  await expect.poll(() => api.requests.refreshRejects).toBe(3);
-  // Not tag-qualified (StatusLine's non-empty root changed from <p> to <div> so it can validly
-  // contain the collapsed Technical-details <details>); role + class alone identify it either way.
-  await expect(page.locator('.feedback [role="status"]')).toContainText(/released; status refresh failed/i);
-  await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"))).toBe("{}");
-  // This release also leaves no browser session, but the panel stays expanded (this seat's own
-  // "Seat released." result is showing). Focus still lands on the "Browser seats" heading -- it
-  // is never busy-disabled the way the Start seat button is, so the failed refresh does not change
-  // where focus goes.
-  await expect(page.getByRole("heading", { name: "Browser seats" })).toBeFocused();
-  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
-  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
-
-  await page.getByRole("button", { name: "Refresh status" }).click();
-  await expect(page.getByRole("button", { name: "Refresh status" })).toHaveCount(0);
-  await expect(page.locator('.feedback [role="status"]')).toHaveText("");
-  await expect(page.getByRole("link", { name: "Devices", exact: true })).toBeFocused();
-  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
-
-  // --- Usage ---
-  await page.getByRole("link", { name: "Apps", exact: true }).click();
-  await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
-  await page.getByText("Activity",{exact:true}).click();
-  await expect(page.getByText("87", { exact: true })).toBeVisible();
-
-  // --- Download: triggers a browser download of the streamed attachment ---
-  // License download is part of the app details.
-  await page.locator("tr").filter({has:page.getByLabel("Device key for DEFAULT solo")}).getByText("Activate and download",{exact:true}).click();
-  await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
-  const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Activate and download .lic" }).first().click();
-  const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe("DEFAULT-solo.lic");
-  await expect.poll(() => api.requests.downloads).toBe(1);
+  // Confirming sends exactly one retire request and shows the resulting status.
+  await deviceRow.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await expect(disconnectDialog).toBeVisible();
+  await disconnectDialog.getByRole("button", { name: "Disconnect device", exact: true }).click();
+  await expect(disconnectDialog).toHaveCount(0);
+  await expect.poll(() => api.requests.retires).toHaveLength(1);
+  expect(api.requests.retires[0]).toEqual({ binding_id: api.bindings[0].binding_id, expected_revision: 0 });
+  await expect(page.getByText(/Renewal stopped for Primary workstation/)).toBeVisible();
+  await expect(page.getByRole("cell", { name: /Disconnecting/ })).toBeVisible();
 
   // --- Leak guard: the rendered page text must NEVER expose any credential / cross-tenant id. ---
   const pageText = await page.locator("body").innerText();
@@ -1241,7 +961,7 @@ test("app grouping, browser history and mobile reflow preserve the customer cont
   await page.getByRole("searchbox", { name: "Find a device" }).fill("missing");
   await expect(page.getByRole("heading", { name: "No matching devices" })).toBeVisible();
   await page.getByRole("searchbox", { name: "Find a device" }).fill("");
-  await expect(page.getByText("d".repeat(40), { exact: true })).toBeVisible();
+  await expect(page.getByText("Primary workstation")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole("link", { name: "Account", exact: true }).click();
   await expect(page).toHaveTitle("Account · Licensecc");
@@ -1264,7 +984,7 @@ test("session and account-read failures do not masquerade as an empty account", 
   await page.getByLabel("Email").fill("user@example.com");
   await page.getByRole("button", { name: "Send code" }).click();
   await page.getByLabel("8-digit code").fill(api.VALID_CODE);
-  api.controls.rejectRefreshes = 3;
+  api.controls.rejectRefreshes = 1;
   await page.getByRole("button", { name: "Verify", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Account data unavailable" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "No apps assigned yet" })).toHaveCount(0);
@@ -1272,195 +992,26 @@ test("session and account-read failures do not masquerade as an empty account", 
   await expect(page.getByRole("link", { name: "View licenses for DEFAULT" })).toBeVisible();
 });
 
-test("usage failure stays local and removing a searched registration keeps the filter truthful", async ({ page }) => {
+test("protected access uses app enrollment; an expired license shows no action, only its status", async ({ page }, testInfo) => {
   const api = makePortalApiFixture();
-  api.controls.rejectUsage = true;
-  api.entitlements.push({ ...api.entitlements[1], id: "second_app", project: "SECOND_APP" });
-  api.devices.push({ ...api.devices[0], project: "SECOND_APP", device_key_id: "second-node" });
-  await signIn(page, api);
-  await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
-  await expect(page.getByText(/Activity is unavailable/)).toBeVisible();
-  await page.locator("tr").filter({has:page.getByLabel("Device key for DEFAULT solo")}).getByText("Activate and download",{exact:true}).click();
-  await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
-  await expect(page.getByRole("button", { name: "Activate and download .lic" })).toBeEnabled();
-  api.controls.rejectUsage = false;
-  await page.getByRole("button", { name: "Retry activity" }).click();
-  await page.getByText("Activity",{exact:true}).click();
-  await expect(page.getByText("87", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "Devices", exact: true }).click();
-  // One page-level search box (matching name, ID or app) replaces the registrations-only App
-  // select; typing the app name filters the same way the old dropdown did.
-  await page.getByRole("searchbox", { name: "Find a device" }).fill("DEFAULT");
-  // The native <dialog> confirm replaces window.confirm() -- no page.on("dialog") handler needed
-  // any more -- and names the exact device, app and feature before anything is sent.
-  await page.locator(".registrations").getByRole("button", { name: "Release", exact: true }).click();
-  const deviceReleaseDialog = page.getByRole("dialog");
-  await expect(deviceReleaseDialog).toBeVisible();
-  await expect(deviceReleaseDialog).toContainText("d".repeat(40));
-  await expect(deviceReleaseDialog).toContainText("DEFAULT");
-  await expect(deviceReleaseDialog).toContainText("pro");
-  await deviceReleaseDialog.getByRole("button", { name: "Confirm release" }).click();
-  await expect(deviceReleaseDialog).toHaveCount(0);
-  // A SUCCESSFUL Confirm returns focus to the section heading too, not
-  // only Cancel/Escape (already covered by the legacy-release test below).
-  await expect(page.getByRole("heading", { name: "Activated devices (older app versions)" })).toBeFocused();
-  await expect(page.getByRole("heading", { name: "No matching devices" })).toBeVisible();
-  // The released row is gone after the refresh, so its result shows under the list instead.
-  await expect(page.locator(".registrations").getByRole("status")).toContainText("Device released.");
-  await expect(page.getByRole("searchbox", { name: "Find a device" })).toHaveValue("DEFAULT");
-  await page.getByRole("searchbox", { name: "Find a device" }).fill("");
-  await expect(page.getByText("second-node", { exact: true })).toBeVisible();
-});
-
-// The legacy-release confirm follows the exact same native <dialog> pattern as the floating-seat
-// release above -- Escape cancels with no request sent, and focus returns to this section's own
-// heading ("Activated devices (older app versions)"), not window.confirm's old accept/dismiss.
-test("the legacy device release confirm names the device, app and feature; Escape cancels without a request and returns focus to the section heading", async ({ page }) => {
-  const api = makePortalApiFixture();
-  await signIn(page, api);
-  await page.getByRole("link", { name: "Devices", exact: true }).click();
-  const releaseButton = page.locator(".registrations").getByRole("button", { name: "Release", exact: true });
-  const heading = page.getByRole("heading", { name: "Activated devices (older app versions)" });
-  await releaseButton.click();
-  const dialog = page.getByRole("dialog");
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("d".repeat(40));
-  await expect(dialog).toContainText("DEFAULT");
-  await expect(dialog).toContainText("pro");
-  await expect.poll(() => api.requests.deviceReleases).toBe(0);
-  await page.keyboard.press("Escape");
-  await expect(dialog).toHaveCount(0);
-  await expect.poll(() => api.requests.deviceReleases).toBe(0);
-  await expect(heading).toBeFocused();
-  await expect(page.getByText("d".repeat(40), { exact: true })).toBeVisible();
-
-  // Cancel is the same no-request path as Escape, and also returns focus to the heading.
-  await releaseButton.click();
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: "Cancel" }).click();
-  await expect(dialog).toHaveCount(0);
-  await expect.poll(() => api.requests.deviceReleases).toBe(0);
-  await expect(heading).toBeFocused();
-});
-
-test("releasing the only activated device keeps its section, shows Device released. and keeps focus on the heading", async ({ page }) => {
-  const api = makePortalApiFixture();
-  await signIn(page, api);
-  await page.getByRole("link", { name: "Devices", exact: true }).click();
-  const section = page.locator(".registrations");
-  const heading = page.getByRole("heading", { name: "Activated devices (older app versions)" });
-  await section.getByRole("button", { name: "Release", exact: true }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Confirm release" }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect.poll(() => api.requests.deviceReleases).toBe(1);
-  await expect(section.getByRole("heading", { name: "No activated devices" })).toBeVisible();
-  await expect(section.getByRole("status")).toContainText("Device released.");
-  await expect(heading).toBeFocused();
-  // The result belongs to this visit only.
-  await page.getByRole("link", { name: "Apps", exact: true }).click();
-  await page.getByRole("link", { name: "Devices", exact: true }).click();
-  await expect(page.getByText("Device released.")).toHaveCount(0);
-  await expect(section).toHaveCount(0);
-});
-
-// Browser Back is not blocked by the inert page behind a confirmation, so the device confirmation has
-// to outlive the Devices page: it stays open and usable where Back lands, and Forward returns to it.
-test("browser Back while a device Release confirmation is open keeps it usable, and Forward returns to it", async ({ page }) => {
-  const api = makePortalApiFixture();
-  await signIn(page, api);
-  await page.getByRole("link", { name: "Devices", exact: true }).click();
-  const releaseButton = page.locator(".registrations").getByRole("button", { name: "Release", exact: true });
-  const dialog = page.getByRole("dialog");
-  const main = page.locator("main");
-
-  await releaseButton.click();
-  await expect(dialog).toBeVisible();
-  await page.goBack();
-  await expect(page.locator("h1")).toHaveText("Apps");
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: "Cancel" }).click();
-  await expect(dialog).toHaveCount(0);
-  await expect(main).not.toHaveAttribute("inert");
-  await expect(main).not.toHaveAttribute("aria-hidden");
-  await expect(page.locator("#content")).toBeFocused();
-  await expect(page.getByRole("link", { name: "View licenses for DEFAULT" })).toBeVisible();
-
-  await page.getByRole("link", { name: "Devices", exact: true }).click();
-  await releaseButton.click();
-  await expect(dialog).toBeVisible();
-  await page.goBack();
-  await expect(page.locator("h1")).toHaveText("Apps");
-  await page.goForward();
-  await expect(page.locator("h1")).toHaveText("Devices");
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("d".repeat(40));
-  await dialog.getByRole("button", { name: "Cancel" }).click();
-  await expect(dialog).toHaveCount(0);
-  await expect(main).not.toHaveAttribute("inert");
-  await expect(page.getByRole("heading", { name: "Activated devices (older app versions)" })).toBeFocused();
-  expect(api.requests.deviceReleases).toBe(0);
-
-  // A release confirmed on the page Back landed on succeeds with no result line anywhere, and the next
-  // visit to Devices lists the device as gone.
-  await releaseButton.click();
-  await page.goBack();
-  await expect(page.locator("h1")).toHaveText("Apps");
-  await dialog.getByRole("button", { name: "Confirm release" }).click();
-  await expect(dialog).toHaveCount(0);
-  await expect.poll(() => api.requests.deviceReleases).toBe(1);
-  await expect(page.locator(".feedback").getByRole("status")).toHaveCount(0);
-  await page.getByRole("link", { name: "Devices", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Connected devices" })).toBeVisible();
-  await expect(page.getByText("d".repeat(40), { exact: true })).toHaveCount(0);
-  await expect(page.locator(".registrations")).toHaveCount(0);
-});
-
-// A release confirmed on another page has no device row on screen to report into. A refusal must still
-// be reported where the customer is, in the page-level line, and it belongs to that visit only.
-test("a device release confirmed on another page after Back and refused by the server is reported on that page, and not again on Devices", async ({ page }) => {
-  const api = makePortalApiFixture();
-  api.controls.failNextDeviceRelease = true;
-  await signIn(page, api);
-  await page.getByRole("link", { name: "Devices", exact: true }).click();
-  await page.locator(".registrations").getByRole("button", { name: "Release", exact: true }).click();
-  const dialog = page.getByRole("dialog");
-  await expect(dialog).toBeVisible();
-  await page.goBack();
-  await expect(page.locator("h1")).toHaveText("Apps");
-  await dialog.getByRole("button", { name: "Confirm release" }).click();
-  await expect(dialog).toHaveCount(0);
-  await expect.poll(() => api.requests.deviceReleases).toBe(1);
-
-  const pageLine = page.locator(".feedback").getByRole("status");
-  await expect(pageLine).toContainText("This is temporarily unavailable. Try again shortly.");
-  await expect(pageLine).toHaveClass(/error/);
-  await pageLine.getByText("Technical details", { exact: true }).click();
-  await expect(pageLine.getByText("temporarily_unavailable (portal-e2e-device-release-failure)", { exact: true })).toBeVisible();
-
-  await page.getByRole("link", { name: "Devices", exact: true }).click();
-  await expect(page.getByText("d".repeat(40), { exact: true })).toBeVisible();
-  await expect(page.locator(".registrations").getByRole("status")).toHaveCount(0);
-  await expect(page.getByText("This is temporarily unavailable. Try again shortly.")).toHaveCount(0);
-});
-
-test("protected access uses app enrollment while legacy downloads respect date boundaries", async ({ page }, testInfo) => {
-  const api = makePortalApiFixture();
-  api.entitlements.push({ ...api.entitlements[1], id: "protected", feature: "protected", enforcement_mode: "device_bound_v1" });
+  api.entitlements.push({ ...api.entitlements[1], id: "protected", feature: "protected" });
   api.entitlements[1].valid_until = Math.floor(Date.now() / 1000) - 1;
   await page.route("**/portal/v1/auth/**", api.route);
   await page.route("**/api/portal/**", api.route);
   await signIn(page, api);
   await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
-  await expect(page.getByText("Connect from your app",{exact:true})).toBeVisible();
-  await expect(page.getByRole("cell", { name: "Protected device", exact: true })).toBeVisible();
+  // Scoped to the Feature cell specifically: a plain row-wide hasText would also catch the "pro"
+  // row's own "Protected device" Mode text (hasText matches case-insensitively).
+  const protectedRow = page.locator("tr").filter({ has: page.locator('td[data-label="Feature"]', { hasText: "protected" }) });
+  await expect(protectedRow.getByText("Connect from your app", { exact: true })).toBeVisible();
+  await expect(protectedRow.getByRole("cell", { name: "Protected device", exact: true })).toBeVisible();
   await expect(page.getByLabel("Device key for DEFAULT protected")).toHaveCount(0);
   await expect(page.locator(".status.expired")).toHaveCount(1);
-  // An expired license offers no download at all; its status says what to do instead.
+  // An expired license offers no action at all; its status says what to do instead.
   const expiredRow = page.locator("tr").filter({ hasText: "solo" });
   await expect(expiredRow.locator('td[data-label="Status"]')).toHaveText(/^Expired on \d{4}-\d{2}-\d{2}\. Contact your administrator to renew\.$/);
-  await expect(expiredRow.getByText("Activate and download")).toHaveCount(0);
+  await expect(expiredRow.getByText("Connect from your app")).toHaveCount(0);
   await expect(page.getByLabel("Device key for DEFAULT solo")).toHaveCount(0);
-  expect(api.requests.downloads).toBe(0);
   for (const width of [320, 390, 768, 1280, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(page.getByText("Status reflects license dates. Your app also checks device and trial access.", { exact: true })).toBeVisible();

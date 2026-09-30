@@ -26,7 +26,7 @@ export function ProvidersScope({ children }: { children: React.ReactNode }): Rea
     return () => { cancelled = true; };
   }, [attempt]);
   const state = useMemo(() => ({ providers, failed, retry: () => setAttempt((value) => value + 1) }), [providers, failed]);
-  // A response without `support` (an older Worker) means no contact is configured.
+  // A response without `support` means no contact is configured.
   const support = typeof providers?.support === "string" ? providers.support : null;
   return <ProvidersContext.Provider value={state}>
     <SupportContactContext.Provider value={support}>{children}</SupportContactContext.Provider>

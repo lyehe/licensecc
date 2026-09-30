@@ -505,7 +505,6 @@ test("architecture documentation derives the SDK inventory and current measureme
     "services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs",
     "services/cloudflare-licensing-backend/src/routes/verify.ts",
     "services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx",
-    "services/cloudflare-customer-portal/src/ui/features/devices/DevicesFeature.tsx",
     "services/cloudflare-d1-backup/src/core.ts",
   ];
   for (const relativePath of hotspotCases) {

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 // Every license lifecycle state tells the customer what happens next, dates render as UTC
-// calendar days, a trial shows when it ends, an inactive license offers no download, and the Apps
+// calendar days, a trial shows when it ends, an inactive license offers no action, and the Apps
 // list flags an app whose licenses need attention -- in words, never colour alone.
 function makeEnvelope(code, data) {
   return { ok: true, code, request_id: "lifecycle-e2e", data };
@@ -10,7 +10,7 @@ function makeEnvelope(code, data) {
 function license(feature, fields = {}) {
   return {
     id: `ent_${feature}`, project: "ALPHA", feature, status: "active", license_fingerprint: "c".repeat(64),
-    valid_from: null, valid_until: 4_102_444_800, enforcement_mode: "legacy", license_mode: "node_locked",
+    valid_from: null, valid_until: 4_102_444_800, enforcement_mode: "device_bound_v1", license_mode: "node_locked",
     pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: null,
     trial_ends_at: null, trial_starts_on_activation: false,
     ...fields,
@@ -21,46 +21,38 @@ const LICENSES = [
   license("solo"),
   license("lapsed", { valid_until: 1_750_000_000 }),
   license("paused", { status: "disabled" }),
-  license("cancelled", { status: "revoked", enforcement_mode: "device_bound_v1" }),
+  license("cancelled", { status: "revoked" }),
   license("upcoming", { valid_from: 4_102_444_800, valid_until: null }),
-  license("runtrial", { enforcement_mode: "device_bound_v1", license_mode: "trial", valid_until: null, trial_ends_at: 4_133_980_800 }),
-  license("newtrial", { enforcement_mode: "device_bound_v1", license_mode: "trial", valid_until: null, trial_ends_at: null, trial_starts_on_activation: true }),
+  license("runtrial", { license_mode: "trial", valid_until: null, trial_ends_at: 4_133_980_800 }),
+  license("newtrial", { license_mode: "trial", valid_until: null, trial_ends_at: null, trial_starts_on_activation: true }),
   license("endtrial", { license_mode: "trial", valid_until: null, trial_ends_at: 1_760_000_000 }),
-  // A trial with no end of its own: a zero-duration legacy trial, or the admin's default from_issue
-  // trial with no end date. Nothing ends it, so it must not read as starting later or as expired.
+  // A trial with no end of its own: a zero-duration trial, or the admin's default from_issue trial
+  // with no end date. Nothing ends it, so it must not read as starting later or as expired.
   license("opentrial", { license_mode: "trial", valid_until: null, trial_ends_at: null, trial_starts_on_activation: false }),
   // A revoked license whose trial never started: it will not be activated, so no "starts" promise.
-  license("haltedtrial", { status: "revoked", enforcement_mode: "device_bound_v1", license_mode: "trial", valid_until: null,
+  license("haltedtrial", { status: "revoked", license_mode: "trial", valid_until: null,
     trial_ends_at: null, trial_starts_on_activation: true }),
   license("steady", { project: "BETA" }),
 ];
 
 async function setup(page, { support } = {}) {
-  const requests = { downloads: 0 };
   const handler = (route) => {
     const path = new URL(route.request().url()).pathname;
     const fulfill = (status, body) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     if (path === "/portal/v1/auth/providers") return fulfill(200, makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false, support: support ?? null }));
     if (path === "/api/portal/me") return fulfill(200, makeEnvelope("me", { customer_id: "cus_lifecycle", email: null }));
     if (path === "/api/portal/entitlements") return fulfill(200, makeEnvelope("entitlements", { items: LICENSES.map((item) => ({ ...item })) }));
-    if (path === "/api/portal/devices") return fulfill(200, makeEnvelope("devices", { items: [] }));
-    if (path === "/api/portal/usage") return fulfill(200, makeEnvelope("usage", { items: [] }));
-    if (path === "/api/portal/download") {
-      requests.downloads += 1;
-      return fulfill(403, { ok: false, code: "no_active_entitlement", request_id: "lifecycle-e2e-download" });
-    }
     return fulfill(404, { ok: false, code: "not_found", request_id: "lifecycle-e2e-unhandled" });
   };
   await page.route("**/portal/v1/auth/**", handler);
   await page.route("**/api/portal/**", handler);
-  return requests;
 }
 
 const row = (page, feature) => page.locator(".licenseTable tbody tr").filter({ hasText: feature });
 const cell = (page, feature, label) => row(page, feature).locator(`td[data-label="${label}"]`);
 
-test("license lifecycle: each state reads as words with its UTC date and next step, and only an active license offers a download", async ({ page }, testInfo) => {
-  const requests = await setup(page, { support: "mailto:help@example.com" });
+test("license lifecycle: each state reads as words with its UTC date and next step, and only an active license offers to connect", async ({ page }, testInfo) => {
+  await setup(page, { support: "mailto:help@example.com" });
   await page.goto("/");
 
   // --- Apps list: the attention badge is text, on the app with an inactive license only ---
@@ -87,13 +79,13 @@ test("license lifecycle: each state reads as words with its UTC date and next st
   await expect(cell(page, "runtrial", "Status")).toHaveText("Active");
   await expect(cell(page, "runtrial", "Action")).toHaveText("Connect from your app");
   await expect(cell(page, "newtrial", "Mode")).toHaveText("Protected device · Trial starts when you activate");
-  await expect(cell(page, "endtrial", "Mode")).toHaveText("Trial · ended 2025-10-09");
+  await expect(cell(page, "endtrial", "Mode")).toHaveText("Protected device · Trial · ended 2025-10-09");
   await expect(cell(page, "endtrial", "Status")).toHaveText("Expired on 2025-10-09. Contact support to renew.");
-  // A trial with no end of its own reads just "Trial", stays active and keeps its download.
-  await expect(cell(page, "opentrial", "Mode")).toHaveText("Trial");
+  // A trial with no end of its own reads just "Protected device · Trial", and stays active.
+  await expect(cell(page, "opentrial", "Mode")).toHaveText("Protected device · Trial");
   await expect(cell(page, "opentrial", "Status")).toHaveText("Active");
   await expect(cell(page, "opentrial", "Valid")).toHaveText("No start date to No end date");
-  await expect(row(page, "opentrial").getByText("Activate and download", { exact: true })).toBeVisible();
+  await expect(cell(page, "opentrial", "Action")).toHaveText("Connect from your app");
   // An inactive license makes no promise about activating it.
   await expect(cell(page, "haltedtrial", "Mode")).toHaveText("Protected device · Trial");
   await expect(cell(page, "haltedtrial", "Status")).toHaveText("Revoked.");
@@ -102,16 +94,12 @@ test("license lifecycle: each state reads as words with its UTC date and next st
   await expect(cell(page, "solo", "Valid")).toHaveText("No start date to 2100-01-01");
   await expect(cell(page, "upcoming", "Valid")).toHaveText("2100-01-01 to No end date");
 
-  // --- Only an active license offers an action; an inactive one offers no download at all ---
-  await expect(row(page, "solo").getByText("Activate and download", { exact: true })).toBeVisible();
+  // --- Only an active license offers an action; an inactive one offers none at all ---
+  await expect(cell(page, "solo", "Action")).toHaveText("Connect from your app");
   for (const feature of ["lapsed", "paused", "cancelled", "upcoming", "endtrial", "haltedtrial"]) {
-    await expect(row(page, feature).getByText("Activate and download")).toHaveCount(0);
-    await expect(row(page, feature).getByRole("textbox")).toHaveCount(0);
     await expect(cell(page, feature, "Action").locator("*")).toHaveCount(0);
     await expect(cell(page, feature, "Action")).toHaveText("");
   }
-  await expect(row(page, "cancelled").getByText("Connect from your app")).toHaveCount(0);
-  expect(requests.downloads).toBe(0);
 
   // --- No raw status code, and no bare "any" date, anywhere in the table ---
   const tableText = await page.locator(".licenseTable").innerText();
