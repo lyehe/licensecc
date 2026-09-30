@@ -2,7 +2,7 @@
 // accepted->terminal transitions that must be decided atomically against current D1
 // state. It intentionally has no route or cross-service dependencies.
 
-const OK_CODES = new Set(["applied", "superseded", "no_entitlement", "stale_ignored", "observed", "cached"]);
+const OK_CODES = new Set(["applied", "superseded", "no_entitlement", "stale_ignored", "cached"]);
 
 export function resultBody(code, extra) {
   return { ok: OK_CODES.has(code), code, ...extra };

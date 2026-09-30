@@ -125,7 +125,8 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
    npm run validate:protected-smoke -- --url https://licensecc-online-verifier.example.workers.dev
    ```
 
-   The smoke is credential-free; the
+   The smoke is credential-free; it also fails on any non-empty or malformed
+   `config_warnings`, not only on a failed readiness check. The
    [protected-device API](#protected-device-api-staged-implementation) section
    describes what it proves.
 
@@ -570,9 +571,11 @@ and an RSA-3072 PEM public key. `/health` certifies protected readiness:
 signs and verifies, the approval key ring seals and opens, and
 `BOUND_GLOBAL_RATE_LIMIT` is valid. The check runs once per Worker isolate. After
 a production deploy, `npm run validate:protected-smoke -- --url <backend-origin>`
-requires that readiness and an `authorization_unavailable` denial for an
-unauthenticated challenge naming an unknown attempt; it prints redacted JSON
-evidence. Neither proves a live issuance or renewal. Follow the [protected key rotation runbook](../../doc/operations/device-bound-key-rotation.md)
+requires that readiness, refuses any non-empty or malformed `config_warnings`
+(a distinct `CONFIG_WARNINGS_PRESENT` failure carrying only the warning count,
+never the warning text), and requires an `authorization_unavailable` denial
+for an unauthenticated challenge naming an unknown attempt; it prints redacted
+JSON evidence. Neither proves a live issuance or renewal. Follow the [protected key rotation runbook](../../doc/operations/device-bound-key-rotation.md)
 before switching signers. Old public keys can still be required to load saved
 checkpoints after their leases expire; lease expiry alone is not a removal rule.
 

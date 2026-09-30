@@ -14,7 +14,7 @@ const ordersPath: Record<string, unknown> = {
     responses: {
       "200": {
         description:
-          "Applied/observed/cached (ok:true, code: applied|superseded|no_entitlement|stale_ignored|observed|cached), including the stored application result for a freshly signed matching replay of a processed/superseded event. cached is the neutral fallback when terminal result finalization did not complete or a legacy terminal row has no stored result.",
+          "Applied/cached (ok:true, code: applied|superseded|no_entitlement|stale_ignored|cached), including the stored application result for a freshly signed matching replay of a processed/superseded event. cached is the neutral fallback when terminal result finalization did not complete or a legacy terminal row has no stored result.",
         content: {
           "application/json": { schema: { $ref: "#/components/schemas/OrderResult" } },
         },

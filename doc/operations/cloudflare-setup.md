@@ -434,12 +434,16 @@ npm --silent run validate:protected-smoke --workspace @licensecc/cloudflare-lice
   --url https://<backend-origin>
 ```
 
-It requires `/health` to report `protected_device_ready: true` and an
-unauthenticated `POST /v2/device-challenges` naming a fresh random attempt to
-return `404 authorization_unavailable`. That denial proves the protected route,
-its configuration and its schema serve without creating a challenge. The smoke
-prints redacted JSON evidence and exits non-zero on any other answer. It
-enrolls no device and does not prove a live issuance or renewal.
+It requires `/health` to report `protected_device_ready: true` with no
+non-empty or malformed `config_warnings` (a missing order signer-scope map or
+an unbound edge rate limiter fails the smoke too, not only a failed readiness
+check), and an unauthenticated `POST /v2/device-challenges` naming a fresh
+random attempt to return `404 authorization_unavailable`. That denial proves
+the protected route, its configuration and its schema serve without creating
+a challenge. The smoke prints redacted JSON evidence — a `config_warnings`
+failure carries only the warning count, never the warning text — and exits
+non-zero on any other answer. It enrolls no device and does not prove a live
+issuance or renewal.
 
 The baseline schema accepts pending attempts with no requested feature and
 makes feature intent immutable once recorded. Deploy the backend before

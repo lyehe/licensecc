@@ -14,11 +14,12 @@ const MAX_RESPONSE_BYTES = 16 * 1024;
 const USAGE = "usage: node scripts/protected-readiness-smoke.mjs --url <canonical https backend origin>";
 
 class SmokeFailure extends Error {
-  constructor(code, check, status) {
+  constructor(code, check, status, details) {
     super(code);
     this.code = code;
     this.check = check;
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -80,6 +81,19 @@ export async function runProtectedReadinessSmoke({ origin }, { fetchImpl = fetch
   if (health.status !== 200 || healthBody.ok !== true || healthBody.service !== SERVICE || healthBody.protected_device_ready !== true) {
     throw new SmokeFailure("PROTECTED_NOT_READY", "health", health.status);
   }
+  // config_warnings is a names-only signal for a half-configured deploy (a missing
+  // signer-scope map, an unbound edge limiter): a deploy that reports any must still fail
+  // this gate, even though protected_device_ready stayed true. The evidence below carries
+  // only the warning COUNT, never the warning text.
+  const configWarnings = healthBody.config_warnings;
+  if (configWarnings !== undefined && (!Array.isArray(configWarnings) || configWarnings.length !== 0)) {
+    throw new SmokeFailure(
+      "CONFIG_WARNINGS_PRESENT",
+      "health",
+      health.status,
+      Array.isArray(configWarnings) ? { config_warning_count: configWarnings.length } : undefined,
+    );
+  }
 
   // Fresh random handles match no enrollment attempt, so the challenge route must
   // deny before creating anything. Any other answer means the protected route,
@@ -125,7 +139,12 @@ export async function main(argv, { fetchImpl = fetch, stdout = process.stdout } 
     return 0;
   } catch (error) {
     const failure = error instanceof SmokeFailure
-      ? { code: error.code, check: error.check, ...(error.status === undefined ? {} : { status: error.status }) }
+      ? {
+        code: error.code,
+        check: error.check,
+        ...(error.status === undefined ? {} : { status: error.status }),
+        ...(error.details ?? {}),
+      }
       : { code: "UNEXPECTED_FAILURE" };
     write({ schema_version: SCHEMA_VERSION, status: "failed", error: failure });
     return 1;

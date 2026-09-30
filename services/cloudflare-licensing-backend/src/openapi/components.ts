@@ -159,7 +159,7 @@ export const openApiComponents: LabeledComponentFragment = {
           ok: { type: "boolean" },
           code: {
             type: "string",
-            enum: ["applied", "superseded", "no_entitlement", "stale_ignored", "observed", "cached"],
+            enum: ["applied", "superseded", "no_entitlement", "stale_ignored", "cached"],
           },
           license_fingerprint: { type: ["string", "null"] },
           fingerprint_origin: { type: "string" },
