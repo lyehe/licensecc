@@ -115,6 +115,34 @@ test("protected smoke fails unless an unauthenticated challenge is denied with a
   assert.doesNotMatch(unreachable.output, /secret-detail|licensecc-prod/u);
 });
 
+test("protected smoke fails when health reports any non-empty or malformed config_warnings", async () => {
+  const secretDetail = "BOUND_REGISTRATION_RATE_LIMITER is not bound — registration has no edge rate limit";
+  const escaped = secretDetail.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const cases = [
+    ["one warning", () => json({ ...READY, config_warnings: [secretDetail] }), 1],
+    ["two warnings", () => json({ ...READY, config_warnings: [secretDetail, secretDetail] }), 2],
+    ["malformed (not an array)", () => json({ ...READY, config_warnings: "warned" }), undefined],
+  ];
+  for (const [label, health, expectedCount] of cases) {
+    const backend = fakeBackend({ health });
+    const { code, evidence } = await runMain([`--url=${ORIGIN}`], backend.fetchImpl);
+    assert.equal(code, 1, label);
+    assert.equal(evidence.status, "failed", label);
+    assert.equal(evidence.error.code, "CONFIG_WARNINGS_PRESENT", label);
+    assert.equal(evidence.error.check, "health", label);
+    assert.deepEqual(backend.calls.map((call) => call.method), ["GET"], `${label}: no challenge once configuration warnings fail the smoke`);
+    assert.doesNotMatch(JSON.stringify(evidence), new RegExp(escaped, "u"), label);
+    if (expectedCount !== undefined) assert.equal(evidence.error.config_warning_count, expectedCount, label);
+  }
+});
+
+test("protected smoke passes when config_warnings is absent or an empty array", async () => {
+  for (const health of [() => json(READY), () => json({ ...READY, config_warnings: [] })]) {
+    const { code } = await runMain(["--url", ORIGIN], fakeBackend({ health }).fetchImpl);
+    assert.equal(code, 0);
+  }
+});
+
 test("protected smoke accepts only one canonical HTTPS backend origin", async () => {
   assert.deepEqual(parseSmokeArguments(["--url", ORIGIN]), { origin: ORIGIN });
   assert.deepEqual(parseSmokeArguments([`--url=${ORIGIN}/`]), { origin: ORIGIN });
