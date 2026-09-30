@@ -19,14 +19,12 @@ import { DISABLE_INTENTS, REVOKE_INTENTS } from "./order_mutation.mjs";
 export { clampValidUntil, mapIntentToMutation } from "./order_mutation.mjs";
 
 // --- Self-contained validators ----------------------------------------------
-// Deliberately defined here (not imported from src/routes/verify.ts, whose copies are
-// un-exported TypeScript internals) so this module is import-free and bundles
-// standalone. Kept consistent IN SPIRIT with the repo's existing safeString /
-// safeUnixSeconds / isNonNegativeInteger so order-ingest cannot drift from the
-// rest of the backend's notion of a "safe" id or timestamp.
+// Deliberately defined here so order ingest states its own rules for a "safe" id or
+// timestamp: a bounded, single-line, separator-free string id and a non-negative
+// safe-integer Unix-seconds value.
 
 // Mirrors the C++ ABI buffer limits LCC_API_ONLINE_PROJECT_SIZE (127) and
-// LCC_API_FEATURE_NAME_SIZE (15); keep in sync with src/routes/verify.ts.
+// LCC_API_FEATURE_NAME_SIZE (15) in include/licensecc/datatypes.h; keep in sync.
 const MAX_PROJECT_SIZE = 127;
 const MAX_FEATURE_SIZE = 15;
 const MAX_ID_SIZE = 255;
@@ -57,8 +55,8 @@ const PERIOD_EXEMPT_INTENTS = new Set([
 ]);
 
 /**
- * A bounded, single-line, separator-free string id (matches src/routes/verify.ts safeString
- * in spirit: rejects the INI/HTTP-injection bytes that could escape a signed line).
+ * A bounded, single-line, separator-free string id: 1..maxLength characters with no
+ * CR, LF, "=" or NUL, the INI/HTTP-injection bytes that could escape a signed line.
  * Returns the string or null.
  */
 export function safeString(value, maxLength) {
@@ -72,8 +70,7 @@ export function safeString(value, maxLength) {
 }
 
 /**
- * A non-negative, safe integer unix-seconds timestamp, or null. Matches
- * src/routes/verify.ts safeUnixSeconds.
+ * A Unix-seconds timestamp: a non-negative safe integer, or null.
  */
 export function safeUnixSeconds(value) {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > Number.MAX_SAFE_INTEGER) {

@@ -36,33 +36,10 @@ export function jsonBody(schemaRef: string, required = true): Record<string, unk
   };
 }
 
-// The account-token auth + token-mode error set.
-export const ACCOUNT_TOKEN_AUTH_ERRORS: Record<string, Record<string, unknown>> = {
-  "401": errorResponse(
-    "Unauthorized. off mode: LEASE_ISSUE_BEARER mismatch. soft/required mode: token missing, malformed, unknown, revoked, or expired. token_revoked: status!=active or revocation floor exceeded. token_expired: expires_at <= now.",
-    "unauthorized",
-  ),
-  "403": errorResponse(
-    "Forbidden. forbidden_scope: token scopes do not allow this operation on project:feature.",
-    "forbidden_scope",
-  ),
-  "503": securityModeConfigErrorResponse(
-    "Other route-specific 503 codes include unavailable account-token material and verification_error for D1 lookup/issuance failures.",
-    ["verification_error"],
-  ),
-};
-
 export const openApiComponents: LabeledComponentFragment = {
   label: "backend-components",
   namespaces: [
     ["securitySchemes", [
-      ["requestProof", {
-        type: "apiKey",
-        in: "header",
-        name: "x-no-auth",
-        description:
-          "No transport auth. /v1/verify is unauthenticated; an OPTIONAL ECDSA-P256-SHA256 request proof is supplied via the JSON body fields (request_signature_version/device_key_id/request_timestamp/request_signature_algorithm/request_signature) and validated server-side per REQUEST_SIGNATURE_MODE.",
-      }],
       ["orderKeyId", {
         type: "apiKey",
         in: "header",
@@ -83,13 +60,6 @@ export const openApiComponents: LabeledComponentFragment = {
         name: "X-LCC-Signature",
         description:
           "Base64 HMAC-SHA256 over the request method, path, ORDER_INGEST_AUDIENCE, X-LCC-Timestamp, and exact raw request-body bytes.",
-      }],
-      ["accountToken", {
-        type: "http",
-        scheme: "bearer",
-        bearerFormat: "lcca_<opaque>",
-        description:
-          "Per-customer account token (Authorization: Bearer lcca_...), scoped by projects/features/operations. Resolved by timing-safe HMAC under a pepper; never stored plaintext.",
       }],
     ]],
     ["schemas", [
@@ -147,47 +117,6 @@ export const openApiComponents: LabeledComponentFragment = {
             description: "Optional names-only consistency warnings; invalid configuration remains terminal readiness failure.",
           },
         },
-      }],
-      ["RequestProofFields", {
-        type: "object",
-        description:
-          "Optional flat ECDSA request-proof fields. Present together or omitted; when present all must validate.",
-        properties: {
-          device_key_id: { type: "string", description: "sha256:<64-hex> device key id." },
-          request_signature_version: { type: "integer", enum: [1] },
-          request_timestamp: { type: "integer", description: "Unix seconds." },
-          request_signature_algorithm: { type: "string", enum: ["ecdsa-p256-sha256"] },
-          request_signature: { type: "string", description: "Base64, <= 512 chars." },
-        },
-      }],
-      ["VerifyRequest", {
-        type: "object",
-        required: ["project", "feature", "license_fingerprint", "nonce"],
-        properties: {
-          project: { type: "string", maxLength: 127 },
-          feature: { type: "string", maxLength: 15 },
-          license_fingerprint: { type: "string", description: "64-hex." },
-          device_hash: { type: "string", description: "64-hex or empty." },
-          nonce: { type: "string", description: "64-hex." },
-          client_version: { type: "string", maxLength: 64 },
-          client_hardening: { type: "integer", minimum: 0, maximum: 65535 },
-          device_key_id: { type: "string", description: "sha256:<64-hex> (request proof)." },
-          request_signature_version: { type: "integer", enum: [1] },
-          request_timestamp: { type: "integer", description: "Unix seconds (request proof)." },
-          request_signature_algorithm: { type: "string", enum: ["ecdsa-p256-sha256"] },
-          request_signature: { type: "string", description: "Base64, <= 512 chars (request proof)." },
-        },
-      }],
-      ["VerifySuccess", {
-        type: "object",
-        required: ["ok", "code", "server_time"],
-        properties: {
-          ok: { type: "boolean" },
-          code: { type: "string", enum: ["entitlement_ok", "entitlement_denied"] },
-          assertion: { type: "string", description: "lccoa1 token (present when ok:true)." },
-          server_time: { type: "integer", description: "Unix seconds." },
-        },
-        additionalProperties: true,
       }],
       ["OrderRequest", {
         type: "object",

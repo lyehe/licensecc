@@ -1,5 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { ACCOUNT_TOKEN_AUTH_ERRORS, errorResponse, jsonBody, securityModeConfigErrorResponse } from "../components.js";
+import { errorResponse, jsonBody, securityModeConfigErrorResponse } from "../components.js";
 
 const ordersPath: Record<string, unknown> = {
   post: {

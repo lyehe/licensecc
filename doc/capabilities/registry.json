@@ -78,18 +78,22 @@
       ]
     },
     {
-      "id": "backend-request-proof",
-      "title": "Backend request proof of possession",
+      "id": "protected-device-licensing",
+      "title": "Protected device-bound online licensing",
       "status": "experimental",
       "owner": "Backend deployable maintainer",
-      "surfaces": ["licensing backend"],
-      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Cloudflare Workers"], "limitations": ["The protocol is available for integration; repository-local Windows and Ubuntu TPM-provider implementations have automated evidence, but no universal client support or published deployment claim is made."]},
+      "surfaces": ["licensing backend /v2 device routes", "customer portal consent routes"],
+      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Cloudflare Workers", "browser"], "limitations": ["Live TPM, browser and backend journeys remain a release gate; the repository evidence is local and no deployed service is claimed."]},
       "replaces": [],
-      "public_docs": ["doc/capabilities/index.rst"],
+      "public_docs": ["doc/capabilities/index.rst", "doc/api/device_enrollment.rst"],
       "evidence": [
-        {"kind": "implementation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/src/routes/verify.ts", "selector": "export function parseRequestProofFields", "assertion": "The verification route implements request-proof parsing."},
-        {"kind": "automated_test", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/test/contexts/request-proof.test.mjs", "selector": "test(\"canonical request proof payload is byte exact\"", "assertion": "The backend has automated request-proof coverage."},
-        {"kind": "limitation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/README.md", "selector": "platform-specific and are not a universal client", "assertion": "The service documentation keeps TPM-provider use client-local and platform-limited rather than claiming hosted TPM support."}
+        {"kind": "implementation", "surface": "licensing backend /v2 device routes", "path": "services/cloudflare-licensing-backend/src/routes/bound_devices.mjs", "selector": "export async function handleBoundDevice(", "assertion": "The backend dispatches the protected /v2 authorization, challenge, exchange and renewal operations."},
+        {"kind": "automated_test", "surface": "licensing backend /v2 device routes", "path": "services/cloudflare-licensing-backend/test/sql/bound-device-http.test.mjs", "selector": "test(\"HTTP activation and renewal issue verified dedicated leases and recover exact responses\"", "assertion": "The /v2 routes issue verified protected leases over HTTP against an in-process SQLite database."},
+        {"kind": "route_contract", "surface": "licensing backend /v2 device routes", "path": "test/contracts/backend.json", "selector": "POST /v2/device-authorizations/exchange", "assertion": "The canonical backend contract exposes the protected authorization exchange."},
+        {"kind": "automated_test", "surface": "licensing backend /v2 device routes", "path": "services/cloudflare-licensing-backend/test/e2e/protected-admin-enrollment.test.mjs", "selector": "test(`admin-created protected ${type}/${basis} grant supports real consent and signed exchange`", "assertion": "An admin-created protected grant completes customer consent and a signed /v2 exchange end to end."},
+        {"kind": "implementation", "surface": "customer portal consent routes", "path": "services/cloudflare-customer-portal/src/worker/routes/device-consent.ts", "selector": "export async function consentRoute(", "assertion": "The portal Worker implements the session-protected device consent routes."},
+        {"kind": "automated_test", "surface": "customer portal consent routes", "path": "services/cloudflare-customer-portal/test/portal-worker-device-consent.test.mjs", "selector": "test(\"all consent routes authenticate before RPC and use only session identity\"", "assertion": "The portal consent routes authenticate the session before any backend call."},
+        {"kind": "limitation", "surface": "licensing backend /v2 device routes", "path": "doc/api/device_enrollment.rst", "selector": "live TPM/browser/backend validation of the complete", "assertion": "The enrollment reference keeps live TPM, browser and backend validation as a release gate."}
       ]
     },
     {

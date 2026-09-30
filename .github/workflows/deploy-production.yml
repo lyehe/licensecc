@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       backend_url:
-        description: Canonical HTTPS URL used for the protected smoke and public-verifier post-deploy drill
+        description: Canonical HTTPS URL used for the protected post-deploy smoke
         required: true
         type: string
       admin_url:
@@ -135,15 +135,6 @@ jobs:
         env:
           BACKEND_URL: ${{ inputs.backend_url }}
         run: npm --silent run validate:protected-smoke --workspace @licensecc/cloudflare-licensing-backend -- --url "$BACKEND_URL" > "$RUNNER_TEMP/licensecc-deployment-evidence/backend-protected-smoke.json"
-      - name: Run proof-authenticated backend post-deploy drill
-        env:
-          BACKEND_URL: ${{ inputs.backend_url }}
-          LICENSECC_PUBLIC_VERIFIER_PROJECT: ${{ vars.LICENSECC_PUBLIC_VERIFIER_PROJECT }}
-          LICENSECC_PUBLIC_VERIFIER_FEATURE: ${{ vars.LICENSECC_PUBLIC_VERIFIER_FEATURE }}
-          LICENSECC_PUBLIC_VERIFIER_FINGERPRINT: ${{ secrets.LICENSECC_PUBLIC_VERIFIER_FINGERPRINT }}
-          LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM: ${{ secrets.LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM }}
-          LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID: ${{ secrets.LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID }}
-        run: npm --silent run validate:public-verifier --workspace @licensecc/cloudflare-licensing-backend -- --url "$BACKEND_URL" --json > "$RUNNER_TEMP/licensecc-deployment-evidence/backend-public-verifier-drill.json"
       - name: Run remaining service post-deploy drills
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

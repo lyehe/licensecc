@@ -576,23 +576,6 @@ test("production deployment is manual, confirmed, serialized, and uses only mate
   assert.ok(backupDeploy < backupGate && backupGate < migration && migration < backendDeploy,
     "backup deployment and completed backup must precede migration and application rollout");
   assert.doesNotMatch(workflow, /wrangler\.example\.(?:toml|jsonc)/u);
-  assert.match(workflow, /validate:public-verifier/u);
-  assert.match(workflow, /LICENSECC_PUBLIC_VERIFIER_FINGERPRINT: \$\{\{ secrets\.LICENSECC_PUBLIC_VERIFIER_FINGERPRINT \}\}/u);
-  assert.match(workflow, /LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM: \$\{\{ secrets\.LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM \}\}/u);
-  assert.match(workflow, /LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID: \$\{\{ secrets\.LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID \}\}/u);
-  const productionVerifier = namedWorkflowStep(job, "Run proof-authenticated backend post-deploy drill", ".github/workflows/deploy-production.yml");
-  assert.deepEqual(
-    Object.fromEntries([...productionVerifier.children.get("env")].map(([key, property]) => [key, property.value])),
-    {
-      BACKEND_URL: "${{ inputs.backend_url }}",
-      LICENSECC_PUBLIC_VERIFIER_PROJECT: "${{ vars.LICENSECC_PUBLIC_VERIFIER_PROJECT }}",
-      LICENSECC_PUBLIC_VERIFIER_FEATURE: "${{ vars.LICENSECC_PUBLIC_VERIFIER_FEATURE }}",
-      LICENSECC_PUBLIC_VERIFIER_FINGERPRINT: "${{ secrets.LICENSECC_PUBLIC_VERIFIER_FINGERPRINT }}",
-      LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM: "${{ secrets.LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM }}",
-      LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID: "${{ secrets.LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID }}",
-    },
-  );
-  assert.match(productionVerifier.properties.get("run")?.value ?? "", /backend-public-verifier-drill\.json/u);
   const protectedSmoke = namedWorkflowStep(job, "Run protected post-deploy smoke", ".github/workflows/deploy-production.yml");
   assertExactCriticalRun(
     protectedSmoke,
@@ -612,7 +595,6 @@ test("production deployment is manual, confirmed, serialized, and uses only mate
     "the protected smoke runs immediately after the Worker deploy",
   );
   const remainingProductionDrills = namedWorkflowStep(job, "Run remaining service post-deploy drills", ".github/workflows/deploy-production.yml");
-  assert.equal(remainingProductionDrills.children.get("env")?.has("LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM"), false);
   // The production portal drill is read-only: no protected-journey input may reach it, either
   // from its own env or inherited from the job or workflow, so it never enrolls a device.
   assert.deepEqual(
@@ -675,15 +657,7 @@ test("staging deployment is isolated, confirmed, backup-gated, and exercises eve
   const migration = workflow.indexOf("run-protected-wrangler.mjs --operation migrate --worker backend");
   const backendDeploy = workflow.indexOf("run-protected-wrangler.mjs --operation deploy --worker backend");
   assert.ok(backupDeploy < backupGate && backupGate < migration && migration < backendDeploy);
-  assert.match(workflow, /validate:public-verifier[^\n]*--expect-rate-limit --json/u);
-  assert.doesNotMatch(workflow, /validate:public-verifier[^\n]*--rotate-fingerprint/u);
-  assert.match(workflow, /LICENSECC_PUBLIC_VERIFIER_FINGERPRINT: \$\{\{ secrets\.LICENSECC_PUBLIC_VERIFIER_FINGERPRINT \}\}/u);
-  assert.match(workflow, /LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM: \$\{\{ secrets\.LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM \}\}/u);
-  assert.match(workflow, /LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID: \$\{\{ secrets\.LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID \}\}/u);
-  const stagingVerifier = namedWorkflowStep(job, "Run proof-authenticated staging verifier drill", ".github/workflows/deploy-staging.yml");
-  assert.match(stagingVerifier.properties.get("run")?.value ?? "", /backend-public-verifier-drill\.json/u);
   const remainingStagingDrills = namedWorkflowStep(job, "Run synthetic staging tenant drills", ".github/workflows/deploy-staging.yml");
-  assert.equal(remainingStagingDrills.children.get("env")?.has("LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM"), false);
   assert.match(workflow, /validate:access-admin/u);
   assert.match(workflow, /LICENSECC_NON_ADMIN_ACCESS_JWT: \$\{\{ secrets\.LICENSECC_NON_ADMIN_ACCESS_JWT \}\}/u);
   assert.match(workflow, /validate:access-admin[^\n]*--require-non-admin/u);

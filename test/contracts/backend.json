@@ -14,10 +14,6 @@
     },
     {
       "method": "POST",
-      "path": "/v1/verify"
-    },
-    {
-      "method": "POST",
       "path": "/v1/orders"
     },
     {
@@ -41,14 +37,13 @@
     "GET /openapi.json",
     "GET /docs",
     "GET /health",
-    "POST /v1/verify",
     "POST /v1/orders",
     "POST /v2/device-authorizations",
     "POST /v2/device-challenges",
     "POST /v2/device-authorizations/exchange",
     "POST /v2/device-leases/renew"
   ],
-  "openApiOperationCount": 9,
+  "openApiOperationCount": 8,
   "openApiSpec": {
     "components": {
       "schemas": {
@@ -345,138 +340,9 @@
             "code"
           ],
           "type": "object"
-        },
-        "RequestProofFields": {
-          "description": "Optional flat ECDSA request-proof fields. Present together or omitted; when present all must validate.",
-          "properties": {
-            "device_key_id": {
-              "description": "sha256:<64-hex> device key id.",
-              "type": "string"
-            },
-            "request_signature": {
-              "description": "Base64, <= 512 chars.",
-              "type": "string"
-            },
-            "request_signature_algorithm": {
-              "enum": [
-                "ecdsa-p256-sha256"
-              ],
-              "type": "string"
-            },
-            "request_signature_version": {
-              "enum": [
-                1
-              ],
-              "type": "integer"
-            },
-            "request_timestamp": {
-              "description": "Unix seconds.",
-              "type": "integer"
-            }
-          },
-          "type": "object"
-        },
-        "VerifyRequest": {
-          "properties": {
-            "client_hardening": {
-              "maximum": 65535,
-              "minimum": 0,
-              "type": "integer"
-            },
-            "client_version": {
-              "maxLength": 64,
-              "type": "string"
-            },
-            "device_hash": {
-              "description": "64-hex or empty.",
-              "type": "string"
-            },
-            "device_key_id": {
-              "description": "sha256:<64-hex> (request proof).",
-              "type": "string"
-            },
-            "feature": {
-              "maxLength": 15,
-              "type": "string"
-            },
-            "license_fingerprint": {
-              "description": "64-hex.",
-              "type": "string"
-            },
-            "nonce": {
-              "description": "64-hex.",
-              "type": "string"
-            },
-            "project": {
-              "maxLength": 127,
-              "type": "string"
-            },
-            "request_signature": {
-              "description": "Base64, <= 512 chars (request proof).",
-              "type": "string"
-            },
-            "request_signature_algorithm": {
-              "enum": [
-                "ecdsa-p256-sha256"
-              ],
-              "type": "string"
-            },
-            "request_signature_version": {
-              "enum": [
-                1
-              ],
-              "type": "integer"
-            },
-            "request_timestamp": {
-              "description": "Unix seconds (request proof).",
-              "type": "integer"
-            }
-          },
-          "required": [
-            "project",
-            "feature",
-            "license_fingerprint",
-            "nonce"
-          ],
-          "type": "object"
-        },
-        "VerifySuccess": {
-          "additionalProperties": true,
-          "properties": {
-            "assertion": {
-              "description": "lccoa1 token (present when ok:true).",
-              "type": "string"
-            },
-            "code": {
-              "enum": [
-                "entitlement_ok",
-                "entitlement_denied"
-              ],
-              "type": "string"
-            },
-            "ok": {
-              "type": "boolean"
-            },
-            "server_time": {
-              "description": "Unix seconds.",
-              "type": "integer"
-            }
-          },
-          "required": [
-            "ok",
-            "code",
-            "server_time"
-          ],
-          "type": "object"
         }
       },
       "securitySchemes": {
-        "accountToken": {
-          "bearerFormat": "lcca_<opaque>",
-          "description": "Per-customer account token (Authorization: Bearer lcca_...), scoped by projects/features/operations. Resolved by timing-safe HMAC under a pepper; never stored plaintext.",
-          "scheme": "bearer",
-          "type": "http"
-        },
         "orderKeyId": {
           "description": "Identifier selecting the HMAC secret from ORDER_HMAC_SECRETS.",
           "in": "header",
@@ -494,17 +360,11 @@
           "in": "header",
           "name": "X-LCC-Timestamp",
           "type": "apiKey"
-        },
-        "requestProof": {
-          "description": "No transport auth. /v1/verify is unauthenticated; an OPTIONAL ECDSA-P256-SHA256 request proof is supplied via the JSON body fields (request_signature_version/device_key_id/request_timestamp/request_signature_algorithm/request_signature) and validated server-side per REQUEST_SIGNATURE_MODE.",
-          "in": "header",
-          "name": "x-no-auth",
-          "type": "apiKey"
         }
       }
     },
     "info": {
-      "description": "Cloudflare Worker that issues online assertions (lccoa1) and protected device leases (lccdl1), and ingests subscription orders. Legacy responses use { ok, code, ... }; device v2 responses use { ok, code, request_id, data? }. Protected enrollment remains staged until browser consent and native integration are delivered. This spec documents the routes the Worker's fetch handler dispatches.",
+      "description": "Cloudflare Worker that issues protected device leases (lccdl1) and ingests subscription orders. Order ingest responses use { ok, code, ... }; device v2 responses use { ok, code, request_id, data? }. Protected enrollment remains staged until browser consent and native integration are delivered. This spec documents the routes the Worker's fetch handler dispatches.",
       "title": "licensecc online verifier / licensing-backend",
       "version": "0.1.0-rc.2"
     },
@@ -825,169 +685,6 @@
           "summary": "Exactly-once subscription order fulfillment. HMAC-SHA256 signed, fingerprint-deduplicated, monotonic epoch/seq floor. Modes: off (404), soft (observe-only), required (mutate).",
           "tags": [
             "fulfillment"
-          ]
-        }
-      },
-      "/v1/verify": {
-        "post": {
-          "description": "No account auth: the client presents a license fingerprint (and optionally an ECDSA request proof) and receives a signed lccoa1 assertion or a denial validated client-side by the C++ SDK. Request-signature mode (off/soft/required) governs proof acceptance. Body must be <= 4096 bytes.",
-          "operationId": "postVerify",
-          "requestBody": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VerifyRequest"
-                }
-              }
-            },
-            "required": true
-          },
-          "responses": {
-            "200": {
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/VerifySuccess"
-                  }
-                }
-              },
-              "description": "Assertion issued (ok:true, code:entitlement_ok) OR a soft denial (ok:false, code:entitlement_denied) -- both are HTTP 200."
-            },
-            "400": {
-              "content": {
-                "application/json": {
-                  "examples": {
-                    "invalid_request": {
-                      "value": {
-                        "code": "invalid_request",
-                        "ok": false
-                      }
-                    }
-                  },
-                  "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
-                  }
-                }
-              },
-              "description": "body_too_large (actual body over 4096 bytes), invalid_json (malformed JSON), or invalid_request (field validation failed)."
-            },
-            "401": {
-              "content": {
-                "application/json": {
-                  "examples": {
-                    "request_proof_invalid": {
-                      "value": {
-                        "code": "request_proof_invalid",
-                        "ok": false
-                      }
-                    }
-                  },
-                  "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
-                  }
-                }
-              },
-              "description": "request_proof_required (required mode, proof missing), request_proof_stale (timestamp outside skew window), or request_proof_invalid (device unknown/disabled, invalid signature, malformed key, or replayed nonce)."
-            },
-            "403": {
-              "content": {
-                "application/json": {
-                  "examples": {
-                    "entitlement_denied": {
-                      "value": {
-                        "code": "entitlement_denied",
-                        "ok": false
-                      }
-                    }
-                  },
-                  "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
-                  }
-                }
-              },
-              "description": "entitlement_denied: not found, revoked, disabled, device mismatch, outside validity window, or rate limited."
-            },
-            "413": {
-              "content": {
-                "application/json": {
-                  "examples": {
-                    "body_too_large": {
-                      "value": {
-                        "code": "body_too_large",
-                        "ok": false
-                      }
-                    }
-                  },
-                  "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
-                  }
-                }
-              },
-              "description": "body_too_large: Content-Length over 4096 bytes."
-            },
-            "429": {
-              "content": {
-                "application/json": {
-                  "examples": {
-                    "rate_limited": {
-                      "value": {
-                        "code": "rate_limited",
-                        "ok": false
-                      }
-                    }
-                  },
-                  "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
-                  }
-                }
-              },
-              "description": "rate_limited. source: cloudflare-client | d1-client | d1-entitlement | d1-global."
-            },
-            "500": {
-              "content": {
-                "application/json": {
-                  "examples": {
-                    "verification_error": {
-                      "value": {
-                        "code": "verification_error",
-                        "ok": false
-                      }
-                    }
-                  },
-                  "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
-                  }
-                }
-              },
-              "description": "verification_error: D1 lookup failed, signing failed, or proof-nonce store unavailable."
-            },
-            "503": {
-              "content": {
-                "application/json": {
-                  "examples": {
-                    "config_error": {
-                      "value": {
-                        "code": "config_error",
-                        "ok": false
-                      }
-                    }
-                  },
-                  "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
-                  }
-                }
-              },
-              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance."
-            }
-          },
-          "security": [
-            {
-              "requestProof": []
-            }
-          ],
-          "summary": "Client-facing online license verification with optional ECDSA device proof. Rate-limited per client IP and per entitlement. Returns a signed RSA lccoa1 assertion or a denial.",
-          "tags": [
-            "client"
           ]
         }
       },
@@ -2968,10 +2665,6 @@
         "name": "meta"
       },
       {
-        "description": "Unauthenticated client-facing online verification.",
-        "name": "client"
-      },
-      {
         "description": "Protected device enrollment, mandatory fresh key proof and signed leases. No emergency override.",
         "name": "device"
       },
@@ -2981,7 +2674,7 @@
       }
     ]
   },
-  "routeCount": 9,
-  "routeKeyCount": 9,
+  "routeCount": 8,
+  "routeKeyCount": 8,
   "service": "cloudflare-licensing-backend"
 }

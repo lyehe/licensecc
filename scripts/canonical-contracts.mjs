@@ -12,7 +12,7 @@ const BASELINE_DIRECTORY = path.join(REPOSITORY_ROOT, "test", "contracts");
 const HTTP_METHODS = new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
 
 const DEPLOYABLES = Object.freeze([
-  { id: "backend", directory: "services/cloudflare-licensing-backend", expectedRoutes: 9 },
+  { id: "backend", directory: "services/cloudflare-licensing-backend", expectedRoutes: 8 },
   { id: "admin", directory: "services/cloudflare-license-admin", expectedRoutes: 68 },
   { id: "portal", directory: "services/cloudflare-customer-portal", expectedRoutes: 29 },
   { id: "backup", directory: "services/cloudflare-d1-backup" },
@@ -416,7 +416,7 @@ async function captureContracts(repoRoot) {
       routeKeysField: "BACKEND_ROUTE_KEYS",
       openApi: backendOpenApi.openApiSpec,
       openApiField: "openApiSpec",
-      expectedRoutes: 9,
+      expectedRoutes: 8,
     }),
     admin: makeRouteContract({
       service: "cloudflare-license-admin",

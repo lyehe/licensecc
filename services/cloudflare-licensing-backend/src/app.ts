@@ -4,7 +4,6 @@ import { scheduled as scheduledMaintenance } from "./maintenance/index.js";
 import { invalidSecurityModeNames, logEvent } from "./observability/index.js";
 import { handleOpenApi, handleDocs, handleHealth } from "./routes/meta.js";
 import { handleOrders } from "./routes/orders.js";
-import { handleVerify } from "./routes/verify.js";
 import { handleBoundDevice } from "./routes/bound_devices.mjs";
 import { META_ROUTES, CLIENT_ROUTES } from "./routes.js";
 
@@ -17,7 +16,6 @@ const DISPATCH: Record<string, RouteHandler> = {
   "GET /openapi.json": () => handleOpenApi(),
   "GET /docs": () => handleDocs(),
   "GET /health": (request, env) => handleHealth(request, env),
-  "POST /v1/verify": (request, env) => handleVerify(request, env),
   "POST /v1/orders": (request, env) => handleOrders(request, env),
   "POST /v2/device-authorizations": (request, env) => handleBoundDevice(request, env, "authorize"),
   "POST /v2/device-challenges": (request, env) => handleBoundDevice(request, env, "challenge"),
@@ -74,7 +72,7 @@ const app = {
       }
       return json({ ok: false, code: "not_found" }, 404);
     } catch (error) {
-      logEvent("error", "verify.unhandled_error", {
+      logEvent("error", "request.unhandled_error", {
         request_id: requestId(request),
         path: new URL(request.url).pathname,
         error_type: error instanceof Error ? error.name : "UnknownThrownValue",

@@ -18,7 +18,7 @@ function capture(method, action) {
 test("structured logs retain operational fields and drop sensitive or unbounded values", () => {
   const lines = capture("error", () => logEvent("error", "verify.d1_error", {
     request_id: `ray\n${"r".repeat(300)}`,
-    d1_duration_ms: 42,
+    affected_rows: 42,
     invalid_config_modes: ["REQUEST_SIGNATURE_MODE"],
     license_fingerprint: "a".repeat(64),
     client_ip: "192.0.2.1",
@@ -30,7 +30,7 @@ test("structured logs retain operational fields and drop sensitive or unbounded 
   const parsed = JSON.parse(lines[0]);
   assert.equal(parsed.event, "verify.d1_error");
   assert.equal(parsed.severity, "error");
-  assert.equal(parsed.d1_duration_ms, 42);
+  assert.equal(parsed.affected_rows, 42);
   assert.deepEqual(parsed.invalid_config_modes, ["REQUEST_SIGNATURE_MODE"]);
   assert.equal(parsed.request_id.includes("\n"), false);
   assert.equal(parsed.request_id.length, 256);

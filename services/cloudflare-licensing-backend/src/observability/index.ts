@@ -11,12 +11,9 @@ export type LogSeverity = "info" | "warn" | "error";
 
 const LOG_FIELD_NAMES = new Set([
   "affected_rows",
-  "assertion_ttl_seconds",
   "attempts",
   "backlog_age_seconds",
   "backlog_present",
-  "client_hardening",
-  "d1_duration_ms",
   "delivery_id",
   "detail",
   "endpoint_id",
@@ -31,15 +28,12 @@ const LOG_FIELD_NAMES = new Set([
   "oldest_expired_at",
   "path",
   "request_id",
-  "request_proof",
-  "request_signature_mode",
   "result",
   "revocation_seq",
   "skipped",
   "source",
   "success",
   "target",
-  "window_from",
 ]);
 
 function safeLogValue(value: unknown): string | number | boolean | null | string[] | undefined {

@@ -502,7 +502,6 @@ test("architecture documentation derives the SDK inventory and current measureme
     "src/library/licensecc.cpp",
     "services/cloudflare-license-admin/src/worker/openapi/components.ts",
     "services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs",
-    "services/cloudflare-licensing-backend/src/routes/verify.ts",
     "services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx",
     "services/cloudflare-d1-backup/src/core.ts",
   ];

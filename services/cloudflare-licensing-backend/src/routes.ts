@@ -16,7 +16,6 @@ export const META_ROUTES = [
 
 // Client + fulfillment routes (their handlers do their own auth/HMAC gating).
 export const CLIENT_ROUTES = [
-  { method: "POST", path: "/v1/verify" },
   { method: "POST", path: "/v1/orders" },
   { method: "POST", path: "/v2/device-authorizations" },
   { method: "POST", path: "/v2/device-challenges" },

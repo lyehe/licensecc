@@ -149,15 +149,6 @@ jobs:
           LICENSECC_STAGING_ORDER_DRILL_RUN_ATTEMPT: ${{ github.run_attempt }}
           LICENSECC_STAGING_ORDER_DRILL_COMMIT: ${{ github.sha }}
         run: npm --silent run validate:staging-order --workspace @licensecc/cloudflare-licensing-backend > "$RUNNER_TEMP/licensecc-deployment-evidence/backend-order-drill.json"
-      - name: Run proof-authenticated staging verifier drill
-        env:
-          BACKEND_URL: ${{ inputs.backend_url }}
-          LICENSECC_PUBLIC_VERIFIER_PROJECT: ${{ vars.LICENSECC_PUBLIC_VERIFIER_PROJECT }}
-          LICENSECC_PUBLIC_VERIFIER_FEATURE: ${{ vars.LICENSECC_PUBLIC_VERIFIER_FEATURE }}
-          LICENSECC_PUBLIC_VERIFIER_FINGERPRINT: ${{ secrets.LICENSECC_PUBLIC_VERIFIER_FINGERPRINT }}
-          LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM: ${{ secrets.LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM }}
-          LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID: ${{ secrets.LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID }}
-        run: npm --silent run validate:public-verifier --workspace @licensecc/cloudflare-licensing-backend -- --url "$BACKEND_URL" --expect-rate-limit --json > "$RUNNER_TEMP/licensecc-deployment-evidence/backend-public-verifier-drill.json"
       - name: Run synthetic staging tenant drills
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

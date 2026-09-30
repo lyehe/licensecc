@@ -13,7 +13,6 @@
     "services/cloudflare-license-admin/src/worker/groups/catalog/import-protocol.ts": 938,
     "services/cloudflare-license-admin/src/worker/openapi/components.ts": 1164,
     "services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs": 1069,
-    "services/cloudflare-licensing-backend/src/routes/verify.ts": 983,
     "src/library/device_identity/device_identity.cpp": 433,
     "src/library/device_identity/providers/tpm2_openssl.cpp": 2111,
     "src/library/device_identity/providers/windows_tpm.cpp": 602,

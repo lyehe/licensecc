@@ -5,7 +5,6 @@ import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "./a
 import { openApiComponents } from "./components.js";
 import { metaPaths } from "./paths/meta.js";
 import { ordersPaths } from "./paths/orders.js";
-import { verifyPaths } from "./paths/verify.js";
 import { boundDevicePaths } from "./paths/bound-devices.js";
 
 export interface OpenApiDocument {
@@ -22,7 +21,6 @@ export interface OpenApiDocument {
 
 const paths = assemblePaths(
   metaPaths,
-  verifyPaths,
   ordersPaths,
   boundDevicePaths,
 );
@@ -34,12 +32,11 @@ export const openApiSpec: OpenApiDocument = {
     title: "licensecc online verifier / licensing-backend",
     version: "0.1.0-rc.2",
     description:
-      "Cloudflare Worker that issues online assertions (lccoa1) and protected device leases (lccdl1), and ingests subscription orders. Legacy responses use { ok, code, ... }; device v2 responses use { ok, code, request_id, data? }. Protected enrollment remains staged until browser consent and native integration are delivered. This spec documents the routes the Worker's fetch handler dispatches.",
+      "Cloudflare Worker that issues protected device leases (lccdl1) and ingests subscription orders. Order ingest responses use { ok, code, ... }; device v2 responses use { ok, code, request_id, data? }. Protected enrollment remains staged until browser consent and native integration are delivered. This spec documents the routes the Worker's fetch handler dispatches.",
   },
   servers: [{ url: "/" }],
   tags: [
     { name: "meta", description: "Health and documentation." },
-    { name: "client", description: "Unauthenticated client-facing online verification." },
     { name: "device", description: "Protected device enrollment, mandatory fresh key proof and signed leases. No emergency override." },
     { name: "fulfillment", description: "HMAC-signed subscription order ingest." },
   ],

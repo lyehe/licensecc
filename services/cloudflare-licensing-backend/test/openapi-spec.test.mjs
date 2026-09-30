@@ -103,7 +103,6 @@ test("every documented operation has unique identity, expected auth, and a respo
     ["/openapi.json", []],
     ["/docs", []],
     ["/health", []],
-    ["/v1/verify", [{ requestProof: [] }]],
     ["/v1/orders", [{ orderKeyId: [], orderTimestamp: [], orderSignature: [] }]],
     ["/v2/device-authorizations", []],
     ["/v2/device-challenges", []],

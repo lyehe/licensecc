@@ -79,7 +79,6 @@ test("app returns the generic top-level 404 contract", async () => {
 });
 
 test("the backend serves no lease, seat, meter, report or emergency route", async () => {
-  assert.equal(allCanonicalRoutes().length, 9);
   // A configured break-glass bearer must not reopen anything: the prefix is gone, not merely closed.
   for (const path of ["/v1/activate", "/v1/checkout", "/v1/emergency/v1/release"]) {
     const response = await app.fetch(

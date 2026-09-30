@@ -78,7 +78,7 @@ status source.
 
 Registry identifiers: ``cpp-local-verification``, ``hardware-binding``,
 ``environment-aware-identification``, ``license-version-limits``,
-``config-attestation``, ``backend-request-proof``,
+``config-attestation``, ``protected-device-licensing``,
 ``backend-order-fulfillment``, ``admin-control-plane``,
 ``portal-self-service``, ``d1-backup-and-restore-drill``, ``python-sdk``,
 ``dotnet-sdk``, ``arm-support``, ``custom-execution-limits``,
