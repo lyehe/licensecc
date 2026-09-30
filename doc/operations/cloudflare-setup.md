@@ -320,8 +320,8 @@ are distinct, as explained in the backend runbook.
 
 Dispatch from `main` at the reviewed commit with the correct environment
 confirmation and origins. Follow the workflow's backup, migration, build,
-deployment and post-deploy gates without skipping failures. Its legacy portal
-drills include fixtures beyond password-only protected enrollment; run the
+deployment and post-deploy gates without skipping failures. Its portal drill
+enrolls a software P-256 key, which does not exercise a native client; run the
 protected native journey separately. Apply all applicable production-readiness
 gates before promoting a staging success to production.
 

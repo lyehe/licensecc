@@ -27,12 +27,8 @@ on:
         description: Synthetic staging customer email used for the portal drill
         required: true
         type: string
-      portal_floating_entitlement_id:
-        description: Synthetic staging floating entitlement used for checkout/heartbeat/release
-        required: true
-        type: string
-      portal_download_entitlement_id:
-        description: Synthetic staging entitlement used for the signed download path
+      portal_protected_entitlement_id:
+        description: Synthetic protected staging entitlement, owned by the portal test customer, used for the device enrollment journey
         required: true
         type: string
 
@@ -185,10 +181,14 @@ jobs:
           STAGING_PORTAL_EMAIL: ${{ inputs.portal_test_email }}
           STAGING_PORTAL_BOOTSTRAP_BEARER: ${{ secrets.LICENSECC_PORTAL_BOOTSTRAP_BEARER }}
           STAGING_PORTAL_ACCESS_JWT: ${{ secrets.LICENSECC_PORTAL_ACCESS_JWT }}
-          STAGING_PORTAL_ALLOW_SEAT_MUTATION: "1"
-          STAGING_PORTAL_FLOATING_ENTITLEMENT_ID: ${{ inputs.portal_floating_entitlement_id }}
-          STAGING_PORTAL_ALLOW_DOWNLOAD: "1"
-          STAGING_PORTAL_DOWNLOAD_ENTITLEMENT_ID: ${{ inputs.portal_download_entitlement_id }}
+          STAGING_BACKEND_BASE_URL: ${{ inputs.backend_url }}
+          STAGING_PORTAL_PROTECTED_ENTITLEMENT_ID: ${{ inputs.portal_protected_entitlement_id }}
+          STAGING_DEVICE_CLIENT_ID: ${{ vars.LICENSECC_STAGING_DEVICE_CLIENT_ID }}
+          STAGING_DEVICE_PROJECT: ${{ vars.LICENSECC_STAGING_DEVICE_PROJECT }}
+          STAGING_DEVICE_FEATURE: ${{ vars.LICENSECC_STAGING_DEVICE_FEATURE }}
+          STAGING_DEVICE_REDIRECT_URI: ${{ vars.LICENSECC_STAGING_DEVICE_REDIRECT_URI }}
+          STAGING_DEVICE_AUDIENCE: ${{ vars.LICENSECC_STAGING_DEVICE_AUDIENCE }}
+          STAGING_BOUND_LEASE_PUBLIC_KEY_SPKI_PEM: ${{ vars.LICENSECC_STAGING_BOUND_LEASE_PUBLIC_KEY_SPKI_PEM }}
         run: |
           npm run validate:access-admin --workspace @licensecc/cloudflare-license-admin -- --url "$STAGING_ADMIN_BASE_URL" --require-non-admin
           npm run validate:staging-portal --workspace @licensecc/cloudflare-customer-portal

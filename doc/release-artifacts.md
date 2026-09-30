@@ -222,8 +222,8 @@ the protected selector posture and the presence of required Worker secret names
 without reading or emitting secret values. Post-deploy checks deliberately
 exercise the public client-network rate limiter with rotating fingerprints; real
 unauthenticated, malformed-token, non-admin mutation-denial, and authenticated
-admin paths; and a synthetic customer portal login, read, floating-seat
-checkout/heartbeat/release, signed download, and logout. A newly issued staging
+admin paths; and a synthetic customer portal login, read, protected device
+enrollment, exchange, renewal, retirement, and logout. A newly issued staging
 portal session must carry `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, and a
 positive `Max-Age`; the drill also proves unauthenticated and post-logout reads
 are denied. Denial of an expired unused OTP, denial of a previously

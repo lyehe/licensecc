@@ -1,5 +1,12 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import {
+  decodeDeviceLeaseEnvelope,
+  deviceLeaseSigningInput,
+  deviceOperationBody,
+  deviceProofSigningInput,
+  encodeBase64url,
+} from "@licensecc/licensing-domain/lease/device_protocol";
 
 const ENV_ALIASES = {
   baseUrl: ["STAGING_PORTAL_BASE_URL", "LICENSECC_PORTAL_URL"],
@@ -9,17 +16,38 @@ const ENV_ALIASES = {
   bootstrapBearer: ["STAGING_PORTAL_BOOTSTRAP_BEARER", "LICENSECC_PORTAL_BOOTSTRAP_BEARER"],
   bootstrapAccessJwt: ["STAGING_PORTAL_ACCESS_JWT", "LICENSECC_PORTAL_ACCESS_JWT"],
   requestOtp: ["STAGING_PORTAL_REQUEST_OTP", "LICENSECC_PORTAL_REQUEST_OTP"],
-  allowSeatMutation: ["STAGING_PORTAL_ALLOW_SEAT_MUTATION", "LICENSECC_PORTAL_ALLOW_SEAT_MUTATION"],
-  floatingEntitlementId: ["STAGING_PORTAL_FLOATING_ENTITLEMENT_ID", "LICENSECC_PORTAL_FLOATING_ENTITLEMENT_ID"],
-  allowDownload: ["STAGING_PORTAL_ALLOW_DOWNLOAD", "LICENSECC_PORTAL_ALLOW_DOWNLOAD"],
-  downloadEntitlementId: ["STAGING_PORTAL_DOWNLOAD_ENTITLEMENT_ID", "LICENSECC_PORTAL_DOWNLOAD_ENTITLEMENT_ID"],
-  deviceKeyId: ["STAGING_PORTAL_DEVICE_KEY_ID", "LICENSECC_PORTAL_DEVICE_KEY_ID"],
+  protectedEntitlementId: ["STAGING_PORTAL_PROTECTED_ENTITLEMENT_ID", "LICENSECC_PORTAL_PROTECTED_ENTITLEMENT_ID"],
+  backendBaseUrl: ["STAGING_BACKEND_BASE_URL", "LICENSECC_BACKEND_URL"],
+  deviceClientId: ["STAGING_DEVICE_CLIENT_ID", "LICENSECC_DEVICE_CLIENT_ID"],
+  deviceProject: ["STAGING_DEVICE_PROJECT", "LICENSECC_DEVICE_PROJECT"],
+  deviceFeature: ["STAGING_DEVICE_FEATURE", "LICENSECC_DEVICE_FEATURE"],
+  deviceRedirectUri: ["STAGING_DEVICE_REDIRECT_URI", "LICENSECC_DEVICE_REDIRECT_URI"],
+  deviceAudience: ["STAGING_DEVICE_AUDIENCE", "LICENSECC_DEVICE_AUDIENCE"],
+  boundLeasePublicKey: ["STAGING_BOUND_LEASE_PUBLIC_KEY_SPKI_PEM", "LICENSECC_BOUND_LEASE_PUBLIC_KEY_SPKI_PEM"],
   logout: ["STAGING_PORTAL_LOGOUT", "LICENSECC_PORTAL_LOGOUT"],
 };
 
+// The protected device journey enrolls a real device and holds a device slot on the configured
+// entitlement for up to a day, so it runs only when every one of these inputs is set. The
+// production post-deploy drill sets none of them.
+const PROTECTED_DEVICE_INPUTS = [
+  "protectedEntitlementId",
+  "backendBaseUrl",
+  "deviceClientId",
+  "deviceProject",
+  "deviceFeature",
+  "deviceRedirectUri",
+  "deviceAudience",
+  "boundLeasePublicKey",
+];
+
+const EXCHANGE_PATH = "/v2/device-authorizations/exchange";
+const RENEW_PATH = "/v2/device-leases/renew";
+const P256_ORDER = BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
+const SPKI_PEM = /^-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=\r\n]+\r?\n-----END PUBLIC KEY-----$/u;
+
 const MAX_JSON_RESPONSE_BYTES = 256 * 1024;
 const MAX_DOCUMENT_RESPONSE_BYTES = 64 * 1024;
-const MAX_DOWNLOAD_RESPONSE_BYTES = 1024 * 1024;
 
 async function readBoundedBytes(response, limit, label) {
   const declaredLength = response.headers.get("content-length");
@@ -92,6 +120,59 @@ function requireUrl(value, label) {
   return new URL(value);
 }
 
+function sha256Hex(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function randomId(size) {
+  return encodeBase64url(new Uint8Array(randomBytes(size)));
+}
+
+function leasePublicKey(pem) {
+  const label = ENV_ALIASES.boundLeasePublicKey.join(" or ");
+  let key;
+  try {
+    key = SPKI_PEM.test(pem) ? createPublicKey(pem) : null;
+  } catch {
+    key = null;
+  }
+  if (key?.asymmetricKeyType !== "rsa" || key.asymmetricKeyDetails?.modulusLength !== 3072) {
+    throw new Error(`${label} must be an RSA-3072 public key in SPKI PEM form`);
+  }
+  return {
+    key,
+    keyId: `sha256:${sha256Hex(key.export({ type: "spki", format: "der" }))}`,
+  };
+}
+
+function protectedDeviceOptions(env) {
+  const values = Object.fromEntries(PROTECTED_DEVICE_INPUTS.map((name) => [name, envText(env, ENV_ALIASES[name])]));
+  const missing = PROTECTED_DEVICE_INPUTS.filter((name) => values[name] === undefined);
+  if (missing.length === PROTECTED_DEVICE_INPUTS.length) {
+    return { enabled: false };
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `the protected device journey runs only when all of its inputs are set; missing ${missing.map((name) => ENV_ALIASES[name].join(" or ")).join(", ")}`,
+    );
+  }
+  const lease = leasePublicKey(values.boundLeasePublicKey);
+  const runId = envText(env, ["GITHUB_RUN_ID"]);
+  return {
+    enabled: true,
+    entitlementId: values.protectedEntitlementId,
+    backendBaseUrl: requireUrl(values.backendBaseUrl, ENV_ALIASES.backendBaseUrl.join(" or ")),
+    clientId: values.deviceClientId,
+    project: values.deviceProject,
+    feature: values.deviceFeature,
+    redirectUri: values.deviceRedirectUri,
+    audience: values.deviceAudience,
+    leasePublicKey: lease.key,
+    leaseKeyId: lease.keyId,
+    deviceLabel: `staging drill ${runId !== undefined && /^[0-9]{1,20}$/u.test(runId) ? runId : randomBytes(6).toString("hex")}`,
+  };
+}
+
 function validateOptions(env = process.env) {
   if (!configured(env)) {
     return { skipped: true, reason: "staging portal drill environment is not configured" };
@@ -125,11 +206,7 @@ function validateOptions(env = process.env) {
     bootstrapBearer,
     bootstrapAccessJwt: envText(env, ENV_ALIASES.bootstrapAccessJwt),
     requestOtp: envBool(env, ENV_ALIASES.requestOtp, false),
-    allowSeatMutation: envBool(env, ENV_ALIASES.allowSeatMutation, false),
-    floatingEntitlementId: envText(env, ENV_ALIASES.floatingEntitlementId),
-    allowDownload: envBool(env, ENV_ALIASES.allowDownload, false),
-    downloadEntitlementId: envText(env, ENV_ALIASES.downloadEntitlementId),
-    deviceKeyId: envText(env, ENV_ALIASES.deviceKeyId) ?? `staging-${randomUUID()}`,
+    protectedDevice: protectedDeviceOptions(env),
     logout: envBool(env, ENV_ALIASES.logout, authMode !== "session_cookie"),
   };
 }
@@ -207,34 +284,27 @@ async function requestJson(options, path, init = {}) {
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
   const setCookies = options.cookieJar.capture(response);
-  const text = await readBoundedText(response, MAX_JSON_RESPONSE_BYTES, `${method} ${path}`);
-  let body = null;
-  try {
-    body = text === "" ? null : JSON.parse(text);
-  } catch {
-    throw new Error(`${method} ${path} returned non-JSON response with status ${response.status}`);
-  }
-  return { response, body, setCookies };
+  return { response, body: await readJson(response, `${method} ${path}`), setCookies };
 }
 
-async function requestBytes(options, path, init = {}) {
-  const url = new URL(path, options.baseUrl);
-  const method = init.method ?? "GET";
-  const response = await options.fetchFn(url, {
-    method,
-    headers: jsonHeaders({
-      ...init,
-      method,
-      origin: options.baseUrl.origin,
-      cookieJar: options.cookieJar,
-    }),
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+async function readJson(response, label) {
+  const text = await readBoundedText(response, MAX_JSON_RESPONSE_BYTES, label);
+  try {
+    return text === "" ? null : JSON.parse(text);
+  } catch {
+    throw new Error(`${label} returned non-JSON response with status ${response.status}`);
+  }
+}
+
+// Device calls go straight to the licensing backend. They never carry the portal session cookie
+// or a portal Origin: the device proves possession of its key, not a browser session.
+async function requestBackend(options, path, body) {
+  const response = await options.fetchFn(new URL(path, options.protectedDevice.backendBaseUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
   });
-  options.cookieJar.capture(response);
-  return {
-    response,
-    bytes: await readBoundedBytes(response, MAX_DOWNLOAD_RESPONSE_BYTES, `${method} ${path}`),
-  };
+  return { response, body: await readJson(response, `POST ${path}`) };
 }
 
 async function requestDocument(options, path) {
@@ -263,13 +333,6 @@ function assertEnvelope(result, expectedCode, label) {
   return result.body;
 }
 
-function assertAction(result, label) {
-  if (!result.response.ok || result.body?.ok !== true) {
-    throw new Error(`${label} failed: status=${result.response.status}; response_ok=${result.response.ok}; envelope_ok=${result.body?.ok === true}`);
-  }
-  return result.body;
-}
-
 function assertUnauthorized(result, label) {
   if (result.response.status !== 401 || result.body?.ok !== false || result.body?.code !== "unauthorized") {
     throw new Error(`${label} failed: status=${result.response.status}; envelope_denied=${result.body?.ok === false}; code_matches=${result.body?.code === "unauthorized"}`);
@@ -288,33 +351,6 @@ function assertSecureSessionCookie(result, label) {
   if (sessionCookie === undefined || !requiredAttributes.every((pattern) => pattern.test(sessionCookie))) {
     throw new Error(`${label} did not issue the required secure session cookie policy`);
   }
-}
-
-function findStringKey(value, key) {
-  if (value === null || typeof value !== "object") {
-    return undefined;
-  }
-  if (typeof value[key] === "string" && value[key] !== "") {
-    return value[key];
-  }
-  for (const child of Object.values(value)) {
-    const found = findStringKey(child, key);
-    if (found !== undefined) {
-      return found;
-    }
-  }
-  return undefined;
-}
-
-function selectEntitlement(items, explicitId, predicate, label) {
-  if (explicitId !== undefined) {
-    return explicitId;
-  }
-  const match = items.find(predicate);
-  if (typeof match?.id === "string" && match.id !== "") {
-    return match.id;
-  }
-  throw new Error(`${label} entitlement id is required`);
 }
 
 async function authenticate(options) {
@@ -361,75 +397,211 @@ async function authenticate(options) {
   return true;
 }
 
-async function runSeatCycle(options, entitlements) {
-  if (!options.allowSeatMutation) {
-    return { enabled: false };
+// ECDSA signatures are (r, s) pairs where s and n - s both verify; the backend accepts only the
+// low-S form, so a proof is normalised before it is sent.
+function lowS(signature) {
+  if (signature.length !== 64) {
+    throw new Error("device proof signature has an unexpected length");
   }
-  const entitlementId = selectEntitlement(
-    entitlements,
-    options.floatingEntitlementId,
-    (item) => item?.license_mode === "floating",
-    "floating seat-cycle",
-  );
-  const clientInstanceId = `staging-${randomUUID()}`;
-  const checkout = assertAction(await requestJson(options, "/api/portal/checkout", {
-    method: "POST",
-    body: {
-      entitlement_id: entitlementId,
-      client_instance_id: clientInstanceId,
-      nonce: randomBytes(32).toString("hex"),
-    },
-  }), "portal checkout");
-  const seatId = findStringKey(checkout, "seat_id");
-  if (seatId === undefined) {
-    throw new Error("portal checkout did not return a seat_id for heartbeat/release");
+  const s = BigInt(`0x${Buffer.from(signature.subarray(32)).toString("hex")}`);
+  if (s <= P256_ORDER / 2n) {
+    return signature;
   }
-  assertAction(await requestJson(options, "/api/portal/heartbeat", {
-    method: "POST",
-    body: {
-      entitlement_id: entitlementId,
-      client_instance_id: clientInstanceId,
-      seat_id: seatId,
-      nonce: randomBytes(32).toString("hex"),
-    },
-  }), "portal heartbeat");
-  assertAction(await requestJson(options, "/api/portal/release", {
-    method: "POST",
-    body: {
-      entitlement_id: entitlementId,
-      client_instance_id: clientInstanceId,
-      seat_id: seatId,
-      nonce: randomBytes(32).toString("hex"),
-    },
-  }), "portal release");
-  return { enabled: true, entitlement_id_configured: options.floatingEntitlementId !== undefined };
+  const normalized = new Uint8Array(signature);
+  normalized.set(Buffer.from((P256_ORDER - s).toString(16).padStart(64, "0"), "hex"), 32);
+  return normalized;
 }
 
-async function runDownload(options, entitlements) {
-  if (!options.allowDownload) {
+async function requestChallenge(options, body, label) {
+  const challenge = assertEnvelope(await requestBackend(options, "/v2/device-challenges", body), "challenge_created", label).data;
+  if (typeof challenge?.challenge_id !== "string" || typeof challenge.nonce !== "string" || !Number.isSafeInteger(challenge.expires_at)) {
+    throw new Error(`${label} returned an invalid challenge`);
+  }
+  return challenge;
+}
+
+async function deviceProof(device, key, path, purpose, body, challenge) {
+  const intent = {
+    audience: device.audience,
+    method: "POST",
+    path,
+    key_id: key.keyId,
+    operation_id: body.operation_id,
+    body_sha256: sha256Hex(deviceOperationBody(purpose, body)),
+    challenge_id: challenge.challenge_id,
+    nonce: challenge.nonce,
+    expires_at: challenge.expires_at,
+  };
+  const signature = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key.privateKey, deviceProofSigningInput(intent)));
+  return {
+    key_id: key.keyId,
+    challenge_id: challenge.challenge_id,
+    nonce: challenge.nonce,
+    expires_at: challenge.expires_at,
+    signature: encodeBase64url(lowS(signature)),
+  };
+}
+
+// Verifies the lease signature against the configured lease key and that its claims name this
+// device, binding and request. Failures name the claim, never its value or the lease itself.
+function verifyDeviceLease(device, token, expected, label) {
+  let lease;
+  try {
+    lease = decodeDeviceLeaseEnvelope(token);
+  } catch {
+    throw new Error(`${label} returned a malformed lease`);
+  }
+  let verified = false;
+  try {
+    verified = verify("RSA-SHA256", deviceLeaseSigningInput(lease.payload), device.leasePublicKey, lease.signature);
+  } catch {
+    verified = false;
+  }
+  if (!verified) {
+    throw new Error(`${label} lease signature did not verify against the configured lease public key`);
+  }
+  const claims = {
+    "key-id": device.leaseKeyId,
+    audience: device.audience,
+    project: device.project,
+    feature: device.feature,
+    "device-key-id": expected.keyId,
+    "binding-id": expected.bindingId,
+    generation: expected.generation,
+    "operation-id": expected.operationId,
+  };
+  const mismatched = Object.keys(claims).filter((claim) => lease.claims[claim] !== claims[claim]);
+  if (mismatched.length > 0) {
+    throw new Error(`${label} lease claims did not match: ${mismatched.join(", ")}`);
+  }
+}
+
+function approvedCallbackCode(callbackUrl, redirectUri, state) {
+  let callback = null;
+  try {
+    callback = new URL(callbackUrl);
+  } catch {
+    callback = null;
+  }
+  const expected = new URL(redirectUri);
+  const code = callback?.searchParams.get("code");
+  if (callback === null || callback.origin !== expected.origin || callback.pathname !== expected.pathname
+      || callback.searchParams.get("state") !== state || typeof code !== "string" || code === "") {
+    throw new Error("portal device consent approval returned a callback for a different device request");
+  }
+  return code;
+}
+
+// Enrolls a fresh software P-256 device through browser consent, exchanges and renews its lease
+// with key-possession proofs, then retires the binding. The retired binding keeps its device slot
+// until its hold ends, so each run occupies one slot on the configured entitlement for up to a day.
+async function runProtectedDeviceJourney(options) {
+  const device = options.protectedDevice;
+  if (device?.enabled !== true) {
     return { enabled: false };
   }
-  const entitlementId = selectEntitlement(
-    entitlements,
-    options.downloadEntitlementId,
-    (item) => typeof item?.id === "string" && item.id !== "",
-    "download",
-  );
-  const downloaded = await requestBytes(options, "/api/portal/download", {
+  if (typeof options.customerId !== "string" || options.customerId === "") {
+    throw new Error("the protected device journey requires the signed-in customer id");
+  }
+  const consentHeaders = { "x-expected-customer-id": encodeURIComponent(options.customerId) };
+
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
+  const spki = new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey));
+  const key = { privateKey: pair.privateKey, keyId: `sha256:${sha256Hex(spki)}` };
+  const codeVerifier = randomId(32);
+  const state = randomId(32);
+
+  const attempt = assertEnvelope(await requestBackend(options, "/v2/device-authorizations", {
+    client_id: device.clientId,
+    project: device.project,
+    public_key_spki: encodeBase64url(spki),
+    device_label: device.deviceLabel,
+    redirect_uri: device.redirectUri,
+    state,
+    code_challenge: encodeBase64url(new Uint8Array(createHash("sha256").update(codeVerifier).digest())),
+    code_challenge_method: "S256",
+    requested_feature: device.feature,
+  }), "authorization_created", "protected device authorization").data;
+  const attemptHandle = attempt?.attempt_handle;
+  if (typeof attemptHandle !== "string" || attemptHandle === "") {
+    throw new Error("protected device authorization did not return an attempt handle");
+  }
+
+  const inspection = assertEnvelope(await requestJson(options, "/api/portal/device-authorizations/inspect", {
     method: "POST",
-    body: {
-      entitlement_id: entitlementId,
-      device_key_id: options.deviceKeyId,
-    },
+    headers: consentHeaders,
+    body: { attempt_handle: attemptHandle },
+  }), "authorization_inspected", "portal device consent inspection").data;
+  if (inspection?.status !== "pending" || inspection.revision !== 0
+      || !Array.isArray(inspection.entitlements) || !inspection.entitlements.some((item) => item?.id === device.entitlementId)) {
+    throw new Error("portal device consent inspection did not offer the protected entitlement to a pending authorization");
+  }
+  // The portal takes the approval's operation id from its Idempotency-Key header.
+  const approval = assertEnvelope(await requestJson(options, "/api/portal/device-authorizations/approve", {
+    method: "POST",
+    headers: { ...consentHeaders, "idempotency-key": randomId(32) },
+    body: { attempt_handle: attemptHandle, entitlement_id: device.entitlementId, expected_attempt_revision: 0 },
+  }), "authorization_approved", "portal device consent approval").data;
+  const code = approvedCallbackCode(approval?.callback_url, device.redirectUri, state);
+
+  const exchange = {
+    attempt_handle: attemptHandle,
+    code,
+    code_verifier: codeVerifier,
+    redirect_uri: device.redirectUri,
+    operation_id: randomId(32),
+  };
+  const exchangeChallenge = await requestChallenge(options, {
+    purpose: "exchange",
+    attempt_handle: attemptHandle,
+    operation_id: exchange.operation_id,
+  }, "protected device exchange challenge");
+  const activated = assertEnvelope(await requestBackend(options, EXCHANGE_PATH, {
+    ...exchange,
+    proof: await deviceProof(device, key, EXCHANGE_PATH, "exchange", exchange, exchangeChallenge),
+  }), "device_activated", "protected device exchange").data;
+  const bindingId = activated?.binding_id;
+  const generation = activated?.generation;
+  if (typeof bindingId !== "string" || bindingId === "" || !Number.isSafeInteger(generation) || generation < 1) {
+    throw new Error("protected device exchange did not return a binding");
+  }
+  verifyDeviceLease(device, activated.lease, { keyId: key.keyId, bindingId, generation, operationId: exchange.operation_id }, "protected device exchange");
+
+  const renewal = { binding_id: bindingId, generation, operation_id: randomId(32) };
+  const renewChallenge = await requestChallenge(options, {
+    purpose: "renew",
+    binding_id: bindingId,
+    operation_id: renewal.operation_id,
+  }, "protected device renewal challenge");
+  const renewed = assertEnvelope(await requestBackend(options, RENEW_PATH, {
+    ...renewal,
+    proof: await deviceProof(device, key, RENEW_PATH, "renew", renewal, renewChallenge),
+  }), "device_renewed", "protected device renewal").data;
+  if (renewed?.binding_id !== bindingId || renewed.generation !== generation) {
+    throw new Error("protected device renewal returned a different binding");
+  }
+  verifyDeviceLease(device, renewed.lease, { keyId: key.keyId, bindingId, generation, operationId: renewal.operation_id }, "protected device renewal");
+
+  // Retirement is guarded by the binding's current revision, which the portal reports.
+  const listed = assertEnvelope(await requestJson(options, `/api/portal/device-bindings?${new URLSearchParams({ binding_id: bindingId })}`, {
+    headers: consentHeaders,
+  }), "device_bindings", "portal device binding read").data;
+  const row = Array.isArray(listed?.items) && listed.items.length === 1 ? listed.items[0] : null;
+  if (row?.binding_id !== bindingId || row.state !== "active" || !Number.isSafeInteger(row.revision)) {
+    throw new Error("portal device binding read did not report the drill binding as active");
+  }
+  const retired = await requestJson(options, "/api/portal/device-bindings/retire", {
+    method: "POST",
+    headers: { ...consentHeaders, "idempotency-key": randomId(32) },
+    body: { binding_id: bindingId, expected_revision: row.revision },
   });
-  const disposition = downloaded.response.headers.get("content-disposition") ?? "";
-  if (!downloaded.response.ok || downloaded.bytes.byteLength === 0 || !/attachment/i.test(disposition)) {
-    throw new Error(`portal download failed: ${JSON.stringify({ status: downloaded.response.status, disposition, bytes: downloaded.bytes.byteLength })}`);
+  const retirement = assertEnvelope(retired, "binding_retired", "portal device binding retirement").data;
+  if (retired.response.status !== 200 || retirement?.binding_id !== bindingId || retirement.state !== "retiring"
+      || retirement.revision !== row.revision + 1) {
+    throw new Error("portal device binding retirement did not retire the drill binding");
   }
-  if (downloaded.response.headers.get("authorization") !== null) {
-    throw new Error("portal download leaked an Authorization response header");
-  }
-  return { enabled: true, entitlement_id_configured: options.downloadEntitlementId !== undefined, bytes: downloaded.bytes.byteLength };
+
+  return { enabled: true, exchanged: true, renewed: true, retired: true, lease_key_id: device.leaseKeyId };
 }
 
 async function runStagingPortalDrill(options, dependencies = {}) {
@@ -453,12 +625,9 @@ async function runStagingPortalDrill(options, dependencies = {}) {
 
   const me = assertEnvelope(await requestJson(runtime, "/api/portal/me"), "me", "portal me");
   const entitlements = assertEnvelope(await requestJson(runtime, "/api/portal/entitlements"), "entitlements", "portal entitlements");
-  const devices = assertEnvelope(await requestJson(runtime, "/api/portal/devices"), "devices", "portal devices");
-  const usage = assertEnvelope(await requestJson(runtime, "/api/portal/usage"), "usage", "portal usage");
 
   const entitlementItems = Array.isArray(entitlements.data?.items) ? entitlements.data.items : [];
-  const seatCycle = await runSeatCycle(runtime, entitlementItems);
-  const download = await runDownload(runtime, entitlementItems);
+  const protectedDevice = await runProtectedDeviceJourney({ ...runtime, customerId: me.data?.customer_id });
 
   let postLogoutStatus = null;
   if (runtime.logout) {
@@ -483,10 +652,7 @@ async function runStagingPortalDrill(options, dependencies = {}) {
     post_logout_status: postLogoutStatus,
     customer_id_present: typeof me.data?.customer_id === "string" && me.data.customer_id !== "",
     entitlement_count: entitlementItems.length,
-    device_count: Array.isArray(devices.data?.items) ? devices.data.items.length : null,
-    usage_count: Array.isArray(usage.data?.items) ? usage.data.items.length : null,
-    seat_cycle: seatCycle,
-    download,
+    protected_device: protectedDevice,
     logout_performed: runtime.logout,
   };
 }

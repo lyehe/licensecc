@@ -187,7 +187,8 @@ Browser smoke tests require the explicit one-time setup command
 
 The deployed portal drill also verifies that the built UI shell and health
 endpoint load before authenticating. With an existing session cookie and the
-mutation flags left unset, it is safe for a production post-deploy read gate:
+protected device variables left unset, it is safe for a production post-deploy
+read gate:
 
 Run this block from the service directory. It is application-read-only but
 still transmits the supplied session cookie to the configured remote origin.
@@ -197,6 +198,28 @@ $env:LICENSECC_PORTAL_URL = "https://portal.example.workers.dev"
 $env:LICENSECC_PORTAL_SESSION_COOKIE = "<redacted-session-cookie>"
 npm run validate:staging-portal
 ```
+
+Staging also runs the protected device journey. The drill generates a fresh
+software P-256 device key, creates a device authorization on the backend,
+inspects and approves it through the portal consent routes with the signed-in
+session, exchanges the approval code with a key-possession proof, renews the
+lease with a second proof, verifies both leases against the configured
+RSA-3072 lease public key, and retires the binding through the portal. The
+journey needs eight inputs, each also accepted under its `LICENSECC_*` alias:
+`STAGING_PORTAL_PROTECTED_ENTITLEMENT_ID`, `STAGING_BACKEND_BASE_URL`,
+`STAGING_DEVICE_CLIENT_ID`, `STAGING_DEVICE_PROJECT`, `STAGING_DEVICE_FEATURE`,
+`STAGING_DEVICE_REDIRECT_URI`, `STAGING_DEVICE_AUDIENCE`, and
+`STAGING_BOUND_LEASE_PUBLIC_KEY_SPKI_PEM`. It runs only when all eight are
+set. With none set, the evidence reports `protected_device: { enabled: false }`
+and the drill makes no backend or consent call; a partial set fails and names
+the missing variables. The production post-deploy drill sets none of them.
+
+The client id and its loopback redirect URI must be registered in the staging
+`BOUND_DEVICE_CONFIG`, whose `audience` is `STAGING_DEVICE_AUDIENCE`. The
+entitlement must be protected, owned by the drill customer, and allow at least
+20 active devices: a retired binding keeps its device slot until its hold ends
+(at most 24 hours plus 120 seconds), so each run occupies one slot for up to a
+day. The drill never prints a lease, proof, device key, or session cookie.
 
 The protected staging bootstrap path additionally requires an unauthenticated
 `/api/portal/me` denial, verifies the newly issued `lccp_session` cookie has

@@ -153,7 +153,12 @@ the exact candidate.
   non-admin mutation denial, authenticated access, and its mutation/idempotency
   cycle. The portal drill proves unauthenticated read denial, secure attributes
   on a newly issued staging cookie, authenticated paths, logout, and
-  post-logout denial. Denial of an expired unused OTP, denial of a previously
+  post-logout denial. In staging it also enrolls a fresh software P-256 device
+  key, approves it through portal consent, exchanges and renews its lease with
+  key-possession proofs, verifies both leases against the staging lease public
+  key, and retires the binding; the production post-deploy drill never enrolls
+  a device. A software key proves the protocol, not hardware-backed key
+  storage. Denial of an expired unused OTP, denial of a previously
   authenticated session after its server-side TTL, successful transactional
   email delivery, and a two-fixture cross-tenant denial require separate
   retained evidence. Cookie attributes or logout do not prove either expiry
