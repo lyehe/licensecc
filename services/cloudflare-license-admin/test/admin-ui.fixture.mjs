@@ -592,10 +592,21 @@ export function makeAdminApiFixture() {
     return Array.from({ length: count }, () => seedCustomer());
   }
 
+  /**
+   * A grant's capacity shape, shared by the create route and every seed helper so a seeded row and
+   * a form-created row of the same feature/pool_size can never drift apart: `feature === "float"`
+   * (the create form's own historical shorthand) or an explicit positive pool_size makes it a
+   * floating seat pool; everything else, including every protected create, is node-locked.
+   */
+  function floatingCapacity(feature, poolSizeOverride) {
+    const floating = feature === "float" || (poolSizeOverride ?? 0) > 0;
+    return { pool_size: poolSizeOverride ?? (floating ? 5 : 0), license_mode: floating ? "floating" : "node_locked" };
+  }
+
   function seedEntitlement(overrides = {}) {
     const index = nextEntitlementId;
     const status = overrides.status ?? "active";
-    const poolSize = overrides.pool_size ?? 0;
+    const capacity = floatingCapacity(overrides.feature, overrides.pool_size);
     const row = {
       id: `ent-${index}`,
       enforcement_mode: "device_bound_v1",
@@ -622,13 +633,13 @@ export function makeAdminApiFixture() {
       max_active_devices: 1,
       lease_seconds: 0,
       rebind_window_sec: 0,
-      pool_size: poolSize,
+      pool_size: capacity.pool_size,
       heartbeat_grace_sec: 300,
       max_borrow_sec: 0,
       allow_overdraft: 0,
       meter_quota: 0,
       meter_period_sec: 2_592_000,
-      license_mode: poolSize > 0 ? "floating" : "node_locked",
+      license_mode: capacity.license_mode,
       created_at: now,
       updated_at: now,
       ...overrides,
@@ -1825,7 +1836,7 @@ export function makeAdminApiFixture() {
       await new Promise((resolve) => setTimeout(resolve, 100));
       const body = await jsonBody(request);
       now += 1;
-      const floating = body.feature === "float" || (body.pool_size ?? 0) > 0;
+      const capacity = floatingCapacity(body.feature, body.pool_size);
       const row = {
         id: `ent-${nextEntitlementId}`,
         enforcement_mode: body.enforcement_mode ?? "device_bound_v1",
@@ -1852,13 +1863,13 @@ export function makeAdminApiFixture() {
         max_active_devices: body.max_active_devices ?? 1,
         lease_seconds: body.lease_seconds ?? 0,
         rebind_window_sec: body.rebind_window_sec ?? 0,
-        pool_size: body.pool_size ?? (floating ? 5 : 0),
+        pool_size: capacity.pool_size,
         heartbeat_grace_sec: body.heartbeat_grace_sec ?? 300,
         max_borrow_sec: body.max_borrow_sec ?? 0,
         allow_overdraft: body.allow_overdraft ?? 0,
         meter_quota: body.meter_quota ?? 0,
         meter_period_sec: body.meter_period_sec ?? 2592000,
-        license_mode: floating ? "floating" : "node_locked",
+        license_mode: capacity.license_mode,
         created_at: now,
         updated_at: now,
       };
