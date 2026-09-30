@@ -57,13 +57,13 @@ function successfulFetch({ calls = [], secret = "body-value-must-not-appear" } =
     calls.push({ url: url.toString(), init });
     if (url.pathname === "/openapi.json") return json(openApi(secret));
     if (url.hostname === "backend.licensecc.net" && url.pathname === "/health") {
-      return json({ ok: true, service: "licensecc-online-verifier", account_token_mode: "required", internal: secret });
+      return json({ ok: true, service: "licensecc-online-verifier", protected_device_ready: true, internal: secret });
     }
     if (url.hostname === "admin.licensecc.net" && url.pathname === "/api/admin/summary") {
       return json({ ok: true, code: "summary", data: { internal: secret } });
     }
     if (url.hostname === "portal.licensecc.net" && url.pathname === "/health") {
-      return json({ ok: true, code: "healthy", data: { account_token_mode_required: true, internal: secret } });
+      return json({ ok: true, code: "healthy", data: { backend_protected_ready: true, internal: secret } });
     }
     if (url.hostname === "backup.licensecc.net" && url.pathname === "/health") {
       return json({ ok: true, code: "backup_ready", database_name: secret, backup_prefix: secret });
@@ -124,6 +124,37 @@ test("post-rollback readiness uses GET-only bounded contracts and emits redacted
 
   const serialized = JSON.stringify(evidence);
   assert.doesNotMatch(serialized, /licensecc\.net|header\.payload|private-body-value|database_name|backup_prefix/u);
+});
+
+test("rollback health accepts protected_device_ready and rejects account_token_mode", async () => {
+  const withHealth = (hostname, body) => async (url, init) => {
+    if (url.hostname === hostname && url.pathname === "/health") return json(body);
+    return successfulFetch()(url, init);
+  };
+  const accepted = await checkWorkerRollbackHealth(optionsFor(), {
+    fetchImpl: withHealth("backend.licensecc.net", { ok: true, service: "licensecc-online-verifier", protected_device_ready: true }),
+  });
+  assert.equal(accepted.services.backend.health.code, "backend_ready");
+
+  for (const body of [
+    { ok: true, service: "licensecc-online-verifier", account_token_mode: "required" },
+    { ok: true, service: "licensecc-online-verifier", account_token_mode: "required", protected_device_ready: false },
+    { ok: true, service: "licensecc-online-verifier", protected_device_ready: "true" },
+    { ok: false, service: "licensecc-online-verifier", protected_device_ready: true },
+  ]) {
+    await assert.rejects(
+      checkWorkerRollbackHealth(optionsFor(), { fetchImpl: withHealth("backend.licensecc.net", body) }),
+      (error) => error instanceof SafeRollbackHealthError && error.code === "READINESS_CONTRACT_FAILED" && error.service === "backend",
+      JSON.stringify(body),
+    );
+  }
+  for (const data of [{ account_token_mode_required: true }, { backend_protected_ready: false }, { backend_protected_ready: "true" }]) {
+    await assert.rejects(
+      checkWorkerRollbackHealth(optionsFor(), { fetchImpl: withHealth("portal.licensecc.net", { ok: true, code: "healthy", data }) }),
+      (error) => error instanceof SafeRollbackHealthError && error.code === "READINESS_CONTRACT_FAILED" && error.service === "portal",
+      JSON.stringify(data),
+    );
+  }
 });
 
 test("arguments require four distinct canonical HTTPS origins, exact commit identity, and an environment-only admin credential", () => {

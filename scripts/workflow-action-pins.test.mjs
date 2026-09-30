@@ -593,6 +593,24 @@ test("production deployment is manual, confirmed, serialized, and uses only mate
     },
   );
   assert.match(productionVerifier.properties.get("run")?.value ?? "", /backend-public-verifier-drill\.json/u);
+  const protectedSmoke = namedWorkflowStep(job, "Run protected post-deploy smoke", ".github/workflows/deploy-production.yml");
+  assertExactCriticalRun(
+    protectedSmoke,
+    'npm --silent run validate:protected-smoke --workspace @licensecc/cloudflare-licensing-backend -- --url "$BACKEND_URL" > "$RUNNER_TEMP/licensecc-deployment-evidence/backend-protected-smoke.json"',
+    "production protected smoke",
+  );
+  // The protected smoke is backend-only and unauthenticated. Its one input is the backend URL, so
+  // it carries no credential and no protected portal-drill input, and it enrolls no device.
+  assert.deepEqual(
+    Object.fromEntries([...protectedSmoke.children.get("env")].map(([key, property]) => [key, property.value])),
+    { BACKEND_URL: "${{ inputs.backend_url }}" },
+  );
+  const productionStepNames = job.steps.map((step) => step.properties.get("name")?.value);
+  assert.equal(
+    productionStepNames.indexOf("Run protected post-deploy smoke"),
+    productionStepNames.indexOf("Deploy backend, admin, and portal Workers") + 1,
+    "the protected smoke runs immediately after the Worker deploy",
+  );
   const remainingProductionDrills = namedWorkflowStep(job, "Run remaining service post-deploy drills", ".github/workflows/deploy-production.yml");
   assert.equal(remainingProductionDrills.children.get("env")?.has("LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM"), false);
   // The production portal drill is read-only: no protected-journey input may reach it, either

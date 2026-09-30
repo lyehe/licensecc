@@ -1,31 +1,54 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import worker from "../../dist/app.js";
-import { testKeyEnv } from "./fixtures.mjs";
+import { protectedDeviceEnv } from "../helpers/protected-device-env.mjs";
+
+// One signer for the whole file. Each test spreads it into a fresh env object, so the
+// per-env readiness result is never shared between tests.
+const PROTECTED = await protectedDeviceEnv();
+
+async function health(env) {
+  const response = await worker.fetch(new Request("https://example.test/health"), env);
+  return { status: response.status, body: await response.json() };
+}
 
 test("health route returns status", async () => {
-  const response = await worker.fetch(new Request("https://example.test/health"), await testKeyEnv(null));
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).ok, true);
+  const result = await health({ ...PROTECTED });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, { ok: true, service: "licensecc-online-verifier", protected_device_ready: true });
 });
 
-test("/health exposes the backend's normalized account-token enforcement mode without secrets", async () => {
-  const health = async (ACCOUNT_TOKEN_MODE) => {
-    const response = await worker.fetch(new Request("https://example.test/health"), { ACCOUNT_TOKEN_MODE });
-    return { status: response.status, body: await response.json() };
-  };
-
-  for (const mode of ["required", "soft", "off", undefined]) {
-    const healthResult = await health(mode);
-    assert.equal(healthResult.status, 200);
-    assert.equal(healthResult.body.account_token_mode, mode ?? "off");
+test("health reports protected_device_ready false and 503 without BOUND_DEVICE_CONFIG", async () => {
+  const { BOUND_DEVICE_CONFIG: _registry, ...withoutRegistry } = PROTECTED;
+  const { BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM: _signer, ...withoutSigner } = PROTECTED;
+  for (const [label, env] of [
+    ["empty env", {}],
+    ["no registry", withoutRegistry],
+    ["invalid registry", { ...PROTECTED, BOUND_DEVICE_CONFIG: "{}" }],
+    ["no signer", withoutSigner],
+    ["invalid global rate limit", { ...PROTECTED, BOUND_GLOBAL_RATE_LIMIT: "12.5" }],
+  ]) {
+    const result = await health(env);
+    assert.equal(result.status, 503, `${label} fails readiness`);
+    assert.deepEqual(result.body, { ok: false, service: "licensecc-online-verifier", protected_device_ready: false }, label);
+    assert.doesNotMatch(JSON.stringify(result.body), /KEY|licenses\.example|12\.5/u, `${label} reflects no configuration`);
   }
+});
 
-  const invalid = await health("not-a-mode");
+test("health no longer reports an account-token mode", async () => {
+  for (const ACCOUNT_TOKEN_MODE of ["required", "soft", "off", undefined]) {
+    const result = await health({ ...PROTECTED, ACCOUNT_TOKEN_MODE });
+    assert.equal(result.status, 200);
+    assert.equal(Object.hasOwn(result.body, "account_token_mode"), false);
+  }
+});
+
+test("an invalid security selector fails health even when protected licensing is ready", async () => {
+  const invalid = await health({ ...PROTECTED, ACCOUNT_TOKEN_MODE: "not-a-mode" });
   assert.equal(invalid.status, 503, "invalid security configuration fails readiness");
   assert.equal(invalid.body.ok, false);
+  assert.equal(invalid.body.protected_device_ready, true);
   assert.equal(invalid.body.code, "config_error");
-  assert.equal(invalid.body.account_token_mode, "invalid");
   assert.deepEqual(invalid.body.invalid_config_modes, ["ACCOUNT_TOKEN_MODE"]);
   assert.doesNotMatch(JSON.stringify(invalid.body), /not-a-mode/, "health never reflects raw configuration values");
 });
@@ -36,7 +59,7 @@ test("/health exposes every invalid security-mode selector without its raw value
   // one could otherwise normalize into an unintentionally permissive mode.
   for (const raw of ["typo", "REQUIRED", " required"]) {
     for (const selector of selectors) {
-      const response = await worker.fetch(new Request("https://example.test/health"), { [selector]: raw });
+      const response = await worker.fetch(new Request("https://example.test/health"), { ...PROTECTED, [selector]: raw });
       assert.equal(response.status, 503, `${selector}=${JSON.stringify(raw)} fails readiness`);
       const body = await response.json();
       assert.equal(body.ok, false);
@@ -51,6 +74,7 @@ test("/health surfaces config-consistency warnings for a half-configured deploy 
   // Secrets present but their enforcing modes left off -> a permissive posture the operator likely
   // did not intend. Marker-free non-empty values (the check only tests presence, never parses).
   const env = {
+    ...PROTECTED,
     ACCOUNT_TOKEN_PEPPERS: "configured",
     ACCOUNT_TOKEN_MODE: "off",
     ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM: "present",
@@ -69,6 +93,7 @@ test("/health surfaces config-consistency warnings for a half-configured deploy 
 
 test("/health has no config_warnings when enforcing modes match the configured secrets (R2.3)", async () => {
   const env = {
+    ...PROTECTED,
     ACCOUNT_TOKEN_PEPPERS: "configured",
     ACCOUNT_TOKEN_MODE: "required",
     ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM: "present",
@@ -103,7 +128,7 @@ test("/health normalizes empty, unset, and off paired-mode values before emittin
   ];
   for (const entry of cases) {
     for (const raw of [undefined, "", "off"]) {
-      const env = { [entry.material]: entry.value };
+      const env = { ...PROTECTED, [entry.material]: entry.value };
       if (raw !== undefined) env[entry.mode] = raw;
       const response = await worker.fetch(new Request("https://example.test/health"), env);
       assert.equal(response.status, 200);

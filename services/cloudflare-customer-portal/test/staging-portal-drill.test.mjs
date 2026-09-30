@@ -306,7 +306,7 @@ function makeFetch(calls, service) {
       });
     }
     if (path === "/health") {
-      return json({ ok: true, code: "healthy", data: { account_token_mode_required: true } });
+      return json({ ok: true, code: "healthy", data: { backend_protected_ready: true } });
     }
     if (path === "/portal/v1/admin/bootstrap-otp") {
       assert.equal(headers.get("authorization"), "Bearer break-glass");
@@ -605,6 +605,26 @@ test("portal drill failure diagnostics do not echo response data", async () => {
       && /status=503; response_ok=false; envelope_ok=false; code_matches=false/u.test(error.message)
       && !error.message.includes(secret),
   );
+});
+
+test("portal drill requires the portal health to certify backend protected readiness", async () => {
+  for (const data of [{ account_token_mode_required: true }, { backend_protected_ready: false }, { backend_protected_ready: "true" }, undefined]) {
+    const calls = [];
+    const fallback = makeFetch(calls);
+    const fetchFn = async (url, init) => {
+      if (new URL(String(url)).pathname === "/health") return json({ ok: true, code: "healthy", ...(data === undefined ? {} : { data }) });
+      return fallback(url, init);
+    };
+    await assert.rejects(
+      runStagingPortalDrill(validateOptions({
+        LICENSECC_PORTAL_URL: PORTAL,
+        LICENSECC_PORTAL_SESSION_COOKIE: "lccp_session=existing",
+      }), { fetchFn }),
+      /portal health did not certify backend protected readiness/u,
+      JSON.stringify(data),
+    );
+    assert.deepEqual(calls.map((call) => call.path), ["/"], "the drill stops before authenticating");
+  }
 });
 
 test("portal drill rejects oversized JSON without retaining or reporting its body", async () => {

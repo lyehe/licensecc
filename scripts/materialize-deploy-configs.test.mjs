@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,6 +37,20 @@ const profileValues = Object.freeze({
     bucket: "licensecc-d1-backups-staging",
   }),
 });
+
+// The protected lease signer is RSA-3072; only its public half is deployment configuration.
+const spkiPem = (modulusLength) => generateKeyPairSync("rsa", { modulusLength }).publicKey.export({ type: "spki", format: "pem" });
+const boundLeasePublicKeyPem = spkiPem(3072);
+const tomlString = (value) => JSON.stringify(value);
+
+function boundDeviceConfig(values) {
+  return JSON.stringify({
+    issuer: `https://${values.backendHost}/`,
+    audience: "desktop",
+    authorization_url: `https://${values.portalHost}/connect`,
+    clients: [{ client_id: "desktop", project: "APP", display_name: "Desktop app", callbacks: [{ host: "127.0.0.1", path: "/callback" }] }],
+  });
+}
 
 function observability() {
   return {
@@ -82,6 +97,8 @@ ORDER_INGEST_MODE = "required"
 ORDER_INGEST_AUDIENCE = "${values.audience}"
 ORDER_MAX_SKEW_SECONDS = "300"
 ORDER_SIGNER_SCOPE_MODE = "required"
+BOUND_DEVICE_CONFIG = '${boundDeviceConfig(values)}'
+BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM = ${tomlString(boundLeasePublicKeyPem)}
 
 [observability]
 enabled = true
@@ -411,6 +428,41 @@ test("rejects a backend config that does not route webhook fetches strictly thro
       const environment = validEnvironment();
       mutate(environment);
       assert.throws(() => materializeDeploymentConfigs({ root, environment }), /global_fetch_strictly_public/u, name);
+      assertNoConfigsWritten(root, name);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("backend config without a valid BOUND_DEVICE_CONFIG is refused", () => {
+  const registry = /^BOUND_DEVICE_CONFIG = .*$/mu;
+  const publicKey = /^BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM = .*$/mu;
+  const privatePem = generateKeyPairSync("rsa", { modulusLength: 3072 }).privateKey.export({ type: "pkcs8", format: "pem" });
+  const ecPem = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).publicKey.export({ type: "spki", format: "pem" });
+  const withRegistry = (text) => (source) => source.replace(registry, `BOUND_DEVICE_CONFIG = '${text}'`);
+  const withPublicKey = (pem) => (source) => source.replace(publicKey, `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM = ${tomlString(pem)}`);
+  const registryError = /vars\.BOUND_DEVICE_CONFIG/u;
+  const publicKeyError = /vars\.BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM/u;
+  const cases = [
+    ["missing registry", (source) => source.replace(registry, ""), registryError],
+    ["empty registry object", withRegistry("{}"), registryError],
+    ["registry is not JSON", withRegistry("not json"), registryError],
+    ["plaintext issuer", (source) => source.replace('"issuer":"https://', '"issuer":"http://'), registryError],
+    ["non-loopback callback", (source) => source.replace('"host":"127.0.0.1"', '"host":"10.0.0.1"'), registryError],
+    ["unknown registry field", (source) => source.replace('"audience":', '"extra":1,"audience":'), registryError],
+    ["missing lease public key", (source) => source.replace(publicKey, ""), publicKeyError],
+    ["private key in the public-key var", withPublicKey(privatePem), publicKeyError],
+    ["RSA-2048 public key", withPublicKey(spkiPem(2048)), publicKeyError],
+    ["EC public key", withPublicKey(ecPem), publicKeyError],
+    ["corrupt public key body", withPublicKey("-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n"), publicKeyError],
+  ];
+  for (const [name, mutation, pattern] of cases) {
+    const root = mkdtempSync(join(tmpdir(), "licensecc-deploy-configs-bound-"));
+    try {
+      const environment = validEnvironment();
+      mutateBackend(environment, mutation);
+      assert.throws(() => materializeDeploymentConfigs({ root, environment }), pattern, name);
       assertNoConfigsWritten(root, name);
     } finally {
       rmSync(root, { recursive: true, force: true });

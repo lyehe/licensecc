@@ -237,15 +237,16 @@ test("spec is OpenAPI 3.1.0 with the shared envelope/server conventions", () => 
   assert.ok(openApiDocument.components.securitySchemes.sessionCookie, "sessionCookie security scheme missing");
 });
 
-test("health OpenAPI keeps the reviewed readiness envelope and status contract", () => {
+test("health OpenAPI documents the backend protected-readiness envelope and status contract", () => {
   const health = openApiDocument.paths["/health"].get;
   assert.deepEqual(Object.keys(health.responses), ["200", "503"]);
-  assert.equal(health.responses["200"].content["application/json"].schema.properties.code.const, "healthy");
-  assert.equal(
-    health.responses["200"].content["application/json"].schema.properties.data.properties.account_token_mode_required.const,
-    true,
-  );
-  assert.equal(health.responses["503"].content["application/json"].schema.properties.code.const, "account_token_mode_not_required");
+  for (const [status, code, ready] of [["200", "healthy", true], ["503", "backend_not_ready", false]]) {
+    const schema = health.responses[status].content["application/json"].schema;
+    assert.equal(schema.properties.code.const, code, status);
+    assert.deepEqual(schema.properties.data.required, ["backend_protected_ready"], status);
+    assert.equal(schema.properties.data.properties.backend_protected_ready.const, ready, status);
+  }
+  assert.doesNotMatch(JSON.stringify(health), /account_token|ACCOUNT_TOKEN/u);
 });
 
 test("the doc routes are served without credentials or environment (behavioral)", async () => {

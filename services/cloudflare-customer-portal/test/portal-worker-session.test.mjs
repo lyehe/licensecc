@@ -55,7 +55,7 @@ test("logout revokes the session and clears the cookie", async () => {
 });
 
 // =================================================================================================
-// CONFIG GATES — pepper-unset 503; /health mode!=required; bootstrap break-glass
+// CONFIG GATES — pepper-unset 503; bootstrap break-glass
 // =================================================================================================
 
 test("pepper-unset (session) -> 503 config_error on a protected route", async () => {

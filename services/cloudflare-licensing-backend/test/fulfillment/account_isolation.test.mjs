@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 // not type-strip .ts). `npm run test:sql` builds first; the standalone gate runs after a build.
 import worker from "../../dist/app.js";
 import { generateAccountToken, hashToken, _resetRevocationFloorForTests } from "../../src/auth/account_token.mjs";
+import { protectedDeviceEnv } from "../helpers/protected-device-env.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "migrations");
@@ -525,7 +526,7 @@ test("emergency: unset bearer => 404; wrong bearer => 401; correct bearer => non
 // =============================================================================
 
 test("/health is open (no account-token gate)", async () => {
-  const { db, env } = await freshEnv();
+  const { db, env } = await freshEnv(await protectedDeviceEnv());
   const res = await worker.fetch(new Request("https://x/health", { method: "GET" }), env, CTX);
   const body = await res.json();
   assert.equal(res.status, 200);

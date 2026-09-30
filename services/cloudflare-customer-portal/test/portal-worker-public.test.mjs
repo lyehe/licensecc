@@ -13,11 +13,11 @@ async function withFetchStub(fetchStub, run) {
   }
 }
 
-function backendHealth({ service = "licensecc-online-verifier", accountTokenMode } = {}) {
-  const body = { ok: true, service };
-  if (accountTokenMode !== undefined) body.account_token_mode = accountTokenMode;
+function backendHealth({ service = "licensecc-online-verifier", ok = true, protectedDeviceReady, extra = {}, status = 200 } = {}) {
+  const body = { ok, service, ...extra };
+  if (protectedDeviceReady !== undefined) body.protected_device_ready = protectedDeviceReady;
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
 }
@@ -56,8 +56,8 @@ test("public documentation routes are direct, credential-free responses", async 
   db.close();
 });
 
-test("/health verifies the backend's required mode instead of a duplicated portal value", async () => {
-  const { db, env } = baseFixture({ ACCOUNT_TOKEN_MODE: "off" });
+test("/health verifies the backend's protected readiness instead of a local portal value", async () => {
+  const { db, env } = baseFixture();
   const calls = [];
   try {
     const healthy = await withFetchStub(async (url, init = {}) => {
@@ -67,11 +67,11 @@ test("/health verifies the backend's required mode instead of a duplicated porta
         authorization: new Headers(init.headers ?? {}).get("authorization"),
         redirect: init.redirect,
       });
-      return backendHealth({ accountTokenMode: "required" });
+      return backendHealth({ protectedDeviceReady: true });
     }, () => call(env, "GET", "/health", {}));
     assert.equal(healthy.status, 200);
     assert.equal(healthy.body.code, "healthy");
-    assert.equal(healthy.body.data.account_token_mode_required, true);
+    assert.equal(healthy.body.data.backend_protected_ready, true);
     assert.deepEqual(calls, [{ url: "https://backend.test/health", method: "GET", authorization: null, redirect: "manual" }]);
   } finally {
     db.close();
@@ -84,7 +84,7 @@ test("/health uses the same-zone backend service binding when it is configured",
   env.BACKEND = {
     fetch: async (request) => {
       calls.push({ url: request.url, redirect: request.redirect });
-      return backendHealth({ accountTokenMode: "required" });
+      return backendHealth({ protectedDeviceReady: true });
     },
   };
   try {
@@ -99,13 +99,30 @@ test("/health uses the same-zone backend service binding when it is configured",
   }
 });
 
-test("/health fails closed when the backend reports account-token enforcement off", async () => {
+test("portal health is healthy only when the backend reports protected readiness", async () => {
   const { db, env } = baseFixture();
   try {
-    const unhealthy = await withFetchStub(async () => backendHealth({ accountTokenMode: "off" }), () => call(env, "GET", "/health", {}));
-    assert.equal(unhealthy.status, 503);
-    assert.equal(unhealthy.body.code, "account_token_mode_not_required");
-    assert.equal(unhealthy.body.data.account_token_mode_required, false);
+    const healthy = await withFetchStub(async () => backendHealth({ protectedDeviceReady: true }), () => call(env, "GET", "/health", {}));
+    assert.equal(healthy.status, 200);
+    assert.equal(typeof healthy.body.request_id, "string");
+    assert.deepEqual(healthy.body, { ok: true, code: "healthy", request_id: healthy.body.request_id, data: { backend_protected_ready: true } });
+
+    for (const [label, backend] of [
+      ["backend not ready", { ok: false, protectedDeviceReady: false, status: 503 }],
+      ["ready flag false", { protectedDeviceReady: false }],
+      ["backend not ok", { ok: false, protectedDeviceReady: true }],
+      ["ready flag is not a boolean", { protectedDeviceReady: "true" }],
+      ["legacy account-token readiness", { extra: { account_token_mode: "required" } }],
+      ["legacy account-token readiness beside a false flag", { protectedDeviceReady: false, extra: { account_token_mode: "required" } }],
+    ]) {
+      const unhealthy = await withFetchStub(async () => backendHealth(backend), () => call(env, "GET", "/health", {}));
+      assert.equal(unhealthy.status, 503, label);
+      assert.deepEqual(
+        unhealthy.body,
+        { ok: false, code: "backend_not_ready", request_id: unhealthy.body.request_id, data: { backend_protected_ready: false } },
+        label,
+      );
+    }
   } finally {
     db.close();
   }
@@ -114,16 +131,16 @@ test("/health fails closed when the backend reports account-token enforcement of
 test("/health fails closed when the backend response is missing or mismatches the trusted health identity", async () => {
   const { db, env } = baseFixture();
   try {
-    const missingMode = await withFetchStub(async () => backendHealth(), () => call(env, "GET", "/health", {}));
-    assert.equal(missingMode.status, 503);
-    assert.equal(missingMode.body.data.account_token_mode_required, false);
+    const missingReadiness = await withFetchStub(async () => backendHealth(), () => call(env, "GET", "/health", {}));
+    assert.equal(missingReadiness.status, 503);
+    assert.equal(missingReadiness.body.data.backend_protected_ready, false);
 
     const wrongService = await withFetchStub(
-      async () => backendHealth({ service: "different-worker", accountTokenMode: "required" }),
+      async () => backendHealth({ service: "different-worker", protectedDeviceReady: true }),
       () => call(env, "GET", "/health", {}),
     );
     assert.equal(wrongService.status, 503);
-    assert.equal(wrongService.body.data.account_token_mode_required, false);
+    assert.equal(wrongService.body.data.backend_protected_ready, false);
   } finally {
     db.close();
   }
@@ -134,8 +151,8 @@ test("/health fails closed when the backend health request is unavailable", asyn
   try {
     const unavailable = await withFetchStub(async () => { throw new Error("backend unavailable"); }, () => call(env, "GET", "/health", {}));
     assert.equal(unavailable.status, 503);
-    assert.equal(unavailable.body.code, "account_token_mode_not_required");
-    assert.equal(unavailable.body.data.account_token_mode_required, false);
+    assert.equal(unavailable.body.code, "backend_not_ready");
+    assert.equal(unavailable.body.data.backend_protected_ready, false);
   } finally {
     db.close();
   }
@@ -148,10 +165,10 @@ test("/health rejects invalid backend destinations before any outbound request",
     try {
       const response = await withFetchStub(async (url, init = {}) => {
         calls.push({ url: String(url), authorization: new Headers(init.headers ?? {}).get("authorization") });
-        return backendHealth({ accountTokenMode: "required" });
+        return backendHealth({ protectedDeviceReady: true });
       }, () => call(env, "GET", "/health", {}));
       assert.equal(response.status, 503, `${label} fails closed`);
-      assert.equal(response.body.code, "account_token_mode_not_required");
+      assert.equal(response.body.code, "backend_not_ready");
       assert.deepEqual(calls, [], `${label} never makes an outbound request`);
     } finally {
       db.close();
@@ -295,7 +312,7 @@ test("health treats redirects as terminal and cancels their body", async () => {
       }, () => settlesWithin(call(env, "GET", "/health", {}), 500));
       assert.notEqual(response, null, `health ${status} never waits for a redirect body`);
       assert.equal(response.status, 503, `health ${status} retains the readiness failure envelope`);
-      assert.equal(response.body.code, "account_token_mode_not_required");
+      assert.equal(response.body.code, "backend_not_ready");
       assert.deepEqual(calls, [{ url: "https://backend.test/health", redirect: "manual" }]);
       assert.equal(cancelled, true, `health ${status} cancels the redirect body`);
     } finally {
@@ -309,7 +326,7 @@ test("/health bounds an oversized backend health body", async () => {
   const payload = JSON.stringify({
     ok: true,
     service: "licensecc-online-verifier",
-    account_token_mode: "required",
+    protected_device_ready: true,
     padding: "x".repeat(8192),
   });
   try {
@@ -318,7 +335,7 @@ test("/health bounds an oversized backend health body", async () => {
       headers: { "content-type": "application/json" },
     }), () => call(env, "GET", "/health", {}));
     assert.equal(response.status, 503);
-    assert.equal(response.body.code, "account_token_mode_not_required");
+    assert.equal(response.body.code, "backend_not_ready");
   } finally {
     db.close();
   }
@@ -332,7 +349,7 @@ test("/health fails closed when the bounded backend body is not JSON", async () 
       headers: { "content-type": "application/json" },
     }), () => call(env, "GET", "/health", {}));
     assert.equal(response.status, 503);
-    assert.equal(response.body.code, "account_token_mode_not_required");
+    assert.equal(response.body.code, "backend_not_ready");
   } finally {
     db.close();
   }
@@ -351,7 +368,7 @@ test("/health times out and cancels a stalled backend response stream", async ()
     );
     assert.notEqual(response, null, "readiness must not wait indefinitely for a backend body");
     assert.equal(response.status, 503);
-    assert.equal(response.body.code, "account_token_mode_not_required");
+    assert.equal(response.body.code, "backend_not_ready");
     assert.equal(cancelled, true, "the stalled response reader is cancelled on timeout");
   } finally {
     db.close();
@@ -371,7 +388,7 @@ test("/health cancels a non-200 backend stream before returning its existing 503
     );
     assert.notEqual(response, null, "readiness must not wait for a non-200 backend body");
     assert.equal(response.status, 503);
-    assert.equal(response.body.code, "account_token_mode_not_required");
+    assert.equal(response.body.code, "backend_not_ready");
     assert.equal(cancelled, true, "the non-200 backend body is cancelled before readiness returns");
   } finally {
     db.close();
