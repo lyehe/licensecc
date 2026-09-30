@@ -715,6 +715,15 @@ test("staging deployment is isolated, confirmed, backup-gated, and exercises eve
   assert.doesNotMatch(workflow, /wrangler\.example\.(?:toml|jsonc)|time-travel[^\n]*restore|--allow-nonempty-scratch/u);
 });
 
+test("no deploy workflow runs the public-verifier drill", () => {
+  // The backend serves no /v1/verify route, so neither deploy drills it or holds its secrets.
+  for (const relativePath of [".github/workflows/deploy-staging.yml", ".github/workflows/deploy-production.yml"]) {
+    const workflow = source(relativePath);
+    assert.doesNotMatch(workflow, /validate:public-verifier/u, relativePath);
+    assert.doesNotMatch(workflow, /LICENSECC_PUBLIC_VERIFIER_/u, relativePath);
+  }
+});
+
 test("staging capacity evidence is confirmed, operator-attested, secret-backed, retained, and fail-closed", () => {
   const relativePath = ".github/workflows/capacity.yml";
   const workflow = source(relativePath);

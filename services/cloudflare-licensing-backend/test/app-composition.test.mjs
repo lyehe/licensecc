@@ -95,6 +95,26 @@ test("the backend serves no lease, seat, meter, report or emergency route", asyn
   }
 });
 
+test("the backend serves exactly eight routes and no /v1/verify", async () => {
+  assert.equal(allCanonicalRoutes().length, 8);
+  const response = await app.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        project: "DEFAULT",
+        feature: "DEFAULT",
+        license_fingerprint: "a".repeat(64),
+        device_hash: "",
+        nonce: "b".repeat(64),
+      }),
+    }),
+    { DB: recordingDb() },
+  );
+  assert.equal(response.status, 404);
+  assert.deepEqual(await responseBody(response), { ok: false, code: "not_found" });
+});
+
 test("scheduled is directly callable and retains each best-effort retention sweep", async () => {
   const statements = [];
   await scheduled({ cron: "0 * * * *" }, { DB: recordingDb(statements) }, { waitUntil() {} });
