@@ -79,6 +79,46 @@ test("a create, sync or PATCH without an owner is refused before any write", asy
   assert.deepEqual(f.snapshot(), stored);
 });
 
+// A PATCH that moves a grant to another owner or license meets the owner and license rules a protected
+// create does: a real, active customer, and a license (when one is set or kept) that customer owns
+// for this project. It is refused with the create's own reason and writes nothing. A blank or padded
+// owner names no customer at all and is refused as malformed. A PATCH that changes neither is unaffected.
+test("a PATCH that moves a grant must name a real, active owner and that owner's license", async t => {
+  const f = fixture(t);
+  f.sql.exec(`INSERT INTO customers(id,name,status,created_at,updated_at) VALUES('suspended','Suspended','disabled',1,1);
+    INSERT INTO licenses(id,customer_id,project,created_at,updated_at) VALUES('license-other','other','APP',1,1),('license-suspended','suspended','APP',1,1);`);
+  const first = await f.send(); assert.equal(first.status, 200);
+  let current = (await first.json()).data;
+  const patch = (body, key) => f.send({ ...body, expected_customer_id: current.customer_id, expected_revocation_seq: current.revocation_seq },
+    key, `${path}/${current.id}`, "PATCH");
+  const stored = f.snapshot();
+  for (const [index, owner] of ["   ", " owner", "owner "].entries()) {
+    const refused = await patch({ customer_id: owner }, `blank-${index}`);
+    assert.equal(refused.status, 400, JSON.stringify(owner)); assert.equal((await refused.json()).code, "invalid_request", JSON.stringify(owner));
+  }
+  for (const [index, [change, reason]] of [
+    [{ customer_id: "ghost" }, "customer_inactive"],
+    [{ customer_id: "ghost", license_id: null }, "customer_inactive"],
+    [{ customer_id: "suspended", license_id: "license-suspended" }, "customer_inactive"],
+    [{ customer_id: "other" }, "license_customer_mismatch"],
+    [{ license_id: "license-other" }, "license_customer_mismatch"],
+    [{ license_id: "no-such-license" }, "license_missing"],
+  ].entries()) {
+    await refusedFor(await patch(change, `move-${index}`), reason);
+  }
+  assert.deepEqual(f.snapshot(), stored);
+  // A PATCH that changes neither owner nor license is unaffected, even while the owner is suspended.
+  f.sql.exec("UPDATE customers SET status='disabled' WHERE id='owner'");
+  const notes = await patch({ notes: "kept owner", customer_id: "owner", license_id: "license" }, "notes");
+  assert.equal(notes.status, 200, await notes.clone().text());
+  current = (await notes.json()).data;
+  assert.equal(current.notes, "kept owner");
+  // A move to an active customer, with that customer's license, applies.
+  const moved = await patch({ customer_id: "other", license_id: "license-other" }, "move");
+  assert.equal(moved.status, 200, await moved.clone().text());
+  assert.deepEqual([(await moved.json()).data.customer_id, f.sql.prepare("SELECT customer_id, license_id FROM entitlements").get().license_id], ["other", "license-other"]);
+});
+
 for (const [change, reason] of [[{ customer_id: "other" }, "license_customer_mismatch"], [{ license_id: null }, "license_missing"]]) {
   test(`protected creation rejects ineligible input ${JSON.stringify(change)} without residue`, async t => {
     const f = fixture(t), before = f.snapshot();

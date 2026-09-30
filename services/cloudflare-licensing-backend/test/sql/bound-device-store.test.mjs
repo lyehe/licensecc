@@ -375,6 +375,11 @@ test("an entitlement without a customer is refused by the schema", t => {
   assert.throws(insert("NULL"),/NOT NULL constraint failed: entitlements\.customer_id/);
   assert.throws(insert(undefined),/NOT NULL constraint failed: entitlements\.customer_id/);
   assert.throws(()=>f.sql.exec("UPDATE entitlements SET customer_id=NULL"),/NOT NULL constraint failed: entitlements\.customer_id/);
+  // An empty or blank owner names no customer either; the schema refuses it as a backstop.
+  for (const blank of ["''","'   '"]) {
+    assert.throws(insert(blank),/CHECK constraint failed/,blank);
+    assert.throws(()=>f.sql.exec(`UPDATE entitlements SET customer_id=${blank}`),/CHECK constraint failed/,blank);
+  }
   assert.equal(f.sql.prepare("SELECT count(*) n FROM entitlements WHERE feature='OWNERLESS'").get().n,0);
   assert.equal(f.sql.prepare("SELECT customer_id FROM entitlements").get().customer_id,"customer");
 });

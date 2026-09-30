@@ -96,8 +96,9 @@ test("PATCH, disable, reenable and revoke each refuse a missing precondition bef
 // A PATCH reads exactly its patch fields, the device limit and the precondition; anything else,
 // including the grant's identity and status, is refused whole and writes nothing.
 // Every grant has an owner, so a PATCH can move it to another customer but never clear it, and its
-// precondition always names the owner it observed. Either refusal happens before any D1 read or write.
-test("PATCH refuses a null or empty owner before any read or write", async () => {
+// precondition always names the owner it observed. A blank owner, or one padded with whitespace, names
+// no customer either. Each refusal happens before any D1 read or write.
+test("PATCH refuses a null, empty, blank or padded owner before any read or write", async () => {
   const { env, request } = protectedCreateFixture();
   const created = await request("/api/admin/entitlements", protectedGrant);
   assert.equal(created.status, 200);
@@ -107,7 +108,7 @@ test("PATCH refuses a null or empty owner before any read or write", async () =>
   const prepare = env.DB.prepare.bind(env.DB);
   let queries = 0;
   env.DB.prepare = (sql) => { queries += 1; return prepare(sql); };
-  for (const owner of [null, ""]) {
+  for (const owner of [null, "", "   ", ` ${customerId}`, `${customerId} `]) {
     for (const [path, body] of [
       [`/api/admin/entitlements/${id}`, { customer_id: owner, expected_customer_id: customerId, expected_revocation_seq: revocationSeq }],
       [`/api/admin/entitlements/${id}`, { notes: "stale owner", expected_customer_id: owner, expected_revocation_seq: revocationSeq }],

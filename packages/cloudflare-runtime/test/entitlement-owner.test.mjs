@@ -38,9 +38,12 @@ function fixture(t) {
   return { env, snapshot, observed };
 }
 
-test("patchEntitlement refuses a null or empty owner with invalid_patch before the database", async t => {
+// A blank owner, or one padded with whitespace, names no real customer either.
+const NOT_OWNERS = [null, "", "   ", " owner", "owner "];
+
+test("patchEntitlement refuses a null, empty, blank or padded owner with invalid_patch before the database", async t => {
   const f = fixture(t), before = f.snapshot();
-  for (const owner of [null, ""]) {
+  for (const owner of NOT_OWNERS) {
     await assert.rejects(patchEntitlement(f.env, key, { customer_id: owner }, { ...ctx, expectedEntitlement: f.observed() }, null),
       /^Error: invalid_patch$/, JSON.stringify(owner));
     assert.deepEqual(f.snapshot(), before, JSON.stringify(owner));
@@ -51,7 +54,7 @@ test("patchEntitlement refuses a null or empty owner with invalid_patch before t
 
 test("createEntitlement and an active syncEntitlement refuse an input without an owner with invalid_patch", async t => {
   const f = fixture(t), before = f.snapshot();
-  for (const owner of [undefined, null, ""]) {
+  for (const owner of [undefined, ...NOT_OWNERS]) {
     const fresh = { ...key, feature: "NEW", status: "active", ...(owner === undefined ? {} : { customer_id: owner }) };
     await assert.rejects(createEntitlement(f.env, fresh, ctx), /^Error: invalid_patch$/, `create ${JSON.stringify(owner)}`);
     const existing = { ...key, status: "active", notes: "resync", ...(owner === undefined ? {} : { customer_id: owner }) };

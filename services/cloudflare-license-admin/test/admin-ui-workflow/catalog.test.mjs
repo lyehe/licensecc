@@ -45,6 +45,22 @@ test("admin UI workflow builds plan projection paths and payloads", async () => 
   }), /license_id_required/);
 });
 
+// Every grant has an owner, so a plan projection names the customer: the form refuses one without,
+// on the Customer ID field, and a preview that blocks a grant for it says why in words.
+test("the plan projection form requires a customer, and an owner-less block reads as a sentence", async () => {
+  const workflow = await loadWorkflowModule("features/catalog/workflow.ts");
+  const fields = await loadWorkflowModule("features/catalog/fieldErrors.ts");
+  const messages = await loadWorkflowModule("shared/messages.ts");
+  const form = { ...workflow.emptyPlanProjectionForm, license_id: "lic_1", license_fingerprint: "c".repeat(64), plan_key: "pro" };
+  assert.throws(() => workflow.normalizePlanProjectionForm(form), /^Error: customer_id_required$/);
+  assert.equal(fields.planProjectionFieldForCode("customer_id_required"), "customer_id");
+  assert.equal(workflow.normalizePlanProjectionForm({ ...form, customer_id: "cus_1" }).customer_id, "cus_1");
+  const blocked = messages.describeCode("owner_required");
+  assert.ok(blocked !== null);
+  assert.match(blocked.text, /customer/);
+  assert.doesNotMatch(blocked.text, /owner_required/);
+});
+
 test("admin UI workflow binds every editable plan projection field to a stable snapshot", async () => {
   const workflow = await loadWorkflowModule("features/catalog/workflow.ts");
   const body = workflow.normalizePlanProjectionForm({
@@ -427,7 +443,7 @@ test("each catalog validation code names the field of its own form, and whole-fo
   // Rules for fields this editor does not show stay with the whole form.
   assert.equal(fields.catalogPlanFeatureFieldForCode("pool_size_must_be_between_0_and_1000000"), null);
 
-  const projection = (patch) => codeOf(() => workflow.normalizePlanProjectionForm({ ...workflow.emptyPlanProjectionForm, license_id: "lic_1", plan_key: "pro", ...patch }));
+  const projection = (patch) => codeOf(() => workflow.normalizePlanProjectionForm({ ...workflow.emptyPlanProjectionForm, license_id: "lic_1", customer_id: "cus_1", plan_key: "pro", ...patch }));
   assert.equal(fields.planProjectionFieldForCode(projection({ plan_key: "" })), "plan_key");
   assert.equal(fields.planProjectionFieldForCode(projection({ license_id: "" })), "license_id");
   assert.equal(fields.planProjectionFieldForCode(projection({ addons: "x".repeat(129) })), "addons");
