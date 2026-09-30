@@ -221,6 +221,26 @@ test("Manage access offers no Show all and never lists another customer's grant"
   expect(listReadCustomers.every((id) => id === customer.id)).toBe(true);
 });
 
+test("a customer workspace shows connected devices and no seat, legacy-device or account-token view", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const customer = api.seed.customer({ login_email: "login@example.test" });
+  api.seed.entitlements([{ customer_id: customer.id, project: "CAD", feature: "render" }]);
+  await page.route("**/api/admin/**", api.route);
+  await page.goto(`/#/customers/${customer.id}?section=access`);
+  await expect(page.getByRole("heading", { name: "Connected devices", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "View app", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Manage access", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("navigation", { name: "App records" })).toHaveCount(0);
+  for (const name of ["Activated devices", "Floating seats"]) {
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
+    await expect(page.getByText(name)).toHaveCount(0);
+  }
+  await page.getByRole("navigation", { name: "Customer detail sections" }).getByRole("button", { name: "Account", exact: true }).click();
+  await expect(page.getByText("Login email: login@example.test", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Account tokens" })).toHaveCount(0);
+  await expect(page.getByText(/account tokens?/i)).toHaveCount(0);
+});
+
 test("workspace shell has no document overflow at supported viewports", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   const api = await installRealisticFixture(page);
