@@ -18,7 +18,6 @@ const RUNTIME_SUBPATHS = [
   "@licensecc/cloudflare-runtime/entitlements/policy_store",
   "@licensecc/cloudflare-runtime/http/kit",
   "@licensecc/cloudflare-runtime/lease/metering",
-  "@licensecc/cloudflare-runtime/lease/seat_reclaim",
   "@licensecc/cloudflare-runtime/lease/trial_store",
   "@licensecc/cloudflare-runtime/webhooks/webhook",
   "@licensecc/cloudflare-runtime/webhooks/event_types",
@@ -27,6 +26,16 @@ const RUNTIME_SUBPATHS = [
 test("every explicit runtime export resolves without a service import", async () => {
   const modules = await Promise.all(RUNTIME_SUBPATHS.map((subpath) => import(subpath)));
   assert.equal(modules.length, RUNTIME_SUBPATHS.length);
+});
+
+test("the runtime exports no seat-reclaim or legacy device helper", async () => {
+  await assert.rejects(
+    () => import("@licensecc/cloudflare-runtime/lease/seat_reclaim"),
+    (error) => error.code === "ERR_PACKAGE_PATH_NOT_EXPORTED",
+  );
+  const entitlementMutation = await import("@licensecc/cloudflare-runtime/d1/entitlement_mutation");
+  assert.equal("listEntitlementDevices" in entitlementMutation, false);
+  assert.equal("transitionEntitlementDevice" in entitlementMutation, false);
 });
 
 test("runtime auth primitives are stateless and fail closed", async () => {

@@ -3,7 +3,7 @@ import { authenticate, authenticateSync, requireAdmin } from "./auth.js";
 import type { AdminRequestContext } from "./context.js";
 import { matchRoute, rejectsCrossSiteMutation } from "./dispatch.js";
 import type { Env } from "./env.js";
-import { envelope } from "./response.js";
+import { envelope } from "./responses.js";
 
 // The composition root owns matching, authentication, dispatch, and the historical asset
 // fallback only. Bounded-context modules own their route descriptors and operation calls.

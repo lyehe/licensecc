@@ -2,7 +2,7 @@
   "schema_version": 1,
   "threshold_lines": 500,
   "files": {
-    "packages/cloudflare-runtime/src/d1/entitlement_mutation.mjs": 624,
+    "packages/cloudflare-runtime/src/d1/entitlement_mutation.mjs": 530,
     "packages/cloudflare-runtime/src/d1/plan_projection.mjs": 1031,
     "packages/cloudflare-runtime/src/webhooks/webhook.mjs": 638,
     "services/cloudflare-d1-backup/src/core.ts": 506,

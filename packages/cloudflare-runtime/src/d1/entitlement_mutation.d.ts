@@ -1,7 +1,5 @@
 import type {
-  DeviceStatus,
   EntitlementCapacity,
-  EntitlementDeviceRecord,
   EntitlementEventType,
   EntitlementInput,
   EntitlementKey,
@@ -11,9 +9,7 @@ import type {
 } from "@licensecc/licensing-domain/entitlements/contracts";
 
 export type {
-  DeviceStatus,
   EntitlementCapacity,
-  EntitlementDeviceRecord,
   EntitlementEventType,
   EntitlementInput,
   EntitlementKey,
@@ -139,16 +135,6 @@ export function transitionEntitlement(
   idempotency: IdempotencyCommit | null,
 ): Promise<MutationResult<EntitlementRecord> | null>;
 
-export function listEntitlementDevices(env: MutationEnv, key: EntitlementKey): Promise<EntitlementDeviceRecord[]>;
-export function transitionEntitlementDevice(
-  env: MutationEnv,
-  key: EntitlementKey,
-  deviceKeyId: string,
-  deviceStatus: DeviceStatus,
-  reason: string,
-  ctx: MutationContext,
-  idempotency: IdempotencyCommit | null,
-): Promise<MutationResult<EntitlementRecord> | null>;
 /**
  * Creates or updates a protected grant from an external projection; an unchanged grant is a no-op.
  * A stored grant of another mode is `enforcement_mode_conflict`, even when unchanged. A disable or

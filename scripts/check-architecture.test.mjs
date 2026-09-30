@@ -37,7 +37,7 @@ const COMPOSITION_ROOTS = {
     adapter: "services/cloudflare-license-admin/src/worker/module-worker.ts",
     adapterImports: ["./app.js", "./operations.js", "./env.js"],
     app: "services/cloudflare-license-admin/src/worker/app.ts",
-    appImports: ["./auth.js", "./context.js", "./dispatch.js", "./env.js", "./response.js"],
+    appImports: ["./auth.js", "./context.js", "./dispatch.js", "./env.js", "./responses.js"],
   },
   portal: {
     entry: "services/cloudflare-customer-portal/src/worker/index.ts",

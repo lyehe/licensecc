@@ -14,7 +14,8 @@ import {
 } from "./idempotency.js";
 import { requireAdmin } from "./auth.js";
 import type { Env } from "./env.js";
-import { boundedCursor, parseJsonBody, safeNotes } from "./request.js";
+import { parseJsonBody, safeNotes } from "./request.js";
+import { boundedCursor } from "./query.js";
 import { transitionWithGuard } from "./transitions.js";
 import type { D1PreparedStatementLike, Actor, MutationContext } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type {

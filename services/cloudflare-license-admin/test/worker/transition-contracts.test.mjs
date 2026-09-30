@@ -191,7 +191,7 @@ class StatementFixture {
 // This deliberately small D1 fixture drives envelope assembly in the real compiled handlers.
 // It deliberately does NOT validate SQL text/bindings or persistence: callers inject `after`.
 // Migration-backed SQLite 3x3, CAS-race, zero-write, and rollback proof lives in
-// services/cloudflare-licensing-backend/test/sql/device-transition.test.mjs so this
+// services/cloudflare-licensing-backend/test/sql/entitlement-transition.test.mjs so this
 // contract test cannot be mistaken for storage-semantics coverage.
 class TransitionFixtureDb {
   constructor(before, after, { view = after } = {}) {

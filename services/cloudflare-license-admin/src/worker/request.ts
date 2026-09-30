@@ -26,5 +26,3 @@ export async function parseJsonBody(request: Request, requestIdValue: string): P
   }
 }
 
-// Keep the historical request-module export while query.ts owns the one parser implementation.
-export { boundedCursor } from "./query.js";
