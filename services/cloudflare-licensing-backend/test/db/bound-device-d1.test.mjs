@@ -75,7 +75,7 @@ async function fixture(t) {
   for (const row of ddl) await db.prepare(row.sql).run();
   const now = await db.prepare("SELECT unixepoch() AS now").first("now");
   await db.prepare("INSERT INTO customers(id,name,created_at,updated_at) VALUES('customer','Test',?,?)").bind(now,now).run();
-  await db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,created_at,updated_at,enforcement_mode,max_active_devices) VALUES('APP','DEFAULT',?,'active','customer',?,?,'device_bound_v1',1)")
+  await db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,created_at,updated_at,max_active_devices) VALUES('APP','DEFAULT',?,'active','customer',?,?,1)")
     .bind(fingerprint,now,now).run();
   return {db,now};
 }
@@ -174,19 +174,19 @@ test("local D1 trial stamp is atomic under competing first activations and audit
     {trialStamp:1,entitlementRevision:1,keyId:`sha256:${String(i).repeat(64)}`}));
   const failed=JSON.stringify({...candidates[0],invocationId:'trial-audit-failure'});
   await assert.rejects(f.db.batch(BOUND_LEASE_COMMIT_SQL.filter((_,i)=>i!==9).map(sql=>f.db.prepare(sql).bind(failed))),/CHECK/);
-  const before=await f.db.prepare('SELECT trial_started_at,trial_device_hash,authority_revision FROM entitlements').first();
-  assert.deepEqual(before,{trial_started_at:null,trial_device_hash:null,authority_revision:1});
+  const before=await f.db.prepare('SELECT trial_started_at,trial_device_key_id,authority_revision FROM entitlements').first();
+  assert.deepEqual(before,{trial_started_at:null,trial_device_key_id:null,authority_revision:1});
   assert.equal(await f.db.prepare('SELECT count(*) n FROM device_bound_operations').first('n'),0);
   const results=await Promise.allSettled(candidates.map(c=>commitBoundDeviceLease(f.db,c)));
   assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
   const winner=candidates[results.findIndex(r=>r.status==='fulfilled')];
-  const row=await f.db.prepare('SELECT trial_started_at,trial_device_hash,authority_revision FROM entitlements').first();
+  const row=await f.db.prepare('SELECT trial_started_at,trial_device_key_id,authority_revision FROM entitlements').first();
   const operation=await f.db.prepare('SELECT committed_at FROM device_bound_operations').first();
-  assert.deepEqual(row,{trial_started_at:operation.committed_at,trial_device_hash:winner.keyId,authority_revision:2});
+  assert.deepEqual(row,{trial_started_at:operation.committed_at,trial_device_key_id:winner.keyId,authority_revision:2});
   assert.equal(await f.db.prepare('SELECT entitlement_revision FROM device_bound_leases').first('entitlement_revision'),2);
   const loser=candidates.find(c=>c!==winner);
   await assert.rejects(commitBoundDeviceLease(f.db,{...loser,trialStamp:0,entitlementRevision:2}),/CHECK/);
-  assert.deepEqual(await f.db.prepare('SELECT trial_started_at,trial_device_hash,authority_revision FROM entitlements').first(),row);
+  assert.deepEqual(await f.db.prepare('SELECT trial_started_at,trial_device_key_id,authority_revision FROM entitlements').first(),row);
 });
 
 test("local D1 enrollment pins validated intent, hashes handles and issues bounded challenges", async t => {

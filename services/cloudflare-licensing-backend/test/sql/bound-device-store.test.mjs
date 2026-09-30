@@ -18,8 +18,8 @@ function fixture() {
   const dir = new URL("../../migrations/", import.meta.url);
   for (const name of readdirSync(dir).filter(n => n.endsWith(".sql")).sort()) sql.exec(readFileSync(new URL(name, dir), "utf8"));
   sql.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('customer','Customer',1000,1000);
-    INSERT INTO entitlements(project,feature,license_fingerprint,status,created_at,updated_at,customer_id,enforcement_mode,max_active_devices)
-    VALUES('APP','DEFAULT','${fp}','active',1000,1000,'customer','device_bound_v1',1);`);
+    INSERT INTO entitlements(project,feature,license_fingerprint,status,created_at,updated_at,customer_id,max_active_devices)
+    VALUES('APP','DEFAULT','${fp}','active',1000,1000,'customer',1);`);
   class Statement {
     constructor(query, params=[]) { this.query=query; this.params=params; }
     bind(...params) { return new Statement(this.query,params); }
@@ -155,13 +155,13 @@ test("trial first exchange stamps commit time and key exactly once across compet
       f.clock(1010); // Signing preceded the actual commit; start uses DB time.
       const outcomes=await Promise.allSettled([commitBoundDeviceLease(f.db,a),commitBoundDeviceLease(f.db,b)]);
       assert.equal(outcomes.filter(r=>r.status==='fulfilled').length,1);
-      const state=()=>f.sql.prepare("SELECT trial_started_at,trial_device_hash,authority_revision FROM entitlements").get();
-      assert.deepEqual({...state()},{trial_started_at:1010,trial_device_hash:a.keyId,authority_revision:2});
+      const state=()=>f.sql.prepare("SELECT trial_started_at,trial_device_key_id,authority_revision FROM entitlements").get();
+      assert.deepEqual({...state()},{trial_started_at:1010,trial_device_key_id:a.keyId,authority_revision:2});
       assert.equal(f.sql.prepare("SELECT entitlement_revision FROM device_bound_leases").get().entitlement_revision,2);
       const retry={...b,trialStamp:0,entitlementRevision:2};
       if (locked) await assert.rejects(commitBoundDeviceLease(f.db,retry),/CHECK/);
       else await commitBoundDeviceLease(f.db,retry);
-      assert.deepEqual({...state()},{trial_started_at:1010,trial_device_hash:a.keyId,authority_revision:2});
+      assert.deepEqual({...state()},{trial_started_at:1010,trial_device_key_id:a.keyId,authority_revision:2});
       assert.equal(count(f,'device_bound_leases'),locked?1:2);
       const sameKey={...candidate('c'),trialStamp:0,entitlementRevision:2,
         keyId:a.keyId,deviceId:a.deviceId,publicKeySpki:a.publicKeySpki,
@@ -170,7 +170,7 @@ test("trial first exchange stamps commit time and key exactly once across compet
         data:{binding_id:sameKey.bindingId,lease:sameKey.token,expires_at:sameKey.expiresAt}});
       seed(f,sameKey); f.clock(1020);
       await commitBoundDeviceLease(f.db,sameKey);
-      assert.deepEqual({...state()},{trial_started_at:1010,trial_device_hash:a.keyId,authority_revision:2});
+      assert.deepEqual({...state()},{trial_started_at:1010,trial_device_key_id:a.keyId,authority_revision:2});
       assert.equal(count(f,'device_bound_bindings'),locked?1:2);
     }
   }
@@ -193,8 +193,8 @@ test("trial stamp omission, excessive expiry and revision overflow roll back wit
       await assert.rejects(f.db.batch(BOUND_LEASE_COMMIT_SQL.filter((_,i)=>i!==1).map(q=>f.db.prepare(q).bind(encoded))),/CHECK/);
     } else await assert.rejects(commitBoundDeviceLease(f.db,c),/CHECK/);
     emptyCommit(f);
-    const row=f.sql.prepare('SELECT trial_started_at,trial_device_hash,authority_revision FROM entitlements').get();
-    assert.equal(row.trial_started_at,null); assert.equal(row.trial_device_hash,null);
+    const row=f.sql.prepare('SELECT trial_started_at,trial_device_key_id,authority_revision FROM entitlements').get();
+    assert.equal(row.trial_started_at,null); assert.equal(row.trial_device_key_id,null);
     assert.equal(row.authority_revision,c.entitlementRevision);
   }
 });
@@ -265,7 +265,6 @@ test("schema refuses fractional authority, null identities and identity rewrites
   assert.throws(()=>f.sql.exec("UPDATE device_bound_bindings SET id='different'"),/immutable/);
   assert.throws(()=>f.sql.exec("UPDATE device_bound_bindings SET generation=1.5"),/CHECK/);
   assert.throws(()=>f.sql.exec("INSERT INTO device_bound_commit_checks(invocation_id,ok) VALUES(NULL,1)"),/NOT NULL/);
-  assert.throws(()=>f.sql.exec("UPDATE entitlements SET enforcement_mode='legacy'"),/downgrade/);
 });
 
 test("fresh authenticated recovery works after code expiry without changing a lease or hold", async () => {
@@ -325,9 +324,9 @@ test("retirement revisions cannot be reset and trial authority changes invalidat
   assert.throws(()=>f.sql.exec("UPDATE device_bound_devices SET revision=0"),/cannot_shrink/);
   assert.throws(()=>f.sql.exec("UPDATE device_bound_bindings SET generation=1"),/cannot_shrink/);
   assert.throws(()=>f.sql.exec("UPDATE device_bound_bindings SET revision=0"),/cannot_shrink/);
-  for (const field of ["trial_one_per_device","trial_device_hash"]) {
+  for (const field of ["trial_one_per_device","trial_device_key_id"]) {
     const before=f.sql.prepare("SELECT authority_revision FROM entitlements").get().authority_revision;
-    f.sql.exec(`UPDATE entitlements SET ${field}=${field==='trial_device_hash' ? "'device-hash'" : '1'}`);
+    f.sql.exec(`UPDATE entitlements SET ${field}=${field==='trial_device_key_id' ? `'sha256:${"c".repeat(64)}'` : '1'}`);
     assert.equal(f.sql.prepare("SELECT authority_revision FROM entitlements").get().authority_revision,before+1);
   }
 });
@@ -337,7 +336,7 @@ test("entitlement authority revision advances for every authority column", t => 
   f.sql.exec("INSERT INTO customers(id,name,created_at,updated_at) VALUES('second','Second',1000,1000)");
   const revision=()=>f.sql.prepare("SELECT authority_revision FROM entitlements").get().authority_revision;
   const authority=[["status","'disabled'"],["customer_id","'second'"],["valid_from","900"],["valid_until","5000"],
-    ["max_active_devices","2"],["lease_seconds","86400"],["revocation_seq","1"],["is_trial","1"],["trial_started_at","1000"],
+    ["max_active_devices","2"],["lease_seconds","3600"],["revocation_seq","1"],["is_trial","1"],["trial_started_at","1000"],
     ["trial_duration_sec","604800"],["trial_expiration_basis","'from_first_activation'"],["trial_one_per_device","1"],
     ["trial_device_key_id",`'sha256:${"b".repeat(64)}'`]];
   for (const [column,value] of authority) {
@@ -358,11 +357,11 @@ const ENTITLEMENT_COLUMNS=["authority_revision","created_at","customer_id","feat
   "trial_one_per_device","trial_started_at","updated_at","valid_from","valid_until"];
 function columns(f,table) { return f.sql.prepare(`PRAGMA table_info(${table})`).all().map(c=>c.name).sort(); }
 
-test("a grant inserted without enforcement_mode is protected by default", async t => {
+// Every grant is protected: one inserted with only its key, status, times and owner is issuable.
+test("a grant inserted with only its required columns is issuable", async t => {
   const f=fixture(); t.after(()=>f.sql.close());
-  f.sql.exec(`INSERT INTO entitlements(project,feature,license_fingerprint,status,created_at,updated_at,customer_id,max_active_devices)
-    VALUES('APP','DEFAULTED','${fp}','active',1000,1000,'customer',1)`);
-  assert.equal(f.sql.prepare("SELECT enforcement_mode FROM entitlements WHERE feature='DEFAULTED'").get().enforcement_mode,"device_bound_v1");
+  f.sql.exec(`INSERT INTO entitlements(project,feature,license_fingerprint,status,created_at,updated_at,customer_id)
+    VALUES('APP','DEFAULTED','${fp}','active',1000,1000,'customer')`);
   const c={...candidate("defaulted"),feature:"DEFAULTED"}; seed(f,c);
   await commitBoundDeviceLease(f.db,c);
   assert.deepEqual(f.sql.prepare("SELECT feature,state FROM device_bound_bindings").all().map(r=>({...r})),[{feature:"DEFAULTED",state:"active"}]);
@@ -446,14 +445,6 @@ test("renewal cannot commit if its verified-contact write is omitted", async () 
   assert.equal(f.sql.prepare("SELECT consumed_invocation_id FROM device_bound_challenges WHERE id='renew-proof'").get().consumed_invocation_id,null);
   await commitBoundDeviceLease(f.db,renewal);
   assert.equal(f.sql.prepare("SELECT last_proof_at FROM device_bound_devices").get().last_proof_at,1020);
-});
-
-test("a legacy entitlement never authorizes automatic protected conversion", () => {
-  const f=fixture();
-  f.sql.exec("INSERT INTO entitlements(project,feature,license_fingerprint,status,created_at,updated_at,customer_id,enforcement_mode) VALUES('OLD','DEFAULT','legacy','active',1000,1000,'customer','legacy')");
-  const convert=()=>f.sql.exec("UPDATE entitlements SET enforcement_mode='device_bound_v1' WHERE project='OLD'");
-  assert.throws(convert,/protected_mode_migration_required/);
-  assert.equal(f.sql.prepare("SELECT enforcement_mode FROM entitlements WHERE project='OLD'").get().enforcement_mode,'legacy');
 });
 
 test("renewal recovery returns the original result and rejects at the retention deadline", async () => {

@@ -5,7 +5,7 @@ import { boundTrialState, boundTrialSql, boundTrialDeadlineSql } from "@licensec
 
 const key = `sha256:${"a".repeat(64)}`;
 const base = { is_trial: 1, trial_expiration_basis: "from_first_activation", trial_duration_sec: 100,
-  trial_one_per_device: 1, trial_started_at: null, trial_device_hash: null, valid_until: null };
+  trial_one_per_device: 1, trial_started_at: null, trial_device_key_id: null, valid_until: null };
 
 test("protected trial SQL and JS agree on timing, malformed policy and key locks", t => {
   const db = new DatabaseSync(":memory:"); t.after(() => db.close());
@@ -22,15 +22,15 @@ test("protected trial SQL and JS agree on timing, malformed policy and key locks
     { trial_expiration_basis: "from_issue" }, { trial_duration_sec: 0 }, { trial_duration_sec: 1 },
     { trial_duration_sec: 2 }, { trial_duration_sec: 100.5 }, { trial_duration_sec: "100" },
     { trial_duration_sec: Number.MAX_SAFE_INTEGER }, { trial_one_per_device: 2 },
-    { trial_device_hash: key },
-    { trial_started_at: 900 }, { trial_started_at: 900, trial_device_hash: key },
-    { trial_started_at: 901, trial_device_hash: key }, { trial_started_at: 1001, trial_device_hash: key },
-    { trial_started_at: 999.5, trial_device_hash: key }, { trial_started_at: -1, trial_device_hash: key },
-    { trial_started_at: 950, trial_device_hash: key + "\n" },
-    { trial_started_at: 950, trial_device_hash: key + "\0suffix", trial_one_per_device: 0 },
-    { trial_started_at: 950, trial_device_hash: key.slice(0,-1) + "\0", trial_one_per_device: 0 },
-    { trial_started_at: 950, trial_device_hash: `sha256:${"b".repeat(64)}` },
-    { trial_started_at: 950, trial_device_hash: `sha256:${"b".repeat(64)}`, trial_one_per_device: 0 },
+    { trial_device_key_id: key },
+    { trial_started_at: 900 }, { trial_started_at: 900, trial_device_key_id: key },
+    { trial_started_at: 901, trial_device_key_id: key }, { trial_started_at: 1001, trial_device_key_id: key },
+    { trial_started_at: 999.5, trial_device_key_id: key }, { trial_started_at: -1, trial_device_key_id: key },
+    { trial_started_at: 950, trial_device_key_id: key + "\n" },
+    { trial_started_at: 950, trial_device_key_id: key + "\0suffix", trial_one_per_device: 0 },
+    { trial_started_at: 950, trial_device_key_id: key.slice(0,-1) + "\0", trial_one_per_device: 0 },
+    { trial_started_at: 950, trial_device_key_id: `sha256:${"b".repeat(64)}` },
+    { trial_started_at: 950, trial_device_key_id: `sha256:${"b".repeat(64)}`, trial_one_per_device: 0 },
     { is_trial: 0 }, { is_trial: 2 },
   ];
   for (const patch of cases) for (const allow of [false, true]) for (const proven of [key, key + "\n", key + "\0suffix", key.slice(0,-1) + "\0"]) {
@@ -44,7 +44,7 @@ test("protected trial SQL and JS agree on timing, malformed policy and key locks
 });
 
 test("a started trial never derives a later deadline from a retry time", () => {
-  const row = { ...base, trial_started_at: 1000, trial_device_hash: key };
+  const row = { ...base, trial_started_at: 1000, trial_device_key_id: key };
   assert.deepEqual(boundTrialState(row, key, 1050), { stamp: 0, expiresAt: 1100 });
   assert.equal(boundTrialState(row, key, 1100), null);
   assert.deepEqual(boundTrialState({ ...row, trial_expiration_basis: "from_issue", valid_until: 1200 }, key, 1100),
@@ -63,6 +63,6 @@ test("a NULL prospective start leaves an unstarted activation trial without an e
   };
   assert.equal(endOf({}), null);
   assert.equal(endOf({ trial_expiration_basis: "from_first_use" }), null);
-  assert.equal(endOf({ trial_started_at: 900, trial_device_hash: key }), 1000);
+  assert.equal(endOf({ trial_started_at: 900, trial_device_key_id: key }), 1000);
   assert.equal(endOf({ trial_expiration_basis: "from_issue", valid_until: 1100 }), 1100);
 });

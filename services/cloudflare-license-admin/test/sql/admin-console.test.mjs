@@ -217,7 +217,7 @@ async function createEntitlementFor(env, customerId, fingerprint, licenseId) {
 // Bulk grants for the app-summary tests: one admin API call per grant would be slow, so these
 // tests insert protected grants directly.
 function seedProtectedGrant(db, customerId, fingerprint) {
-  db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, enforcement_mode, created_at, updated_at) VALUES ('DEFAULT','DEFAULT',?,'active',?,'device_bound_v1',?,?)")
+  db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, created_at, updated_at) VALUES ('DEFAULT','DEFAULT',?,'active',?,?,?)")
     .run(fingerprint, customerId, NOW, NOW);
 }
 
@@ -344,7 +344,7 @@ test("console: complete app summaries stay within customer ownership", async () 
   for (let i = 1; i <= 105; i++) seedProtectedGrant(db, "cus_a", i.toString(16).padStart(64, "0"));
   seedProtectedGrant(db, "cus_b", FP_B);
   const fp = (1).toString(16).padStart(64, "0");
-  db.prepare("INSERT INTO entitlements (project,feature,license_fingerprint,status,customer_id,enforcement_mode,created_at,updated_at) VALUES ('Z_EXTRA','base',?,'active','cus_a','device_bound_v1',?,?)").run(FP_A, NOW, NOW);
+  db.prepare("INSERT INTO entitlements (project,feature,license_fingerprint,status,customer_id,created_at,updated_at) VALUES ('Z_EXTRA','base',?,'active','cus_a',?,?)").run(FP_A, NOW, NOW);
   db.exec("UPDATE customers SET status='disabled' WHERE id='cus_a'");
   db.prepare("UPDATE entitlements SET valid_until=? WHERE license_fingerprint=?").run(NOW - 10, fp);
   const apps = (await body(await worker.fetch(devReq("/api/admin/customers/cus_a/apps?limit=1"), env))).data;
@@ -399,7 +399,7 @@ test("console: the entitlement list filters by license_id, exactly like the othe
 
 test("console: workspace query plans and bounded responses at 20000 grants", async t => {
   const db = freshDb(); seed(db); const env = devEnv(db);
-  const insert = db.prepare("INSERT INTO entitlements (project,feature,license_fingerprint,status,customer_id,enforcement_mode,created_at,updated_at) VALUES (?,'base',?,'active','cus_a','device_bound_v1',?,?)");
+  const insert = db.prepare("INSERT INTO entitlements (project,feature,license_fingerprint,status,customer_id,created_at,updated_at) VALUES (?,'base',?,'active','cus_a',?,?)");
   db.exec("BEGIN");
   for (let i = 0; i < 20000; i++) insert.run(`APP_${String(i % 250).padStart(3, "0")}`, i.toString(16).padStart(64, "0"), NOW, NOW);
   db.exec("COMMIT");

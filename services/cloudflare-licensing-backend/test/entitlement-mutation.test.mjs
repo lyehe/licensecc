@@ -59,9 +59,7 @@ function makeDb(state) {
         // createEntitlement INSERT...ON CONFLICT param order (see core).
         const a = writeStmt._args;
         state.writeSql = writeSql;
-        // The INSERT names no mode; the schema default makes every new grant protected.
         const row = {
-          enforcement_mode: "device_bound_v1",
           project: a[0],
           feature: a[1],
           license_fingerprint: a[2],
@@ -79,9 +77,9 @@ function makeDb(state) {
           trial_duration_sec: 0,
           trial_one_per_device: 0,
           trial_started_at: null,
-          trial_device_hash: null,
+          trial_device_key_id: null,
           max_active_devices: 1,
-          lease_seconds: 2592000,
+          lease_seconds: 86400,
           created_at: a[12],
           updated_at: a[13],
         };
@@ -164,15 +162,13 @@ test("createEntitlement returns a MutationResult with an id and writes an audit 
   assert.ok(state.events[0].sql.includes("INSERT INTO entitlement_events"));
 });
 
-// Every grant is protected, so the writer names no mode and the schema default applies. The SQL
-// suites run the real schema.
-test("createEntitlement names no mode", async () => {
+// The INSERT names exactly the grant's own columns; every other column takes its schema default.
+// The SQL suites run the real schema.
+test("createEntitlement names exactly the grant's own columns", async () => {
   const state = {};
   const env = { DB: makeDb(state) };
   await createEntitlement(env, input(), ctx());
   assert.match(state.writeSql, /^INSERT INTO entitlements \(project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at\) VALUES/);
-  // The RETURNING projection still reads the stored column; the write itself names no mode.
-  assert.doesNotMatch(state.writeSql.slice(0, state.writeSql.indexOf(" RETURNING ")), /enforcement_mode|device_bound_v1/);
 });
 
 test("setEntitlementCapacity updates only provided columns and preserves the rest", async () => {
@@ -196,7 +192,7 @@ test("setEntitlementCapacity updates only provided columns and preserves the res
   // Unknown key is ignored.
   assert.equal("bogus_column" in state.entitlement, false);
   // Negative value is ignored (lease_seconds keeps its default).
-  assert.equal(state.entitlement.lease_seconds, 2592000);
+  assert.equal(state.entitlement.lease_seconds, 86400);
   // Untouched body columns are preserved.
   assert.equal(state.entitlement.notes, "keep-me");
   assert.equal(state.entitlement.status, "active");

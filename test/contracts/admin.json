@@ -1763,15 +1763,6 @@
                 "null"
               ]
             },
-            "enforcement_mode": {
-              "description": "Stored enforcement protocol, independent of commercial license_mode. Historical cached mutation responses may omit this field; read the current entitlement to establish its mode.",
-              "enum": [
-                "legacy",
-                "device_bound_v1"
-              ],
-              "readOnly": true,
-              "type": "string"
-            },
             "feature": {
               "type": "string"
             },
@@ -1821,7 +1812,8 @@
               ],
               "type": "string"
             },
-            "trial_device_hash": {
+            "trial_device_key_id": {
+              "description": "Key id (sha256:<hex>) of the device that started this trial, proven on its first exchange; null until then.",
               "type": [
                 "string",
                 "null"

@@ -20,7 +20,7 @@ const MAX_BACKUP_MANIFEST_BYTES = 16 * 1024;
 const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const MAX_MANIFEST_STRING_LENGTH = 2048;
 const SQL_HASH_CHUNK_BYTES = 64 * 1024;
-const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "0d6c0e68af9362376b0b6b51d4aee647d05f9a4657ba815de3f414904e9906d5";
+const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "cd764b622c928cfca7f9c65bfb8839d7a431f6531cf5fe9045f6d68598c05cda";
 const SNAPSHOT_INVENTORY_ALGORITHM = "d1-export-sql-insert-count-v1";
 const DEFAULT_BACKEND_MIGRATIONS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -219,8 +219,6 @@ const EXPECTED_TRIGGERS = {
   tr_bound_device_revision_no_reset: "device_bound_devices",
   tr_bound_entitlement_revision: "entitlements",
   tr_bound_entitlement_revision_no_reset: "entitlements",
-  tr_bound_mode_no_downgrade: "entitlements",
-  tr_bound_mode_requires_migration: "entitlements",
   tr_bound_operation_immutable: "device_bound_operations",
   tr_bound_operation_tombstone: "device_bound_operations",
   tr_bound_operation_no_replace: "device_bound_operations",

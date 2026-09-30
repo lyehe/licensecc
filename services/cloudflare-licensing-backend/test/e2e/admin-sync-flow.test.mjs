@@ -42,7 +42,6 @@ async function enrolledSyncGrant(t) {
   const synced = await sync({ ...grant, status: "active", reason: "subscription active" });
   assert.equal(synced.status, 200, JSON.stringify(synced.body));
   assert.equal(synced.body.code, "entitlement_synced");
-  assert.equal(synced.body.data.enforcement_mode, "device_bound_v1");
   assert.equal(db.prepare("SELECT source FROM entitlement_events ORDER BY id DESC LIMIT 1").get().source, "sync");
 
   const env = { DB: portal.DB, BOUND_DEVICE_CONFIG: JSON.stringify(config), BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM: privatePem,

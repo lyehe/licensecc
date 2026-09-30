@@ -33,7 +33,7 @@ export {
  *  statements off the same single source of truth without re-coupling the admin
  *  mutators below — keeping the admin write path byte-identical. */
 export const ENTITLEMENT_COLUMNS =
-  "project, feature, license_fingerprint, enforcement_mode, status, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, policy_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_started_at, trial_device_hash, max_active_devices, lease_seconds, created_at, updated_at";
+  "project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, policy_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_started_at, trial_device_key_id, max_active_devices, lease_seconds, created_at, updated_at";
 
 /** UPDATE assignment that re-derives the revocation_seq floor from the audit log
  *  and bumps it. Security-relevant (monotonic revocation counter) — keep identical

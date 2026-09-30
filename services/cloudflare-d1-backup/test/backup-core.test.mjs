@@ -213,10 +213,10 @@ test("snapshot inventory parser is bounded to names and counts and fails closed 
   });
   assert.ok(SNAPSHOT_COUNTED_TABLES.includes("entitlements"));
   assert.throws(() => snapshotInventoryFromSql(`
-    CREATE TABLE entitlements (id TEXT);
-    INSERT INTO entitlements SELECT id FROM another_table;
+    CREATE TABLE entitlements (id TEXT, customer_id TEXT NOT NULL);
+    INSERT INTO entitlements (id, customer_id) SELECT id, customer_id FROM another_table;
   `), /snapshot_inventory_unsupported_insert/);
-  assert.throws(() => snapshotInventoryFromSql("CREATE TABLE entitlements (id TEXT); INSERT INTO entitlements VALUES ('unterminated);"), /snapshot_inventory_invalid_sql_stream/);
+  assert.throws(() => snapshotInventoryFromSql("CREATE TABLE entitlements (id TEXT, customer_id TEXT NOT NULL); INSERT INTO entitlements (id, customer_id) VALUES ('unterminated);"), /snapshot_inventory_invalid_sql_stream/);
 });
 
 test("snapshot inventory remains exact across arbitrary export-stream chunk boundaries", async () => {

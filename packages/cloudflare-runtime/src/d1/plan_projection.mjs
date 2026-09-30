@@ -461,11 +461,13 @@ function claimFailureStatement(env, previewId, actorSubject, now) {
   ).bind(previewId, actorSubject, previewId, actorSubject, now);
 }
 
-// Plan apply writes only the columns a protected grant takes from its plan, and this comparison
-// covers exactly those.
+// Plan apply writes exactly these values, the columns a protected grant takes from its plan, and its
+// audit and assertion compare exactly these. Every grant has an owner (customer_id is NOT NULL), so an
+// entitlement input without one is refused while the Apply batch is built: nothing is claimed or written.
 function valuesForDesired(action) {
   const desired = action.desired;
   const input = desired.input;
+  if (!nonEmptyString(input.customer_id)) throw new Error("invalid_patch");
   return [
     input.project,
     input.feature,
@@ -474,7 +476,7 @@ function valuesForDesired(action) {
     input.valid_from ?? null,
     input.valid_until ?? null,
     input.notes ?? "",
-    input.customer_id ?? null,
+    input.customer_id,
     input.license_id ?? null,
     desired.policy_id,
     desired.capacity.max_active_devices,
@@ -502,8 +504,7 @@ function desiredSatisfiedSql(alias = "e") {
 
 // A plan-applied grant is protected, like every grant.
 function createEntitlementStatement(env, action, now, previewId, claimToken) {
-  const { desired } = action;
-  const { input, capacity, trial } = desired;
+  const [project, feature, fingerprint, status, ...fields] = valuesForDesired(action);
   return env.DB.prepare(
     `INSERT INTO entitlements
        (project, feature, license_fingerprint, status, revocation_seq,
@@ -514,35 +515,11 @@ function createEntitlementStatement(env, action, now, previewId, claimToken) {
        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
      WHERE ${claimGuardSql()}
      RETURNING ${ENTITLEMENT_COLUMNS}`,
-  ).bind(
-    input.project,
-    input.feature,
-    input.license_fingerprint,
-    input.status,
-    input.project,
-    input.feature,
-    input.license_fingerprint,
-    input.valid_from ?? null,
-    input.valid_until ?? null,
-    input.notes ?? "",
-    input.customer_id ?? null,
-    input.license_id ?? null,
-    desired.policy_id,
-    capacity.max_active_devices,
-    trial.is_trial,
-    trial.trial_expiration_basis,
-    trial.trial_duration_sec,
-    trial.trial_one_per_device,
-    now,
-    now,
-    previewId,
-    claimToken,
-  );
+  ).bind(project, feature, fingerprint, status, project, feature, fingerprint, ...fields, now, now, previewId, claimToken);
 }
 
 function updateEntitlementStatement(env, action, now, previewId, claimToken) {
-  const { desired } = action;
-  const { input, capacity, trial } = desired;
+  const [project, feature, fingerprint, ...fields] = valuesForDesired(action);
   return env.DB.prepare(
     `UPDATE entitlements
      SET status = ?, ${REVOCATION_SEQ_BUMP},
@@ -552,26 +529,7 @@ function updateEntitlementStatement(env, action, now, previewId, claimToken) {
      WHERE project = ? AND feature = ? AND license_fingerprint = ?
        AND ${claimGuardSql()}
      RETURNING ${ENTITLEMENT_COLUMNS}`,
-  ).bind(
-    input.status,
-    input.valid_from ?? null,
-    input.valid_until ?? null,
-    input.notes ?? "",
-    input.customer_id ?? null,
-    input.license_id ?? null,
-    desired.policy_id,
-    capacity.max_active_devices,
-    trial.is_trial,
-    trial.trial_expiration_basis,
-    trial.trial_duration_sec,
-    trial.trial_one_per_device,
-    now,
-    input.project,
-    input.feature,
-    input.license_fingerprint,
-    previewId,
-    claimToken,
-  );
+  ).bind(...fields, now, project, feature, fingerprint, previewId, claimToken);
 }
 
 function disableEntitlementStatement(env, action, now, previewId, claimToken) {

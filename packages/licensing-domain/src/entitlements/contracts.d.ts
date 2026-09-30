@@ -11,7 +11,6 @@ export type EntitlementEventType = "create" | "update" | "disable" | "reenable" 
 
 export interface EntitlementRecord {
   id: string;
-  enforcement_mode: "legacy" | "device_bound_v1";
   project: string;
   feature: string;
   license_fingerprint: string;
@@ -28,7 +27,7 @@ export interface EntitlementRecord {
   trial_duration_sec: number;
   trial_one_per_device: number;
   trial_started_at: number | null;
-  trial_device_hash: string | null;
+  trial_device_key_id: string | null;
   max_active_devices: number;
   lease_seconds: number;
   license_mode: LicenseMode;

@@ -186,12 +186,12 @@ function insertOrderEvent(db, eventId, receivedAt, status = "accepted") {
 }
 
 function insertEntitlement(db, fp, {
-  status = "active", validUntil = null, customerId = null, now = 1000,
+  status = "active", validUntil = null, customerId = "cus_owner", now = 1000,
   isTrial = 0, trialBasis = "from_issue", trialDurationSec = 0, trialStartedAt = null,
 } = {}) {
   db.prepare(
-    `INSERT INTO entitlements (project, feature, license_fingerprint, status, valid_until, customer_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_started_at, enforcement_mode, created_at, updated_at)
-     VALUES ('DEFAULT','DEFAULT',?,?,?,?,?,?,?,?,'device_bound_v1',?,?)`,
+    `INSERT INTO entitlements (project, feature, license_fingerprint, status, valid_until, customer_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_started_at, created_at, updated_at)
+     VALUES ('DEFAULT','DEFAULT',?,?,?,?,?,?,?,?,?,?)`,
   ).run(fp, status, validUntil, customerId, isTrial, trialBasis, trialDurationSec, trialStartedAt, now, now);
 }
 
@@ -370,24 +370,25 @@ test("expiring: cursor pagination over valid_until ASC", async () => {
   assert.equal(page2.items[0].days_left, 3);
 });
 
-test("expiring: each row carries the entitlement's canonical id and, when a customer is set, its name", async () => {
+test("expiring: each row carries the entitlement's canonical id and its owning customer's name", async () => {
   const db = freshDb();
   const env = devEnv(db);
   const now = Math.floor(Date.now() / 1000);
   const DAY = 86400;
   insertCustomer(db, "cus_a", "Acme Co", now);
+  insertCustomer(db, "cus_b", "Beta Ltd", now);
   insertEntitlement(db, FP_A, { validUntil: now + 5 * DAY, customerId: "cus_a", now });
-  insertEntitlement(db, FP_B, { validUntil: now + 6 * DAY, customerId: null, now });
+  insertEntitlement(db, FP_B, { validUntil: now + 6 * DAY, customerId: "cus_b", now });
 
   const data = (await body(await worker.fetch(devReq("/api/admin/report/expiring"), env))).data;
   assert.equal(data.items.length, 2);
-  const withCustomer = data.items.find((item) => item.license_fingerprint === FP_A);
-  const withoutCustomer = data.items.find((item) => item.license_fingerprint === FP_B);
-  assert.equal(withCustomer.id, entitlementId("DEFAULT", "DEFAULT", FP_A));
-  assert.equal(withCustomer.customer_name, "Acme Co");
-  assert.equal(withoutCustomer.id, entitlementId("DEFAULT", "DEFAULT", FP_B));
-  assert.equal(withoutCustomer.customer_id, null);
-  assert.equal(withoutCustomer.customer_name, null);
+  const acme = data.items.find((item) => item.license_fingerprint === FP_A);
+  const beta = data.items.find((item) => item.license_fingerprint === FP_B);
+  assert.equal(acme.id, entitlementId("DEFAULT", "DEFAULT", FP_A));
+  assert.equal(acme.customer_name, "Acme Co");
+  assert.equal(beta.id, entitlementId("DEFAULT", "DEFAULT", FP_B));
+  assert.equal(beta.customer_id, "cus_b");
+  assert.equal(beta.customer_name, "Beta Ltd");
 });
 
 test("expiring: an activated activation-basis trial is included via its trial deadline; one not yet activated is excluded", async () => {

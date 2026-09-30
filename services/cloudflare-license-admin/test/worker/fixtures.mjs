@@ -16,7 +16,6 @@ const protectedGrant = { project: PROTECTED_PROJECT, feature: "PRO", license_fin
 // (eventFromCurrentStatement, now in the shared @licensecc/cloudflare-runtime
 // entitlement_mutation core); the drift-guard test pins this contract.
 const NEXT_JSON_KEYS = [
-  "enforcement_mode",
   "project",
   "feature",
   "license_fingerprint",
@@ -33,7 +32,7 @@ const NEXT_JSON_KEYS = [
   "trial_duration_sec",
   "trial_one_per_device",
   "trial_started_at",
-  "trial_device_hash",
+  "trial_device_key_id",
   "max_active_devices",
   "lease_seconds",
   "license_mode",
@@ -126,16 +125,15 @@ function effectiveLicenseMode(row) {
 
 function entitlementDefaults(overrides = {}) {
   const row = {
-    enforcement_mode: "device_bound_v1",
     policy_id: null,
     is_trial: 0,
     trial_expiration_basis: null,
     trial_duration_sec: 0,
     trial_one_per_device: 0,
     trial_started_at: null,
-    trial_device_hash: null,
+    trial_device_key_id: null,
     max_active_devices: 1,
-    lease_seconds: 2592000,
+    lease_seconds: 86400,
     ...overrides,
   };
   return { ...row, license_mode: effectiveLicenseMode(row) };

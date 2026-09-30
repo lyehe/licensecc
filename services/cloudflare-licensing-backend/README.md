@@ -362,8 +362,9 @@ create customers without granting licensing access. See the
 
 The baseline schema contains persistent device bindings, capacity holds, proof
 challenges, authorization attempts, exact operation recovery and audit records.
-v1 verification, leases and floating-seat paths select only legacy-mode
-entitlements. Existing entitlements default to `legacy`; no customer is opted in.
+Every grant is protected, and there is no enforcement mode. Each entitlement names
+its owning customer. Its `lease_seconds` defaults to 86400 (24 hours), which is
+also the longest lease the issuer signs.
 The backend now serves `/v2/device-authorizations`, `/v2/device-challenges`,
 `/v2/device-authorizations/exchange` and `/v2/device-leases/renew`. Staged browser
 consent is implemented; the native protected consumer remains unfinished. Local
@@ -376,7 +377,8 @@ clock and reserves no slot. Activation-based trials expire at that persisted
 start plus their duration; `from_issue` preserves its absolute `valid_until`.
 The earliest trial, entitlement or lease deadline caps each signed lease.
 Renewal and response recovery recheck current expiry and the optional first-key
-lock without restarting the trial. Existing legacy trials retain their own path.
+lock without restarting the trial. The first-key lock is the proven key id stored
+in `trial_device_key_id`.
 Consent inspection includes optional `activation_trial_seconds` only for an
 unstarted activation-based trial. Its `valid_until` is an optional absolute cap;
 for a started trial it is the effective expiry. The portal explains activation
@@ -520,14 +522,6 @@ from these cleanup jobs and backlog probes. Enforcement identities, generations,
 operation tombstones and slot holds remain protected independently of event
 retention. A future audit-history policy must not release slots or erase that
 enforcement state.
-
-In-place `legacy` to `device_bound_v1` updates fail with
-`protected_mode_migration_required`. Pruned issuance history, released borrowed
-seats and external offline licenses prevent empty current tables from proving
-that legacy authority has drained. The backend/release owner must complete the
-reviewed cutover-evidence protocol and restore tests before replacing that guard.
-Use fresh synthetic protected-only entitlements for development; the baseline
-schema does not authorize enabling protection for existing customers.
 
 `npm run test:sql` includes deterministic SQLite boundary tests and the local
 Miniflare D1 binding tests for concurrent allocation and complete batch rollback.

@@ -600,7 +600,6 @@ export function makeAdminApiFixture() {
     const status = overrides.status ?? "active";
     const row = {
       id: `ent-${index}`,
-      enforcement_mode: "device_bound_v1",
       project: "DEFAULT",
       feature: `seed-${index}`,
       license_fingerprint: index.toString(16).padStart(64, "0"),
@@ -617,7 +616,7 @@ export function makeAdminApiFixture() {
       trial_duration_sec: 0,
       trial_one_per_device: 0,
       trial_started_at: null,
-      trial_device_hash: null,
+      trial_device_key_id: null,
       max_active_devices: 1,
       lease_seconds: 0,
       license_mode: "node_locked",
@@ -1741,7 +1740,7 @@ export function makeAdminApiFixture() {
           trial_duration_sec: 0,
           trial_one_per_device: 0,
           trial_started_at: null,
-          trial_device_hash: null,
+          trial_device_key_id: null,
           max_active_devices: item.max_active_devices,
           lease_seconds: 0,
           license_mode: item.license_mode,
@@ -1769,7 +1768,6 @@ export function makeAdminApiFixture() {
       now += 1;
       const row = {
         id: `ent-${nextEntitlementId}`,
-        enforcement_mode: "device_bound_v1",
         project: body.project,
         feature: body.feature,
         license_fingerprint: body.license_fingerprint,
@@ -1786,7 +1784,7 @@ export function makeAdminApiFixture() {
         trial_duration_sec: 0,
         trial_one_per_device: 0,
         trial_started_at: null,
-        trial_device_hash: null,
+        trial_device_key_id: null,
         max_active_devices: body.max_active_devices ?? 1,
         lease_seconds: 0,
         license_mode: "node_locked",

@@ -12,8 +12,8 @@ function fixture(t) {
   sql.exec(readFileSync(new URL('../../schema.sql',import.meta.url),'utf8'));
   const id=boundRandomId(16),fp='a'.repeat(64);
   sql.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('owner','Owner',1,1),('other','Other',1,1);
-    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,max_active_devices,created_at,updated_at)
-    VALUES('APP','DEFAULT','${fp}','owner','active','device_bound_v1',1,1,1);
+    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,max_active_devices,created_at,updated_at)
+    VALUES('APP','DEFAULT','${fp}','owner','active',1,1,1);
     INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
     VALUES('device','owner','APP','key','spki',1,1);`);
   sql.prepare(`INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,hold_until,created_at,updated_at)

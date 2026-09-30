@@ -78,12 +78,12 @@ test("sync without license_id is refused", async () => {
   assert.equal(db.events.length, 0);
 });
 
-// A sync reads exactly its grant fields and the audit reason. A body naming anything else (the
-// mode, a policy, a device limit, a column no request writes, or a typo) is refused whole.
+// A sync reads exactly its grant fields and the audit reason. A body naming anything else (a
+// policy, a device limit, a column no request writes, or a typo) is refused whole.
 test("sync refuses a body naming any field a sync does not read", async () => {
   const db = new MockD1();
-  for (const field of ["enforcement_mode", "policy_id", "max_active_devices", "revocation_seq", "lease_seconds",
-    "trial_device_hash", "license_mode", "id", "seats", "hash", "ttl_seconds", "unknown_field"]) {
+  for (const field of ["policy_id", "max_active_devices", "revocation_seq", "lease_seconds",
+    "trial_device_key_id", "license_mode", "id", "seats", "hash", "ttl_seconds", "unknown_field"]) {
     for (const value of ["", 0, "d".repeat(64)]) {
       const response = await worker.fetch(syncAuthed({ ...ownedSync, [field]: value }), syncEnv(db));
       assert.equal(response.status, 400, `${field}=${JSON.stringify(value)}`);

@@ -47,39 +47,12 @@ async function refusedFor(response, reason) {
 test("admin creates a fresh protected grant and exactly replays it without allocating devices", async t => {
   const f = fixture(t), first = await f.send(); assert.equal(first.status, 200);
   const text = await first.text(), body = JSON.parse(text);
-  assert.equal(body.data.enforcement_mode, "device_bound_v1");
   assert.equal(body.data.customer_id, "owner"); assert.equal(body.data.max_active_devices, 1);
   const before = f.snapshot(); assert.deepEqual(before.slice(3), [[], [], []]);
   const retry = await f.send(); assert.equal(retry.status, 200); assert.equal(await retry.text(), text);
   assert.equal(retry.headers.get("x-idempotent-replay"), "1");
-  assert.equal((await f.send({ ...input, enforcement_mode: "device_bound_v1" })).status, 400);
   assert.equal((await f.send({ ...input, feature: "OTHER" })).status, 409);
   assert.deepEqual(f.snapshot(), before);
-});
-
-// Every grant is protected, so a create, a policy create, a sync or a PATCH naming any mode, even
-// the protected one, is refused before any write.
-test("a create, policy create, sync or PATCH naming a mode is refused before any write", async t => {
-  const f = fixture(t), before = f.snapshot();
-  for (const mode of ["device_bound_v1", "legacy", null, [], "", " device_bound_v1", "floating"]) {
-    for (const [body, key] of [[{ ...input, enforcement_mode: mode }, "direct"], [{ ...input, policy_id: "policy", enforcement_mode: mode }, "policy"]]) {
-      const refused = await f.send(body, `${key}-${JSON.stringify(mode)}`);
-      assert.equal(refused.status, 400, key); assert.equal((await refused.json()).code, "invalid_request", key);
-    }
-    const synced = await worker.fetch(syncAuthed({ ...input, enforcement_mode: mode }), syncEnv(f.db));
-    assert.equal(synced.status, 400); assert.equal((await synced.json()).code, "invalid_request");
-  }
-  assert.deepEqual(f.snapshot(), before);
-  const first = await f.send(), body = await first.json(); assert.equal(first.status, 200);
-  assert.equal(body.data.enforcement_mode, "device_bound_v1");
-  const created = f.snapshot();
-  for (const mode of ["device_bound_v1", "legacy"]) {
-    const patched = await f.send({ enforcement_mode: mode, expected_customer_id: body.data.customer_id, expected_revocation_seq: body.data.revocation_seq },
-      `patch-${mode}`, `${path}/${body.data.id}`, "PATCH");
-    assert.equal(patched.status, 400); assert.equal((await patched.json()).code, "invalid_request");
-  }
-  assert.deepEqual(f.snapshot(), created);
-  assert.deepEqual(f.sql.prepare("PRAGMA foreign_key_check").all(), []);
 });
 
 for (const [change, reason] of [[{ customer_id: "other" }, "license_customer_mismatch"], [{ license_id: null }, "license_missing"]]) {
@@ -95,7 +68,7 @@ for (const [change, reason] of [[{ customer_id: "other" }, "license_customer_mis
 test("a create naming a field it does not read is refused before any write", async t => {
   const f = fixture(t), before = f.snapshot();
   for (const policy of [{}, { policy_id: "policy" }]) {
-    for (const field of [{ lease_seconds: 60 }, { revocation_seq: 1 }, { trial_device_hash: "" }, { hash: "d".repeat(64) },
+    for (const field of [{ lease_seconds: 60 }, { revocation_seq: 1 }, { trial_device_key_id: "" }, { hash: "d".repeat(64) },
       { seats: 2 }, { ttl_seconds: 300 }]) {
       const refused = await f.send({ ...input, ...policy, ...field }, JSON.stringify({ ...policy, ...field }));
       assert.equal(refused.status, 400, JSON.stringify(field)); assert.equal((await refused.json()).code, "invalid_request");
@@ -124,7 +97,7 @@ test("policy creation copies standard and trial settings and retries after polic
     const request = { ...input, policy_id: "policy" };
     const first = await f.send(request); assert.equal(first.status, 200);
     const text = await first.text(), body = JSON.parse(text);
-    assert.equal(body.data.enforcement_mode, "device_bound_v1"); assert.equal(body.data.is_trial, type === "trial" ? 1 : 0);
+    assert.equal(body.data.is_trial, type === "trial" ? 1 : 0);
     f.sql.exec("UPDATE entitlement_policies SET status='disabled'");
     const retry = await f.send(request); assert.equal(retry.status, 200); assert.equal(await retry.text(), text);
     for (const policy_id of [[], "p".repeat(129)]) assert.equal((await f.send({ ...request, policy_id })).status, 400);
@@ -182,9 +155,9 @@ test("a missing or incorrect policy side-write rolls back the preceding upsert",
 // A create that observed no grant never overwrites one a competing writer inserted meanwhile.
 test("a competing insertion is never taken over by a create that observed no grant", async t => {
   const f = fixture(t);
-  f.race(() => f.sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,created_at,updated_at) VALUES('APP','PRO',?,'active',1,1)").run(input.license_fingerprint));
+  f.race(() => f.sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,created_at,updated_at) VALUES('APP','PRO',?,'active','owner',1,1)").run(input.license_fingerprint));
   await refusedFor(await f.send(), "fingerprint_in_use");
-  assert.deepEqual({ ...f.sql.prepare("SELECT customer_id, license_id, revocation_seq FROM entitlements").get() }, { customer_id: null, license_id: null, revocation_seq: 0 });
+  assert.deepEqual({ ...f.sql.prepare("SELECT customer_id, license_id, revocation_seq FROM entitlements").get() }, { customer_id: "owner", license_id: null, revocation_seq: 0 });
   assert.equal(f.sql.prepare("SELECT count(*) AS n FROM mutation_idempotency").get().n, 0);
 });
 
@@ -207,7 +180,7 @@ test("sync runs the protected create checks", async t => {
   assert.deepEqual(f.snapshot(), before, "a refused sync leaves no grant, audit event or replay record");
   const synced = await sync(body, "owned");
   assert.equal(synced.status, 200, await synced.clone().text());
-  assert.equal((await synced.json()).data.enforcement_mode, "device_bound_v1");
+  assert.equal((await synced.json()).data.customer_id, "owner");
 });
 
 // A synced disable or revocation of an existing protected grant always applies, whatever the state
@@ -218,7 +191,7 @@ const WITHDRAWAL_CASES = [
   ["the license is detached", "UPDATE licenses SET customer_id=NULL WHERE id='license'"],
   ["its from_issue trial has expired", "UPDATE entitlements SET is_trial=1, trial_expiration_basis='from_issue', valid_until=100"],
 ];
-const KEPT_COLUMNS = "customer_id, license_id, notes, valid_from, valid_until, is_trial, enforcement_mode";
+const KEPT_COLUMNS = "customer_id, license_id, notes, valid_from, valid_until, is_trial";
 
 for (const [name, change] of WITHDRAWAL_CASES) {
   for (const status of ["disabled", "revoked"]) {
@@ -337,8 +310,8 @@ const REASON_CASES = [
   // The owner-change trigger also aborts with capacity_in_use. A move to another customer while a
   // device is connected is its own rule; a higher device limit cannot fix it.
   { reason: "devices_connected", name: "a move to another customer while a device is connected",
-    setup: `INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,enforcement_mode,max_active_devices,created_at,updated_at)
-        VALUES('APP','PRO','${fp}','active','owner','license','device_bound_v1',5,1,1);
+    setup: `INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,max_active_devices,created_at,updated_at)
+        VALUES('APP','PRO','${fp}','active','owner','license',5,1,1);
       INSERT INTO licenses(id,customer_id,project,created_at,updated_at) VALUES('license-other','other','APP',1,1);
       INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at) VALUES('device','owner','APP','key','synthetic',1,1);
       INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,hold_until,created_at,updated_at)

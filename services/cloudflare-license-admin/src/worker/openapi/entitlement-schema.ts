@@ -4,7 +4,6 @@ export const entitlementRecordSchema = {
   type: "object",
   properties: {
     id: { type: "string", description: "Encoded entitlement id (project/feature/license_fingerprint)." },
-    enforcement_mode: { type: "string", enum: ["legacy", "device_bound_v1"], readOnly: true, description: "Stored enforcement protocol, independent of commercial license_mode. Historical cached mutation responses may omit this field; read the current entitlement to establish its mode." },
     project: { type: "string" },
     feature: { type: "string" },
     license_fingerprint: { type: "string" },
@@ -23,7 +22,7 @@ export const entitlementRecordSchema = {
     trial_duration_sec: { type: "integer" },
     trial_one_per_device: { type: "integer", enum: [0, 1] },
     trial_started_at: { type: ["integer", "null"] },
-    trial_device_hash: { type: ["string", "null"] },
+    trial_device_key_id: { type: ["string", "null"], description: "Key id (sha256:<hex>) of the device that started this trial, proven on its first exchange; null until then." },
     max_active_devices: { type: "integer", minimum: 0, description: "Device limit: the most devices this license (entitlement) may have connected at once." },
   },
 };

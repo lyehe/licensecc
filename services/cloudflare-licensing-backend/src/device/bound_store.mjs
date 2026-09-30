@@ -70,9 +70,9 @@ export const BOUND_LEASE_GUARD_SQL = input + `INSERT INTO device_bound_operation
 
 const stampTrial = input + `UPDATE entitlements SET
   trial_started_at=(SELECT o.committed_at FROM p JOIN device_bound_operations o ON ${operation}),
-  trial_device_hash=(SELECT p.keyId FROM p),
+  trial_device_key_id=(SELECT p.keyId FROM p),
   updated_at=(SELECT o.committed_at FROM p JOIN device_bound_operations o ON ${operation})
-  WHERE trial_started_at IS NULL AND trial_device_hash IS NULL AND is_trial=1
+  WHERE trial_started_at IS NULL AND trial_device_key_id IS NULL AND is_trial=1
     AND EXISTS (SELECT 1 FROM p JOIN device_bound_operations o ON ${operation}
       WHERE p.trialStamp=1 AND p.purpose='exchange' AND entitlements.project=p.project
         AND entitlements.feature=p.feature AND entitlements.license_fingerprint=p.fingerprint
@@ -132,7 +132,7 @@ const finalize = input + `UPDATE device_bound_operations SET status='complete'
     WHERE device_bound_operations.invocation_id=p.invocationId AND device_bound_operations.status='prepared'
       AND p.expiresAt>unixepoch()
       AND (e.is_trial=0 OR p.expiresAt<=${boundTrialDeadlineSql("e", "p.issuedAt")})
-      AND (p.trialStamp=0 OR (e.trial_started_at=device_bound_operations.committed_at AND e.trial_device_hash=p.keyId))
+      AND (p.trialStamp=0 OR (e.trial_started_at=device_bound_operations.committed_at AND e.trial_device_key_id=p.keyId))
       AND (p.purpose='renew' OR EXISTS (SELECT 1 FROM device_bound_authorizations a
         WHERE a.handle_hash=p.subjectId AND a.status='consumed' AND a.revision=p.attemptRevision+1
           AND a.consumed_invocation_id=p.invocationId AND a.consumed_operation_id=p.operationId

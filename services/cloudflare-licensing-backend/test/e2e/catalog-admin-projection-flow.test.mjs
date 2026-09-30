@@ -218,9 +218,9 @@ test("admin catalog import and plan projection yield protected grants that suppo
     assert.equal(appliedBody.code, "license_plan_projection_applied");
     assert.equal(appliedBody.data.applied.created.length, 2);
 
-    const rows = db.prepare(`SELECT feature, enforcement_mode, license_id, customer_id, max_active_devices
+    const rows = db.prepare(`SELECT feature, license_id, customer_id, max_active_devices
       FROM entitlements WHERE project = 'DEFAULT' AND license_fingerprint = ? ORDER BY feature`).all(FP).map((row) => ({ ...row }));
-    const protectedGrant = (feature, maxActiveDevices) => ({ feature, enforcement_mode: "device_bound_v1", license_id: "lic_catalog_e2e",
+    const protectedGrant = (feature, maxActiveDevices) => ({ feature, license_id: "lic_catalog_e2e",
       customer_id: "cus_catalog_e2e", max_active_devices: maxActiveDevices });
     // The plan row's device limit overrides the team policy's.
     assert.deepEqual(rows, [protectedGrant("core", 1), protectedGrant("team", 6)]);

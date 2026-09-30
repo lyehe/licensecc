@@ -55,7 +55,7 @@ for(const trial of [false,true])test(`actual local Worker and D1 execute ${trial
   for(const row of ddl)await db.prepare(row.sql).run();
   const fingerprint="a".repeat(64);
   await db.prepare("INSERT INTO customers(id,name,created_at,updated_at) VALUES('customer','Customer',unixepoch(),unixepoch())").run();
-  await db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,max_active_devices,lease_seconds,created_at,updated_at) VALUES('APP','DEFAULT',?,'customer','active','device_bound_v1',1,3600,unixepoch(),unixepoch())").bind(fingerprint).run();
+  await db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,max_active_devices,lease_seconds,created_at,updated_at) VALUES('APP','DEFAULT',?,'customer','active',1,3600,unixepoch(),unixepoch())").bind(fingerprint).run();
   if(trial)await db.prepare("UPDATE entitlements SET is_trial=1,trial_expiration_basis='from_first_activation',trial_duration_sec=7200,trial_one_per_device=1").run();
   async function call(path,body,expectedStatus=200){
     const response=await mf.dispatchFetch(`https://untrusted-host.test${path}`,{method:"POST",headers:{"content-type":"application/json","cf-connecting-ip":"127.0.0.2"},body:JSON.stringify(body)});
@@ -97,7 +97,7 @@ for(const trial of [false,true])test(`actual local Worker and D1 execute ${trial
     const changed=await portalCall(op,{attempt_handle:attempt.data.attempt_handle},{"x-expected-customer-id":"other"});
     assert.equal(changed.status,409);assert.equal((await changed.json()).code,"account_changed");
   }
-  const extraGrants=Array.from({length:101},(_,i)=>db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,created_at,updated_at) VALUES('APP','DEFAULT',?,'customer','active','device_bound_v1',unixepoch(),unixepoch())").bind((i+1).toString(16).padStart(64,"0")));
+  const extraGrants=Array.from({length:101},(_,i)=>db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,created_at,updated_at) VALUES('APP','DEFAULT',?,'customer','active',unixepoch(),unixepoch())").bind((i+1).toString(16).padStart(64,"0")));
   for(let i=0;i<extraGrants.length;i+=50)await db.batch(extraGrants.slice(i,i+50));
   const page1=await (await portalCall("inspect",{attempt_handle:attempt.data.attempt_handle})).json();
   assert.equal(page1.data.entitlements.length,100);assert.equal(page1.data.has_more,true);assert.equal(page1.data.comparison_code,comparison);
@@ -126,8 +126,8 @@ for(const trial of [false,true])test(`actual local Worker and D1 execute ${trial
   const body={attempt_handle:attempt.data.attempt_handle,code,code_verifier:verifier,redirect_uri:redirect,operation_id:boundRandomId(32)};
   const activated=await call("/v2/device-authorizations/exchange",await signed("exchange",body));
   if(trial){
-    const stamp=await db.prepare('SELECT trial_started_at,trial_device_hash FROM entitlements WHERE license_fingerprint=?').bind(fingerprint).first();
-    assert.ok(stamp.trial_started_at>0);assert.equal(stamp.trial_device_hash,keyId);
+    const stamp=await db.prepare('SELECT trial_started_at,trial_device_key_id FROM entitlements WHERE license_fingerprint=?').bind(fingerprint).first();
+    assert.ok(stamp.trial_started_at>0);assert.equal(stamp.trial_device_key_id,keyId);
   }
   const claims=decodeDeviceLeaseEnvelope(activated.data.lease).claims;
   assert.equal(claims["device-key-id"],keyId);assert.equal(claims.issuer,config.issuer);
@@ -172,7 +172,7 @@ for(const trial of [false,true])test(`actual local Worker and D1 execute ${trial
   assert.deepEqual((await consent("deny",cancelInput)).data,denied.data);
   assert.equal((await consent("execute",cancelInput)).rpc_unavailable,true);
   const operatorBinding=boundRandomId(16),operatorFingerprint='b'.repeat(64);
-  await db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,max_active_devices,created_at,updated_at) VALUES('APP','OPERATOR',?,'customer','active','device_bound_v1',1,unixepoch(),unixepoch())").bind(operatorFingerprint).run();
+  await db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,max_active_devices,created_at,updated_at) VALUES('APP','OPERATOR',?,'customer','active',1,unixepoch(),unixepoch())").bind(operatorFingerprint).run();
   await db.prepare("INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,hold_until,created_at,updated_at) VALUES(?,'APP','OPERATOR',?,?,unixepoch()+120,unixepoch(),unixepoch())").bind(operatorBinding,operatorFingerprint,activated.data.device_id).run();
   const operatorInput={binding_id:operatorBinding,expected_revision:0,operation_id:boundRandomId(32)};
   const operator={subject:'access-subject',actor_type:'access',role:'admin'};
@@ -189,7 +189,7 @@ for(const trial of [false,true])test(`actual local Worker and D1 execute ${trial
   const operatorEvents=await db.prepare('SELECT actor FROM device_bound_events WHERE binding_id=?').bind(operatorBinding).all();
   assert.deepEqual(operatorEvents.results,[{actor:'operator:access:access-subject'}]);
   const admin=await mf.getWorker('real-admin'),adminBinding=boundRandomId(16),adminKey=boundRandomId(32),adminFingerprint='e'.repeat(64);
-  await db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,max_active_devices,created_at,updated_at) VALUES('APP','ADMIN',?,'customer','active','device_bound_v1',1,unixepoch(),unixepoch())").bind(adminFingerprint).run();
+  await db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,max_active_devices,created_at,updated_at) VALUES('APP','ADMIN',?,'customer','active',1,unixepoch(),unixepoch())").bind(adminFingerprint).run();
   await db.prepare("INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,hold_until,created_at,updated_at) VALUES(?,'APP','ADMIN',?,?,unixepoch()+120,unixepoch(),unixepoch())").bind(adminBinding,adminFingerprint,activated.data.device_id).run();
   const adminPath=`https://admin.example.test/api/admin/customers/customer/bindings`;
   const adminHeaders={authorization:'Bearer local-test-admin','content-type':'application/json','x-expected-operator':encodeURIComponent(JSON.stringify(['dev','dev'])),'idempotency-key':adminKey};

@@ -42,8 +42,8 @@ function fixture(t) {
   sql.function("unixepoch",()=>BigInt(now)); sql.exec("PRAGMA foreign_keys=ON");
   sql.exec(readFileSync(new URL("../../schema.sql",import.meta.url),"utf8"));
   sql.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('customer','Customer',1000,1000);
-    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,max_active_devices,lease_seconds,valid_until,created_at,updated_at)
-    VALUES('APP','DEFAULT','${fingerprint}','customer','active','device_bound_v1',1,3600,10000,1000,1000);`);
+    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,max_active_devices,lease_seconds,valid_until,created_at,updated_at)
+    VALUES('APP','DEFAULT','${fingerprint}','customer','active',1,3600,10000,1000,1000);`);
   class Statement {
     constructor(query,params=[]) { this.query=query; this.params=params; }
     bind(...params) { return new Statement(this.query,params); }
@@ -194,9 +194,9 @@ test("HTTP trials start on exchange and preserve their deadline through renewal 
     const token=decodeDeviceLeaseEnvelope(activated.body.data.lease);
     assert.equal(token.claims['expires-at'],deadline);
     assert.equal(verify('RSA-SHA256',deviceLeaseSigningInput(token.payload),createPublicKey(publicPem),token.signature),true);
-    const state=()=>f.sql.prepare('SELECT trial_started_at,trial_device_hash,authority_revision FROM entitlements').get();
+    const state=()=>f.sql.prepare('SELECT trial_started_at,trial_device_key_id,authority_revision FROM entitlements').get();
     const started=state();
-    assert.deepEqual({...started},{trial_started_at:1000,trial_device_hash:d.keyId,authority_revision:2});
+    assert.deepEqual({...started},{trial_started_at:1000,trial_device_key_id:d.keyId,authority_revision:2});
     f.clock(1300);
     assert.deepEqual((await f.call('/v2/device-authorizations/exchange',await signed(f,d,'exchange'))).body,activated.body);
     const renew={binding_id:activated.body.data.binding_id,generation:1,operation_id:boundRandomId(32)};
@@ -613,8 +613,8 @@ test("feature sessions renew fresh operations on one persistent binding with exa
 test("two feature entitlements share a device key but keep permissions and capacity independent",async t=>{
   const f=fixture(t);
   for(const feature of ["BATCH_RUN","EXPORT"]) f.sql.prepare(`INSERT INTO entitlements
-    (project,feature,license_fingerprint,customer_id,status,enforcement_mode,max_active_devices,lease_seconds,valid_until,created_at,updated_at)
-    VALUES('APP',?,?,'customer','active','device_bound_v1',1,900,10000,1000,1000)`).run(feature,fingerprint);
+    (project,feature,license_fingerprint,customer_id,status,max_active_devices,lease_seconds,valid_until,created_at,updated_at)
+    VALUES('APP',?,?,'customer','active',1,900,10000,1000,1000)`).run(feature,fingerprint);
   const batch=await enrollment(f,"BATCH_RUN"),exporter=await enrollment(f,"EXPORT",batch.keys);
   assert.equal(batch.keyId,exporter.keyId);
   const bindings=[];

@@ -3,7 +3,7 @@
   "threshold_lines": 500,
   "files": {
     "packages/cloudflare-runtime/src/d1/entitlement_mutation.mjs": 503,
-    "packages/cloudflare-runtime/src/d1/plan_projection.mjs": 980,
+    "packages/cloudflare-runtime/src/d1/plan_projection.mjs": 938,
     "packages/cloudflare-runtime/src/webhooks/webhook.mjs": 626,
     "services/cloudflare-d1-backup/src/core.ts": 506,
     "services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx": 740,

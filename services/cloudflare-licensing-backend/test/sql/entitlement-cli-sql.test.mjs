@@ -24,9 +24,9 @@ for (const bindingState of ["active", "retiring"]) {
     const db = freshDb(); t.after(() => db.close());
     db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES
       ('owner','Owner',1,1);
-      INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,enforcement_mode,
+      INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,
         max_active_devices,revocation_seq,created_at,updated_at)
-      VALUES('DEFAULT','DEFAULT','${fingerprint}','active','owner','device_bound_v1',1,4,1,1);
+      VALUES('DEFAULT','DEFAULT','${fingerprint}','active','owner',1,4,1,1);
       INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
       VALUES('device','owner','DEFAULT','protected-key','synthetic-public',1,1);
       INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,generation,revision,hold_until,created_at,updated_at)
@@ -36,7 +36,7 @@ for (const bindingState of ["active", "retiring"]) {
     const originalBinding = binding(), originalAuthority = authority();
 
     db.exec(sqlFor("upsert", { fingerprint, actor: "operator", "customer-id": "owner", "license-id": "lic_owner", "valid-until": 4102445000 }));
-    assert.equal(authority().enforcement_mode, "device_bound_v1");
+    assert.equal(authority().customer_id, "owner");
     assert.equal(authority().authority_revision, originalAuthority.authority_revision + 1);
     assert.equal(authority().valid_until, 4102445000);
     assert.equal(authority().max_active_devices, 1);
@@ -45,7 +45,7 @@ for (const bindingState of ["active", "retiring"]) {
     db.exec(sqlFor("reenable", { fingerprint, actor: "operator" }));
     assert.equal(authority().status, "active");
     assert.equal(authority().authority_revision, originalAuthority.authority_revision + 3);
-    assert.equal(authority().enforcement_mode, "device_bound_v1");
+    assert.equal(authority().customer_id, "owner");
     assert.deepEqual(binding(), originalBinding);
     assert.equal(eventCount(db), 3);
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
@@ -66,8 +66,8 @@ function freshDb() {
 function seed(db, status, seq) {
   db.exec(
     "INSERT INTO entitlements (project, feature, license_fingerprint, status, " +
-      "revocation_seq, created_at, updated_at) VALUES " +
-      `('DEFAULT', 'DEFAULT', '${fingerprint}', '${status}', ${seq}, unixepoch(), unixepoch())`,
+      "revocation_seq, customer_id, created_at, updated_at) VALUES " +
+      `('DEFAULT', 'DEFAULT', '${fingerprint}', '${status}', ${seq}, 'cus_1', unixepoch(), unixepoch())`,
   );
 }
 

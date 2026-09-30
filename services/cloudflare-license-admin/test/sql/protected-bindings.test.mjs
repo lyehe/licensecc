@@ -14,8 +14,8 @@ function fixture(t,count=1,deviceOwner='owner',grantOwner='owner') {
   sql.function('unixepoch',()=>now);
   sql.exec(readFileSync(new URL('../../../cloudflare-licensing-backend/schema.sql',import.meta.url),'utf8'));
   sql.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('owner','Owner',1,1),('other','Other',1,1);
-    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,max_active_devices,created_at,updated_at)
-    VALUES('APP','DEFAULT','${'a'.repeat(64)}','${grantOwner}','active','device_bound_v1',200,1,1);`);
+    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,max_active_devices,created_at,updated_at)
+    VALUES('APP','DEFAULT','${'a'.repeat(64)}','${grantOwner}','active',200,1,1);`);
   for(let n=1;n<=count;n++) {
     sql.prepare(`INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,label,created_at,last_proof_at)
       VALUES(?,?,'APP',?,'spki',?,1,900)`).run(`device-${n}`,deviceOwner,`key-${n}`,`Node ${n}`);
@@ -68,11 +68,11 @@ test('protected reads paginate without duplicates and use database time rather t
 test('list read reports device-limit capacity and recent refused connections, scoped to the customer and project filter',async t=>{
   const f=fixture(t,1);
   f.sql.exec(`UPDATE entitlements SET max_active_devices=1 WHERE project='APP' AND feature='DEFAULT';
-    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,max_active_devices,created_at,updated_at)
-      VALUES('OTHER','DEFAULT','${'b'.repeat(64)}','owner','active','device_bound_v1',5,1,1);
+    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,max_active_devices,created_at,updated_at)
+      VALUES('OTHER','DEFAULT','${'b'.repeat(64)}','owner','active',5,1,1);
     INSERT INTO customers(id,name,created_at,updated_at) VALUES('foreign','Foreign',1,1);
-    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,max_active_devices,created_at,updated_at)
-      VALUES('FOREIGN','DEFAULT','${'c'.repeat(64)}','foreign','active','device_bound_v1',1,1,1);
+    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,max_active_devices,created_at,updated_at)
+      VALUES('FOREIGN','DEFAULT','${'c'.repeat(64)}','foreign','active',1,1,1);
     INSERT INTO device_bound_denials(project,feature,license_fingerprint,key_id,reason,ts)
       VALUES('FOREIGN','DEFAULT','${'c'.repeat(64)}','key-foreign','device_limit_reached',3000);
     INSERT INTO device_bound_denials(project,feature,license_fingerprint,key_id,reason,ts)

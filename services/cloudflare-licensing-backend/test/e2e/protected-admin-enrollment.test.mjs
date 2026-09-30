@@ -34,7 +34,7 @@ for (const [type, basis] of [["node_locked", "from_issue"], ["trial", "from_issu
       customer_id: "protected-owner", license_id: license.data.id, policy_id: "protected-policy" });
     const grant = await created.json(); assert.equal(created.status, 200, JSON.stringify(grant));
     assert.equal(grant.data.license_id, license.data.id);
-    assert.equal(grant.data.enforcement_mode, "device_bound_v1");
+    assert.equal(grant.data.customer_id, "protected-owner");
     const env = { DB: portal.DB, BOUND_DEVICE_CONFIG: JSON.stringify(config), BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM: privatePem,
       BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM: publicPem };
     const call = async (path, body) => {
@@ -67,9 +67,9 @@ for (const [type, basis] of [["node_locked", "from_issue"], ["trial", "from_issu
     assert.equal(verify("RSA-SHA256", deviceLeaseSigningInput(lease.payload), createPublicKey(publicPem), lease.signature), true);
     assert.equal(lease.claims.project, "APP"); assert.equal(lease.claims.feature, "PRO");
     assert.equal(db.prepare("SELECT count(*) AS n FROM device_bound_bindings WHERE state='active'").get().n, 1);
-    const stored = db.prepare("SELECT is_trial,trial_started_at,trial_device_hash FROM entitlements WHERE project='APP'").get();
+    const stored = db.prepare("SELECT is_trial,trial_started_at,trial_device_key_id FROM entitlements WHERE project='APP'").get();
     assert.equal(stored.is_trial, type === "trial" ? 1 : 0);
-    if (type === "trial") { assert.ok(Number.isSafeInteger(stored.trial_started_at)); assert.equal(stored.trial_device_hash, keyId); }
+    if (type === "trial") { assert.ok(Number.isSafeInteger(stored.trial_started_at)); assert.equal(stored.trial_device_key_id, keyId); }
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   });
 }

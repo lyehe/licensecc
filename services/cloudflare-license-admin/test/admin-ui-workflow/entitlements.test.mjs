@@ -3,12 +3,13 @@ import test from "node:test";
 
 import { loadWorkflowModule } from "./helpers.mjs";
 
-// Every create is protected, so neither creation path sends a mode, and a policy create sends no
-// status: the Worker refuses both.
-test("protected form sends no mode through either creation path and reports incompatible identifiers", async () => {
+// Each creation path sends exactly the fields its Worker route reads, and a policy create sends no
+// status: the Worker refuses any other field.
+test("protected form sends only its grant fields through either creation path and reports incompatible identifiers", async () => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
   const form = { ...workflow.emptyEntitlementForm, license_fingerprint: "a".repeat(64), customer_id: "owner", license_id: "license" };
-  assert.equal(Object.hasOwn(workflow.normalizeEntitlementForm(form), "enforcement_mode"), false);
+  assert.deepEqual(Object.keys(workflow.normalizeEntitlementForm(form)).sort(), ["customer_id", "feature", "license_fingerprint", "license_id", "notes",
+    "project", "valid_from", "valid_until"]);
   const fromPolicy = workflow.normalizeCreateFromPolicy({ ...form, policy_id: "policy", notes: "n", valid_from: "2024-03-09", valid_until: "2025-03-09" });
   assert.deepEqual(Object.keys(fromPolicy).sort(), ["customer_id", "feature", "license_fingerprint", "license_id", "notes", "policy_id", "project",
     "valid_from", "valid_until"]);
@@ -266,15 +267,15 @@ test("a finished batch reads as one sentence, with every per-row outcome in word
 
 test("the entitlement record guard accepts the protected row shape", async () => {
   const guards = await loadWorkflowModule("shared/mutationGuards.ts");
-  // Only the columns the next removal keeps, plus the enforcement mode every
-  // grant now carries; none of the dropped seat, borrow, meter or TTL columns.
+  // Only the columns a grant record carries; none of the dropped seat, borrow, meter, TTL or
+  // mode columns.
   const row = {
     id: "ent-1", project: "APP", feature: "PRO", license_fingerprint: "a".repeat(64),
-    status: "active", license_mode: "node_locked", enforcement_mode: "device_bound_v1",
+    status: "active", license_mode: "node_locked",
     revocation_seq: 1, valid_from: null, valid_until: null, notes: "",
     customer_id: "cus_1", license_id: "lic_1", policy_id: null,
     is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0,
-    trial_one_per_device: 0, trial_started_at: null, trial_device_hash: null,
+    trial_one_per_device: 0, trial_started_at: null, trial_device_key_id: null,
     max_active_devices: 3, lease_seconds: 0, created_at: 1, updated_at: 2,
   };
   assert.equal(guards.hasEntitlementRecordData(row), true);

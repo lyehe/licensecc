@@ -9,8 +9,6 @@ test("A's /api/portal/entitlements returns ONLY A's entitlements", async () => {
     assert.equal(r.body.data.items.length, 1);
     assert.equal(r.body.data.items[0].project, "DEFAULT");
     assert.equal(r.body.data.items[0].license_mode, "node_locked");
-    // Every grant is protected, so a row names no mode.
-    assert.equal(Object.hasOwn(r.body.data.items[0], "enforcement_mode"), false);
     assert.equal(typeof r.body.data.items[0].id, "string");
   // The response carries no fingerprint/foreign id.
   assert.ok(!JSON.stringify(r.body).includes(FP_B), "B's data never appears in A's response");
@@ -143,11 +141,11 @@ export const DIRECT_ROUTE_TESTS = Object.freeze([
 test("portal entitlement projection lists each owned protected grant without exposing another owner", async () => {
   const { db, env } = baseFixture();
   try {
-    db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,enforcement_mode,status,max_active_devices,created_at,updated_at) VALUES ('PROTECTED','DEFAULT',?,'A','device_bound_v1','active',1,?,?)").run("c".repeat(64), NOW, NOW);
+    db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,max_active_devices,created_at,updated_at) VALUES ('PROTECTED','DEFAULT',?,'A','active',1,?,?)").run("c".repeat(64), NOW, NOW);
     const result = await call(env, "GET", "/api/portal/entitlements", { cookie: await cookieFor(env, "A") });
     assert.equal(result.status, 200);
     const listed = result.body.data.items.find(row => row.project === "PROTECTED");
-    assert.ok(listed); assert.equal(Object.hasOwn(listed, "enforcement_mode"), false);
+    assert.ok(listed);
     assert.ok(!JSON.stringify(result.body).includes(FP_B));
   } finally { db.close(); }
 });
@@ -164,10 +162,10 @@ const DAY = 86400;
 // A protected trial grant owned by A, inserted with its trial columns and, once started, the trial key.
 function seedProtectedTrial(db, feature, fingerprint, { basis, duration, started = null, validUntil = null }) {
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, customer_id, enforcement_mode, status, max_active_devices, " +
+    "INSERT INTO entitlements (project, feature, license_fingerprint, customer_id, status, max_active_devices, " +
       "valid_until, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, " +
-      "trial_started_at, trial_device_hash, created_at, updated_at) " +
-      "VALUES ('DEFAULT', ?, ?, 'A', 'device_bound_v1', 'active', 1, ?, 1, ?, ?, 1, ?, ?, ?, ?)",
+      "trial_started_at, trial_device_key_id, created_at, updated_at) " +
+      "VALUES ('DEFAULT', ?, ?, 'A', 'active', 1, ?, 1, ?, ?, 1, ?, ?, ?, ?)",
   ).run(feature, fingerprint, validUntil, basis, duration, started, started === null ? null : TRIAL_KEY, NOW, NOW);
 }
 
@@ -203,7 +201,7 @@ test("each row's trial end follows the protected trial rule and never outlives t
     }
     // Only the derived values reach the browser, never the columns they are computed from.
     for (const row of r.body.data.items) {
-      for (const column of ["trial_started_at", "trial_duration_sec", "trial_expiration_basis", "trial_device_hash"]) {
+      for (const column of ["trial_started_at", "trial_duration_sec", "trial_expiration_basis", "trial_device_key_id"]) {
         assert.ok(!Object.hasOwn(row, column), `${row.feature} must not expose ${column}`);
       }
     }

@@ -651,9 +651,9 @@ test("license-plan apply creates stamped entitlements, assignment row, and is re
   assert.equal(firstBody.code, "license_plan_projection_applied");
   assert.equal(firstBody.data.applied.created.length, 3);
 
-  const team = db.prepare("SELECT status, enforcement_mode, policy_id, max_active_devices, valid_until FROM entitlements WHERE feature = 'team' AND license_fingerprint = ?").get(FP);
+  const team = db.prepare("SELECT status, customer_id, policy_id, max_active_devices, valid_until FROM entitlements WHERE feature = 'team' AND license_fingerprint = ?").get(FP);
   assert.equal(team.status, "active");
-  assert.equal(team.enforcement_mode, "device_bound_v1");
+  assert.equal(team.customer_id, "cus_plan");
   assert.equal(team.policy_id, "pol_team");
   // The plan row's device limit overrides its policy's.
   assert.equal(team.max_active_devices, 6);
@@ -712,7 +712,7 @@ test("license-plan Preview reports license_fingerprint_conflict without changing
   seedCatalog(db);
   const env = devEnv(db);
   const oldFingerprint = "e".repeat(64);
-  db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', 'core', ?, 'active', 'lic_plan', ?, ?)").run(oldFingerprint, NOW, NOW);
+  db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'core', ?, 'active', 'cus_old', 'lic_plan', ?, ?)").run(oldFingerprint, NOW, NOW);
   db.prepare("INSERT INTO license_plan_assignments (license_id, project, plan_id, license_fingerprint, customer_id, status, support_until, addons_json, created_at, updated_at) VALUES ('lic_plan', 'DEFAULT', 'plan_pro', ?, 'cus_old', 'active', NULL, '[]', ?, ?)").run(oldFingerprint, NOW, NOW);
   const before = {
     old: db.prepare("SELECT feature, status, license_id FROM entitlements WHERE license_fingerprint = ?").get(oldFingerprint),
@@ -738,9 +738,9 @@ test("license-plan Preview rejects an unassigned protected grant that pairs the 
   seedCatalog(db);
   const env = devEnv(db);
   const oldFingerprint = "1".repeat(64);
-  // The conflicting grant is protected, as every writer now creates it; the fence does not depend on mode.
+  // The conflicting grant pairs the same license with another fingerprint.
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, enforcement_mode, created_at, updated_at) VALUES ('DEFAULT', 'unassigned', ?, 'active', 'lic_plan', 'device_bound_v1', ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'unassigned', ?, 'active', 'cus_plan', 'lic_plan', ?, ?)",
   ).run(oldFingerprint, NOW, NOW);
 
   const preview = await worker.fetch(
@@ -767,7 +767,7 @@ test("license-plan Apply atomically reports license_fingerprint_conflict after a
   );
   const previewId = (await body(preview)).data.preview_id;
   const oldFingerprint = "f".repeat(64);
-  db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', 'core', ?, 'active', 'lic_plan', ?, ?)").run(oldFingerprint, NOW, NOW);
+  db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'core', ?, 'active', 'cus_old', 'lic_plan', ?, ?)").run(oldFingerprint, NOW, NOW);
   db.prepare("INSERT INTO license_plan_assignments (license_id, project, plan_id, license_fingerprint, customer_id, status, support_until, addons_json, created_at, updated_at) VALUES ('lic_plan', 'DEFAULT', 'plan_pro', ?, 'cus_old', 'active', NULL, '[]', ?, ?)").run(oldFingerprint, NOW, NOW);
   const before = {
     assignment: db.prepare("SELECT plan_id, license_fingerprint, customer_id, addons_json FROM license_plan_assignments WHERE license_id = 'lic_plan' AND project = 'DEFAULT'").get(),
@@ -799,9 +799,9 @@ test("license-plan Apply reports a protected grant that pairs the license with a
   );
   const previewId = (await body(preview)).data.preview_id;
   const oldFingerprint = "2".repeat(64);
-  // The racing grant is protected, as every writer now creates it; the fence does not depend on mode.
+  // The racing grant pairs the same license with another fingerprint.
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, enforcement_mode, created_at, updated_at) VALUES ('DEFAULT', 'race', ?, 'active', 'lic_plan', 'device_bound_v1', ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'race', ?, 'active', 'cus_plan', 'lic_plan', ?, ?)",
   ).run(oldFingerprint, NOW, NOW);
 
   const apply = await worker.fetch(

@@ -10,8 +10,8 @@ function fixture(t, state) {
   const sql = new DatabaseSync(":memory:"); t.after(() => sql.close());
   sql.exec(readFileSync(new URL("../../schema.sql", import.meta.url), "utf8"));
   sql.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('owner','Owner',1,1),('other','Other',1,1);
-    INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,enforcement_mode,max_active_devices,created_at,updated_at)
-      VALUES('APP','PRO','fingerprint','active','owner','device_bound_v1',1,1,1);
+    INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,max_active_devices,created_at,updated_at)
+      VALUES('APP','PRO','fingerprint','active','owner',1,1,1);
     INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
       VALUES('device','owner','APP','key','synthetic-public',1,1);
     INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,generation,revision,hold_until,created_at,updated_at)
@@ -51,7 +51,7 @@ for (const state of ["active", "retiring"]) {
     for (const action of [
       () => createEntitlement(f.env, { ...input, customer_id: "other" }, ctx, "", undefined, idempotency),
       () => patchEntitlement(f.env, key, { customer_id: "other" }, { ...ctx, expectedEntitlement: observed(f) }, idempotency),
-      () => syncEntitlement(f.env, { ...input, customer_id: undefined }, "sync", { ...ctx, source: "sync" }, idempotency),
+      () => syncEntitlement(f.env, { ...input, customer_id: "other" }, "sync", { ...ctx, source: "sync" }, idempotency),
       () => setEntitlementCapacity(f.env, key, { max_active_devices: 0 }, { ...ctx, expectedEntitlement: observed(f) }, idempotency),
     ]) {
       await assert.rejects(action(), /capacity_in_use/);
@@ -63,12 +63,13 @@ for (const state of ["active", "retiring"]) {
     assert.deepEqual(f.snapshot(), before, "failed policy stamp rolls back the preceding upsert and all evidence");
     const result = await patchEntitlement(f.env, key, { valid_until: 4102445000 }, { ...ctx, expectedEntitlement: observed(f) }, idempotency);
     assert.ok(result);
-    assert.equal(result.data.enforcement_mode, "device_bound_v1");
-    assert.equal((await findEntitlement(f.env, key)).enforcement_mode, "device_bound_v1");
-    assert.equal(JSON.parse(f.sql.prepare("SELECT next_json FROM entitlement_events").get().next_json).enforcement_mode, "device_bound_v1");
-    assert.equal(JSON.parse(f.sql.prepare("SELECT response_json FROM mutation_idempotency").get().response_json).data.enforcement_mode, "device_bound_v1");
-    const row = f.sql.prepare("SELECT enforcement_mode,authority_revision,max_active_devices,valid_until FROM entitlements").get();
-    assert.deepEqual({ ...row }, { enforcement_mode: "device_bound_v1", authority_revision: 1, max_active_devices: 1, valid_until: 4102445000 });
+    // The record, its audit event and its replay all carry the patched window.
+    assert.equal(result.data.valid_until, 4102445000);
+    assert.equal((await findEntitlement(f.env, key)).valid_until, 4102445000);
+    assert.equal(JSON.parse(f.sql.prepare("SELECT next_json FROM entitlement_events").get().next_json).valid_until, 4102445000);
+    assert.equal(JSON.parse(f.sql.prepare("SELECT response_json FROM mutation_idempotency").get().response_json).data.valid_until, 4102445000);
+    const row = f.sql.prepare("SELECT customer_id,authority_revision,max_active_devices,valid_until FROM entitlements").get();
+    assert.deepEqual({ ...row }, { customer_id: "owner", authority_revision: 1, max_active_devices: 1, valid_until: 4102445000 });
     assert.deepEqual(f.snapshot()[1], before[1]);
     assert.equal(f.snapshot()[2].length, 1);
     assert.equal(f.snapshot()[3].length, 1);
@@ -76,19 +77,19 @@ for (const state of ["active", "retiring"]) {
       { ...ctx, source: "sync", idempotencyKey: "sync-operation" }, idempotency);
     await setEntitlementCapacity(f.env, key, { max_active_devices: 2 },
       { ...ctx, idempotencyKey: "capacity-operation", expectedEntitlement: observed(f) }, idempotency);
-    const updated = f.sql.prepare("SELECT enforcement_mode,customer_id,authority_revision,max_active_devices,valid_until FROM entitlements").get();
-    assert.deepEqual({ ...updated }, { enforcement_mode: "device_bound_v1", customer_id: "owner", authority_revision: 3,
+    const updated = f.sql.prepare("SELECT customer_id,authority_revision,max_active_devices,valid_until FROM entitlements").get();
+    assert.deepEqual({ ...updated }, { customer_id: "owner", authority_revision: 3,
       max_active_devices: 2, valid_until: 4102445100 });
     assert.deepEqual(f.snapshot()[1], before[1]);
     assert.equal(f.snapshot()[2].length, 3);
     assert.equal(f.snapshot()[3].length, 3);
-    // A grant inserted without naming its mode is protected by default, so an identical sync is a no-op.
+    // A sync identical to a grant inserted directly with only its required columns is a no-op.
     f.sql.exec("INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,created_at,updated_at) VALUES('APP','OLD','fingerprint','active','owner',1,1)");
     const defaulted = f.snapshot();
     const unchanged = await syncEntitlement(f.env, { ...key, feature: "OLD", customer_id: "owner", status: "active" }, "",
       { ...ctx, source: "sync", idempotencyKey: "defaulted-operation" }, idempotency);
     assert.equal(unchanged.idempotencyRecorded, false);
-    assert.equal(unchanged.data.enforcement_mode, "device_bound_v1");
+    assert.equal(unchanged.data.customer_id, "owner");
     assert.deepEqual(f.snapshot(), defaulted);
     assert.deepEqual(f.sql.prepare("PRAGMA foreign_key_check").all(), []);
   });

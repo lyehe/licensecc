@@ -327,7 +327,7 @@ export function hasEntitlementRecordData(value: unknown): boolean {
     nullableStringField(row, "customer_id") && nullableStringField(row, "license_id") && nullableStringField(row, "policy_id") &&
     binaryFlagField(row, "is_trial") && nullableEnumField(row, "trial_expiration_basis", ["from_issue", "from_first_activation", "from_first_use"] as const) && integerInRangeField(row, "trial_duration_sec", 0, MAX_DURATION_SECONDS) &&
     binaryFlagField(row, "trial_one_per_device") && nullableIntegerInRangeField(row, "trial_started_at", 0, Number.MAX_SAFE_INTEGER) &&
-    nullableStringField(row, "trial_device_hash") && integerInRangeField(row, "max_active_devices", 0, MAX_CAPACITY) && integerInRangeField(row, "lease_seconds", 0, MAX_DURATION_SECONDS) &&
+    nullableStringField(row, "trial_device_key_id") && integerInRangeField(row, "max_active_devices", 0, MAX_CAPACITY) && integerInRangeField(row, "lease_seconds", 0, MAX_DURATION_SECONDS) &&
     nonNegativeIntegerField(row, "created_at") && nonNegativeIntegerField(row, "updated_at");
 }
 

@@ -87,7 +87,7 @@ function projectionProbe() {
     project: "DEFAULT",
     license_id: "lic_probe",
     license_fingerprint: fingerprint,
-    customer_id: null,
+    customer_id: "cus_probe",
     plan_id: "plan_probe",
     plan_key: "probe",
     support_until: null,
@@ -102,7 +102,7 @@ function projectionProbe() {
       valid_from: null,
       valid_until: null,
       notes: "probe",
-      customer_id: null,
+      customer_id: "cus_probe",
       license_id: "lic_probe",
     },
     policy_id: "pol_probe",
@@ -126,12 +126,11 @@ function projectionProbe() {
   };
   const actions = { projection_snapshot_version: 3, created: [action], updated: [], disabled: [], assignment, assignment_snapshot: null };
   const entitlement = {
-    enforcement_mode: "legacy",
     project: "DEFAULT", feature: "core", license_fingerprint: fingerprint, status: "active",
     revocation_seq: 1, valid_from: null, valid_until: null,
-    notes: "probe", customer_id: null, license_id: "lic_probe", policy_id: "pol_probe", is_trial: 0,
+    notes: "probe", customer_id: "cus_probe", license_id: "lic_probe", policy_id: "pol_probe", is_trial: 0,
     trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0,
-    trial_started_at: null, trial_device_hash: null, max_active_devices: 1, lease_seconds: 0,
+    trial_started_at: null, trial_device_key_id: null, max_active_devices: 1, lease_seconds: 0,
     created_at: now, updated_at: now,
   };
   const previewRow = {
@@ -142,7 +141,7 @@ function projectionProbe() {
   };
   const assignmentRow = {
     license_id: "lic_probe", project: "DEFAULT", plan_id: "plan_probe", license_fingerprint: fingerprint,
-    customer_id: null, status: "active", support_until: null, addons_json: "[]", created_at: now, updated_at: now,
+    customer_id: "cus_probe", status: "active", support_until: null, addons_json: "[]", created_at: now, updated_at: now,
   };
   const catalogPlan = {
     id: "plan_probe", project: "DEFAULT", plan_key: "probe", name: "Probe", status: "active",
@@ -259,11 +258,10 @@ if connection.getlimit(sqlite3.SQLITE_LIMIT_FUNCTION_ARG) != 32:
     raise RuntimeError("failed to lower SQLITE_LIMIT_FUNCTION_ARG to 32")
 connection.executescript("""
 CREATE TABLE entitlements (
-  enforcement_mode TEXT,
   project TEXT, feature TEXT, license_fingerprint TEXT, status TEXT, revocation_seq INTEGER,
   valid_from INTEGER, valid_until INTEGER, notes TEXT, customer_id TEXT, license_id TEXT,
   policy_id TEXT, is_trial INTEGER, trial_expiration_basis TEXT, trial_duration_sec INTEGER,
-  trial_one_per_device INTEGER, trial_started_at INTEGER, trial_device_hash TEXT,
+  trial_one_per_device INTEGER, trial_started_at INTEGER, trial_device_key_id TEXT,
   max_active_devices INTEGER, lease_seconds INTEGER, created_at INTEGER, updated_at INTEGER
 );
 CREATE TABLE entitlement_events (

@@ -11,8 +11,8 @@ function fixture(t) {
   sql.function('unixepoch', () => now); sql.exec('PRAGMA foreign_keys=ON');
   sql.exec(readFileSync(new URL('../../schema.sql', import.meta.url), 'utf8'));
   sql.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('owner','Private customer',1,1);
-    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,created_at,updated_at)
-    VALUES('APP','PRO','fp','owner','active','device_bound_v1',1,1);
+    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,created_at,updated_at)
+    VALUES('APP','PRO','fp','owner','active',1,1);
     INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
     VALUES('device','owner','APP','key','private-key-identity',1,1);
     INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,hold_until,created_at,updated_at)

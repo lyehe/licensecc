@@ -5,7 +5,7 @@ export interface BoundTrialRow {
   trial_duration_sec: unknown;
   trial_one_per_device: unknown;
   trial_started_at: unknown;
-  trial_device_hash: unknown;
+  trial_device_key_id: unknown;
   valid_until: unknown;
 }
 

@@ -2,15 +2,13 @@ import { expect } from "@playwright/test";
 
 import { fillProtectedOwner, makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
-// Every grant is protected, so the console never reads a mode from the saved record: a reply that
-// names none still settles the create.
-test("protected creation settles on a saved record that names no mode", async ({ page }) => {
+// A create settles once the Worker returns the saved record.
+test("protected creation settles on the saved record", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.route("**/api/admin/entitlements", async route => {
     if (route.request().method() !== "POST") return route.fallback();
     const row = api.seed.entitlement(route.request().postDataJSON());
-    delete row.enforcement_mode;
     return route.fulfill({ contentType: "application/json", body: JSON.stringify(makeEnvelope("entitlement_saved", row)) });
   });
   await page.goto("/#/entitlements");
@@ -819,7 +817,7 @@ test("an operator edits a policy's device limit without touching its identity", 
 // refused with their count, in words.
 test("an operator sets a protected grant's device limit and is told how many devices block a lower one", async ({ page }) => {
   const api = makeAdminApiFixture();
-  api.seed.entitlement({ project: "APP", feature: "PRO", enforcement_mode: "device_bound_v1", customer_id: "cus_acme", license_id: "lic_acme", max_active_devices: 5 });
+  api.seed.entitlement({ project: "APP", feature: "PRO", customer_id: "cus_acme", license_id: "lic_acme", max_active_devices: 5 });
   api.behavior.devicesInUse = 3;
   await page.route("**/api/admin/**", api.route);
   await page.goto("/#/entitlements");

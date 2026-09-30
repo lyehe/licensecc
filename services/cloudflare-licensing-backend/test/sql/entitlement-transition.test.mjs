@@ -60,14 +60,14 @@ class D1Like {
   }
 }
 
-function freshDb({ entitlementStatus = "active", revocationSeq = 0, enforcementMode = "legacy" } = {}) {
+function freshDb({ entitlementStatus = "active", revocationSeq = 0 } = {}) {
   const db = new DatabaseSync(":memory:");
   for (const f of readdirSync(migrationsDir).filter((x) => x.endsWith(".sql")).sort()) {
     db.exec(readFileSync(join(migrationsDir, f), "utf8"));
   }
   db.exec(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, enforcement_mode, created_at, updated_at) " +
-      `VALUES ('DEFAULT', 'DEFAULT', '${FP}', '${entitlementStatus}', ${revocationSeq}, '${enforcementMode}', ${NOW}, ${NOW})`,
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, customer_id, created_at, updated_at) " +
+      `VALUES ('DEFAULT', 'DEFAULT', '${FP}', '${entitlementStatus}', ${revocationSeq}, 'cus_1', ${NOW}, ${NOW})`,
   );
   return db;
 }
@@ -79,9 +79,9 @@ function ctx(overrides = {}) {
     ip: "",
     idempotencyKey: null,
     source: "admin",
-    // Every scenario here reads a freshly seeded row (customer_id null, revocation_seq 0) before
+    // Every scenario here reads a freshly seeded row (customer_id cus_1, revocation_seq 0) before
     // any write, so the mandatory owner/revocation-sequence guard always matches that observed state.
-    expectedEntitlement: { customer_id: null, revocation_seq: 0 },
+    expectedEntitlement: { customer_id: "cus_1", revocation_seq: 0 },
     ...overrides,
   };
 }
@@ -261,7 +261,7 @@ test("real SQLite guards every other pre-read entitlement writer against a concu
       responseCode: "entitlement_saved",
       run: (env, idempotencyKey, idempotency) => createEntitlement(
         env,
-        { ...KEY, status: "active", notes: "stale-create" },
+        { ...KEY, status: "active", notes: "stale-create", customer_id: "cus_1" },
         ctx({ idempotencyKey }),
         "",
         undefined,
@@ -302,7 +302,7 @@ test("real SQLite guards every other pre-read entitlement writer against a concu
       responseCode: "entitlement_synced",
       run: (env, idempotencyKey, idempotency) => syncEntitlement(
         env,
-        { ...KEY, status: "active", notes: "stale-sync" },
+        { ...KEY, status: "active", notes: "stale-sync", customer_id: "cus_1" },
         "",
         ctx({ idempotencyKey, source: "sync" }),
         idempotency,
@@ -311,8 +311,7 @@ test("real SQLite guards every other pre-read entitlement writer against a concu
   ];
 
   for (const writer of writers) {
-    // createEntitlement writes only protected grants, so the row every writer pre-reads is protected.
-    const db = freshDb({ enforcementMode: "device_bound_v1" });
+    const db = freshDb();
     const idempotencyKey = `writer-loser-${writer.name}`;
     const idempotency = { scope: "test:writer-race", responseCode: writer.responseCode };
     const env = {

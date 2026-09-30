@@ -14,8 +14,8 @@ async function fixture(t, requestedFeature = null) {
   sql.exec(readFileSync(new URL("../../schema.sql",import.meta.url),"utf8"));
   const fingerprint="a".repeat(64),handle=boundRandomId(32),hash=await boundSecretHash(handle);
   sql.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('owner','Owner',1000,1000),('other','Other',1000,1000);
-    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,created_at,updated_at)
-    VALUES('APP','DEFAULT','${fingerprint}','owner','active','device_bound_v1',1000,1000);`);
+    INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,created_at,updated_at)
+    VALUES('APP','DEFAULT','${fingerprint}','owner','active',1000,1000);`);
   sql.prepare("INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,device_label,redirect_uri,client_state,pkce_challenge,requested_feature,created_at,expires_at) VALUES(?,'desktop','APP',?,'pinned-spki','Workstation','http://127.0.0.1:45678/callback',?,?,?,1000,1300)").run(hash,`sha256:${"b".repeat(64)}`,"A".repeat(43),"A".repeat(43),requestedFeature);
   class Statement {constructor(query,params=[]){this.query=query;this.params=params;}bind(...params){return new Statement(this.query,params);}async first(){before(this.query);return sql.prepare(this.query).get(...this.params)??null;}async all(){before(this.query);return {results:sql.prepare(this.query).all(...this.params)};}}
   const db={prepare:query=>new Statement(query),async batch(statements){
@@ -31,7 +31,7 @@ async function fixture(t, requestedFeature = null) {
 
 function seedPages(f,count){
   f.sql.exec("UPDATE entitlements SET status='disabled'");
-  const insert=f.sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,created_at,updated_at) VALUES('APP','DEFAULT',?,'owner','active','device_bound_v1',1000,1000)");
+  const insert=f.sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,created_at,updated_at) VALUES('APP','DEFAULT',?,'owner','active',1000,1000)");
   for(let i=1;i<=count;i++)insert.run((i*10).toString(16).padStart(64,"0"));
   return insert;
 }
@@ -57,13 +57,13 @@ test("trial consent reports timing and approves without starting or reserving a 
 test("started-trial consent uses its persisted deadline and rejects a different device key",async t=>{
   const f=await fixture(t);
   f.sql.prepare(`UPDATE entitlements SET is_trial=1,trial_expiration_basis='from_first_activation',trial_duration_sec=200,
-    trial_started_at=900,trial_device_hash=?,trial_one_per_device=1`).run(`sha256:${'b'.repeat(64)}`);
+    trial_started_at=900,trial_device_key_id=?,trial_one_per_device=1`).run(`sha256:${'b'.repeat(64)}`);
   const read=()=>inspectBoundAuthorization(f.db,'owner',f.input.attempt_handle,f.config);
   const first=await read();assert.equal(first.entitlements[0].valid_until,1100);
   assert.equal(first.entitlements[0].activation_trial_seconds,undefined);
   f.sql.exec('UPDATE entitlements SET valid_until=1050');
   assert.equal((await read()).entitlements[0].valid_until,1050);
-  f.sql.prepare('UPDATE entitlements SET trial_device_hash=?').run(`sha256:${'c'.repeat(64)}`);
+  f.sql.prepare('UPDATE entitlements SET trial_device_key_id=?').run(`sha256:${'c'.repeat(64)}`);
   assert.equal((await read()).entitlements.length,0);
   await assert.rejects(approveBoundAuthorization(f.db,'owner',f.input,f.config,f.ring),/access_denied/);
   f.sql.exec('UPDATE entitlements SET trial_one_per_device=0');
@@ -307,8 +307,8 @@ test("lost approval response recovers the committed callback without code or rev
 
 test("requested feature constrains consent, approval, recovery and immutable intent", async t => {
   const f = await fixture(t, "DEFAULT");
-  f.sql.exec(`INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,created_at,updated_at)
-    VALUES('APP','EXPORT','${"c".repeat(64)}','owner','active','device_bound_v1',1000,1000)`);
+  f.sql.exec(`INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,created_at,updated_at)
+    VALUES('APP','EXPORT','${"c".repeat(64)}','owner','active',1000,1000)`);
   const page = await inspectBoundAuthorization(f.db, "owner", f.input.attempt_handle, f.config);
   assert.deepEqual(page.entitlements.map(row => row.feature), ["DEFAULT"]);
   const otherId = Buffer.from(JSON.stringify(["APP", "EXPORT", "c".repeat(64)])).toString("base64url");
@@ -356,8 +356,8 @@ test("consent page counts occupied device slots, expires a retiring hold's count
 
 test("consent page flags a device that already holds an active binding for this exact license, not a retiring or different-license one",async t=>{
   const f=await fixture(t),fp="a".repeat(64),otherFp="e".repeat(64),selfKey=`sha256:${"b".repeat(64)}`;
-  f.sql.exec(`INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,created_at,updated_at)
-      VALUES('APP','EXPORT','${otherFp}','owner','active','device_bound_v1',1000,1000);
+  f.sql.exec(`INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,created_at,updated_at)
+      VALUES('APP','EXPORT','${otherFp}','owner','active',1000,1000);
     INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
       VALUES('device-self','owner','APP','${selfKey}','spki-self',1000,1000),
         ('device-other','owner','APP','sha256:${"c".repeat(64)}','spki-other',1000,1000);`);

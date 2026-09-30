@@ -30,38 +30,22 @@ test("entitlement routes have direct owners and reject anonymous access", async 
   await assertRouteGroupRejectsUnauthenticated("entitlements");
 });
 
-// Every create is protected, so a body cannot name a mode at all, not even the protected one.
-test("admin create with an enforcement_mode key is refused", async () => {
-  const { env, request } = protectedCreateFixture();
-  const body = { project: "APP", feature: "PRO", license_fingerprint: "c".repeat(64), customer_id: "cus_1", license_id: "lic_1" };
-  for (const mode of ["device_bound_v1", "legacy", "", null]) {
-    for (const create of [{ ...body, enforcement_mode: mode }, { ...body, policy_id: "pol_1", enforcement_mode: mode }]) {
-      const response = await request("/api/admin/entitlements", create);
-      assert.equal(response.status, 400, JSON.stringify(create));
-      assert.equal((await response.json()).code, "invalid_request", JSON.stringify(create));
-    }
-  }
-  assert.equal(env.DB.entitlements.size, 0);
-  assert.equal(env.DB.events.length, 0);
-});
-
-test("admin create without enforcement_mode creates a protected grant", async () => {
+test("admin create creates a grant owned by its customer", async () => {
   const { env, request } = protectedCreateFixture();
   const body = { project: "APP", feature: "PRO", license_fingerprint: "c".repeat(64), customer_id: "cus_1", license_id: "lic_1" };
   const response = await request("/api/admin/entitlements", body);
   assert.equal(response.status, 200);
   const { data } = await response.json();
-  assert.equal(data.enforcement_mode, "device_bound_v1");
   assert.equal(data.customer_id, "cus_1");
   assert.equal(data.license_id, "lic_1");
   assert.equal(env.DB.entitlements.size, 1);
   assert.equal(env.DB.events.length, 1);
 });
 
-// A create reads exactly its grant fields, its mode, and a policy or its own device limit. A body
+// A create reads exactly its grant fields and a policy or its own device limit. A body
 // naming anything else (a column no request writes, a column the schema no longer has, or a typo)
 // is refused whole, so a caller never believes a field it sent took effect.
-const UNREAD_FIELDS = ["revocation_seq", "authority_revision", "lease_seconds", "trial_started_at", "trial_device_hash",
+const UNREAD_FIELDS = ["revocation_seq", "authority_revision", "lease_seconds", "trial_started_at", "trial_device_key_id",
   "license_mode", "id", "seats", "hash", "ttl_seconds", "unknown_field"];
 
 test("admin create refuses a body naming any field a create does not read", async () => {
@@ -110,7 +94,7 @@ test("PATCH, disable, reenable and revoke each refuse a missing precondition bef
 });
 
 // A PATCH reads exactly its patch fields, the device limit and the precondition; anything else,
-// including the grant's identity, status and mode, is refused whole and writes nothing.
+// including the grant's identity and status, is refused whole and writes nothing.
 test("PATCH refuses a body naming any field a PATCH does not read", async () => {
   const { env, request } = protectedCreateFixture();
   const created = await request("/api/admin/entitlements", protectedGrant);
@@ -118,7 +102,7 @@ test("PATCH refuses a body naming any field a PATCH does not read", async () => 
   const { id, customer_id: customerId, revocation_seq: revocationSeq } = (await created.json()).data;
   const key = keyOf(protectedGrant.project, protectedGrant.feature, protectedGrant.license_fingerprint);
   const before = clone(env.DB.entitlements.get(key));
-  for (const field of [...UNREAD_FIELDS, "project", "feature", "license_fingerprint", "status", "enforcement_mode", "policy_id"]) {
+  for (const field of [...UNREAD_FIELDS, "project", "feature", "license_fingerprint", "status", "policy_id"]) {
     for (const extra of [{}, { notes: "with an unread field" }, { max_active_devices: 2 }]) {
       const body = { ...extra, [field]: "d".repeat(64), expected_customer_id: customerId, expected_revocation_seq: revocationSeq };
       const patched = await worker.fetch(authed(`/api/admin/entitlements/${id}`, { method: "PATCH", body: JSON.stringify(body) }), env);
@@ -242,7 +226,6 @@ test("admin upsert increments the stored revocation sequence", async () => {
   const env = baseEnv(db);
   const key = keyOf("APP", "PRO", fingerprint);
   db.entitlements.set(key, {
-    enforcement_mode: "device_bound_v1",
     project: "APP",
     feature: "PRO",
     license_fingerprint: fingerprint,
@@ -429,7 +412,6 @@ test("audit next_json carries the full production json_object field set", async 
   // The audit snapshot and the API response describe the same record.
   assert.deepEqual(Object.keys(next).sort(), Object.keys(saved).sort());
   assert.equal(next.id, saved.id);
-  assert.equal(next.enforcement_mode, "device_bound_v1");
   assert.equal(next.customer_id, "cus_1");
   assert.equal(next.license_id, "lic_1");
   assert.equal(db.events[0].prev_json, ""); // prev was null on create

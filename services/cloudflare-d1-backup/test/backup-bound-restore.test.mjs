@@ -17,8 +17,8 @@ test("local D1 SQL export restores protected holds and enforcement without lease
     d1_databases: [{ binding: "DB", database_name: database, database_id: "00000000-0000-0000-0000-000000000001" }] }));
   const seed = `
     INSERT INTO customers(id,name,created_at,updated_at) VALUES('owner','Synthetic owner',1,1);
-    INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,max_active_devices,enforcement_mode,created_at,updated_at)
-      VALUES('APP','PRO','fingerprint','active','owner',2,'device_bound_v1',1,1);
+    INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,max_active_devices,created_at,updated_at)
+      VALUES('APP','PRO','fingerprint','active','owner',2,1,1);
     INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at) VALUES
       ('device-a','owner','APP','key-a','synthetic-public-a',1,1),
       ('device-b','owner','APP','key-b','synthetic-public-b',1,1);

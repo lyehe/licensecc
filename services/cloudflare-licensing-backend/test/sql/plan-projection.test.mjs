@@ -287,8 +287,8 @@ for (const state of ["active", "retiring"]) {
     const db = freshDb(); t.after(() => db.close()); seedCatalog(db);
     db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_1','Customer',1,1);
       INSERT INTO licenses(id,customer_id,project,label,created_at,updated_at) VALUES('lic_1','cus_1','DEFAULT','License',1,1);
-      INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,enforcement_mode,max_active_devices,created_at,updated_at)
-        VALUES('DEFAULT','export','${FP}','active','cus_1','lic_1','device_bound_v1',1,1,1);
+      INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,max_active_devices,created_at,updated_at)
+        VALUES('DEFAULT','export','${FP}','active','cus_1','lic_1',1,1,1);
       INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
         VALUES('device','cus_1','DEFAULT','key','synthetic-public',1,1);
       INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,generation,revision,hold_until,created_at,updated_at)
@@ -307,16 +307,15 @@ for (const state of ["active", "retiring"]) {
     db.exec("UPDATE entitlement_policies SET max_active_devices=2 WHERE id='pol_node'");
     const replacement = await previewPlanProjection(env, input, "admin", NOW + 2);
     await applyPlanProjection(env, replacement.preview_id, ctx({ idempotencyKey: "protected-success" }), mutation, NOW + 3);
-    const protectedRow = db.prepare("SELECT enforcement_mode,customer_id,max_active_devices,authority_revision FROM entitlements WHERE feature='export'").get();
-    assert.equal(protectedRow.enforcement_mode, "device_bound_v1");
+    const protectedRow = db.prepare("SELECT customer_id,max_active_devices,authority_revision FROM entitlements WHERE feature='export'").get();
     assert.equal(protectedRow.customer_id, "cus_1");
     assert.equal(protectedRow.max_active_devices, 2);
     assert.ok(protectedRow.authority_revision > before[0][0].authority_revision);
     assert.deepEqual(snapshot()[1], before[1]);
-    // Both the updated grant with connected devices and the created one stay protected and issuable.
-    assert.deepEqual(db.prepare("SELECT feature,enforcement_mode FROM entitlements ORDER BY feature").all().map((row) => ({ ...row })), [
-      { feature: "core", enforcement_mode: "device_bound_v1" },
-      { feature: "export", enforcement_mode: "device_bound_v1" },
+    // Both the updated grant with connected devices and the created one belong to the projection's customer.
+    assert.deepEqual(db.prepare("SELECT feature,customer_id FROM entitlements ORDER BY feature").all().map((row) => ({ ...row })), [
+      { feature: "core", customer_id: "cus_1" },
+      { feature: "export", customer_id: "cus_1" },
     ]);
     assert.equal(db.prepare("SELECT count(*) AS n FROM mutation_idempotency").get().n, 1);
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
@@ -324,20 +323,19 @@ for (const state of ["active", "retiring"]) {
 }
 
 // The authority read the protected issuer makes before it signs (bound_issue.mjs): an active grant
-// of an active customer, inside its validity window, in the protected mode.
+// of an active customer, inside its validity window.
 const PROTECTED_AUTHORITY_SQL = `SELECT e.feature FROM entitlements e JOIN customers c ON c.id = e.customer_id
   WHERE e.project = ? AND e.feature = ? AND e.license_fingerprint = ? AND e.customer_id = ?
     AND e.status = 'active' AND c.status = 'active'
-    AND (e.valid_from IS NULL OR e.valid_from <= ?) AND (e.valid_until IS NULL OR e.valid_until > ?)
-    AND e.enforcement_mode = 'device_bound_v1'`;
+    AND (e.valid_from IS NULL OR e.valid_from <= ?) AND (e.valid_until IS NULL OR e.valid_until > ?)`;
 
 test("plan apply keeps a protected grant issuable", async (t) => {
   const db = freshDb(); t.after(() => db.close()); seedCatalog(db);
   // A catalog row over an existing protected grant.
   db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_1','Customer',1,1);
     INSERT INTO licenses(id,customer_id,project,label,created_at,updated_at) VALUES('lic_1','cus_1','DEFAULT','License',1,1);
-    INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,enforcement_mode,max_active_devices,created_at,updated_at)
-      VALUES('DEFAULT','vault','${FP}','active','cus_1','lic_1','device_bound_v1',1,1,1);
+    INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,max_active_devices,created_at,updated_at)
+      VALUES('DEFAULT','vault','${FP}','active','cus_1','lic_1',1,1,1);
     INSERT INTO catalog_features(id,project,feature_key,name,description,category,status,created_at,updated_at)
       VALUES('feat_vault','DEFAULT','vault','Vault','','','active',${NOW},${NOW});
     INSERT INTO catalog_plan_features(project,plan_id,feature_key,feature_inclusion,addon_key,policy_id,status,display_order,
@@ -348,9 +346,9 @@ test("plan apply keeps a protected grant issuable", async (t) => {
   assert.deepEqual(preview.will_update.map((row) => row.feature), ["vault"]);
   await applyPlanProjection(env, preview.preview_id, ctx(), null, NOW);
 
-  const row = db.prepare(`SELECT enforcement_mode, policy_id
+  const row = db.prepare(`SELECT customer_id, policy_id
     FROM entitlements WHERE project = 'DEFAULT' AND feature = 'vault' AND license_fingerprint = ?`).get(FP);
-  assert.deepEqual({ ...row }, { enforcement_mode: "device_bound_v1", policy_id: "pol_node" });
+  assert.deepEqual({ ...row }, { customer_id: "cus_1", policy_id: "pol_node" });
   assert.deepEqual(db.prepare(PROTECTED_AUTHORITY_SQL).all("DEFAULT", "vault", FP, "cus_1", NOW + 1, NOW + 1).map((found) => found.feature), ["vault"]);
 });
 
@@ -362,9 +360,9 @@ test("plan apply creates protected rows", async (t) => {
   await applyPlanProjection(env, preview.preview_id, ctx(), null, NOW);
 
   const protectedRow = (feature, maxActiveDevices) => ({
-    feature, enforcement_mode: "device_bound_v1", max_active_devices: maxActiveDevices, lease_seconds: 2592000,
+    feature, customer_id: "cus_1", max_active_devices: maxActiveDevices, lease_seconds: 86400,
   });
-  const rows = db.prepare(`SELECT feature, enforcement_mode, max_active_devices, lease_seconds
+  const rows = db.prepare(`SELECT feature, customer_id, max_active_devices, lease_seconds
     FROM entitlements WHERE license_fingerprint = ? ORDER BY feature`).all(FP);
   // The plan row's device limit override is the one capacity a protected grant takes from the catalog.
   assert.deepEqual(rows.map((row) => ({ ...row })), [protectedRow("core", 1), protectedRow("export", 1), protectedRow("team", 7)]);
@@ -499,7 +497,7 @@ test("current-version projection snapshots persist and apply normally", async ()
   assert.equal(applied.applied.created.length, 1);
   // Plan apply never writes the lease length: a created grant keeps the column default.
   const core = db.prepare("SELECT lease_seconds FROM entitlements WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").get(FP);
-  assert.deepEqual({ ...core }, { lease_seconds: 2592000 });
+  assert.deepEqual({ ...core }, { lease_seconds: 86400 });
 });
 
 test("a parent-format unchanged preview fails closed before any projection write", async () => {
@@ -707,7 +705,7 @@ test("every conservative source dependency mutation invalidates a persisted proj
     ["catalog plan", (db) => db.prepare("UPDATE catalog_plans SET description = description WHERE id = 'plan_pro'").run()],
     ["catalog plan feature", (db) => db.prepare("UPDATE catalog_plan_features SET display_order = display_order WHERE plan_id = 'plan_pro' AND feature_key = 'core'").run()],
     ["policy", (db) => db.prepare("UPDATE entitlement_policies SET notes = notes WHERE id = 'pol_node'").run()],
-    ["managed entitlement source", (db) => db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, created_at, updated_at) VALUES ('DEFAULT', 'side', ?, 'active', ?, ?)").run("a".repeat(64), NOW, NOW)],
+    ["managed entitlement source", (db) => db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, created_at, updated_at) VALUES ('DEFAULT', 'side', ?, 'active', 'cus_1', ?, ?)").run("a".repeat(64), NOW, NOW)],
     ["assignment source", (db) => db.prepare("INSERT INTO license_plan_assignments (license_id, project, plan_id, license_fingerprint, customer_id, status, support_until, addons_json, created_at, updated_at) VALUES ('lic_other', 'DEFAULT', 'plan_pro', ?, NULL, 'active', NULL, '[]', ?, ?)").run("d".repeat(64), NOW, NOW)],
   ];
 
@@ -778,7 +776,7 @@ test("a differing existing assignment fingerprint rejects Preview without touchi
   const db = freshDb();
   seedCatalog(db);
   const oldFingerprint = "e".repeat(64);
-  db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', 'core', ?, 'active', 'lic_1', ?, ?)").run(oldFingerprint, NOW, NOW);
+  db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'core', ?, 'active', 'cus_old', 'lic_1', ?, ?)").run(oldFingerprint, NOW, NOW);
   db.prepare("INSERT INTO license_plan_assignments (license_id, project, plan_id, license_fingerprint, customer_id, status, support_until, addons_json, created_at, updated_at) VALUES ('lic_1', 'DEFAULT', 'plan_basic', ?, 'cus_old', 'active', NULL, '[]', ?, ?)").run(oldFingerprint, NOW, NOW);
   const env = { DB: new D1Like(db) };
   const before = {
@@ -804,7 +802,7 @@ test("a legacy entitlement identity conflict without an assignment rejects Previ
   const env = { DB: new D1Like(db) };
   const oldFingerprint = "1".repeat(64);
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', 'legacy_unmanaged', ?, 'active', 'lic_1', ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'legacy_unmanaged', ?, 'active', 'cus_1', 'lic_1', ?, ?)",
   ).run(oldFingerprint, NOW, NOW);
 
   await assert.rejects(
@@ -825,7 +823,7 @@ test("the legacy entitlement identity fence is status-independent", async () => 
     seedCatalog(db);
     const env = { DB: new D1Like(db) };
     db.prepare(
-      "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', 'legacy_status', ?, ?, 'lic_1', ?, ?)",
+      "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'legacy_status', ?, ?, 'cus_1', 'lic_1', ?, ?)",
     ).run(status === "disabled" ? "5".repeat(64) : "6".repeat(64), status, NOW, NOW);
     await assert.rejects(
       () => previewPlanProjection(env, projectionInput(), "admin", NOW),
@@ -841,16 +839,16 @@ test("same-fingerprint legacy features and null or empty legacy license ids rema
   seedCatalog(db);
   const env = { DB: new D1Like(db) };
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', ?, ?, 'active', ?, ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', ?, ?, 'active', 'cus_1', ?, ?, ?)",
   ).run("legacy_same_a", FP, "lic_1", NOW, NOW);
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', ?, ?, 'active', ?, ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', ?, ?, 'active', 'cus_1', ?, ?, ?)",
   ).run("legacy_same_b", FP, "lic_1", NOW, NOW);
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', ?, ?, 'active', NULL, ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', ?, ?, 'active', 'cus_1', NULL, ?, ?)",
   ).run("legacy_null", "2".repeat(64), NOW, NOW);
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', ?, ?, 'active', '', ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', ?, ?, 'active', 'cus_1', '', ?, ?)",
   ).run("legacy_empty", "3".repeat(64), NOW, NOW);
 
   const preview = await previewPlanProjection(env, projectionInput(), "admin", NOW);
@@ -867,7 +865,7 @@ test("the final in-batch claim rejects an assignment fingerprint conflict with z
   const env = { DB: new D1Like(db) };
   const preview = await previewPlanProjection(env, projectionInput(), "admin", NOW);
   const oldFingerprint = "f".repeat(64);
-  db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', 'core', ?, 'active', 'lic_1', ?, ?)").run(oldFingerprint, NOW, NOW);
+  db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'core', ?, 'active', 'cus_old', 'lic_1', ?, ?)").run(oldFingerprint, NOW, NOW);
   db.prepare("INSERT INTO license_plan_assignments (license_id, project, plan_id, license_fingerprint, customer_id, status, support_until, addons_json, created_at, updated_at) VALUES ('lic_1', 'DEFAULT', 'plan_basic', ?, 'cus_old', 'active', NULL, '[]', ?, ?)").run(oldFingerprint, NOW, NOW);
   const beforeAssignment = db.prepare("SELECT plan_id, license_fingerprint, customer_id, support_until, addons_json FROM license_plan_assignments WHERE license_id = 'lic_1' AND project = 'DEFAULT'").get();
   const beforeEvents = db.prepare("SELECT COUNT(*) AS c FROM entitlement_events").get().c;
@@ -892,7 +890,7 @@ test("the final in-batch claim rejects a post-Preview legacy entitlement identit
   const preview = await previewPlanProjection(env, projectionInput(), "admin", NOW);
   const oldFingerprint = "4".repeat(64);
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', 'legacy_race', ?, 'active', 'lic_1', ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'legacy_race', ?, 'active', 'cus_1', 'lic_1', ?, ?)",
   ).run(oldFingerprint, NOW, NOW);
   const mutation = { scope: "POST:/api/admin/license-plans/apply:admin", responseCode: "license_plan_projection_applied" };
 

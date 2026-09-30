@@ -12,9 +12,9 @@ export function boundTrialState(row, provenKeyId, now, allowUnstarted = true) {
   if (row.is_trial !== 1 || !safeTime(now) || !keyId(provenKeyId)
       || ![0, 1].includes(row.trial_one_per_device)) return null;
   const pending = row.trial_started_at === null;
-  if (pending ? (!allowUnstarted || row.trial_device_hash !== null)
-    : (!safeTime(row.trial_started_at) || row.trial_started_at > now || !keyId(row.trial_device_hash))) return null;
-  if (!pending && row.trial_one_per_device === 1 && row.trial_device_hash !== provenKeyId) return null;
+  if (pending ? (!allowUnstarted || row.trial_device_key_id !== null)
+    : (!safeTime(row.trial_started_at) || row.trial_started_at > now || !keyId(row.trial_device_key_id))) return null;
+  if (!pending && row.trial_one_per_device === 1 && row.trial_device_key_id !== provenKeyId) return null;
   let expiresAt;
   if (row.trial_expiration_basis === "from_issue") {
     expiresAt = row.valid_until;
@@ -30,16 +30,16 @@ export function boundTrialState(row, provenKeyId, now, allowUnstarted = true) {
 // Arguments are owner-controlled SQL identifiers/expressions, not request data.
 // Keep this predicate aligned with boundTrialState; SQL is final authority.
 export function boundTrialSql(e, provenKey, now = "unixepoch()", allowUnstarted = true) {
-  const started = `${e}.trial_started_at`, hash = `${e}.trial_device_hash`;
+  const started = `${e}.trial_started_at`, lockedKey = `${e}.trial_device_key_id`;
   return `(${e}.is_trial=0 OR (${e}.is_trial=1
     AND length(${provenKey})=71 AND length(CAST(${provenKey} AS BLOB))=71 AND substr(${provenKey},1,7)='sha256:'
     AND substr(${provenKey},8) NOT GLOB '*[^0-9a-f]*'
     AND ${e}.trial_one_per_device IN (0,1)
-    AND ((${allowUnstarted ? "1" : "0"}=1 AND ${started} IS NULL AND ${hash} IS NULL)
+    AND ((${allowUnstarted ? "1" : "0"}=1 AND ${started} IS NULL AND ${lockedKey} IS NULL)
       OR (typeof(${started})='integer' AND ${started} BETWEEN 0 AND ${now}
-        AND length(${hash})=71 AND length(CAST(${hash} AS BLOB))=71 AND substr(${hash},1,7)='sha256:'
-        AND substr(${hash},8) NOT GLOB '*[^0-9a-f]*'
-        AND (${e}.trial_one_per_device=0 OR ${hash}=${provenKey})))
+        AND length(${lockedKey})=71 AND length(CAST(${lockedKey} AS BLOB))=71 AND substr(${lockedKey},1,7)='sha256:'
+        AND substr(${lockedKey},8) NOT GLOB '*[^0-9a-f]*'
+        AND (${e}.trial_one_per_device=0 OR ${lockedKey}=${provenKey})))
     AND ((${e}.trial_expiration_basis='from_issue' AND typeof(${e}.valid_until)='integer'
         AND ${e}.valid_until BETWEEN 0 AND 9007199254740991 AND ${e}.valid_until>${now})
       OR (${e}.trial_expiration_basis IN ('from_first_activation','from_first_use')

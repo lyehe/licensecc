@@ -217,7 +217,6 @@ test("the providers envelope documents its nullable support contact", () => {
 test("the entitlements envelope documents each row's nullable trial end and its activation flag", () => {
   const data = openApiDocument.paths["/api/portal/entitlements"].get.responses["200"].content["application/json"].schema.properties.data;
   const row = data.properties.items.items;
-  assert.equal(row.properties.enforcement_mode, undefined, "every listed grant is protected, so a row names no mode");
   assert.deepEqual(row.properties.trial_ends_at?.type, ["integer", "null"]);
   const description = row.properties.trial_ends_at.description;
   assert.match(description, /protected-device trial rule that enforces/, "the end follows the protected-device trial rule that enforces every row");

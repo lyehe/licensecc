@@ -253,8 +253,8 @@ for (const state of ["active", "retiring"]) {
     const rejected = makeOrder({ seq: 1, intent: "quantity.changed", quantity: { max_active_devices: 0 } });
     const fingerprint = await fpOf(rejected);
     db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_order','Owner',1,1);
-      INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,enforcement_mode,max_active_devices,created_at,updated_at)
-        VALUES('${PROJECT}','${FEATURE}','${fingerprint}','active','cus_order','device_bound_v1',1,1,1);
+      INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,max_active_devices,created_at,updated_at)
+        VALUES('${PROJECT}','${FEATURE}','${fingerprint}','active','cus_order',1,1,1);
       INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
         VALUES('device','cus_order','${PROJECT}','key','synthetic-public',1,1);
       INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,generation,revision,hold_until,created_at,updated_at)
@@ -273,7 +273,6 @@ for (const state of ["active", "retiring"]) {
     const applied = await submit(env, permitted, { now: NOW + 2 });
     assert.equal(applied.status, 200); assert.equal(applied.body.code, "applied");
     const row = entRow(db, fingerprint);
-    assert.equal(row.enforcement_mode, "device_bound_v1");
     assert.equal(row.customer_id, "cus_order");
     assert.equal(row.max_active_devices, 2);
     assert.equal(row.authority_revision, 1);
@@ -321,7 +320,6 @@ test("an order creates a protected grant owned by its customer", async (t) => {
   assert.equal(status, 200);
   assert.equal(body.code, "applied");
   const row = entRow(db, fp);
-  assert.equal(row.enforcement_mode, "device_bound_v1");
   assert.equal(row.customer_id, "cus_order");
   assert.equal(row.max_active_devices, 3);
   assert.equal(row.status, "active");
@@ -329,7 +327,6 @@ test("an order creates a protected grant owned by its customer", async (t) => {
   const refresh = makeOrder({ seq: 2, event_id: "evt_refresh", customer: { id: "cus_order" } });
   assert.equal((await submit(env, refresh)).body.code, "applied");
   const refreshed = entRow(db, fp);
-  assert.equal(refreshed.enforcement_mode, "device_bound_v1");
   assert.equal(refreshed.customer_id, "cus_order");
   assert.equal(refreshed.max_active_devices, 3, "a refresh without quantity keeps the device limit");
 });
@@ -1259,7 +1256,6 @@ test("case 15: a renew names its customer and carries an omitted license forward
   assert.equal((await submit(env, renew)).body.code, "applied");
   assert.equal(entRow(db, fp).customer_id, "cus_1");
   assert.equal(entRow(db, fp).license_id, "lic_1", "license_id carried forward");
-  assert.equal(entRow(db, fp).enforcement_mode, "device_bound_v1");
 
   // The customer email was normalized (trim + lowercase) at upsert time.
   const cust = db.prepare("SELECT email FROM customers WHERE id = 'cus_1'").get();
@@ -1410,11 +1406,11 @@ const OTHER_INTENTS = [
   ["chargeback", {}],
 ];
 
-// An operator-made grant at FOREIGN_FP, owned by `owner` (NULL for an unowned grant).
+// An operator-made grant at FOREIGN_FP, owned by `owner`.
 function seedGrant(db, owner) {
   db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_B','B',1,1);
-    INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,enforcement_mode,max_active_devices,notes,created_at,updated_at)
-      VALUES('${PROJECT}','${FEATURE}','${FOREIGN_FP}','active',${owner === null ? "NULL" : `'${owner}'`},'device_bound_v1',2,'operator grant',1,1);`);
+    INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,max_active_devices,notes,created_at,updated_at)
+      VALUES('${PROJECT}','${FEATURE}','${FOREIGN_FP}','active','${owner}',2,'operator grant',1,1);`);
 }
 
 function orderState(db) {
@@ -1447,18 +1443,6 @@ test("a signer scoped to customer A cannot revoke or change customer B's grant w
     assert.deepEqual(orderState(db), before, `${intent} writes nothing`);
   }
   assert.equal(entRow(db, FOREIGN_FP).status, "active");
-});
-
-test("a grant with no owner refuses every order", async (t) => {
-  const { db, env } = freshEnv(); t.after(() => db.close());
-  seedGrant(db, null);
-  const before = orderState(db);
-  for (const [seq, [intent, extra]] of [["subscription.active", {}], ...OTHER_INTENTS].entries()) {
-    const order = wireOrder({ event_id: `evt_${intent}`, seq: seq + 1, intent, customer: { id: "cus_A" }, license_fingerprint: FOREIGN_FP, ...extra });
-    assertOwnerRefusal(await ingest(env, order), intent);
-  }
-  assert.deepEqual(orderState(db), before);
-  assert.equal(entRow(db, FOREIGN_FP).customer_id, null);
 });
 
 test("after an admin reassigns a grant, orders naming the old customer are refused instead of moving it back", async (t) => {
@@ -1556,7 +1540,6 @@ test("a same-customer order on its own grant still works and never changes the o
     const row = entRow(db, FOREIGN_FP);
     assert.equal(row.status, status, intent);
     assert.equal(row.customer_id, "cus_A", intent);
-    assert.equal(row.enforcement_mode, "device_bound_v1", intent);
   }
 });
 
@@ -1568,8 +1551,8 @@ test("a same-customer order on its own grant still works and never changes the o
 async function operatorGrantAndOrder(db, env, order) {
   const fp = await fpOf(order);
   db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_order','Owner',1,1);
-    INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,enforcement_mode,max_active_devices,notes,created_at,updated_at)
-      VALUES('${PROJECT}','${FEATURE}','${fp}','active','cus_order','device_bound_v1',2,'operator grant',1,1);`);
+    INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,max_active_devices,notes,created_at,updated_at)
+      VALUES('${PROJECT}','${FEATURE}','${fp}','active','cus_order',2,'operator grant',1,1);`);
   return fp;
 }
 
@@ -1612,7 +1595,6 @@ test("a first subscription.active at seq 0 refreshes the same customer's operato
   assert.equal(row.license_id, "lic_order");
   assert.equal(row.customer_id, "cus_order", "the owner is unchanged");
   assert.equal(row.notes, "operator grant", "the operator's notes are kept");
-  assert.equal(row.enforcement_mode, "device_bound_v1");
   assert.equal(row.last_applied_order_seq, 0);
   assert.deepEqual(auditRows(db, order.event_id), [{ event_type: "update", status: "active" }]);
 

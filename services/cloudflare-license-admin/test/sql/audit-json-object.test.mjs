@@ -20,7 +20,6 @@ const migrationsDir = join(here, "..", "..", "..", "cloudflare-licensing-backend
 
 // The audit payload contract: the exact keys the production json_object emits (+ no others).
 const NEXT_JSON_KEYS = [
-  "enforcement_mode",
   "project",
   "feature",
   "license_fingerprint",
@@ -37,7 +36,7 @@ const NEXT_JSON_KEYS = [
   "trial_duration_sec",
   "trial_one_per_device",
   "trial_started_at",
-  "trial_device_hash",
+  "trial_device_key_id",
   "max_active_devices",
   "lease_seconds",
   "license_mode",
@@ -66,8 +65,8 @@ test("real SQLite json_object emits exactly the audit contract keys with preserv
   db.exec(
     "INSERT INTO entitlements (project, feature, license_fingerprint, status, " +
       "max_active_devices, lease_seconds, revocation_seq, valid_from, valid_until, notes, " +
-      "customer_id, license_id, created_at, updated_at, enforcement_mode) VALUES " +
-      "('DEFAULT', 'DEFAULT', 'fp', 'active', 3, 321, 5, NULL, NULL, 'note', NULL, NULL, 1000, 2000, 'device_bound_v1')",
+      "customer_id, license_id, created_at, updated_at) VALUES " +
+      "('DEFAULT', 'DEFAULT', 'fp', 'active', 3, 321, 5, NULL, NULL, 'note', 'cus_audit', NULL, 1000, 2000)",
   );
   const expr = productionJsonObjectExpression();
   const { next_json: nextJson } = db
@@ -78,7 +77,6 @@ test("real SQLite json_object emits exactly the audit contract keys with preserv
   const next = JSON.parse(nextJson);
 
   assert.deepEqual(Object.keys(next).sort(), [...NEXT_JSON_KEYS].sort());
-  assert.equal(next.enforcement_mode, "device_bound_v1");
   // Numbers must stay numbers (not stringified) so audit consumers and idempotency replay see the real types.
   assert.equal(typeof next.max_active_devices, "number");
   assert.equal(next.max_active_devices, 3);
@@ -90,8 +88,8 @@ test("real SQLite json_object emits exactly the audit contract keys with preserv
   // NULL columns must stay JSON null, not "" or absent.
   assert.equal(next.valid_from, null);
   assert.equal(next.valid_until, null);
-  assert.equal(next.customer_id, null);
   assert.equal(next.license_id, null);
+  assert.equal(next.customer_id, "cus_audit");
   assert.equal(next.id, "test-id");
   db.close();
 });
@@ -100,8 +98,8 @@ test("a failing audit insert rolls back the entitlement write transactionally", 
   const db = freshDb();
   db.exec(
     "INSERT INTO entitlements (project, feature, license_fingerprint, status, " +
-      "revocation_seq, created_at, updated_at) VALUES " +
-      "('DEFAULT', 'DEFAULT', 'fp', 'active', 5, 1000, 1000)",
+      "revocation_seq, customer_id, created_at, updated_at) VALUES " +
+      "('DEFAULT', 'DEFAULT', 'fp', 'active', 5, 'cus_audit', 1000, 1000)",
   );
   // Model the production D1 batch() contract: the entitlement write and audit event are one transaction.
   let threw = false;

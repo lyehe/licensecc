@@ -30,8 +30,8 @@ test("the occupancy predicate is built only for an SQL alias", () => {
 
 test("a create's own device limit is written only beside the create's claimed row", () => {
   const sql = new DatabaseSync(":memory:");
-  sql.exec(`CREATE TABLE entitlements(project TEXT, feature TEXT, license_fingerprint TEXT, max_active_devices INTEGER NOT NULL DEFAULT 1,
-    PRIMARY KEY(project, feature, license_fingerprint))`);
+  sql.exec(`CREATE TABLE entitlements(project TEXT, feature TEXT, license_fingerprint TEXT, customer_id TEXT NOT NULL,
+    max_active_devices INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(project, feature, license_fingerprint))`);
   const env = { DB: { prepare: (query) => ({ bind: (...args) => ({ query, args }) }) } };
   const key = { project: "APP", feature: "PRO", license_fingerprint: "f".repeat(64) };
   const limit = (value) => buildDeviceLimitStatement(env, key, value);
@@ -40,7 +40,7 @@ test("a create's own device limit is written only beside the create's claimed ro
   const claimed = limit(3);
   assert.deepEqual(claimed.args, [3, key.project, key.feature, key.license_fingerprint]);
   assert.match(claimed.query, /\bchanges\(\) = 1\b/);
-  sql.prepare("INSERT INTO entitlements(project, feature, license_fingerprint) VALUES (?, ?, ?)").run(key.project, key.feature, key.license_fingerprint);
+  sql.prepare("INSERT INTO entitlements(project, feature, license_fingerprint, customer_id) VALUES (?, ?, ?, 'cus_1')").run(key.project, key.feature, key.license_fingerprint);
   sql.prepare(claimed.query).run(...claimed.args);
   assert.equal(stored(), 3);
 

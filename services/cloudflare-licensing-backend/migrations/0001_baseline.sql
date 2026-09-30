@@ -255,10 +255,10 @@ CREATE TABLE IF NOT EXISTS entitlements (
   valid_from INTEGER NULL,
   valid_until INTEGER NULL,
   notes TEXT NOT NULL DEFAULT '',
-  customer_id TEXT NULL,
+  customer_id TEXT NOT NULL,
   license_id TEXT NULL,
   max_active_devices INTEGER NOT NULL DEFAULT 1,
-  lease_seconds INTEGER NOT NULL DEFAULT 2592000,
+  lease_seconds INTEGER NOT NULL DEFAULT 86400,
   last_applied_order_seq INTEGER NOT NULL DEFAULT -1,
   last_applied_order_epoch INTEGER NOT NULL DEFAULT 0,
   policy_id TEXT NULL,
@@ -267,8 +267,7 @@ CREATE TABLE IF NOT EXISTS entitlements (
   trial_duration_sec INTEGER NOT NULL DEFAULT 0,
   trial_one_per_device INTEGER NOT NULL DEFAULT 0,
   trial_started_at INTEGER NULL,
-  trial_device_hash TEXT NULL,
-  enforcement_mode TEXT NOT NULL DEFAULT 'device_bound_v1' CHECK (enforcement_mode IN ('legacy', 'device_bound_v1')),
+  trial_device_key_id TEXT NULL,
   authority_revision INTEGER NOT NULL DEFAULT 0
     CHECK (authority_revision = CAST(authority_revision AS BIGINT) AND authority_revision BETWEEN 0 AND 9007199254740991),
   PRIMARY KEY (project, feature, license_fingerprint)
@@ -968,7 +967,7 @@ WHEN NEW.revision < OLD.revision OR NEW.generation < OLD.generation
 BEGIN SELECT RAISE(ABORT, 'binding_revision_cannot_shrink'); END;
 
 CREATE TRIGGER IF NOT EXISTS tr_bound_capacity_decrease BEFORE UPDATE OF max_active_devices ON entitlements
-WHEN NEW.enforcement_mode = 'device_bound_v1' AND NEW.max_active_devices < (
+WHEN NEW.max_active_devices < (
   SELECT COUNT(*) FROM device_bound_bindings b WHERE b.project = OLD.project
   AND b.feature = OLD.feature AND b.license_fingerprint = OLD.license_fingerprint
   AND (b.state = 'active' OR (b.state = 'retiring' AND b.hold_until > unixepoch()))
@@ -1014,12 +1013,12 @@ CREATE TRIGGER IF NOT EXISTS tr_bound_entitlement_revision AFTER UPDATE ON entit
 WHEN NEW.status IS NOT OLD.status OR NEW.customer_id IS NOT OLD.customer_id
   OR NEW.valid_from IS NOT OLD.valid_from OR NEW.valid_until IS NOT OLD.valid_until
   OR NEW.max_active_devices IS NOT OLD.max_active_devices OR NEW.lease_seconds IS NOT OLD.lease_seconds
-  OR NEW.enforcement_mode IS NOT OLD.enforcement_mode OR NEW.revocation_seq IS NOT OLD.revocation_seq
+  OR NEW.revocation_seq IS NOT OLD.revocation_seq
   OR NEW.is_trial IS NOT OLD.is_trial
   OR NEW.trial_started_at IS NOT OLD.trial_started_at OR NEW.trial_duration_sec IS NOT OLD.trial_duration_sec
   OR NEW.trial_expiration_basis IS NOT OLD.trial_expiration_basis
   OR NEW.trial_one_per_device IS NOT OLD.trial_one_per_device
-  OR NEW.trial_device_hash IS NOT OLD.trial_device_hash
+  OR NEW.trial_device_key_id IS NOT OLD.trial_device_key_id
 BEGIN
   UPDATE entitlements SET authority_revision = OLD.authority_revision + 1
   WHERE project = NEW.project AND feature = NEW.feature AND license_fingerprint = NEW.license_fingerprint;
@@ -1028,14 +1027,6 @@ END;
 CREATE TRIGGER IF NOT EXISTS tr_bound_entitlement_revision_no_reset BEFORE UPDATE OF authority_revision ON entitlements
 WHEN NEW.authority_revision < OLD.authority_revision
 BEGIN SELECT RAISE(ABORT, 'authority_revision_cannot_shrink'); END;
-
-CREATE TRIGGER IF NOT EXISTS tr_bound_mode_no_downgrade BEFORE UPDATE OF enforcement_mode ON entitlements
-WHEN OLD.enforcement_mode = 'device_bound_v1' AND NEW.enforcement_mode != OLD.enforcement_mode
-BEGIN SELECT RAISE(ABORT, 'protected_mode_downgrade'); END;
-
-CREATE TRIGGER IF NOT EXISTS tr_bound_mode_requires_migration BEFORE UPDATE OF enforcement_mode ON entitlements
-WHEN OLD.enforcement_mode = 'legacy' AND NEW.enforcement_mode = 'device_bound_v1'
-BEGIN SELECT RAISE(ABORT, 'protected_mode_migration_required'); END;
 
 CREATE TRIGGER IF NOT EXISTS tr_bound_operation_immutable BEFORE UPDATE ON device_bound_operations
 WHEN NEW.key_id IS NOT OLD.key_id OR NEW.purpose IS NOT OLD.purpose

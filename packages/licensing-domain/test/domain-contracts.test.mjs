@@ -98,11 +98,10 @@ test("a plan-projected grant takes only its device limit from the catalog, and a
     ...desired.capacity,
     ...desired.trial,
     // Columns plan apply never writes: a grant keeps its own values, so they never make a change.
-    enforcement_mode: "device_bound_v1",
     revocation_seq: 7,
     lease_seconds: 86_400,
     trial_started_at: null,
-    trial_device_hash: null,
+    trial_device_key_id: null,
   };
 
   assert.equal(planProjectionMatchesDesired(existing, desired), true);

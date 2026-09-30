@@ -4,7 +4,7 @@ export const DIRECT_ROUTE_TESTS=['GET /api/portal/device-bindings'];
 const path='/api/portal/device-bindings';
 function seed(f,index,owner='A',state='active',hold=NOW+120) {
   const id=Buffer.alloc(16,index).toString('base64url'),fp=(owner==='A'?'c':'d').repeat(64);
-  f.db.prepare("INSERT OR IGNORE INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,created_at,updated_at) VALUES('APP','DEFAULT',?,?,'active','device_bound_v1',1,1)").run(fp,owner);
+  f.db.prepare("INSERT OR IGNORE INTO entitlements(project,feature,license_fingerprint,customer_id,status,created_at,updated_at) VALUES('APP','DEFAULT',?,?,'active',1,1)").run(fp,owner);
   f.db.prepare("INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,label,created_at,last_proof_at) VALUES(?,?,'APP',?,'public','My laptop',1,?)").run(id,owner,id,NOW-30);
   f.db.prepare("INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,hold_until,created_at,updated_at) VALUES(?,'APP','DEFAULT',?,?,?,?,1,1)").run(id,fp,id,state,hold);
   return id;

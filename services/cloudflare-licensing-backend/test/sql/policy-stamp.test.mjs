@@ -109,7 +109,7 @@ test("createEntitlement + stamp extra writes the window, device limit and trial 
   const extra = buildPolicyStampStatement(env, target, p.id, capacity, trial);
   const result = await createEntitlement(env, input, ctx(), "", undefined, null, [extra]);
   assert.equal(result.data.revocation_seq, 1);
-  assert.equal(result.data.enforcement_mode, "device_bound_v1");
+  assert.equal(result.data.customer_id, "cus_a");
   assert.equal(result.data.valid_until, NOW + 1209600);
   assert.equal(result.data.policy_id, "pol_1");
   assert.equal(result.data.license_mode, "trial");
@@ -137,7 +137,7 @@ test("createEntitlement + stamp extra writes the window, device limit and trial 
 test("byte-identical guard: createEntitlement with NO extras leaves capacity/trial at column defaults", async () => {
   const db = freshDb();
   const env = { DB: new D1Like(db) };
-  const result = await createEntitlement(env, { ...target }, ctx());
+  const result = await createEntitlement(env, { ...target, customer_id: "cus_a" }, ctx());
   assert.equal(result.data.revocation_seq, 1);
   const row = db.prepare("SELECT policy_id, max_active_devices, is_trial, trial_expiration_basis, trial_duration_sec FROM entitlements WHERE license_fingerprint = ?").get(FP);
   assert.equal(row.policy_id, null);
