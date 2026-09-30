@@ -1,5 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { ACCOUNT_TOKEN_AUTH_ERRORS, errorResponse, jsonBody, LEASE_SUCCESS, REPORT_SUCCESS, SEAT_SUCCESS } from "../components.js";
+import { ACCOUNT_TOKEN_AUTH_ERRORS, errorResponse, jsonBody } from "../components.js";
 
 const openapiJsonPath: Record<string, unknown> = {
   get: {

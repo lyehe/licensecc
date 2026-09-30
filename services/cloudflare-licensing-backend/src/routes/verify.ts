@@ -1,14 +1,10 @@
-import { accountAuth } from "../auth/account_auth.mjs";
 import { parseDeviceProofMode, parseRequestSignatureMode } from "../security_modes.mjs";
 import { json, readTextBody, requestId, clientIp, safeString } from "@licensecc/cloudflare-runtime/http/kit";
 import type {
   AssertionClaims,
-  AccountOperation,
   EntitlementDeviceRow,
   EntitlementRow,
   Env,
-  ExecutionContextLike,
-  IsolationBinding,
   RateLimitDecision,
   RequestProof,
   RequestProofEvaluation,
@@ -93,29 +89,6 @@ export async function readJsonBody(request: Request): Promise<{ ok: true; value:
   } catch {
     return { ok: false, code: "invalid_request", status: 400 };
   }
-}
-
-export async function resolveIsolation(
-  request: Request,
-  env: Env,
-  operation: AccountOperation,
-  project: string,
-  feature: string,
-  now: number,
-  ctx?: ExecutionContextLike,
-  override?: IsolationBinding,
-): Promise<IsolationBinding | { ok: false; code: string; status: number }> {
-  if (override !== undefined) {
-    return override;
-  }
-  const auth = await accountAuth(request, env, operation, project, feature, now, ctx);
-  if (!auth.ok) {
-    return { ok: false, code: auth.code, status: typeof auth.status === "number" ? auth.status : 401 };
-  }
-  if (auth.mode !== "off" && auth.mode !== "soft" && auth.mode !== "required") {
-    return { ok: false, code: "config_error", status: 503 };
-  }
-  return { mode: auth.mode, customerId: auth.customerId };
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number, maximum: number): number {

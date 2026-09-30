@@ -9,19 +9,6 @@ export interface ExecutionContextLike {
   waitUntil(promise: Promise<unknown>): void;
 }
 
-// Slice 2 isolation binding: the account-token mode + the authenticated customer_id threaded
-// from accountAuth() into the mutating SQL. In `off` mode customerId is null (legacy bearer):
-// the handlers MUST take the ORIGINAL non-owned SQL path, because the `*Owned` builders bind
-// `e.customer_id = ?` and `NULL = null` is never true — an owned query in off mode would match
-// no entitlement and break every lease/seat. Only `soft`/`required` use the `*Owned` builders.
-export interface IsolationBinding {
-  mode: "off" | "soft" | "required";
-  customerId: string | null;
-}
-
-export type AccountOperation = "activate" | "renew" | "checkout" | "heartbeat" | "release" | "report";
-
-
 export interface RateLimitBindingLike {
   limit(input: { key: string }): Promise<{ success: boolean }>;
 }
@@ -81,10 +68,6 @@ interface RuntimeEnv {
   D1_GLOBAL_RATE_LIMIT_PERIOD_SECONDS?: string;
   REQUEST_SIGNATURE_MODE?: string;
   REQUEST_SIGNATURE_MAX_SKEW_SECONDS?: string;
-  // Lease platform (/v1/activate, /v1/renew). The HOT lease key is distinct from the
-  // online assertion key and from the cold-root project key (design doc D2/D6).
-  LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM?: string;
-  LEASE_SIGNING_KEY_ID?: string;
   // Protected device v2: explicit registry/issuer and independently purposed
   // RSA-3072 signer. Missing configuration fails closed; no legacy key fallback.
   BOUND_DEVICE_CONFIG?: string;
@@ -92,7 +75,6 @@ interface RuntimeEnv {
   BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM?: string;
   BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM?: string;
   LEASE_ISSUE_BEARER?: string; // phase-1 placeholder authn; replaced by account_token (phase 2)
-  LEASE_SKEW_DAYS?: string; // signed valid-from backdate, default 2
   // Device-proof (ECDSA relay-resistance) gate for lease/seat issuance: off | required.
   // A presented proof is always verified; "required" denies issuance without one. Default off
   // for back-compat; production sets "required" to make the hardware lock actually bind.
@@ -112,16 +94,13 @@ interface RuntimeEnv {
   ORDER_SIGNER_SCOPE_MODE?: string;
   ORDER_SIGNER_SCOPES?: string;
   // Slice 2 account-token isolation (D9/D10). ACCOUNT_TOKEN_PEPPERS is a JSON map
-  // {id: base64 >= 32B} (fail-closed; null => 503 on the 6 scoped paths). MODE mirrors
-  // REQUEST_SIGNATURE_MODE: off (runtime default; legacy bearer + shadow-eval) | soft (token
-  // required, NULL-owner allowed+logged, populated-mismatch denied) | required (production;
-  // NULL/mismatch denied). EMERGENCY_OPERATOR_BEARER gates the SEPARATE /v1/emergency/* break-glass route
-  // ONLY (never the 6 scoped paths); unset = closed.
+  // {id: base64 >= 32B} (fail-closed). MODE mirrors REQUEST_SIGNATURE_MODE: off (runtime
+  // default; legacy bearer + shadow-eval) | soft (token required, NULL-owner allowed+logged,
+  // populated-mismatch denied) | required (production; NULL/mismatch denied).
   ACCOUNT_TOKEN_PEPPERS?: string;
   ACCOUNT_TOKEN_ACTIVE_PEPPER_ID?: string;
   ACCOUNT_TOKEN_MODE?: string;
   ACCOUNT_TOKEN_LAST_USED_THROTTLE_SEC?: string;
-  EMERGENCY_OPERATOR_BEARER?: string;
   // Webhook dispatcher (cron-drained read-side outbox). WEBHOOK_SIGNING_SECRETS is a JSON map
   // {keyId: base64-secret} (each secret >= 32 bytes), mirroring ORDER_HMAC_SECRETS; the active
   // WEBHOOK_SIGNING_KEY_ID names which key signs deliveries. Fail-closed: with no usable secret /

@@ -655,19 +655,10 @@ test("staging deployment is isolated, confirmed, backup-gated, and exercises eve
   assert.equal((workflow.match(/LICENSECC_EXPECTED_(?:BACKEND|ADMIN|PORTAL|BACKUP)_ORIGIN: \$\{\{ inputs\.(?:backend|admin|portal|backup)_url \}\}/gmu) ?? []).length, 4);
   assert.match(workflow, /npm --silent run validate:secret-inventory --workspace @licensecc\/cloudflare-licensing-backend -- --profile=staging > "\$RUNNER_TEMP\/licensecc-deployment-evidence\/backend-secret-inventory\.json"/u);
   assert.ok(workflow.indexOf("validate:secret-inventory") < workflow.indexOf("run-protected-wrangler.mjs --operation dry-run --worker backend"));
-  assert.match(workflow, /LICENSECC_STAGING_LEASE_DRILL_URL: \$\{\{ inputs\.backend_url \}\}/u);
-  assert.match(workflow, /LICENSECC_STAGING_LEASE_ACCOUNT_TOKEN: \$\{\{ secrets\.LICENSECC_STAGING_LEASE_ACCOUNT_TOKEN \}\}/u);
-  assert.match(workflow, /LICENSECC_STAGING_LEASE_DEVICE_PRIVATE_KEY_PKCS8_PEM: \$\{\{ secrets\.LICENSECC_STAGING_LEASE_DEVICE_PRIVATE_KEY_PKCS8_PEM \}\}/u);
-  assert.match(workflow, /LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64: \$\{\{ secrets\.LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64 \}\}/u);
-  assert.match(workflow, /LICENSECC_STAGING_LEASE_FIXTURE_JSON: \$\{\{ secrets\.LICENSECC_STAGING_LEASE_FIXTURE_JSON \}\}/u);
-  assert.match(workflow, /LICENSECC_STAGING_LEASE_COMMIT: \$\{\{ github\.sha \}\}/u);
-  assert.match(workflow, /npm --silent run validate:staging-lease --workspace @licensecc\/cloudflare-licensing-backend > "\$RUNNER_TEMP\/licensecc-deployment-evidence\/backend-lease-drill\.json"/u);
-  const stagingLease = namedWorkflowStep(job, "Verify scoped staging leases, proof, and signatures", ".github/workflows/deploy-staging.yml");
-  assert.equal(stagingLease.children.get("env")?.get("LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64")?.value,
-    "${{ secrets.LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64 }}");
-  assert.equal((workflow.match(/LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64:/gmu) ?? []).length, 1);
+  // The backend serves no account-token lease route, so staging runs no lease drill and holds no lease-drill secret.
+  assert.doesNotMatch(workflow, /staging-lease|LICENSECC_STAGING_LEASE_|backend-lease-drill|Verify scoped staging leases/u);
   assert.match(workflow, /LICENSECC_STAGING_ORDER_DRILL_URL: \$\{\{ inputs\.backend_url \}\}/u);
-  assert.doesNotMatch(workflow, /LICENSECC_STAGING_(?:LEASE|ORDER)_DRILL_URL: \$\{\{ vars\./u);
+  assert.doesNotMatch(workflow, /LICENSECC_STAGING_ORDER_DRILL_URL: \$\{\{ vars\./u);
   assert.match(workflow, /LICENSECC_STAGING_ORDER_DRILL_KEY_ID: \$\{\{ secrets\.LICENSECC_STAGING_ORDER_DRILL_KEY_ID \}\}/u);
   assert.match(workflow, /LICENSECC_STAGING_ORDER_DRILL_SECRET_B64: \$\{\{ secrets\.LICENSECC_STAGING_ORDER_DRILL_SECRET_B64 \}\}/u);
   assert.match(workflow, /LICENSECC_STAGING_ORDER_DRILL_FIXTURE_JSON: \$\{\{ secrets\.LICENSECC_STAGING_ORDER_DRILL_FIXTURE_JSON \}\}/u);

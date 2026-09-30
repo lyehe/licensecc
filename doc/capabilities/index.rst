@@ -47,9 +47,8 @@ Local C++ runtime
 Online platform
 ---------------
 
-* **Fail-closed online verification**, **floating-seat lifecycle**, **backend
-  usage metering**, and **signed order fulfillment** are shipped in the accepted
-  repository.
+* **Fail-closed online verification** and **signed order fulfillment** are
+  shipped in the accepted repository.
 * **Backend request proof of possession** is experimental. The protocol is
   implemented; the C++ runtime now has platform-limited Windows Platform KSP
   and Ubuntu TPM2/OpenSSL provider surfaces with conditional build and
@@ -79,7 +78,7 @@ status source.
 
 Registry identifiers: ``cpp-local-verification``, ``hardware-binding``,
 ``environment-aware-identification``, ``license-version-limits``,
-``config-attestation``, ``backend-request-proof``, ``backend-metering``,
+``config-attestation``, ``backend-request-proof``,
 ``backend-order-fulfillment``, ``admin-control-plane``,
 ``portal-self-service``, ``d1-backup-and-restore-drill``, ``python-sdk``,
 ``dotnet-sdk``, ``arm-support``, ``custom-execution-limits``,

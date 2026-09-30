@@ -139,17 +139,6 @@ jobs:
           node scripts/run-protected-wrangler.mjs --operation deploy --worker backend
           node scripts/run-protected-wrangler.mjs --operation deploy --worker admin
           node scripts/run-protected-wrangler.mjs --operation deploy --worker portal
-      - name: Verify scoped staging leases, proof, and signatures
-        env:
-          LICENSECC_STAGING_LEASE_DRILL_URL: ${{ inputs.backend_url }}
-          LICENSECC_STAGING_LEASE_ACCOUNT_TOKEN: ${{ secrets.LICENSECC_STAGING_LEASE_ACCOUNT_TOKEN }}
-          LICENSECC_STAGING_LEASE_DEVICE_PRIVATE_KEY_PKCS8_PEM: ${{ secrets.LICENSECC_STAGING_LEASE_DEVICE_PRIVATE_KEY_PKCS8_PEM }}
-          LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64: ${{ secrets.LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64 }}
-          LICENSECC_STAGING_LEASE_FIXTURE_JSON: ${{ secrets.LICENSECC_STAGING_LEASE_FIXTURE_JSON }}
-          LICENSECC_STAGING_LEASE_RUN_ID: ${{ github.run_id }}
-          LICENSECC_STAGING_LEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
-          LICENSECC_STAGING_LEASE_COMMIT: ${{ github.sha }}
-        run: npm --silent run validate:staging-lease --workspace @licensecc/cloudflare-licensing-backend > "$RUNNER_TEMP/licensecc-deployment-evidence/backend-lease-drill.json"
       - name: Verify signed staging order replay and idempotency
         env:
           LICENSECC_STAGING_ORDER_DRILL_URL: ${{ inputs.backend_url }}

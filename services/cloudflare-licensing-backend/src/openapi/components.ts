@@ -36,9 +36,7 @@ export function jsonBody(schemaRef: string, required = true): Record<string, unk
   };
 }
 
-// The five scoped lease/seat/report endpoints share the same auth + token-mode error set. Build it
-// once so /v1/activate, /v1/renew, /v1/checkout, /v1/heartbeat, /v1/release, /v1/admin/report and
-// every /v1/emergency/* override stay in lock-step with the handler.
+// The account-token auth + token-mode error set.
 export const ACCOUNT_TOKEN_AUTH_ERRORS: Record<string, Record<string, unknown>> = {
   "401": errorResponse(
     "Unauthorized. off mode: LEASE_ISSUE_BEARER mismatch. soft/required mode: token missing, malformed, unknown, revoked, or expired. token_revoked: status!=active or revocation floor exceeded. token_expired: expires_at <= now.",
@@ -52,29 +50,6 @@ export const ACCOUNT_TOKEN_AUTH_ERRORS: Record<string, Record<string, unknown>> 
     "Other route-specific 503 codes include unavailable account-token material and verification_error for D1 lookup/issuance failures.",
     ["verification_error"],
   ),
-};
-
-export const LEASE_SUCCESS: Record<string, unknown> = {
-  description: "Signed v201 lease issued.",
-  content: {
-    "application/json": {
-      schema: { $ref: "#/components/schemas/LeaseSuccess" },
-    },
-  },
-};
-
-export const SEAT_SUCCESS: Record<string, unknown> = {
-  description: "Seat checked out / heartbeat refreshed. Returns a short-TTL lccoa1 assertion.",
-  content: {
-    "application/json": { schema: { $ref: "#/components/schemas/SeatSuccess" } },
-  },
-};
-
-export const REPORT_SUCCESS: Record<string, unknown> = {
-  description: "Usage/analytics summary over the requested window.",
-  content: {
-    "application/json": { schema: { $ref: "#/components/schemas/ReportSuccess" } },
-  },
 };
 
 export const openApiComponents: LabeledComponentFragment = {
@@ -115,18 +90,6 @@ export const openApiComponents: LabeledComponentFragment = {
         bearerFormat: "lcca_<opaque>",
         description:
           "Per-customer account token (Authorization: Bearer lcca_...), scoped by projects/features/operations. Resolved by timing-safe HMAC under a pepper; never stored plaintext.",
-      }],
-      ["leaseBearer", {
-        type: "http",
-        scheme: "bearer",
-        description:
-          "Legacy LEASE_ISSUE_BEARER (off mode only), compared constant-time. When unset the endpoint is open in off mode.",
-      }],
-      ["emergencyBearer", {
-        type: "http",
-        scheme: "bearer",
-        description:
-          "EMERGENCY_OPERATOR_BEARER, compared constant-time. Gates /v1/emergency/* only; unset/empty => 404, mismatch => 401. Never logged.",
       }],
     ]],
     ["schemas", [
@@ -297,189 +260,6 @@ export const openApiComponents: LabeledComponentFragment = {
           entitlement: { type: "object", additionalProperties: true },
         },
         additionalProperties: true,
-      }],
-      ["LeaseRequest", {
-        type: "object",
-        required: ["project", "feature", "license_fingerprint", "device_key_id"],
-        properties: {
-          project: { type: "string" },
-          feature: { type: "string" },
-          license_fingerprint: { type: "string" },
-          device_key_id: { type: "string", description: "sha256:<64-hex>." },
-          hw_id: { type: "string" },
-          client_signature_source_strength: { type: "integer" },
-          start_version: { type: "integer" },
-          end_version: { type: "integer" },
-          request_id: { type: "string", description: "Idempotency key." },
-          nonce: { type: "string", description: "Required when a request proof is present." },
-          request_signature_version: { type: "integer", enum: [1] },
-          request_timestamp: { type: "integer", description: "Unix seconds." },
-          request_signature_algorithm: { type: "string", enum: ["ecdsa-p256-sha256"] },
-          request_signature: { type: "string", description: "Base64." },
-        },
-        additionalProperties: true,
-      }],
-      ["LeaseSuccess", {
-        type: "object",
-        required: ["ok", "lic", "server_time", "renew_by", "valid_to_epoch"],
-        properties: {
-          ok: { type: "boolean", enum: [true] },
-          lic: { type: "string", description: "v201 signed lease text." },
-          server_time: { type: "integer" },
-          renew_by: { type: "integer", description: "Unix seconds." },
-          valid_to_epoch: { type: "integer", description: "Unix seconds (hard offline expiry)." },
-          // UNSIGNED trial telemetry (Stage 4). Present only for trial entitlements; NOT part of the
-          // signed v201 canonical payload. trial=true marks the lease as a trial; trial_expires_at_epoch
-          // is the server-computed trial deadline (for from_first_activation/from_first_use the clock
-          // starts at the first activation), clamped to the subscription end. Omitted for non-trials.
-          trial: { type: "boolean", enum: [true], description: "Present (true) only for trial entitlements." },
-          trial_expires_at_epoch: {
-            type: "integer",
-            description: "Unix seconds. Server-computed trial deadline, clamped to valid_until. Omitted when the trial has no finite deadline.",
-          },
-        },
-      }],
-      ["SeatCheckoutRequest", {
-        type: "object",
-        required: ["project", "feature", "license_fingerprint", "client_instance_id", "nonce"],
-        properties: {
-          project: { type: "string" },
-          feature: { type: "string" },
-          license_fingerprint: { type: "string" },
-          client_instance_id: { type: "string" },
-          nonce: { type: "string" },
-          seat_id: { type: "string" },
-          borrow_seconds: { type: "integer", minimum: 1, description: "Positive; returns mode=borrowed." },
-          device_key_id: { type: "string", description: "sha256:<64-hex> (optional)." },
-          request_signature_version: { type: "integer", enum: [1] },
-          request_timestamp: { type: "integer" },
-          request_signature_algorithm: { type: "string", enum: ["ecdsa-p256-sha256"] },
-          request_signature: { type: "string", description: "Base64." },
-        },
-        additionalProperties: true,
-      }],
-      ["SeatCheckoutSuccess", {
-        type: "object",
-        required: ["ok", "assertion", "seat_id", "mode", "server_time", "expires_at", "heartbeat_in"],
-        properties: {
-          ok: { type: "boolean", enum: [true] },
-          assertion: { type: "string", description: "lccoa1 token." },
-          seat_id: { type: "string", format: "uuid" },
-          mode: { type: "string", enum: ["live", "borrowed"] },
-          server_time: { type: "integer" },
-          expires_at: { type: "integer", description: "Unix seconds." },
-          heartbeat_in: { type: "integer", description: "Seconds until next heartbeat." },
-        },
-      }],
-      ["SeatHeartbeatRequest", {
-        type: "object",
-        required: ["project", "feature", "license_fingerprint", "client_instance_id", "nonce", "seat_id"],
-        properties: {
-          project: { type: "string" },
-          feature: { type: "string" },
-          license_fingerprint: { type: "string" },
-          client_instance_id: { type: "string" },
-          nonce: { type: "string" },
-          seat_id: { type: "string", description: "REQUIRED." },
-          device_key_id: { type: "string", description: "sha256:<64-hex> (optional)." },
-          request_signature_version: { type: "integer", enum: [1] },
-          request_timestamp: { type: "integer" },
-          request_signature_algorithm: { type: "string", enum: ["ecdsa-p256-sha256"] },
-          request_signature: { type: "string", description: "Base64." },
-        },
-        additionalProperties: true,
-      }],
-      ["SeatSuccess", {
-        type: "object",
-        required: ["ok", "assertion", "server_time", "expires_at", "heartbeat_in"],
-        properties: {
-          ok: { type: "boolean", enum: [true] },
-          assertion: { type: "string", description: "lccoa1 token." },
-          server_time: { type: "integer" },
-          expires_at: { type: "integer" },
-          heartbeat_in: { type: "integer" },
-        },
-      }],
-      ["SeatReleaseRequest", {
-        type: "object",
-        required: ["project", "feature", "license_fingerprint", "client_instance_id", "nonce", "seat_id"],
-        properties: {
-          project: { type: "string" },
-          feature: { type: "string" },
-          license_fingerprint: { type: "string" },
-          client_instance_id: { type: "string" },
-          nonce: { type: "string" },
-          seat_id: { type: "string", description: "REQUIRED." },
-          device_key_id: { type: "string", description: "Optional." },
-          request_signature_version: { type: "integer", enum: [1] },
-          request_timestamp: { type: "integer" },
-          request_signature_algorithm: { type: "string", enum: ["ecdsa-p256-sha256"] },
-          request_signature: { type: "string", description: "Base64 (optional)." },
-
-        },
-        additionalProperties: true,
-      }],
-      ["ReleaseSuccess", {
-        type: "object",
-        required: ["ok", "server_time"],
-        properties: {
-          ok: { type: "boolean", enum: [true] },
-          server_time: { type: "integer" },
-        },
-      }],
-      ["MeterRequest", {
-        type: "object",
-        required: ["project", "feature", "license_fingerprint"],
-        properties: {
-          project: { type: "string" },
-          feature: { type: "string" },
-          license_fingerprint: { type: "string" },
-          units: { type: "integer", minimum: 1, description: "Positive integer; defaults to 1 when omitted." },
-        },
-        additionalProperties: true,
-      }],
-      ["MeterSuccess", {
-        type: "object",
-        required: ["ok", "server_time", "units_consumed", "quota", "period_start", "period_end"],
-        properties: {
-          ok: { type: "boolean" },
-          server_time: { type: "integer" },
-          units_consumed: { type: "integer", description: "Cumulative units for the current period after this call." },
-          quota: { type: "integer", description: "meter_quota (0 = unlimited / count-only)." },
-          period_start: { type: "integer", description: "Unix seconds; start of the current rolling period." },
-          period_end: { type: "integer", description: "Unix seconds; period_start + meter_period_sec." },
-        },
-      }],
-      ["ReportSuccess", {
-        type: "object",
-        required: [
-          "ok",
-          "project",
-          "feature",
-          "from",
-          "to",
-          "server_time",
-          "truncated",
-          "peak_concurrent",
-          "unique_devices",
-          "denials",
-          "peak_concurrent_at",
-          "denial_rate_per_day",
-        ],
-        properties: {
-          ok: { type: "boolean", enum: [true] },
-          project: { type: "string" },
-          feature: { type: "string" },
-          from: { type: "integer", description: "Unix seconds." },
-          to: { type: "integer", description: "Unix seconds." },
-          server_time: { type: "integer" },
-          truncated: { type: "boolean", description: "True if > 100000 rows in the window." },
-          peak_concurrent: { type: "integer" },
-          unique_devices: { type: "integer" },
-          denials: { type: "integer" },
-          peak_concurrent_at: { type: "integer", description: "Unix seconds." },
-          denial_rate_per_day: { type: "number" },
-        },
       }],
     ]],
   ],

@@ -6,7 +6,6 @@ import test from "node:test";
 import { BOUND_LEASE_COMMIT_SQL, commitBoundDeviceLease } from "../../src/device/bound_store.mjs";
 import { BOUND_RECOVERY_SQL, recoverBoundDeviceLease } from "../../src/device/bound_recovery.mjs";
 import { EXPIRE_BOUND_RECOVERY_SQL } from "../../src/device/bound_cleanup.mjs";
-import { SEAT_CHECKOUT_ATOMIC_SQL, seatCheckoutSqlOwned, seatHeartbeatSql } from "../../src/lease/issuance_sql.mjs";
 
 const fp = "a".repeat(64);
 function fixture() {
@@ -403,23 +402,15 @@ test("an expired unconsumed approval cannot recover or create an operation", asy
   emptyCommit(f);
 });
 
-test("legacy floating mutations cannot bypass protected mode after a stale pre-read", () => {
+test("the baseline triggers refuse seat inserts and updates for a protected entitlement", () => {
   const f=fixture();
-  const base=["APP","DEFAULT",fp,"seat","client","live",1000,1100,"APP","DEFAULT",fp,1000,1];
-  assert.throws(()=>f.sql.prepare(SEAT_CHECKOUT_ATOMIC_SQL).get(...base),/legacy_protocol_disabled/);
-  for (const mode of ["soft","required"]) {
-    assert.equal(f.sql.prepare(seatCheckoutSqlOwned(mode)).get(...base,"APP","DEFAULT",fp,"customer",1000,1000),undefined);
-  }
+  const insert="INSERT INTO seat_checkouts(project,feature,license_fingerprint,seat_id,client_instance_id,mode,checked_out_at,heartbeat_deadline) VALUES('APP','DEFAULT',?,'seat','client','live',1000,1100)";
+  assert.throws(()=>f.sql.prepare(insert).run(fp),/legacy_protocol_disabled/);
   assert.equal(count(f,"seat_checkouts"),0);
   // Inject an old row to exercise UPDATE independently of the INSERT guard.
   f.sql.exec("DROP TRIGGER tr_bound_reject_legacy_seat_insert");
-  f.sql.prepare("INSERT INTO seat_checkouts(project,feature,license_fingerprint,seat_id,client_instance_id,mode,checked_out_at,heartbeat_deadline) VALUES('APP','DEFAULT',?,'seat','client','live',1000,1100)").run(fp);
+  f.sql.prepare(insert).run(fp);
   assert.throws(()=>f.sql.exec("UPDATE seat_checkouts SET heartbeat_deadline=9999"),/legacy_protocol_disabled/);
-  for (const mode of ["off","soft","required"]) {
-    const params=[1200,"APP","DEFAULT",fp,"seat",1000,1000,1000];
-    if (mode!=='off') params.push("customer");
-    assert.equal(f.sql.prepare(seatHeartbeatSql(mode)).get(...params),undefined);
-  }
   assert.equal(f.sql.prepare("SELECT heartbeat_deadline FROM seat_checkouts").get().heartbeat_deadline,1100);
 });
 

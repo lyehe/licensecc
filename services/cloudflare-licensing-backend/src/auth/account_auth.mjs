@@ -1,10 +1,8 @@
 // Per-endpoint account-token authentication + isolation gate (Slice 2, Stage 3).
 //
-// Replaces the four shared LEASE_ISSUE_BEARER bearer checks on the 6 scoped paths
-// (/v1/activate, /v1/renew, /v1/checkout, /v1/heartbeat, /v1/release, /v1/admin/report)
-// with a real per-customer credential whose customer_id is bound into the MUTATING SQL
-// (see issuance_sql.mjs). This module owns the *authn + mode* decision; the *isolation*
-// teeth live in the SQL ownership EXISTS.
+// Replaces the shared LEASE_ISSUE_BEARER bearer check with a real per-customer credential
+// whose customer_id is bound into the MUTATING SQL. This module owns the *authn + mode*
+// decision; the *isolation* teeth live in the SQL ownership EXISTS.
 //
 // Modes (ACCOUNT_TOKEN_MODE, runtime default 'off'; mirrors REQUEST_SIGNATURE_MODE — production
 // MUST set 'required'):

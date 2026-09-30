@@ -1,5 +1,5 @@
 // Unit tests for the PURE order-event modeling (Slice 1 order-ingest).
-// Mirrors test/lease-worker.test.mjs's node:test + crypto style. No DB, no HTTP.
+// node:test + crypto only. No DB, no HTTP.
 //
 // Source under test: src/fulfillment/order_event.mjs
 //   normalizeOrderEvent, deriveFingerprint, clampValidUntil, mapIntentToMutation.

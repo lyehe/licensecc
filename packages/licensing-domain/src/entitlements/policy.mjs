@@ -8,7 +8,7 @@
 //
 // Policies are STAMP-TIME templates (frozen): the entitlement copies the defaults at create time and is
 // thereafter its own source of truth; entitlements.policy_id is advisory provenance (no FK, no live-link).
-// Trial timing for from_first_activation/from_first_use is computed at /v1/activate, NOT here.
+// Trial timing for from_first_activation/from_first_use is computed at the first protected device activation, NOT here.
 //
 // Design: docs/superpowers/plans/2026-06-25-essential-features-implementation-plan.md (Workstream A).
 
@@ -49,7 +49,7 @@ export function stampFromPolicy(policy, overrides, now) {
     validUntil = null;
   } else if (isTrial) {
     // from_issue: clock starts now. from_first_activation/from_first_use: open until first activation
-    // clamps it (server-side, in /v1/activate) — so leave null at stamp time.
+    // clamps it (server-side, at the first protected device activation) — so leave null at stamp time.
     validUntil = basis === "from_issue" && policy.trial_duration_sec > 0 ? (validFrom ?? now) + policy.trial_duration_sec : null;
   } else if (typeof policy.duration_sec === "number") {
     validUntil = (validFrom ?? now) + policy.duration_sec;

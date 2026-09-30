@@ -93,21 +93,6 @@
       ]
     },
     {
-      "id": "backend-metering",
-      "title": "Backend usage metering",
-      "status": "shipped",
-      "owner": "Backend deployable maintainer",
-      "surfaces": ["licensing backend"],
-      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Cloudflare Workers"], "limitations": ["Implemented locally with automated tests; operating a remote service remains deployer responsibility."]},
-      "replaces": [],
-      "public_docs": ["doc/capabilities/index.rst"],
-      "evidence": [
-        {"kind": "implementation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/src/routes/metering.ts", "selector": "export async function handleMeter", "assertion": "The backend implements account-scoped metering."},
-        {"kind": "route_contract", "surface": "licensing backend", "path": "test/contracts/backend.json", "selector": "POST /v1/meter", "assertion": "The canonical backend contract exposes metering."},
-        {"kind": "automated_test", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/test/sql/metering.test.mjs", "selector": "test(\"units accumulate within a rolling period (R6.3)\"", "assertion": "Metering behavior is covered by an automated test."}
-      ]
-    },
-    {
       "id": "backend-order-fulfillment",
       "title": "Signed order fulfillment",
       "status": "shipped",

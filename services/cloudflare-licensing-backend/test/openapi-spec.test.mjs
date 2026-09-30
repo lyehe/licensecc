@@ -6,20 +6,19 @@
 // route/spec divergence can.
 //
 // This Worker has NO path parameters — every route is a static literal — so the cross-check is a
-// literal-set comparison. Emergency break-glass routes are the scoped routes re-served under the
-// /v1/emergency prefix; the inventory composes them via allCanonicalRoutes().
+// literal-set comparison; the inventory composes the full set via allCanonicalRoutes().
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "../dist/openapi/assemble.js";
 import { openApiSpec } from "../dist/openapi/document.js";
-import { META_ROUTES, CLIENT_ROUTES, SCOPED_ROUTES, EMERGENCY_PREFIX, allCanonicalRoutes } from "../dist/routes.js";
+import { META_ROUTES, CLIENT_ROUTES, allCanonicalRoutes } from "../dist/routes.js";
 import worker from "../dist/app.js";
 import { BACKEND_ROUTE_KEYS } from "../dist/app.js";
 import { normalizeOrderEventForReplay } from "../src/fulfillment/order_event.mjs";
 
 const keyOf = (r) => `${r.method} ${r.path}`;
-const DISPATCHED_INVENTORY = [...META_ROUTES, ...CLIENT_ROUTES, ...SCOPED_ROUTES];
+const DISPATCHED_INVENTORY = [...META_ROUTES, ...CLIENT_ROUTES];
 const CANONICAL = allCanonicalRoutes();
 const CANONICAL_PATHS = new Set(CANONICAL.map((r) => r.path));
 
@@ -65,19 +64,10 @@ test("OpenAPI assembly rejects collisions without mutating its fragments", () =>
 });
 
 test("the dispatch table serves exactly the literal route inventory", () => {
-  // Emergency composites are served via the prefix gate, not the literal table, so the table must
-  // equal META + CLIENT + SCOPED — nothing more (no unlisted route), nothing less (no dead entry).
+  // The table must equal META + CLIENT — nothing more (no unlisted route), nothing less (no dead
+  // entry) — and that inventory is the whole canonical set.
   assert.deepEqual([...BACKEND_ROUTE_KEYS].sort(), DISPATCHED_INVENTORY.map(keyOf).sort());
-});
-
-test("the canonical set composes every scoped route under the emergency prefix", () => {
-  for (const r of SCOPED_ROUTES) {
-    assert.ok(
-      CANONICAL_PATHS.has(`${EMERGENCY_PREFIX}${r.path}`),
-      `missing emergency composite for ${r.path}`,
-    );
-  }
-  assert.equal(CANONICAL.length, DISPATCHED_INVENTORY.length + SCOPED_ROUTES.length);
+  assert.deepEqual(CANONICAL.map(keyOf).sort(), DISPATCHED_INVENTORY.map(keyOf).sort());
 });
 
 test("spec.paths == canonical route set (no drift in either direction)", () => {
@@ -115,20 +105,6 @@ test("every documented operation has unique identity, expected auth, and a respo
     ["/health", []],
     ["/v1/verify", [{ requestProof: [] }]],
     ["/v1/orders", [{ orderKeyId: [], orderTimestamp: [], orderSignature: [] }]],
-    ["/v1/activate", [{ accountToken: [] }, { leaseBearer: [] }]],
-    ["/v1/renew", [{ accountToken: [] }, { leaseBearer: [] }]],
-    ["/v1/checkout", [{ accountToken: [] }, { leaseBearer: [] }]],
-    ["/v1/heartbeat", [{ accountToken: [] }, { leaseBearer: [] }]],
-    ["/v1/release", [{ accountToken: [] }, { leaseBearer: [] }]],
-    ["/v1/meter", [{ accountToken: [] }, { leaseBearer: [] }]],
-    ["/v1/admin/report", [{ accountToken: [] }, { leaseBearer: [] }]],
-    ["/v1/emergency/v1/activate", [{ emergencyBearer: [] }]],
-    ["/v1/emergency/v1/renew", [{ emergencyBearer: [] }]],
-    ["/v1/emergency/v1/checkout", [{ emergencyBearer: [] }]],
-    ["/v1/emergency/v1/heartbeat", [{ emergencyBearer: [] }]],
-    ["/v1/emergency/v1/release", [{ emergencyBearer: [] }]],
-    ["/v1/emergency/v1/meter", [{ emergencyBearer: [] }]],
-    ["/v1/emergency/v1/admin/report", [{ emergencyBearer: [] }]],
     ["/v2/device-authorizations", []],
     ["/v2/device-challenges", []],
     ["/v2/device-authorizations/exchange", []],

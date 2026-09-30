@@ -15,9 +15,8 @@ import {
 } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 
 // Minimal mock-D1 mirroring the prepare/bind/first/run/batch shape used by the
-// real binding (see test/lease-worker.test.mjs). It keeps a single entitlements
-// row in `state.entitlement` and records audit/idempotency writes so tests can
-// assert atomicity and column-level behavior. UPDATE...RETURNING and
+// real binding. It keeps a single entitlements row in `state.entitlement` and
+// records audit/idempotency writes so tests can assert atomicity and column-level behavior. UPDATE...RETURNING and
 // INSERT...ON CONFLICT...RETURNING are emulated by applying the bound params and
 // returning the resulting row in the D1 batch `{ results: [...] }` envelope.
 function makeDb(state) {

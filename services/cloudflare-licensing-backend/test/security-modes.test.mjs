@@ -10,8 +10,6 @@ import {
   resetSigningKeyCacheForTests,
   signingKeyImportCountForTests,
 } from "../dist/routes/verify.js";
-import { handleLeaseIssue } from "../dist/routes/leases.js";
-import { handleSeatCheckout } from "../dist/routes/seats.js";
 import { accountAuth, accountTokenMode } from "../src/auth/account_auth.mjs";
 import {
   parseAccountTokenMode,
@@ -90,7 +88,7 @@ test("account-token mode parser rejects unknown values before bearer auth or tok
     const env = { ACCOUNT_TOKEN_MODE: raw, DB: countingDb(calls), LEASE_ISSUE_BEARER: "secret" };
     assert.equal(accountTokenMode(env), "invalid");
     const result = await accountAuth(
-      new Request("https://example.test/v1/activate", { headers: { authorization: "Bearer secret" } }),
+      new Request("https://example.test/", { headers: { authorization: "Bearer secret" } }),
       env,
       "activate",
       "DEFAULT",
@@ -121,17 +119,4 @@ test("device-proof mode parser rejects unknown values before device lookup", asy
     assert.deepEqual(result, { ok: false, code: "config_error", proven: false });
     assert.equal(calls.prepare, 0);
   }
-});
-
-test("direct lease and seat checkout handlers return config_error before signing or D1 for invalid device-proof mode", async () => {
-  const calls = { prepare: 0 };
-  const env = { DEVICE_PROOF_MODE: "not-a-mode", DB: countingDb(calls) };
-  const lease = await handleLeaseIssue(new Request("https://example.test/v1/activate", { method: "POST" }), env, "activate");
-  assert.equal(lease.status, 503);
-  assert.deepEqual(await lease.json(), { ok: false, code: "config_error" });
-
-  const checkout = await handleSeatCheckout(new Request("https://example.test/v1/checkout", { method: "POST" }), env);
-  assert.equal(checkout.status, 503);
-  assert.deepEqual(await checkout.json(), { ok: false, code: "config_error" });
-  assert.equal(calls.prepare, 0);
 });
