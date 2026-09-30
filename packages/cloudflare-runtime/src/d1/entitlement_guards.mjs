@@ -1,8 +1,15 @@
 // Input and observed-state guards for entitlement mutations. SQL/CAS and audit
 // ownership remain in entitlement_mutation; no persistence is performed here.
+// The guard is never a no-op: every caller of patchEntitlement, transitionEntitlement
+// and setEntitlementCapacity must supply the owner and revocation sequence it observed,
+// so a caller that forgets the precondition fails loudly (invalid_patch) instead of
+// silently skipping the check a stale-write race depends on.
 export function assertExpectedEntitlement(row, ctx) {
   const expected = ctx.expectedEntitlement;
-  if (expected !== undefined && (row.customer_id !== expected.customer_id || row.revocation_seq !== expected.revocation_seq)) {
+  if (expected === undefined) {
+    throw new Error("invalid_patch");
+  }
+  if (row.customer_id !== expected.customer_id || row.revocation_seq !== expected.revocation_seq) {
     throw new Error("stale_transition");
   }
 }

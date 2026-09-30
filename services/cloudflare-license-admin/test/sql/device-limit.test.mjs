@@ -102,15 +102,19 @@ test("a create that selects a policy cannot also set a device limit; the policy 
 
 test("a device limit outside 1 to 1,000,000 is refused before any write", async t => {
   const f = fixture(t);
-  const { id } = await created(await f.send(protectedGrant));
+  const grant = await created(await f.send(protectedGrant));
+  const { id } = grant;
   const before = f.snapshot();
   for (const value of [0, -1, 1_000_001, 2.5, "3", null, true, [3], 1e21]) {
     await refused(await f.send({ ...protectedGrant, max_active_devices: value }), 400, "invalid_request", undefined);
-    await refused(await f.patch(id, { max_active_devices: value }), 400, "invalid_request", undefined);
+    await refused(await f.patch(id, { max_active_devices: value, expected_customer_id: "owner", expected_revocation_seq: grant.revocation_seq }), 400, "invalid_request", undefined);
   }
   assert.deepEqual(f.snapshot(), before);
+  let revocationSeq = grant.revocation_seq;
   for (const value of [1, 1_000_000]) {
-    assert.equal((await created(await f.patch(id, { max_active_devices: value }))).max_active_devices, value);
+    const patched = await created(await f.patch(id, { max_active_devices: value, expected_customer_id: "owner", expected_revocation_seq: revocationSeq }));
+    assert.equal(patched.max_active_devices, value);
+    revocationSeq = patched.revocation_seq;
   }
 });
 
@@ -122,7 +126,7 @@ test("a PATCH sets only the device limit, audits it, and honors the expected sta
   const expected = { expected_customer_id: "owner", expected_revocation_seq: grant.revocation_seq };
   await refused(await f.patch(grant.id, { max_active_devices: 5, ...expected, expected_revocation_seq: grant.revocation_seq + 7 }), 409, "stale_transition", undefined);
   // The device limit is its own audited capacity write, so it cannot share a PATCH with other fields.
-  await refused(await f.patch(grant.id, { max_active_devices: 5, notes: "both" }), 400, "invalid_request", undefined);
+  await refused(await f.patch(grant.id, { max_active_devices: 5, notes: "both", ...expected }), 400, "invalid_request", undefined);
   assert.deepEqual(f.snapshot(), before);
 
   const patched = await f.send({ max_active_devices: 5, ...expected }, "limit", url, "PATCH");
@@ -136,14 +140,15 @@ test("a PATCH sets only the device limit, audits it, and honors the expected sta
   assert.equal(f.snapshot()[1].length, before[1].length + 1, "one audit event");
   assert.equal(JSON.parse(f.sql.prepare("SELECT next_json FROM entitlement_events ORDER BY id DESC").get().next_json).max_active_devices, 5);
 
-  await created(await f.send({ reason: "done" }, "revoke", `${url}/revoke`, "POST"));
-  await refused(await f.patch(grant.id, { max_active_devices: 6 }), 409, "revoked_entitlement_is_terminal", undefined);
-  await refused(await f.patch(entitlementId("APP", "MISSING", "9".repeat(64)), { max_active_devices: 6 }), 404, "not_found", undefined);
+  const revoked = await created(await f.send({ reason: "done", expected_customer_id: "owner", expected_revocation_seq: body.data.revocation_seq }, "revoke", `${url}/revoke`, "POST"));
+  await refused(await f.patch(grant.id, { max_active_devices: 6, expected_customer_id: "owner", expected_revocation_seq: revoked.revocation_seq }), 409, "revoked_entitlement_is_terminal", undefined);
+  await refused(await f.patch(entitlementId("APP", "MISSING", "9".repeat(64)), { max_active_devices: 6, expected_customer_id: null, expected_revocation_seq: 0 }), 404, "not_found", undefined);
 });
 
 test("a PATCH below the connected devices is refused with their count and changes nothing", async t => {
   const f = fixture(t);
   const grant = await created(await f.send({ ...protectedGrant, max_active_devices: 5 }));
+  const expectedFor = (seq) => ({ expected_customer_id: "owner", expected_revocation_seq: seq });
   const now = f.now();
   // Occupied: both active bindings, and the retiring one whose hold has not ended.
   f.connect("active", 0);
@@ -153,13 +158,15 @@ test("a PATCH below the connected devices is refused with their count and change
   f.connect("released", now - HOUR);
   const before = f.snapshot();
   for (const key of ["shrink", "shrink"]) {
-    await refused(await f.patch(grant.id, { max_active_devices: 2 }, key), 409, "capacity_in_use", { devices_in_use: 3 });
+    await refused(await f.patch(grant.id, { max_active_devices: 2, ...expectedFor(grant.revocation_seq) }, key), 409, "capacity_in_use", { devices_in_use: 3 });
     assert.deepEqual(f.snapshot(), before, "a refused PATCH leaves no write, audit event, or replay record");
   }
-  assert.equal((await created(await f.patch(grant.id, { max_active_devices: 3 }))).max_active_devices, 3);
+  const shrunkToThree = await created(await f.patch(grant.id, { max_active_devices: 3, ...expectedFor(grant.revocation_seq) }));
+  assert.equal(shrunkToThree.max_active_devices, 3);
   // Once the retiring hold ends, its slot is free again.
   f.clock(now + HOUR + 1);
-  assert.equal((await created(await f.patch(grant.id, { max_active_devices: 2 }))).max_active_devices, 2);
+  const shrunkToTwo = await created(await f.patch(grant.id, { max_active_devices: 2, ...expectedFor(shrunkToThree.revocation_seq) }));
+  assert.equal(shrunkToTwo.max_active_devices, 2);
 });
 
 test("a protected re-create without a policy cannot set a device limit below the connected devices", async t => {
@@ -223,12 +230,15 @@ test("a device-limit PATCH refuses every other patchable field that OpenAPI name
   const samples = { valid_from: null, valid_until: null, notes: "kept", customer_id: "owner", license_id: "license" };
   assert.deepEqual([...excluded].sort(), Object.keys(samples).sort(), "every patchable field is excluded beside the limit");
   const before = f.snapshot();
+  let revocationSeq = grant.revocation_seq;
   for (const field of excluded) {
-    await refused(await f.patch(grant.id, { max_active_devices: 5, [field]: samples[field] }), 400, "invalid_request", undefined);
-    assert.equal((await f.patch(grant.id, { [field]: samples[field] })).status, 200, `${field} alone is patchable`);
+    await refused(await f.patch(grant.id, { max_active_devices: 5, [field]: samples[field], expected_customer_id: "owner", expected_revocation_seq: revocationSeq }), 400, "invalid_request", undefined);
+    const alone = await f.patch(grant.id, { [field]: samples[field], expected_customer_id: "owner", expected_revocation_seq: revocationSeq });
+    assert.equal(alone.status, 200, `${field} alone is patchable`);
+    revocationSeq = (await alone.json()).data.revocation_seq;
   }
   assert.equal(f.snapshot()[0][0].max_active_devices, before[0][0].max_active_devices);
-  const ignored = await created(await f.patch(grant.id, { max_active_devices: 5, status: "disabled" }));
+  const ignored = await created(await f.patch(grant.id, { max_active_devices: 5, status: "disabled", expected_customer_id: "owner", expected_revocation_seq: revocationSeq }));
   assert.equal(ignored.max_active_devices, 5);
   assert.equal(ignored.status, "active", "status is not a PATCH field, so it is ignored");
 });

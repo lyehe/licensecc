@@ -359,7 +359,7 @@ test("console: complete app summaries stay within customer ownership", async () 
   assert.equal((await worker.fetch(devReq("/api/admin/customers/missing/apps"), env)).status, 404);
 });
 
-test("console: exact grant selection and optional owner/revision preconditions reject stale writes", async () => {
+test("console: exact grant selection and required owner/revision preconditions reject stale writes", async () => {
   const db = freshDb(); seed(db); const env = devEnv(db);
   await createEntitlementFor(env, "cus_a", FP_A, "lic_a1"); await createEntitlementFor(env, "cus_b", FP_B, "lic_b1");
   const observed = (await body(await worker.fetch(devReq("/api/admin/customers/cus_a/access"), env))).data.items[0];
@@ -379,7 +379,7 @@ test("console: exact grant selection and optional owner/revision preconditions r
   assert.equal((await patch(expected)).status, 409);
   const staleDisable = await worker.fetch(devReq(`${path}/disable`, { method: "POST", body: JSON.stringify({ ...expected, reason: "old view" }) }), env);
   assert.equal(staleDisable.status, 409);
-  assert.equal((await patch({})).status, 200, "legacy callers remain supported");
+  assert.equal((await patch({})).status, 400, "the precondition is now mandatory");
   assert.equal(db.prepare("SELECT status FROM entitlements WHERE license_fingerprint=?").get(FP_A).status, "active");
 });
 

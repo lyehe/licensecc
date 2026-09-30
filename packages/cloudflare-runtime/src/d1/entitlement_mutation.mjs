@@ -445,8 +445,8 @@ export async function transitionEntitlement(env, key, status, eventType, reason,
 // Sync yields only protected grants: an unchanged grant of another mode is a conflict, not a no-op.
 // A disable or revocation of an existing grant always applies as an operator's status-only
 // transition (stored owner, license, notes and validity kept; terminal revocation; no-op when
-// unchanged). extraStatements, the admin sync's protected assertion, ride only a create or an
-// active write.
+// unchanged, and never blocked by the mandatory guard, satisfied here with the row just read).
+// extraStatements, the admin sync's protected assertion, ride only a create or an active write.
 export async function syncEntitlement(env, input, reason, ctx, idempotency, extraStatements = []) {
   const key = { project: input.project, feature: input.feature, license_fingerprint: input.license_fingerprint };
   const prev = await findEntitlement(env, key);
@@ -456,7 +456,7 @@ export async function syncEntitlement(env, input, reason, ctx, idempotency, extr
   }
   const targetStatus = input.status ?? "active";
   const withdrawal = targetStatus === "revoked" ? "revoke" : "disable";
-  if (prev !== null && targetStatus !== "active") return transitionEntitlement(env, key, targetStatus, withdrawal, reason, ctx, idempotency);
+  if (prev !== null && targetStatus !== "active") return transitionEntitlement(env, key, targetStatus, withdrawal, reason, { ...ctx, expectedEntitlement: { customer_id: prev.customer_id, revocation_seq: prev.revocation_seq } }, idempotency);
   return createEntitlement(env, input, ctx, reason, syncEventType(prev, targetStatus), idempotency, extraStatements);
 }
 

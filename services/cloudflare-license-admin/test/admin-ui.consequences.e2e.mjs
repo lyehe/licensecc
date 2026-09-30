@@ -695,7 +695,7 @@ test("admin UI reports a known partial batch outcome when every row identity and
   await dialog.getByRole("button", { name: "Confirm" }).click();
 
   await expect.poll(() => api.requests.batches.length).toBe(1);
-  expect(api.requests.batches[0].ids).toEqual(["ent-1", "ent-2"]);
+  expect(api.requests.batches[0].rows.map((row) => row.id)).toEqual(["ent-1", "ent-2"]);
   await expect(dialog).toHaveCount(0);
   await expect(page.getByText("Disable finished: 1 done, 1 not found.")).toBeVisible();
   // A row that did not change is not a success.
@@ -772,7 +772,7 @@ test("admin UI rejects reordered batch proof rows as an unknown outcome", async 
   await dialog.getByRole("button", { name: "Confirm" }).click();
 
   await expect.poll(() => api.requests.batches.length).toBe(1);
-  expect(api.requests.batches[0].ids).toEqual(["ent-1", "ent-2"]);
+  expect(api.requests.batches[0].rows.map((row) => row.id)).toEqual(["ent-1", "ent-2"]);
   await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
 });
@@ -846,7 +846,7 @@ test("admin UI stops a twenty-row batch at a 500 on chunk 3 and reconciles that 
   await expect(dialog.locator(".batchRun")).toContainText("Close this dialog, then use “Reconcile chunk 3” in the notice at the bottom of the page.");
   // The run stopped: chunks 4 and 5 are never sent.
   await page.waitForTimeout(400);
-  expect(attempts.map((attempt) => attempt.body.ids)).toEqual([chunkIds(1), chunkIds(2), chunkIds(3)]);
+  expect(attempts.map((attempt) => attempt.body.rows.map((row) => row.id))).toEqual([chunkIds(1), chunkIds(2), chunkIds(3)]);
   expect(new Set(attempts.map((attempt) => attempt.key)).size).toBe(3);
 
   await dialog.getByRole("button", { name: "Cancel" }).click();
@@ -882,7 +882,7 @@ test("admin UI reports a refused chunk 2 as failed, not unknown, and sends nothi
   await expect(panel).not.toContainText("unknown");
   await expect(page.getByRole("button", { name: /^Reconcile/ })).toHaveCount(0);
   await page.waitForTimeout(400);
-  expect(attempts.map((attempt) => attempt.body.ids)).toEqual([chunkIds(1), chunkIds(2)]);
+  expect(attempts.map((attempt) => attempt.body.rows.map((row) => row.id))).toEqual([chunkIds(1), chunkIds(2)]);
   await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(4);
   await expect(page.locator(".bulkBar")).toContainText("16 selected");
 });
@@ -951,7 +951,7 @@ test("admin UI reenables five suspended rows without a dialog as two chunks with
 
   await expect.poll(() => attempts.length).toBe(2);
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  expect(attempts.map((attempt) => attempt.body.ids)).toEqual([["ent-1", "ent-2", "ent-3", "ent-4"], ["ent-5"]]);
+  expect(attempts.map((attempt) => attempt.body.rows.map((row) => row.id))).toEqual([["ent-1", "ent-2", "ent-3", "ent-4"], ["ent-5"]]);
   for (const attempt of attempts) expect(attempt.body.action).toBe("reenable");
   expect(new Set(attempts.map((attempt) => attempt.key)).size).toBe(2);
   const panel = page.locator(".tablePane .batchRun");
@@ -975,7 +975,7 @@ test("admin UI reconciles an unknown second reenable chunk by replaying its froz
   await page.getByRole("button", { name: "Reconcile chunk 2", exact: true }).click();
   await expect.poll(() => attempts.length).toBe(3);
   expect(attempts[2]).toEqual(attempts[1]);
-  expect(attempts[1].body.ids).toEqual(["ent-5"]);
+  expect(attempts[1].body.rows.map((row) => row.id)).toEqual(["ent-5"]);
   await expect(panel.getByRole("listitem")).toHaveText(["5 done"]);
   await expect(panel).toContainText("Reenable finished; chunk 2 is now reconciled.");
   await expect(page.locator(".desktopRecords .status.active")).toHaveCount(5);

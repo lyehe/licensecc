@@ -37,14 +37,22 @@ const input = { ...key, customer_id: "owner", status: "active", assertion_ttl_se
 const ctx = { actor: { subject: "operator", email: "", actorType: "access" }, requestId: "request", ip: "", idempotencyKey: "operation", source: "admin" };
 const idempotency = { scope: "writer-test", responseCode: "updated" };
 
+// The owner/revocation-sequence precondition patchEntitlement and setEntitlementCapacity now
+// require, read fresh off the row so it always matches whatever this test's preceding calls left.
+function observed(f) {
+  const row = f.sql.prepare("SELECT customer_id, revocation_seq FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=?")
+    .get(key.project, key.feature, key.license_fingerprint);
+  return { customer_id: row.customer_id, revocation_seq: row.revocation_seq };
+}
+
 for (const state of ["active", "retiring"]) {
   test(`admin and sync batches cannot overwrite occupied protected ${state} authority`, async t => {
     const f = fixture(t, state), before = f.snapshot();
     for (const action of [
       () => createEntitlement(f.env, { ...input, customer_id: "other" }, ctx, "", undefined, idempotency),
-      () => patchEntitlement(f.env, key, { customer_id: "other" }, ctx, idempotency),
+      () => patchEntitlement(f.env, key, { customer_id: "other" }, { ...ctx, expectedEntitlement: observed(f) }, idempotency),
       () => syncEntitlement(f.env, { ...input, customer_id: undefined }, "sync", { ...ctx, source: "sync" }, idempotency),
-      () => setEntitlementCapacity(f.env, key, { max_active_devices: 0 }, ctx, idempotency),
+      () => setEntitlementCapacity(f.env, key, { max_active_devices: 0 }, { ...ctx, expectedEntitlement: observed(f) }, idempotency),
     ]) {
       await assert.rejects(action(), /capacity_in_use/);
       assert.deepEqual(f.snapshot(), before);
@@ -53,7 +61,7 @@ for (const state of ["active", "retiring"]) {
       { is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0, trial_require_device_proof: 0 });
     await assert.rejects(createEntitlement(f.env, input, ctx, "", undefined, idempotency, [stamp]), /capacity_in_use/);
     assert.deepEqual(f.snapshot(), before, "failed policy stamp rolls back the preceding upsert and all evidence");
-    const result = await patchEntitlement(f.env, key, { valid_until: 4102445000 }, ctx, idempotency);
+    const result = await patchEntitlement(f.env, key, { valid_until: 4102445000 }, { ...ctx, expectedEntitlement: observed(f) }, idempotency);
     assert.ok(result);
     assert.equal(result.data.enforcement_mode, "device_bound_v1");
     assert.equal((await findEntitlement(f.env, key)).enforcement_mode, "device_bound_v1");
@@ -68,7 +76,7 @@ for (const state of ["active", "retiring"]) {
     await syncEntitlement(f.env, { ...input, valid_until: 4102445100, enforcement_mode: "device_bound_v1" }, "extend",
       { ...ctx, source: "sync", idempotencyKey: "sync-operation" }, idempotency);
     await setEntitlementCapacity(f.env, key, { max_active_devices: 2 },
-      { ...ctx, idempotencyKey: "capacity-operation" }, idempotency);
+      { ...ctx, idempotencyKey: "capacity-operation", expectedEntitlement: observed(f) }, idempotency);
     const updated = f.sql.prepare("SELECT enforcement_mode,customer_id,authority_revision,max_active_devices,valid_until FROM entitlements").get();
     assert.deepEqual({ ...updated }, { enforcement_mode: "device_bound_v1", customer_id: "owner", authority_revision: 3,
       max_active_devices: 2, valid_until: 4102445100 });
@@ -89,10 +97,10 @@ for (const state of ["active", "retiring"]) {
 // refuses one, as createEntitlement never writes one, whatever its caller validated.
 test("patchEntitlement refuses a device hash on a protected grant", async t => {
   const f = fixture(t, "active"), before = f.snapshot();
-  await assert.rejects(patchEntitlement(f.env, key, { device_hash: "d".repeat(64) }, ctx, idempotency), /invalid_patch/);
-  await assert.rejects(patchEntitlement(f.env, key, { device_hash: "d".repeat(64), notes: "with a hash" }, ctx, idempotency), /invalid_patch/);
+  await assert.rejects(patchEntitlement(f.env, key, { device_hash: "d".repeat(64) }, { ...ctx, expectedEntitlement: observed(f) }, idempotency), /invalid_patch/);
+  await assert.rejects(patchEntitlement(f.env, key, { device_hash: "d".repeat(64), notes: "with a hash" }, { ...ctx, expectedEntitlement: observed(f) }, idempotency), /invalid_patch/);
   assert.deepEqual(f.snapshot(), before);
-  const result = await patchEntitlement(f.env, key, { device_hash: "", notes: "no hash" }, ctx, idempotency);
+  const result = await patchEntitlement(f.env, key, { device_hash: "", notes: "no hash" }, { ...ctx, expectedEntitlement: observed(f) }, idempotency);
   assert.equal(result.data.device_hash, "");
   assert.equal(result.data.notes, "no hash");
 });

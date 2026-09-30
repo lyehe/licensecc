@@ -408,7 +408,7 @@
           "type": "object"
         },
         "BatchTransitionInput": {
-          "description": "Bulk transition body. `reason` is required (non-empty) for disable/revoke. `ids` is the encoded entitlement ids (1..4); a larger batch is rejected before any D1 query or mutation, with recovery guidance in the error data.",
+          "description": "Bulk transition body. `reason` is required (non-empty) for disable/revoke. `rows` names the entitlements to transition (1..4), each with the same owner/revocation-sequence precondition the single-row routes require; a larger batch is rejected before any D1 query or mutation, with recovery guidance in the error data.",
           "properties": {
             "action": {
               "enum": [
@@ -418,24 +418,47 @@
               ],
               "type": "string"
             },
-            "ids": {
-              "items": {
-                "description": "Encoded entitlement id.",
-                "type": "string"
-              },
-              "maxItems": 4,
-              "minItems": 1,
-              "type": "array"
-            },
             "reason": {
               "description": "Required (non-empty) for disable/revoke; ignored for reenable.",
               "maxLength": 1000,
               "type": "string"
+            },
+            "rows": {
+              "items": {
+                "description": "One entitlement to transition, with the precondition observed for it.",
+                "properties": {
+                  "expected_customer_id": {
+                    "maxLength": 128,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "expected_revocation_seq": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "id": {
+                    "description": "Encoded entitlement id.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "expected_customer_id",
+                  "expected_revocation_seq"
+                ],
+                "type": "object"
+              },
+              "maxItems": 4,
+              "minItems": 1,
+              "type": "array"
             }
           },
           "required": [
             "action",
-            "ids"
+            "rows"
           ],
           "type": "object"
         },
@@ -11279,15 +11302,7 @@
                       "$ref": "#/components/schemas/EntitlementPatch"
                     },
                     {
-                      "dependentRequired": {
-                        "expected_customer_id": [
-                          "expected_revocation_seq"
-                        ],
-                        "expected_revocation_seq": [
-                          "expected_customer_id"
-                        ]
-                      },
-                      "description": "Optional paired precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409); omitted fields retain legacy behavior. Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+                      "description": "Required precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
                       "properties": {
                         "expected_customer_id": {
                           "maxLength": 128,
@@ -11302,6 +11317,10 @@
                           "type": "integer"
                         }
                       },
+                      "required": [
+                        "expected_customer_id",
+                        "expected_revocation_seq"
+                      ],
                       "type": "object"
                     }
                   ]
@@ -11611,15 +11630,7 @@
                       "$ref": "#/components/schemas/ReasonRequiredBody"
                     },
                     {
-                      "dependentRequired": {
-                        "expected_customer_id": [
-                          "expected_revocation_seq"
-                        ],
-                        "expected_revocation_seq": [
-                          "expected_customer_id"
-                        ]
-                      },
-                      "description": "Optional paired precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409); omitted fields retain legacy behavior. Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+                      "description": "Required precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
                       "properties": {
                         "expected_customer_id": {
                           "maxLength": 128,
@@ -11634,6 +11645,10 @@
                           "type": "integer"
                         }
                       },
+                      "required": [
+                        "expected_customer_id",
+                        "expected_revocation_seq"
+                      ],
                       "type": "object"
                     }
                   ]
@@ -11927,15 +11942,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "dependentRequired": {
-                    "expected_customer_id": [
-                      "expected_revocation_seq"
-                    ],
-                    "expected_revocation_seq": [
-                      "expected_customer_id"
-                    ]
-                  },
-                  "description": "Optional paired precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409); omitted fields retain legacy behavior. Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+                  "description": "Required precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
                   "properties": {
                     "expected_customer_id": {
                       "maxLength": 128,
@@ -11950,12 +11957,15 @@
                       "type": "integer"
                     }
                   },
+                  "required": [
+                    "expected_customer_id",
+                    "expected_revocation_seq"
+                  ],
                   "type": "object"
                 }
               }
             },
-            "description": "Empty JSON object accepted.",
-            "required": false
+            "required": true
           },
           "responses": {
             "200": {
@@ -12240,15 +12250,7 @@
                       "$ref": "#/components/schemas/ReasonRequiredBody"
                     },
                     {
-                      "dependentRequired": {
-                        "expected_customer_id": [
-                          "expected_revocation_seq"
-                        ],
-                        "expected_revocation_seq": [
-                          "expected_customer_id"
-                        ]
-                      },
-                      "description": "Optional paired precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409); omitted fields retain legacy behavior. Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+                      "description": "Required precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
                       "properties": {
                         "expected_customer_id": {
                           "maxLength": 128,
@@ -12263,6 +12265,10 @@
                           "type": "integer"
                         }
                       },
+                      "required": [
+                        "expected_customer_id",
+                        "expected_revocation_seq"
+                      ],
                       "type": "object"
                     }
                   ]
@@ -12651,7 +12657,7 @@
                   }
                 }
               },
-              "description": "Invalid action/ids/json/idempotency key or a missing reason for disable/revoke. More than four ids is rejected before any D1 query or mutation; split the request using the response data guidance."
+              "description": "Invalid action/rows/json/idempotency key, a malformed row (missing id or precondition), or a missing reason for disable/revoke. More than four rows is rejected before any D1 query or mutation; split the request using the response data guidance."
             },
             "401": {
               "content": {

@@ -195,15 +195,18 @@ test("admin UI workflow builds the bulk transition path and body", async () => {
   // Selection is no longer capped at four; the batch runner splits a larger run into chunks.
   assert.equal(workflow.boundedBatchSelection, undefined);
   assert.equal(workflow.entitlementBatchSelectionNotice, undefined);
-  assert.deepEqual(workflow.batchBody("disable", ["a", "b"], "audit"), {
+  assert.deepEqual(workflow.batchBody("disable", [{ id: "a", customer_id: "cus_a", revocation_seq: 1 }, { id: "b", customer_id: null, revocation_seq: 2 }], "audit"), {
     action: "disable",
     reason: "audit",
-    ids: ["a", "b"],
+    rows: [
+      { id: "a", expected_customer_id: "cus_a", expected_revocation_seq: 1 },
+      { id: "b", expected_customer_id: null, expected_revocation_seq: 2 },
+    ],
   });
-  const ids = ["x"];
-  const body = workflow.batchBody("revoke", ids, "chargeback");
-  ids.push("y");
-  assert.deepEqual(body.ids, ["x"]);
+  const rows = [{ id: "x", customer_id: "cus_x", revocation_seq: 1 }];
+  const body = workflow.batchBody("revoke", rows, "chargeback");
+  rows.push({ id: "y", customer_id: "cus_y", revocation_seq: 1 });
+  assert.deepEqual(body.rows, [{ id: "x", expected_customer_id: "cus_x", expected_revocation_seq: 1 }]);
 });
 
 test("admin UI workflow summarizes per-row batch results into one operator line", async () => {

@@ -237,7 +237,7 @@ test("meter_quota is configurable via setEntitlementCapacity and then enforced (
   const db = freshDb();
   seed(db); // default meter_quota = 0 (count-only)
   const env = { DB: new D1Like(db) };
-  const ctx = { actor: { subject: "op", email: "op@x.test", role: "admin", actorType: "access" }, requestId: "r1", ip: "", idempotencyKey: null, source: "admin" };
+  const ctx = { actor: { subject: "op", email: "op@x.test", role: "admin", actorType: "access" }, requestId: "r1", ip: "", idempotencyKey: null, source: "admin", expectedEntitlement: { customer_id: null, revocation_seq: 0 } };
 
   // Count-only initially: a large call is allowed.
   assert.equal((await meterUsage(env, KEY, OFF, 8, NOW)).ok, true);

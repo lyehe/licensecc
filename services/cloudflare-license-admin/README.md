@@ -134,7 +134,7 @@ ADR 0006. The complete deployment requires the backend's baseline schema.
   grant or not at all. Omitted, a new grant gets 1 and a re-create keeps the
   stored limit; the console sends it only when the field is filled in. With a
   `policy_id` it returns `400 invalid_request`: the policy stamps its own limit.
-- `PATCH /api/admin/entitlements/{id}` sets it alone, with the optional
+- `PATCH /api/admin/entitlements/{id}` sets it alone, with the required
   `expected_customer_id`/`expected_revocation_seq` precondition. With another
   PATCH field it returns `400 invalid_request`, because the limit is its own
   audited capacity write; keys a PATCH does not write are ignored, as always.
@@ -739,13 +739,14 @@ unsaved-draft protection and idempotent recovery. Advanced device/seat operation
 remain in the global entitlement workspace. Browse apps in the catalog reads the
 complete configuration/business-record inventory, including apps with no plans.
 
-Entitlement PATCH and individual disable/reenable/revoke accept the optional pair
-expected_customer_id (nullable) and expected_revocation_seq (nonnegative integer).
-Both are required when either is supplied. A mismatched owner or revision returns
-409 stale_transition before any write. Existing callers may omit both. Successful
-same-key retries return the original result; they do not initiate a new operation.
-The UI sends this pair for edits and individual lifecycle transitions. Exact list
-filters id and customer_id compose with existing project/feature/status filters.
+Entitlement PATCH, individual disable/reenable/revoke, and batch transition rows each
+require the pair expected_customer_id (nullable) and expected_revocation_seq
+(nonnegative integer). A missing field returns 400 invalid_request before any read.
+A mismatched owner or revision returns 409 stale_transition before any write.
+Successful same-key retries return the original result; they do not initiate a new
+operation. The UI sends this pair for edits, individual lifecycle transitions, and
+every row of a batch run. Exact list filters id and customer_id compose with existing
+project/feature/status filters.
 
 The baseline schema has a customer/project/feature/fingerprint index for
 efficient customer paging. Aggregation and deep offset scans still scale with

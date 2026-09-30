@@ -278,14 +278,14 @@ test("admin patch and transitions increment from stored row state", async () => 
 
   const patched = await worker.fetch(authed(`/api/admin/entitlements/${id}`, {
     method: "PATCH",
-    body: JSON.stringify({ notes: "patched" }),
+    body: JSON.stringify({ notes: "patched", expected_customer_id: "cus_1", expected_revocation_seq: 11 }),
   }), env);
   assert.equal((await json(patched)).data.revocation_seq, 12);
 
   db.entitlements.get(key).revocation_seq = 21;
   const disabled = await worker.fetch(authed(`/api/admin/entitlements/${id}/disable`, {
     method: "POST",
-    body: JSON.stringify({ reason: "stored sequence regression" }),
+    body: JSON.stringify({ reason: "stored sequence regression", expected_customer_id: "cus_1", expected_revocation_seq: 21 }),
   }), env);
   assert.equal((await json(disabled)).data.revocation_seq, 22);
 });
@@ -309,6 +309,8 @@ test("admin create and patch accept explicit empty notes from UI payloads", asyn
       notes: "",
       customer_id: "",
       license_id: "",
+      expected_customer_id: created.data.customer_id,
+      expected_revocation_seq: created.data.revocation_seq,
     }),
   }), env);
   assert.equal(patched.status, 200);
@@ -330,7 +332,7 @@ test("admin transitions require reason and revoked is terminal", async () => {
 
   const missingReason = await worker.fetch(authed(`/api/admin/entitlements/${id}/disable`, {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify({ expected_customer_id: "cus_1", expected_revocation_seq: 1 }),
   }), env);
   assert.equal(missingReason.status, 400);
   assert.equal((await json(missingReason)).code, "reason_required");
@@ -338,21 +340,21 @@ test("admin transitions require reason and revoked is terminal", async () => {
   const disabled = await worker.fetch(authed(`/api/admin/entitlements/${id}/disable`, {
     method: "POST",
     headers: { "idempotency-key": "disable-1" },
-    body: JSON.stringify({ reason: "support request" }),
+    body: JSON.stringify({ reason: "support request", expected_customer_id: "cus_1", expected_revocation_seq: 1 }),
   }), env);
   assert.equal((await json(disabled)).data.status, "disabled");
 
   const reenabled = await worker.fetch(authed(`/api/admin/entitlements/${id}/reenable`, {
     method: "POST",
     headers: { "idempotency-key": "reenable-1" },
-    body: JSON.stringify({}),
+    body: JSON.stringify({ expected_customer_id: "cus_1", expected_revocation_seq: 2 }),
   }), env);
   assert.equal((await json(reenabled)).data.status, "active");
 
   const revoked = await worker.fetch(authed(`/api/admin/entitlements/${id}/revoke`, {
     method: "POST",
     headers: { "idempotency-key": "revoke-1" },
-    body: JSON.stringify({ reason: "chargeback" }),
+    body: JSON.stringify({ reason: "chargeback", expected_customer_id: "cus_1", expected_revocation_seq: 3 }),
   }), env);
   const revokedBody = await json(revoked);
   assert.equal(revokedBody.data.status, "revoked");
@@ -360,7 +362,7 @@ test("admin transitions require reason and revoked is terminal", async () => {
 
   const terminal = await worker.fetch(authed(`/api/admin/entitlements/${id}/reenable`, {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify({ expected_customer_id: "cus_1", expected_revocation_seq: 4 }),
   }), env);
   assert.equal(terminal.status, 409);
   assert.equal((await json(terminal)).code, "revoked_entitlement_is_terminal");
@@ -439,32 +441,32 @@ test("cloudflare access admin can patch and transition entitlements end to end",
 
   const patched = await worker.fetch(accessAuthed(`/api/admin/entitlements/${id}`, token, {
     method: "PATCH",
-    body: JSON.stringify({ notes: "access-patched" }),
+    body: JSON.stringify({ notes: "access-patched", expected_customer_id: "cus_1", expected_revocation_seq: 1 }),
   }), env);
   assert.equal(patched.status, 200);
   assert.equal((await json(patched)).code, "entitlement_patched");
 
   const disabled = await worker.fetch(accessAuthed(`/api/admin/entitlements/${id}/disable`, token, {
     method: "POST",
-    body: JSON.stringify({ reason: "support request" }),
+    body: JSON.stringify({ reason: "support request", expected_customer_id: "cus_1", expected_revocation_seq: 2 }),
   }), env);
   assert.equal((await json(disabled)).data.status, "disabled");
 
   const reenabled = await worker.fetch(accessAuthed(`/api/admin/entitlements/${id}/reenable`, token, {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify({ expected_customer_id: "cus_1", expected_revocation_seq: 3 }),
   }), env);
   assert.equal((await json(reenabled)).data.status, "active");
 
   const revoked = await worker.fetch(accessAuthed(`/api/admin/entitlements/${id}/revoke`, token, {
     method: "POST",
-    body: JSON.stringify({ reason: "chargeback" }),
+    body: JSON.stringify({ reason: "chargeback", expected_customer_id: "cus_1", expected_revocation_seq: 4 }),
   }), env);
   assert.equal((await json(revoked)).data.status, "revoked");
 
   const terminal = await worker.fetch(accessAuthed(`/api/admin/entitlements/${id}/reenable`, token, {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify({ expected_customer_id: "cus_1", expected_revocation_seq: 5 }),
   }), env);
   assert.equal(terminal.status, 409);
   assert.equal((await json(terminal)).code, "revoked_entitlement_is_terminal");

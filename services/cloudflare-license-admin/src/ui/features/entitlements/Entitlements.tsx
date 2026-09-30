@@ -384,7 +384,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   // request fence above still drops any response that no longer matches the current request.
   const visibleEntitlements = entitlements;
   const visibleEntitlementsCursor = ready ? entitlementsCursor : null;
-  const selectedVisibleIds = visibleEntitlements.filter((item) => selectedIds.has(item.id)).map((item) => item.id);
+  const selectedVisibleRows = visibleEntitlements.filter((item) => selectedIds.has(item.id)), selectedVisibleIds = selectedVisibleRows.map((item) => item.id);
   const selectedCount = selectedVisibleIds.length;
   // "Select all {n} loaded" selects every loaded row; a run larger than the Worker's per-request
   // cap is split into sequential chunks rather than capped here.
@@ -401,7 +401,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   }
 
   const batch = useEntitlementBatch({
-    selectedIds: selectedVisibleIds, setSelectedIds, runMutation, refreshCore, currentReason, setFeedback, setReason,
+    selectedRows: selectedVisibleRows.map((item) => ({ id: item.id, customer_id: item.customer_id, revocation_seq: item.revocation_seq })), setSelectedIds, runMutation, refreshCore, currentReason, setFeedback, setReason,
     recoveryContext: () => {
       let generation = filterGeneration;
       return { isCurrent: () => isFilterGenerationCurrent(generation), capture: () => { if (currentFilterContext() === filterContextKey) generation = currentFilterGeneration(); } };

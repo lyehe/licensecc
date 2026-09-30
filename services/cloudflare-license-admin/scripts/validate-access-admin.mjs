@@ -337,7 +337,7 @@ async function runAccessAdminValidation(options) {
   const revoke = assertEnvelope(await requestJson(options.baseUrl, `/api/admin/entitlements/${created.id}/revoke`, {
     method: "POST",
     headers: accessHeaders(options.accessJwt, { "idempotency-key": `access-revoke-${randomUUID()}` }),
-    body: JSON.stringify({ reason: "access validation cleanup" }),
+    body: JSON.stringify({ reason: "access validation cleanup", expected_customer_id: created.customer_id, expected_revocation_seq: created.revocation_seq }),
   }), "entitlement_revoked", "Access JWT revoke cleanup");
   if (revoke.data?.status !== "revoked" || revoke.data.revocation_seq <= created.revocation_seq) {
     throw new Error("revoke cleanup did not advance the scratch entitlement to revoked");
@@ -346,7 +346,7 @@ async function runAccessAdminValidation(options) {
   const reactivate = await requestJson(options.baseUrl, `/api/admin/entitlements/${created.id}/reenable`, {
     method: "POST",
     headers: accessHeaders(options.accessJwt, { "idempotency-key": `access-reactivate-${randomUUID()}` }),
-    body: JSON.stringify({ reason: "terminal-state validation" }),
+    body: JSON.stringify({ reason: "terminal-state validation", expected_customer_id: revoke.data.customer_id, expected_revocation_seq: revoke.data.revocation_seq }),
   });
   if (reactivate.status !== 409 || reactivate.body?.code !== "revoked_entitlement_is_terminal") {
     throw new Error(`revoked terminal check failed: status=${reactivate.status}; code_matches=${reactivate.body?.code === "revoked_entitlement_is_terminal"}`);

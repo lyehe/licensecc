@@ -124,8 +124,9 @@ test("plan projection documents the bounded epoch contract without exposing priv
 
 test("entitlement batch documents the Free-tier-safe pre-query cap and recovery data", () => {
   const input = openApiDocument.components.schemas.BatchTransitionInput;
-  assert.equal(input.properties.ids.minItems, 1);
-  assert.equal(input.properties.ids.maxItems, ENTITLEMENT_BATCH_MAX_IDS);
+  assert.equal(input.properties.rows.minItems, 1);
+  assert.equal(input.properties.rows.maxItems, ENTITLEMENT_BATCH_MAX_IDS);
+  assert.deepEqual(input.properties.rows.items.required, ["id", "expected_customer_id", "expected_revocation_seq"]);
   assert.match(input.description, /before any D1 query or mutation/i);
 
   const operation = openApiDocument.paths["/api/admin/entitlements/batch"].post;

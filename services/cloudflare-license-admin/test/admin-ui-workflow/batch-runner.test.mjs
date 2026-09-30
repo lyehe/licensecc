@@ -26,17 +26,28 @@ function batchDone(ids, action = "disable", requestId = "ui-unit-batch") {
 const refusal = (status, code, requestId = `ui-unit-${status}`) => envelope(status, { ok: false, code, request_id: requestId });
 const twenty = Array.from({ length: 20 }, (_unused, index) => `ent-${index + 1}`);
 
+/** Fixture rows for `planBatchChunks`: an id plus the owner/revocation-sequence precondition it
+ * carries. The exact owner/sequence values do not matter to these pure run-mechanics tests. */
+function rowsFor(ids) {
+  return ids.map((id) => ({ id, customer_id: "cus_1", revocation_seq: 1 }));
+}
+
+/** The wire shape a row serializes to inside a chunk's JSON body. */
+function wireRows(ids) {
+  return rowsFor(ids).map((row) => ({ id: row.id, expected_customer_id: row.customer_id, expected_revocation_seq: row.revocation_seq }));
+}
+
 test("a selection splits into sequential chunks of at most four, each with its own key and immutable body", async () => {
   const runner = await loadRunner();
-  const chunks = runner.planBatchChunks("disable", twenty, "contract ended", "base-key");
+  const chunks = runner.planBatchChunks("disable", rowsFor(twenty), "contract ended", "base-key");
   assert.deepEqual(chunks.map((chunk) => chunk.index), [1, 2, 3, 4, 5]);
   assert.deepEqual(chunks.map((chunk) => chunk.ids.length), [4, 4, 4, 4, 4]);
   assert.deepEqual(chunks[2].ids, ["ent-9", "ent-10", "ent-11", "ent-12"]);
   assert.deepEqual(chunks.map((chunk) => chunk.idempotencyKey), ["base-key:1", "base-key:2", "base-key:3", "base-key:4", "base-key:5"]);
-  assert.deepEqual(JSON.parse(chunks[2].body), { action: "disable", reason: "contract ended", ids: ["ent-9", "ent-10", "ent-11", "ent-12"] });
+  assert.deepEqual(JSON.parse(chunks[2].body), { action: "disable", reason: "contract ended", rows: wireRows(["ent-9", "ent-10", "ent-11", "ent-12"]) });
 
-  assert.deepEqual(runner.planBatchChunks("revoke", ["a", "b", "c", "d", "e"], "r", "k").map((chunk) => chunk.ids), [["a", "b", "c", "d"], ["e"]]);
-  assert.deepEqual(runner.planBatchChunks("reenable", ["a", "b", "a"], "", "k").map((chunk) => chunk.ids), [["a", "b"]], "duplicates are dropped and first-loaded order kept");
+  assert.deepEqual(runner.planBatchChunks("revoke", rowsFor(["a", "b", "c", "d", "e"]), "r", "k").map((chunk) => chunk.ids), [["a", "b", "c", "d"], ["e"]]);
+  assert.deepEqual(runner.planBatchChunks("reenable", rowsFor(["a", "b", "a"]), "", "k").map((chunk) => chunk.ids), [["a", "b"]], "duplicates are dropped and first-loaded order kept");
   assert.deepEqual(runner.planBatchChunks("disable", [], "r", "k"), []);
 });
 
@@ -74,7 +85,7 @@ test("a chunk is done only on its exact proof; a 5xx, lost transport or malforme
 
 test("chunk 3 of 5 returning 500 stops the run with 8 done, 4 outcome unknown and 8 not attempted after exactly 3 requests", async () => {
   const runner = await loadRunner();
-  const chunks = runner.planBatchChunks("disable", twenty, "audit", "run");
+  const chunks = runner.planBatchChunks("disable", rowsFor(twenty), "audit", "run");
   const sent = [];
   const progress = [];
   const state = await runner.runBatchChunks("disable", chunks, async (chunk) => {
@@ -97,7 +108,7 @@ test("chunk 3 of 5 returning 500 stops the run with 8 done, 4 outcome unknown an
 
 test("a definite refusal on chunk 2 reads failed, not unknown, and stops after 2 requests", async () => {
   const runner = await loadRunner();
-  const chunks = runner.planBatchChunks("revoke", twenty, "chargeback", "k");
+  const chunks = runner.planBatchChunks("revoke", rowsFor(twenty), "chargeback", "k");
   let requests = 0;
   const state = await runner.runBatchChunks("revoke", chunks, async (chunk) => {
     requests += 1;
@@ -114,7 +125,7 @@ test("a definite refusal on chunk 2 reads failed, not unknown, and stops after 2
 
 test("a send the operation gate refuses stops the run as not sent: never failed, never unknown, and no request id", async () => {
   const runner = await loadRunner();
-  const chunks = runner.planBatchChunks("disable", twenty.slice(0, 8), "r", "k");
+  const chunks = runner.planBatchChunks("disable", rowsFor(twenty.slice(0, 8)), "r", "k");
   const state = await runner.runBatchChunks("disable", chunks, async () => undefined, () => {});
   assert.equal(state.stopped.kind, "not_sent");
   assert.equal(state.stopped.requestId, undefined);
@@ -123,13 +134,13 @@ test("a send the operation gate refuses stops the run as not sent: never failed,
   assert.equal(runner.batchRunHeadline(state), "Disable stopped at chunk 1 of 2: it was not sent.");
   assert.equal(runner.batchStopMessage(state), "Disable stopped at chunk 1 of 2: it was not sent.");
   assert.doesNotMatch(runner.batchStopMessage(state), /refused|mutation_busy|not_sent|\(/);
-  const single = await runner.runBatchChunks("disable", runner.planBatchChunks("disable", ["a"], "r", "k"), async () => undefined, () => {});
+  const single = await runner.runBatchChunks("disable", runner.planBatchChunks("disable", rowsFor(["a"]), "r", "k"), async () => undefined, () => {});
   assert.equal(runner.batchStopMessage(single), "Disable was not sent.");
 });
 
 test("an all-success run reports every row done, in order, with each chunk's request id", async () => {
   const runner = await loadRunner();
-  const chunks = runner.planBatchChunks("disable", twenty, "audit", "k");
+  const chunks = runner.planBatchChunks("disable", rowsFor(twenty), "audit", "k");
   const state = await runner.runBatchChunks("disable", chunks, async (chunk) => batchDone(chunk.ids, "disable", `rid-${chunk.index}`), () => {});
   assert.equal(state.stopped, null);
   assert.equal(state.running, false);
@@ -142,7 +153,7 @@ test("an all-success run reports every row done, in order, with each chunk's req
 
 test("a same-key replay that proves the unknown chunk settles it as done and leaves the rest not attempted", async () => {
   const runner = await loadRunner();
-  const chunks = runner.planBatchChunks("disable", twenty, "audit", "k");
+  const chunks = runner.planBatchChunks("disable", rowsFor(twenty), "audit", "k");
   const stopped = await runner.runBatchChunks("disable", chunks, async (chunk) => chunk.index === 3 ? envelope(0, undefined) : batchDone(chunk.ids), () => {});
   const replay = runner.classifyBatchChunk(batchDone(stopped.stopped.chunk.ids, "disable", "rid-replay"), "disable", stopped.stopped.chunk.ids, "replay");
   const settled = runner.settleReconciledChunk(stopped, replay);
@@ -168,7 +179,7 @@ test("the confirmation names the chunk plan before anything is sent", async () =
 
 /** Run `ids` in chunks of four, answering chunk `unknownAt` with a 500 and every other chunk with its exact proof. */
 async function runWithUnknownAt(runner, ids, unknownAt) {
-  const chunks = runner.planBatchChunks("disable", ids, "audit", "k");
+  const chunks = runner.planBatchChunks("disable", rowsFor(ids), "audit", "k");
   const sent = [];
   const state = await runner.runBatchChunks("disable", chunks, async (chunk) => {
     sent.push(chunk.index);
@@ -209,7 +220,7 @@ test("an uneven final chunk is counted by its own size: 5 rows with chunk 2 unkn
 test("a single-request run keeps the single-request copy; a multi-chunk run names its chunk", async () => {
   const runner = await loadRunner();
   const three = twenty.slice(0, 3);
-  const plan = (ids) => runner.planBatchChunks("disable", ids, "audit", "k");
+  const plan = (ids) => runner.planBatchChunks("disable", rowsFor(ids), "audit", "k");
 
   const unknownSingle = await runner.runBatchChunks("disable", plan(three), async () => refusal(500, "internal_error"), () => {});
   assert.equal(runner.batchReconcileLabel(unknownSingle), "Reconcile status");
@@ -236,7 +247,7 @@ test("reconcile guidance says where the control is, and a refresh failure after 
   const { state: finished } = await runWithUnknownAt(runner, twenty, 0);
   assert.equal(runner.batchReconcileGuidance(finished, "page"), null);
 
-  const refused = await runner.runBatchChunks("disable", runner.planBatchChunks("disable", twenty, "audit", "k"), async (chunk) => chunk.index === 2 ? refusal(409, "idempotency_request_conflict") : batchDone(chunk.ids), () => {});
+  const refused = await runner.runBatchChunks("disable", runner.planBatchChunks("disable", rowsFor(twenty), "audit", "k"), async (chunk) => chunk.index === 2 ? refusal(409, "idempotency_request_conflict") : batchDone(chunk.ids), () => {});
   const message = runner.batchRefreshFailureMessage(refused);
   // The notice replaces the stop banner, so it must keep why the run stopped as well as the failed read.
   assert.equal(message, "Disable stopped at chunk 2 of 5: the request was refused. This request key was already used for a different change. Reload the page and try again. The status could not be refreshed.");

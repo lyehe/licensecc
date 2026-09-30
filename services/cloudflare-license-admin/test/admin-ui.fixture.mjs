@@ -972,7 +972,8 @@ export function makeAdminApiFixture() {
       const { entitlement_count: _entitlementCount, active_entitlement_count: _activeEntitlementCount, ...transitionRow } = customer;
       return fulfill(200, makeEnvelope(`customer_${action}d`, transitionRow));
     }
-    // Workstream C — bulk transitions. One POST carries action/reason/ids; returns per-row results.
+    // Workstream C — bulk transitions. One POST carries action/reason/rows (each an id plus the
+    // owner/revocation-sequence precondition observed for it); returns per-row results.
     if (method === "POST" && path === "/api/admin/entitlements/batch") {
       const body = await jsonBody(request);
       requests.batches.push(body);
@@ -983,10 +984,14 @@ export function makeAdminApiFixture() {
       }
       now += 1;
       const results = [];
-      for (const id of body.ids) {
+      for (const { id, expected_customer_id: expectedCustomerId, expected_revocation_seq: expectedRevocationSeq } of body.rows) {
         const row = findById(id);
         if (row === undefined) {
           results.push({ id, ok: false, code: "not_found" });
+          continue;
+        }
+        if (row.customer_id !== expectedCustomerId || row.revocation_seq !== expectedRevocationSeq) {
+          results.push({ id, ok: false, code: "stale_transition" });
           continue;
         }
         if (body.action === "revoke" && row.status === "revoked") {

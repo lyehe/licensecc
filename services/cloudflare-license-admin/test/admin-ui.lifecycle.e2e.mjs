@@ -242,7 +242,7 @@ test("admin UI runs bulk transitions, global search deep-link, and CSV export", 
 
   await expect.poll(() => api.requests.batches.length).toBe(1);
   expect(api.requests.batches[0]).toMatchObject({ action: "disable", reason: "quarterly audit" });
-  expect(api.requests.batches[0].ids).toHaveLength(2);
+  expect(api.requests.batches[0].rows).toHaveLength(2);
   // The per-row roll-up renders in the status line, and the rows refreshed to disabled.
   await expect(page.getByText("Disable finished: 2 done.")).toBeVisible();
   await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(2);
@@ -297,7 +297,7 @@ test("admin UI retains the server-owned four-entitlement batch limit", async ({ 
   await dialog.getByLabel(/Reason/).fill("four-row free tier proof");
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.batches.length).toBe(2);
-  expect(api.requests.batches.map((batch) => batch.ids)).toEqual([["ent-1", "ent-2", "ent-3", "ent-4"], ["ent-5"]]);
+  expect(api.requests.batches.map((batch) => batch.rows.map((row) => row.id))).toEqual([["ent-1", "ent-2", "ent-3", "ent-4"], ["ent-5"]]);
 });
 
 test("admin UI gates a batch revoke behind an exact typed REVOKE phrase", async ({ page }) => {
@@ -337,7 +337,7 @@ test("admin UI gates a batch revoke behind an exact typed REVOKE phrase", async 
   await confirm.click();
   await expect.poll(() => api.requests.batches.length).toBe(1);
   expect(api.requests.batches[0]).toMatchObject({ action: "revoke", reason: "mass revoke test" });
-  expect(api.requests.batches[0].ids).toHaveLength(4);
+  expect(api.requests.batches[0].rows).toHaveLength(4);
   await expect(dialog).toHaveCount(0);
   await expect(page.locator(".desktopRecords .status.revoked")).toHaveCount(4);
 });
@@ -386,7 +386,7 @@ test("admin UI disables twenty loaded entitlements with one confirmation, one re
 
   await expect.poll(() => api.requests.batches.length).toBe(5);
   await expect(dialog).toHaveCount(0);
-  expect(api.requests.batches.map((batch) => batch.ids)).toEqual(
+  expect(api.requests.batches.map((batch) => batch.rows.map((row) => row.id))).toEqual(
     Array.from({ length: 5 }, (_unused, chunk) => Array.from({ length: 4 }, (_item, row) => `ent-${chunk * 4 + row + 1}`)),
   );
   for (const batch of api.requests.batches) expect(batch).toMatchObject({ action: "disable", reason: "contract ended" });

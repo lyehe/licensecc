@@ -296,7 +296,8 @@ async function invokeEntitlementTransition(action, sourceStatus) {
   );
   assert.equal(created.status, 200, `setup ${sourceStatus} entitlement`);
   const id = (await created.json()).data.id;
-  const body = action === "reenable" ? {} : { reason: "support" };
+  const expected = { expected_customer_id: protectedGrant.customer_id, expected_revocation_seq: 1 };
+  const body = action === "reenable" ? expected : { reason: "support", ...expected };
   return handleMutation(post(`/api/admin/entitlements/${id}/${action}`, body), env, ACTOR, REQUEST_ID);
 }
 
@@ -413,7 +414,7 @@ const TRANSITION_CONTRACTS = [
       const env = { DB: db };
       const created = await handleMutation(post("/api/admin/entitlements", protectedGrant), env, ACTOR, REQUEST_ID);
       const id = (await created.json()).data.id;
-      return handleMutation(post(`/api/admin/entitlements/${id}/disable`, { reason: "support" }), env, ACTOR, REQUEST_ID);
+      return handleMutation(post(`/api/admin/entitlements/${id}/disable`, { reason: "support", expected_customer_id: protectedGrant.customer_id, expected_revocation_seq: 1 }), env, ACTOR, REQUEST_ID);
     },
   },
   {
@@ -428,7 +429,7 @@ const TRANSITION_CONTRACTS = [
       const env = { DB: db };
       const created = await handleMutation(post("/api/admin/entitlements", { ...protectedGrant, status: "disabled" }), env, ACTOR, REQUEST_ID);
       const id = (await created.json()).data.id;
-      return handleMutation(post(`/api/admin/entitlements/${id}/reenable`), env, ACTOR, REQUEST_ID);
+      return handleMutation(post(`/api/admin/entitlements/${id}/reenable`, { expected_customer_id: protectedGrant.customer_id, expected_revocation_seq: 1 }), env, ACTOR, REQUEST_ID);
     },
   },
   {
@@ -443,7 +444,7 @@ const TRANSITION_CONTRACTS = [
       const env = { DB: db };
       const created = await handleMutation(post("/api/admin/entitlements", protectedGrant), env, ACTOR, REQUEST_ID);
       const id = (await created.json()).data.id;
-      return handleMutation(post(`/api/admin/entitlements/${id}/revoke`, { reason: "support" }), env, ACTOR, REQUEST_ID);
+      return handleMutation(post(`/api/admin/entitlements/${id}/revoke`, { reason: "support", expected_customer_id: protectedGrant.customer_id, expected_revocation_seq: 1 }), env, ACTOR, REQUEST_ID);
     },
   },
   {
@@ -489,7 +490,7 @@ const TRANSITION_CONTRACTS = [
       const env = { DB: db };
       const created = await handleMutation(post("/api/admin/entitlements", protectedGrant), env, ACTOR, REQUEST_ID);
       const id = (await created.json()).data.id;
-      return handleBatchTransition(post("/api/admin/entitlements/batch", { action: "disable", reason: "support", ids: [id] }), env, ACTOR, REQUEST_ID);
+      return handleBatchTransition(post("/api/admin/entitlements/batch", { action: "disable", reason: "support", rows: [{ id, expected_customer_id: protectedGrant.customer_id, expected_revocation_seq: 1 }] }), env, ACTOR, REQUEST_ID);
     },
   },
 ];
@@ -586,7 +587,7 @@ test("compiled entitlement transition state matrix distinguishes changes, no-ops
 test("compiled entitlement handler maps a guarded CAS loser to the documented stale_transition conflict", async () => {
   const db = new CasLoserFixtureDb(entitlementRecord("active", 7), entitlementRecord("active", 8));
   const response = await handleMutation(
-    post(entitlementTransitionPath("disable"), { reason: "support" }),
+    post(entitlementTransitionPath("disable"), { reason: "support", expected_customer_id: null, expected_revocation_seq: 7 }),
     { DB: db },
     ACTOR,
     REQUEST_ID,
@@ -610,7 +611,7 @@ test("compiled entitlement handler serves the winner cache for a same-key guarde
     JSON.stringify(winnerBody),
   );
   const response = await handleMutation(
-    post(entitlementTransitionPath("disable"), { reason: "support" }, { "idempotency-key": "same-key-race" }),
+    post(entitlementTransitionPath("disable"), { reason: "support", expected_customer_id: null, expected_revocation_seq: 7 }, { "idempotency-key": "same-key-race" }),
     { DB: db },
     ACTOR,
     REQUEST_ID,
@@ -627,8 +628,9 @@ test("compiled batch transition preserves duplicate input identity and per-row o
   const env = { DB: db };
   const created = await handleMutation(post("/api/admin/entitlements", protectedGrant), env, ACTOR, REQUEST_ID);
   const id = (await created.json()).data.id;
+  const row = { id, expected_customer_id: protectedGrant.customer_id, expected_revocation_seq: 1 };
   const response = await handleBatchTransition(
-    post("/api/admin/entitlements/batch", { action: "disable", reason: "support", ids: [id, id] }),
+    post("/api/admin/entitlements/batch", { action: "disable", reason: "support", rows: [row, row] }),
     env,
     ACTOR,
     REQUEST_ID,

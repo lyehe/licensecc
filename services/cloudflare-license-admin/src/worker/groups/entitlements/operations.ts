@@ -36,6 +36,18 @@ function policyStampOn(env: Env): boolean {
   return env.POLICY_STAMP_MODE === "on";
 }
 
+// The owner and revocation-sequence precondition every grant mutation now requires: the
+// customer_id (including null) and revocation_seq the caller observed before it decided to
+// write. A missing or malformed field is refused before any row is read.
+function parseExpectedEntitlement(candidate: Record<string, unknown>): { customer_id: string | null; revocation_seq: number } | null {
+  const { expected_customer_id: customerId, expected_revocation_seq: revocationSeq } = candidate;
+  if ((customerId !== null && (typeof customerId !== "string" || customerId.length > 128)) ||
+    !Number.isSafeInteger(revocationSeq) || Number(revocationSeq) < 0) {
+    return null;
+  }
+  return { customer_id: customerId as string | null, revocation_seq: revocationSeq as number };
+}
+
 // The stored policy row as the stamp reads it, including columns the policy record omits.
 async function findPolicy(env: Env, policyId: string): Promise<Policy | null> {
   return env.DB.prepare("SELECT * FROM entitlement_policies WHERE id = ?").bind(policyId).first<Policy>();
@@ -255,14 +267,11 @@ export async function handleMutation(request: Request, env: Env, actor: Actor, r
   }
   const action = match[2];
   if (body === null || typeof body !== "object" || Array.isArray(body)) return envelope(requestIdValue, "invalid_request", undefined, 400);
-  const expected = body as Record<string, unknown>;
-  if (expected.expected_customer_id !== undefined || expected.expected_revocation_seq !== undefined) {
-    if ((expected.expected_customer_id !== null && (typeof expected.expected_customer_id !== "string" || expected.expected_customer_id.length > 128)) ||
-      !Number.isSafeInteger(expected.expected_revocation_seq) || Number(expected.expected_revocation_seq) < 0) {
-      return envelope(requestIdValue, "invalid_request", undefined, 400);
-    }
-    ctx.expectedEntitlement = { customer_id: expected.expected_customer_id as string | null, revocation_seq: expected.expected_revocation_seq as number };
+  const expected = parseExpectedEntitlement(body as Record<string, unknown>);
+  if (expected === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
+  ctx.expectedEntitlement = expected;
   if (request.method === "PATCH" && action === undefined) {
     const patch = validateEntitlementPatch(body);
     if (patch === null) {
@@ -313,22 +322,38 @@ export async function handleBatchTransition(request: Request, env: Env, actor: A
   if ((action === "disable" || action === "revoke") && reason === "") {
     return envelope(requestIdValue, "reason_required", undefined, 400);
   }
-  const ids = input.ids;
-  if (!Array.isArray(ids) || ids.length === 0) {
+  const rows = input.rows;
+  if (!Array.isArray(rows) || rows.length === 0) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
   // This check must remain above decoding, idempotency reads, and every D1
   // side effect. Four rows leave deterministic headroom below Free D1's 50
   // query limit even on same-target guarded-CAS races, while fitting the
   // Worker-wide 8 KiB JSON parser budget for canonical encoded ids.
-  if (ids.length > ENTITLEMENT_BATCH_MAX_IDS) {
+  if (rows.length > ENTITLEMENT_BATCH_MAX_IDS) {
     return envelope(requestIdValue, ENTITLEMENT_BATCH_TOO_LARGE_CODE, {
       max_ids: ENTITLEMENT_BATCH_MAX_IDS,
       guidance: ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE,
     }, 400);
   }
-  if (ids.some((id) => typeof id !== "string")) {
-    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  // Every row names the id it targets and the owner/revocation-sequence precondition the
+  // caller observed for it — the same mandatory precondition the single-row routes require.
+  // A malformed row refuses the whole batch before any D1 query, exactly like a non-string
+  // id did before per-row expectations existed.
+  const parsedRows: Array<{ id: string; expected: { customer_id: string | null; revocation_seq: number } }> = [];
+  for (const row of rows) {
+    if (row === null || typeof row !== "object" || Array.isArray(row)) {
+      return envelope(requestIdValue, "invalid_request", undefined, 400);
+    }
+    const candidate = row as Record<string, unknown>;
+    if (typeof candidate.id !== "string") {
+      return envelope(requestIdValue, "invalid_request", undefined, 400);
+    }
+    const expected = parseExpectedEntitlement(candidate);
+    if (expected === null) {
+      return envelope(requestIdValue, "invalid_request", undefined, 400);
+    }
+    parsedRows.push({ id: candidate.id, expected });
   }
   // The per-row idempotency BASE: the caller's key, or a stable per-request batch id when absent
   // (a generated base means no cross-request replay, but the rows are still mutually distinct).
@@ -337,7 +362,7 @@ export async function handleBatchTransition(request: Request, env: Env, actor: A
   const transition = action as "disable" | "reenable" | "revoke";
   const scope = `POST:${new URL(request.url).pathname}:${actor.subject}`;
   const results: Array<{ id: string; ok: boolean; code: string }> = [];
-  for (const id of ids as string[]) {
+  for (const { id, expected } of parsedRows) {
     const key = decodeEntitlementId(id);
     if (key === null) {
       results.push({ id, ok: false, code: "invalid_entitlement_id" });
@@ -351,6 +376,7 @@ export async function handleBatchTransition(request: Request, env: Env, actor: A
       ip: clientIp(request),
       idempotencyKey: rowKey,
       source: "admin",
+      expectedEntitlement: expected,
     };
     const replay = await readIdempotentResponse(env.DB, scope, rowKey);
     if (replay !== null) {

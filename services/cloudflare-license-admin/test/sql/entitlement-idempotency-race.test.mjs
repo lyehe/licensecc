@@ -212,7 +212,7 @@ test("policy create: the initial body is the committed snapshot even when a post
     afterBatch: async () => {
       const patched = await worker.fetch(devRequest(`/api/admin/entitlements/${id}`, {
         method: "PATCH",
-        body: { notes: "after-commit" },
+        body: { notes: "after-commit", expected_customer_id: "cus_race", expected_revocation_seq: 1 },
         idempotencyKey: "after-commit-patch",
         requestId: "after-commit-patch-request",
       }), patchEnv);

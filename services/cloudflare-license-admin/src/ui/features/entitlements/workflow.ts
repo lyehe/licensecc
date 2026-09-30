@@ -219,12 +219,21 @@ export interface BatchRowResult {
   code: string;
 }
 
-export function batchBody(action: EntitlementAction, ids: ReadonlyArray<string>, reason: string): {
+/** The row identity and precondition a batch run needs for one entitlement: the id it targets,
+ * plus the owner and revocation sequence observed for it (the same precondition the single-row
+ * routes require), read from the loaded row the operator selected. */
+export interface BatchTargetRow {
+  id: string;
+  customer_id: string | null;
+  revocation_seq: number;
+}
+
+export function batchBody(action: EntitlementAction, rows: ReadonlyArray<BatchTargetRow>, reason: string): {
   action: EntitlementAction;
   reason: string;
-  ids: string[];
+  rows: Array<{ id: string; expected_customer_id: string | null; expected_revocation_seq: number }>;
 } {
-  return { action, reason, ids: [...ids] };
+  return { action, reason, rows: rows.map((row) => ({ id: row.id, expected_customer_id: row.customer_id, expected_revocation_seq: row.revocation_seq })) };
 }
 
 export function summarizeBatchResults(results: ReadonlyArray<BatchRowResult>): string {

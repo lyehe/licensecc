@@ -2,7 +2,7 @@ import { ENTITLEMENT_BATCH_MAX_IDS } from "../../../shared/api";
 import { describeCode, unknownResultText } from "../../shared/messages";
 import { hasBatchResultsData, mutationFailurePolicies, parseMutationResponse, type MutationPhase } from "../../shared/mutationGuards";
 import type { FeedbackDetail } from "../../shared/operatorFeedback";
-import { batchBody, type BatchRowResult, type EntitlementAction } from "./workflow";
+import { batchBody, type BatchRowResult, type BatchTargetRow, type EntitlementAction } from "./workflow";
 
 /*
  * A selection larger than the Worker's per-request cap runs as sequential
@@ -55,14 +55,20 @@ export interface BatchRunState {
   readonly reconciled: number | null;
 }
 
-/** Split ids (duplicates dropped, first-loaded order kept) into chunks; chunk k's key is `${baseKey}:${k}`. */
-export function planBatchChunks(action: EntitlementAction, ids: readonly string[], reason: string, baseKey: string): BatchChunk[] {
-  const unique = [...new Set(ids)];
+/** Split rows (duplicates dropped by id, first-loaded order kept) into chunks; chunk k's key is `${baseKey}:${k}`. */
+export function planBatchChunks(action: EntitlementAction, rows: readonly BatchTargetRow[], reason: string, baseKey: string): BatchChunk[] {
+  const seen = new Set<string>();
+  const unique: BatchTargetRow[] = [];
+  for (const row of rows) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    unique.push(row);
+  }
   const chunks: BatchChunk[] = [];
   for (let start = 0; start < unique.length; start += ENTITLEMENT_BATCH_MAX_IDS) {
-    const chunkIds = unique.slice(start, start + ENTITLEMENT_BATCH_MAX_IDS);
+    const chunkRows = unique.slice(start, start + ENTITLEMENT_BATCH_MAX_IDS);
     const index = chunks.length + 1;
-    chunks.push(Object.freeze({ index, ids: Object.freeze(chunkIds), idempotencyKey: `${baseKey}:${index}`, body: JSON.stringify(batchBody(action, chunkIds, reason)) }));
+    chunks.push(Object.freeze({ index, ids: Object.freeze(chunkRows.map((row) => row.id)), idempotencyKey: `${baseKey}:${index}`, body: JSON.stringify(batchBody(action, chunkRows, reason)) }));
   }
   return chunks;
 }

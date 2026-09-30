@@ -1022,12 +1022,12 @@ export const openApiComponents: LabeledComponentFragment = {
       }],
       ["BatchTransitionInput", {
         type: "object",
-        required: ["action", "ids"],
-        description: `Bulk transition body. \`reason\` is required (non-empty) for disable/revoke. \`ids\` is the encoded entitlement ids (1..${ENTITLEMENT_BATCH_MAX_IDS}); a larger batch is rejected before any D1 query or mutation, with recovery guidance in the error data.`,
+        required: ["action", "rows"],
+        description: `Bulk transition body. \`reason\` is required (non-empty) for disable/revoke. \`rows\` names the entitlements to transition (1..${ENTITLEMENT_BATCH_MAX_IDS}), each with the same owner/revocation-sequence precondition the single-row routes require; a larger batch is rejected before any D1 query or mutation, with recovery guidance in the error data.`,
         properties: {
           action: { type: "string", enum: ["disable", "reenable", "revoke"] },
           reason: { type: "string", maxLength: 1000, description: "Required (non-empty) for disable/revoke; ignored for reenable." },
-          ids: { type: "array", minItems: 1, maxItems: ENTITLEMENT_BATCH_MAX_IDS, items: { type: "string", description: "Encoded entitlement id." } },
+          rows: { type: "array", minItems: 1, maxItems: ENTITLEMENT_BATCH_MAX_IDS, items: { type: "object", required: ["id", "expected_customer_id", "expected_revocation_seq"], description: "One entitlement to transition, with the precondition observed for it.", properties: { id: { type: "string", description: "Encoded entitlement id." }, expected_customer_id: { type: ["string", "null"], maxLength: 128 }, expected_revocation_seq: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER } } } },
         },
       }],
       ["EntitlementBatchTooLargeData", {

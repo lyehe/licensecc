@@ -15,7 +15,7 @@ import { feedbackWith, refusalOutcome } from "../../shared/messages";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { BatchRunPanel, createBatchRunStore, type BatchRunStore } from "./BatchRunPanel";
 import { batchPlanText, batchReconcileLabel, batchRefreshFailureMessage, batchStopDetail, batchStopMessage, classifyBatchChunk, planBatchChunks, runBatchChunks, settleReconciledChunk, type BatchChunk, type BatchRunState } from "./batchRunner";
-import { batchPath, batchResultSentence, type EntitlementAction } from "./workflow";
+import { batchPath, batchResultSentence, type BatchTargetRow, type EntitlementAction } from "./workflow";
 
 /** The list context a later reconcile must still match, captured as the single-row transitions do. */
 export interface BatchRecoveryContext {
@@ -24,8 +24,9 @@ export interface BatchRecoveryContext {
 }
 
 export interface EntitlementBatchOptions {
-  /** The loaded rows selected when the operator starts the action. */
-  selectedIds: readonly string[];
+  /** The loaded rows selected when the operator starts the action, each carrying the owner and
+   * revocation sequence the batch request sends as that row's precondition. */
+  selectedRows: readonly BatchTargetRow[];
   setSelectedIds: Dispatch<SetStateAction<Set<string>>>;
   runMutation: <T>(work: () => Promise<T>, owner?: "consequence" | "recovery") => Promise<T | undefined>;
   refreshCore: (strict?: boolean) => Promise<ExactReadProof | null>;
@@ -53,7 +54,7 @@ const focusTarget: ConfirmFocusTarget = () => document.querySelector<HTMLElement
  */
 export function useEntitlementBatch(options: EntitlementBatchOptions): EntitlementBatch {
   const [store] = useState(createBatchRunStore);
-  const { selectedIds, setSelectedIds, runMutation, refreshCore, currentReason, setFeedback, setReason, recoveryContext } = options;
+  const { selectedRows, setSelectedIds, runMutation, refreshCore, currentReason, setFeedback, setReason, recoveryContext } = options;
   const deselect = (ids: readonly string[]): void => setSelectedIds((previous) => {
     const next = new Set(previous);
     for (const id of ids) next.delete(id);
@@ -61,7 +62,8 @@ export function useEntitlementBatch(options: EntitlementBatchOptions): Entitleme
   });
 
   function begin(action: EntitlementAction): ReturnType<EntitlementBatch["begin"]> {
-    const ids = [...new Set(selectedIds)];
+    const seen = new Set<string>();
+    const rows = selectedRows.filter((row) => (seen.has(row.id) ? false : (seen.add(row.id), true)));
     const runId = store.reserve();
     const publish = (state: BatchRunState): void => store.set({ runId, state });
     const post = (chunk: BatchChunk, owner: "consequence" | "recovery"): Promise<unknown> => runMutation(async () => {
@@ -72,13 +74,13 @@ export function useEntitlementBatch(options: EntitlementBatchOptions): Entitleme
       }
     }, owner);
     const run = async ({ idempotencyKey }: ConfirmActionContext): Promise<ConfirmActionOutcome> => {
-      if (ids.length === 0) return refusalOutcome("no_entitlements_selected", null);
+      if (rows.length === 0) return refusalOutcome("no_entitlements_selected", null);
       const { isCurrent, capture } = recoveryContext();
       const refreshStatus = async (): Promise<ExactReadProof | null> => {
         capture();
         return await refreshCore(true);
       };
-      const finished = await runBatchChunks(action, planBatchChunks(action, ids, currentReason(), idempotencyKey), (chunk) => post(chunk, "consequence"), publish);
+      const finished = await runBatchChunks(action, planBatchChunks(action, rows, currentReason(), idempotencyKey), (chunk) => post(chunk, "consequence"), publish);
       deselect(finished.results.map((row) => row.id));
       const stopped = finished.stopped;
       if (stopped?.kind === "unknown") {
@@ -131,7 +133,7 @@ export function useEntitlementBatch(options: EntitlementBatchOptions): Entitleme
         return refreshFailed();
       }
     };
-    const details = <><p>{batchPlanText(ids.length)}</p><BatchRunPanel store={store} runId={runId} /></>;
+    const details = <><p>{batchPlanText(rows.length)}</p><BatchRunPanel store={store} runId={runId} /></>;
     return { run, details };
   }
 

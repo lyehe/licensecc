@@ -205,7 +205,7 @@ test("setEntitlementCapacity updates only provided columns and preserves the res
     env,
     KEY,
     { max_active_devices: 5, lease_seconds: 1000, bogus_column: 99, pool_size: -1 },
-    ctx(),
+    ctx({ expectedEntitlement: { customer_id: state.entitlement.customer_id, revocation_seq: seededRevSeq } }),
   );
   assert.ok(result, "result is non-null for an existing entitlement");
   // Only the two valid provided columns were written.
@@ -241,7 +241,7 @@ test("setEntitlementCapacity throws revoked_terminal on a revoked entitlement", 
   await createEntitlement(env, input(), ctx());
   state.entitlement.status = "revoked";
   await assert.rejects(
-    setEntitlementCapacity(env, KEY, { max_active_devices: 2 }, ctx()),
+    setEntitlementCapacity(env, KEY, { max_active_devices: 2 }, ctx({ expectedEntitlement: { customer_id: state.entitlement.customer_id, revocation_seq: state.entitlement.revocation_seq } })),
     /revoked_terminal/,
   );
 });

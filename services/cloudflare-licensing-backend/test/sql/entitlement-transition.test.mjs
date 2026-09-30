@@ -79,6 +79,9 @@ function ctx(overrides = {}) {
     ip: "",
     idempotencyKey: null,
     source: "admin",
+    // Every scenario here reads a freshly seeded row (customer_id null, revocation_seq 0) before
+    // any write, so the mandatory owner/revocation-sequence guard always matches that observed state.
+    expectedEntitlement: { customer_id: null, revocation_seq: 0 },
     ...overrides,
   };
 }

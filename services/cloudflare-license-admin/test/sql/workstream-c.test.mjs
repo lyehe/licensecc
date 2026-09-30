@@ -298,6 +298,12 @@ async function createEntitlementFor(env, fingerprint, extra = {}) {
   return (await body(res)).data;
 }
 
+// The batch precondition a row carries: the id it targets, plus the owner and revocation
+// sequence observed for it — the same precondition the single-row routes require.
+function expectedRow(record) {
+  return { id: record.id, expected_customer_id: record.customer_id, expected_revocation_seq: record.revocation_seq };
+}
+
 async function createMaxBatchEntitlements(env) {
   const records = [];
   for (const fingerprint of [FP_A, FP_B, FP_C, FP_D]) {
@@ -322,9 +328,10 @@ test("batch: per-row results — mixed success / revoked-terminal / missing / ba
 
   // Revoke B up front so a later "disable" on it is rejected as terminal.
   const revokeB = await worker.fetch(devReq(`/api/admin/entitlements/${b.id}/revoke`, {
-    method: "POST", body: JSON.stringify({ reason: "pre-revoked" }),
+    method: "POST", body: JSON.stringify({ reason: "pre-revoked", expected_customer_id: b.customer_id, expected_revocation_seq: b.revocation_seq }),
   }), env);
   assert.equal(revokeB.status, 200);
+  const revokedB = (await body(revokeB)).data;
 
   const missingId = entitlementId("DEFAULT", "DEFAULT", "d".repeat(64));
   const res = await worker.fetch(devReq("/api/admin/entitlements/batch", {
@@ -334,7 +341,7 @@ test("batch: per-row results — mixed success / revoked-terminal / missing / ba
       reason: "bulk pause",
       // Keep this accepted request at the public maximum. Put the successful
       // row last so the proof also shows earlier isolated errors do not abort it.
-      ids: [b.id, missingId, "!!!not-base64!!!", a.id],
+      rows: [expectedRow(revokedB), { id: missingId, expected_customer_id: null, expected_revocation_seq: 0 }, { id: "!!!not-base64!!!", expected_customer_id: null, expected_revocation_seq: 0 }, expectedRow(a)],
     }),
   }), env);
   assert.equal(res.status, 200);
@@ -362,7 +369,7 @@ test("batch: THE PER-ROW IDEMPOTENCY FOOTGUN — re-POST same batch + key replay
   const a = await createEntitlementFor(env, FP_A);
   const b = await createEntitlementFor(env, FP_B);
 
-  const payload = JSON.stringify({ action: "disable", reason: "footgun probe", ids: [a.id, b.id] });
+  const payload = JSON.stringify({ action: "disable", reason: "footgun probe", rows: [expectedRow(a), expectedRow(b)] });
   const first = await worker.fetch(devReq("/api/admin/entitlements/batch", {
     method: "POST", headers: { "idempotency-key": "batch-key-1" }, body: payload,
   }), env);
@@ -409,35 +416,35 @@ test("batch: validation — bad action, missing reason for disable/revoke, empty
 
   // bad action
   let res = await worker.fetch(devReq("/api/admin/entitlements/batch", {
-    method: "POST", body: JSON.stringify({ action: "explode", reason: "x", ids: [a.id] }),
+    method: "POST", body: JSON.stringify({ action: "explode", reason: "x", rows: [expectedRow(a)] }),
   }), env);
   assert.equal(res.status, 400);
   assert.equal((await body(res)).code, "invalid_request");
 
   // disable with no reason
   res = await worker.fetch(devReq("/api/admin/entitlements/batch", {
-    method: "POST", body: JSON.stringify({ action: "disable", ids: [a.id] }),
+    method: "POST", body: JSON.stringify({ action: "disable", rows: [expectedRow(a)] }),
   }), env);
   assert.equal(res.status, 400);
   assert.equal((await body(res)).code, "reason_required");
 
   // revoke with no reason
   res = await worker.fetch(devReq("/api/admin/entitlements/batch", {
-    method: "POST", body: JSON.stringify({ action: "revoke", ids: [a.id] }),
+    method: "POST", body: JSON.stringify({ action: "revoke", rows: [expectedRow(a)] }),
   }), env);
   assert.equal(res.status, 400);
   assert.equal((await body(res)).code, "reason_required");
 
-  // empty ids
+  // empty rows
   res = await worker.fetch(devReq("/api/admin/entitlements/batch", {
-    method: "POST", body: JSON.stringify({ action: "reenable", ids: [] }),
+    method: "POST", body: JSON.stringify({ action: "reenable", rows: [] }),
   }), env);
   assert.equal(res.status, 400);
   assert.equal((await body(res)).code, "invalid_request");
 
   // reenable needs no reason -> succeeds (a is active so it's a no-op success).
   res = await worker.fetch(devReq("/api/admin/entitlements/batch", {
-    method: "POST", body: JSON.stringify({ action: "reenable", ids: [a.id] }),
+    method: "POST", body: JSON.stringify({ action: "reenable", rows: [expectedRow(a)] }),
   }), env);
   assert.equal(res.status, 200);
   assert.equal((await body(res)).data.results[0].ok, true);
@@ -462,7 +469,7 @@ test("batch: four changed rows complete inside the Free-tier D1 budget", async (
   const records = await createMaxBatchEntitlements(env);
   d1.resetMetrics();
 
-  const payload = JSON.stringify({ action: "disable", reason: "budget changed", ids: records.map((record) => record.id) });
+  const payload = JSON.stringify({ action: "disable", reason: "budget changed", rows: records.map(expectedRow) });
   assert.ok(new TextEncoder().encode(payload).byteLength < 8192, "four encoded ids stay below the request-body parser limit");
   const response = await worker.fetch(devReq("/api/admin/entitlements/batch", { method: "POST", body: payload }), env);
   assert.equal(response.status, 200);
@@ -480,7 +487,7 @@ test("batch: four target-state no-op rows complete inside the Free-tier D1 budge
 
   const response = await worker.fetch(devReq("/api/admin/entitlements/batch", {
     method: "POST",
-    body: JSON.stringify({ action: "reenable", ids: records.map((record) => record.id) }),
+    body: JSON.stringify({ action: "reenable", rows: records.map(expectedRow) }),
   }), env);
   assert.equal(response.status, 200);
   const result = await body(response);
@@ -497,7 +504,7 @@ test("batch: four same-target CAS races complete inside the Free-tier D1 budget 
 
   const response = await worker.fetch(devReq("/api/admin/entitlements/batch", {
     method: "POST",
-    body: JSON.stringify({ action: "disable", reason: "budget race", ids: records.map((record) => record.id) }),
+    body: JSON.stringify({ action: "disable", reason: "budget race", rows: records.map(expectedRow) }),
   }), env);
   assert.equal(response.status, 200);
   const result = await body(response);
@@ -515,9 +522,9 @@ test("batch: max-plus-one is rejected before any D1 prepare, batch, query, or wr
 
   const response = await worker.fetch(devReq("/api/admin/entitlements/batch", {
     method: "POST",
-    // Full valid ids keep the body well below 8192 bytes and prove this is the
+    // Full valid rows keep the body well below 8192 bytes and prove this is the
     // operation-specific row guard, not a malformed-id or body-size rejection.
-    body: JSON.stringify({ action: "disable", reason: "too many", ids: Array.from({ length: 5 }, () => record.id) }),
+    body: JSON.stringify({ action: "disable", reason: "too many", rows: Array.from({ length: 5 }, () => expectedRow(record)) }),
   }), env);
   assert.equal(response.status, 400);
   const result = await body(response);
@@ -553,7 +560,7 @@ test("batch: reader RBAC is blocked; createEntitlement remains byte-identical (u
 
   // Reader cannot batch.
   const denied = await worker.fetch(accessReq("/api/admin/entitlements/batch", reader, {
-    method: "POST", body: JSON.stringify({ action: "disable", reason: "nope", ids: [a.id, b.id] }),
+    method: "POST", body: JSON.stringify({ action: "disable", reason: "nope", rows: [expectedRow(a), expectedRow(b)] }),
   }), env);
   assert.equal(denied.status, 403);
   assert.equal((await body(denied)).code, "admin_role_required");
@@ -564,7 +571,7 @@ test("batch: reader RBAC is blocked; createEntitlement remains byte-identical (u
 
   // Admin CAN, and the disable goes through the SHARED transitionEntitlement (create rows untouched).
   const ok = await worker.fetch(accessReq("/api/admin/entitlements/batch", admin, {
-    method: "POST", body: JSON.stringify({ action: "disable", reason: "admin can", ids: [a.id, b.id] }),
+    method: "POST", body: JSON.stringify({ action: "disable", reason: "admin can", rows: [expectedRow(a), expectedRow(b)] }),
   }), env);
   assert.equal(ok.status, 200);
   assert.ok((await body(ok)).data.results.every((r) => r.ok));
@@ -694,7 +701,7 @@ function parseCsv(text) {
 test("csv: entitlements ?format=csv streams a text/csv attachment with the SAME filters", async () => {
   const db = freshDb();
   const env = devEnv(db);
-  await createEntitlementFor(env, FP_A, { project: "DEFAULT" });
+  const a = await createEntitlementFor(env, FP_A, { project: "DEFAULT" });
   await createEntitlementFor(env, FP_B, { project: "DEFAULT" });
 
   const res = await worker.fetch(devReq("/api/admin/entitlements?format=csv"), env);
@@ -710,7 +717,7 @@ test("csv: entitlements ?format=csv streams a text/csv attachment with the SAME 
 
   // The SAME status filter applies: disable FP_A, then csv with status=disabled returns only it.
   const aId = entitlementId("DEFAULT", "DEFAULT", FP_A);
-  await worker.fetch(devReq(`/api/admin/entitlements/${aId}/disable`, { method: "POST", body: JSON.stringify({ reason: "x" }) }), env);
+  await worker.fetch(devReq(`/api/admin/entitlements/${aId}/disable`, { method: "POST", body: JSON.stringify({ reason: "x", expected_customer_id: a.customer_id, expected_revocation_seq: a.revocation_seq }) }), env);
   const filtered = await worker.fetch(devReq("/api/admin/entitlements?format=csv&status=disabled"), env);
   const filteredRows = parseCsv(await filtered.text());
   const filteredFps = filteredRows.slice(1).map((r) => r[fpCol]);

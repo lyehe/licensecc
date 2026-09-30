@@ -26,9 +26,9 @@ import { capacityConflictResponse } from "../device-limit.js";
 
 const expectedState = {
   type: "object",
-  description: "Optional paired precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409); omitted fields retain legacy behavior. Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+  description: "Required precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+  required: ["expected_customer_id", "expected_revocation_seq"],
   properties: { expected_customer_id: { type: ["string", "null"], maxLength: 128 }, expected_revocation_seq: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER } },
-  dependentRequired: { expected_customer_id: ["expected_revocation_seq"], expected_revocation_seq: ["expected_customer_id"] },
 };
 function withExpected(ref: string): Record<string, unknown> { return { allOf: [{ $ref: ref }, expectedState] }; }
 export const entitlementPaths: LabeledPathFragment = {
@@ -143,8 +143,7 @@ export const entitlementPaths: LabeledPathFragment = {
       security: ADMIN_SECURITY,
       parameters: [idParam, idempotencyKeyHeader],
       requestBody: {
-        required: false,
-        description: "Empty JSON object accepted.",
+        required: true,
         content: { "application/json": { schema: expectedState } },
       },
       responses: {
@@ -230,7 +229,7 @@ export const entitlementPaths: LabeledPathFragment = {
           "batch_done",
         ),
         "400": entitlementBatchTooLargeResponse(
-          "Invalid action/ids/json/idempotency key or a missing reason for disable/revoke. More than four ids is rejected before any D1 query or mutation; split the request using the response data guidance.",
+          "Invalid action/rows/json/idempotency key, a malformed row (missing id or precondition), or a missing reason for disable/revoke. More than four rows is rejected before any D1 query or mutation; split the request using the response data guidance.",
           "invalid_request",
           "invalid_idempotency_key",
           "invalid_json",
