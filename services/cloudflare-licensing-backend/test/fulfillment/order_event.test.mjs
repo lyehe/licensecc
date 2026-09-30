@@ -189,9 +189,9 @@ test("normalizeOrderEvent requires a customer id on every intent, revocations in
   }
 });
 
-test("normalizeOrderEvent refuses quantity.pool_size", () => {
+test("normalizeOrderEvent refuses a quantity field other than max_active_devices", () => {
   const customer = { id: "cus_1" };
-  for (const quantity of [{ pool_size: 5 }, { pool_size: 0 }, { pool_size: 5, max_active_devices: 2 }]) {
+  for (const quantity of [{ seats: 5 }, { seats: 0 }, { seats: 5, max_active_devices: 2 }]) {
     for (const intent of ["subscription.active", "quantity.changed"]) {
       assert.equal(normalizeOrderEvent(baseBody({ intent, customer, quantity }), NOW).error, "invalid_order", JSON.stringify(quantity));
     }

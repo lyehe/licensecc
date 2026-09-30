@@ -150,9 +150,10 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
 
   await expect(page.getByText("Entitlement changes saved.")).toBeVisible();
   await expect.poll(() => api.requests.patches.length).toBe(1);
-  // The Worker refuses a PATCH naming a device hash or an assertion TTL, so the console sends neither.
-  expect(api.requests.patches[0]).not.toHaveProperty("assertion_ttl_seconds");
-  expect(api.requests.patches[0]).not.toHaveProperty("device_hash");
+  // The Worker refuses a PATCH naming any field it does not read, so the console sends exactly the
+  // patch fields and the observed-state precondition.
+  expect(Object.keys(api.requests.patches[0]).sort()).toEqual(["customer_id", "expected_customer_id", "expected_revocation_seq",
+    "license_id", "notes", "valid_from", "valid_until"]);
   expect(api.requests.patches[0]).toMatchObject({
     valid_from: 1709942400,
     valid_until: 1719964800,
@@ -806,11 +807,10 @@ test("an operator edits a policy's device limit without touching its identity", 
   expect(patch.id).toBe("pol_edit");
   expect(patch.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
   expect(patch.body).toMatchObject({ max_active_devices: 5, notes: "tier" });
-  // A PATCH names only patchable fields: never the identity, and never a seat, borrowing, meter,
-  // TTL or device-proof field, which the Worker refuses.
-  for (const field of ["project", "name", "type", "status", "pool_size", "max_borrow_sec", "meter_quota", "meter_period_sec", "assertion_ttl_seconds", "trial_require_device_proof"]) {
-    expect(Object.hasOwn(patch.body, field)).toBe(false);
-  }
+  // A PATCH names only patchable fields, never the identity: the Worker refuses any other field.
+  const patchable = ["valid_from_offset_sec", "duration_sec", "max_active_devices", "expiry_strategy", "trial_expiration_basis",
+    "trial_duration_sec", "trial_one_per_device", "notes"];
+  expect(Object.keys(patch.body).filter((field) => !patchable.includes(field))).toEqual([]);
   await expect(row).toContainText("Max devices 5");
   await expect(editor).toHaveCount(0);
 });

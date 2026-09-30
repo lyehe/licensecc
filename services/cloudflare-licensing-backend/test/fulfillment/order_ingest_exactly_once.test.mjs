@@ -323,8 +323,6 @@ test("an order creates a protected grant owned by its customer", async (t) => {
   const row = entRow(db, fp);
   assert.equal(row.enforcement_mode, "device_bound_v1");
   assert.equal(row.customer_id, "cus_order");
-  assert.equal(row.pool_size, 0);
-  assert.equal(row.device_hash, "");
   assert.equal(row.max_active_devices, 3);
   assert.equal(row.status, "active");
 
@@ -333,7 +331,6 @@ test("an order creates a protected grant owned by its customer", async (t) => {
   const refreshed = entRow(db, fp);
   assert.equal(refreshed.enforcement_mode, "device_bound_v1");
   assert.equal(refreshed.customer_id, "cus_order");
-  assert.equal(refreshed.pool_size, 0);
   assert.equal(refreshed.max_active_devices, 3, "a refresh without quantity keeps the device limit");
 });
 
@@ -359,13 +356,13 @@ test("an order without a customer is refused", async (t) => {
   assert.equal(countRows(db, "entitlements"), 1);
 });
 
-test("quantity.pool_size is refused", async (t) => {
+test("a quantity field other than max_active_devices is refused", async (t) => {
   const { db, env } = freshEnv(); t.after(() => db.close());
   const customer = { id: "cus_order" };
   for (const [label, body] of [
-    ["an active order", wireOrder({ event_id: "evt_pool_active", customer, quantity: { pool_size: 5 } })],
-    ["a quantity change", wireOrder({ event_id: "evt_pool_change", customer, intent: "quantity.changed", quantity: { pool_size: 5 } })],
-    ["a pool beside a device limit", wireOrder({ event_id: "evt_pool_mixed", customer, quantity: { pool_size: 5, max_active_devices: 2 } })],
+    ["an active order", wireOrder({ event_id: "evt_seats_active", customer, quantity: { seats: 5 } })],
+    ["a quantity change", wireOrder({ event_id: "evt_seats_change", customer, intent: "quantity.changed", quantity: { seats: 5 } })],
+    ["seats beside a device limit", wireOrder({ event_id: "evt_seats_mixed", customer, quantity: { seats: 5, max_active_devices: 2 } })],
   ]) {
     const refused = await ingest(env, body);
     assert.equal(refused.status, 400, label);
@@ -1293,7 +1290,6 @@ test("case 16: intent coverage (disable reversible, resume, quantity-only, fraud
   // quantity.changed -> device limit only (status + window untouched)
   await submit(env, makeOrder({ seq: 4, event_id: "evt_4", intent: "quantity.changed", quantity: { max_active_devices: 9 } }));
   assert.equal(entRow(db, fp).max_active_devices, 9);
-  assert.equal(entRow(db, fp).pool_size, 0);
   assert.equal(entRow(db, fp).status, "active");
   assert.equal(entRow(db, fp).valid_until, windowAfterCreate, "quantity change did not touch the window");
 

@@ -160,27 +160,20 @@ function seedPolicy(db, id, overrides = {}) {
     status: "active",
     valid_from_offset_sec: null,
     duration_sec: null,
-    assertion_ttl_seconds: 600,
-    pool_size: 0,
     max_active_devices: 1,
-    max_borrow_sec: 0,
     expiry_strategy: "non_expiring",
     trial_expiration_basis: "from_issue",
     trial_duration_sec: 0,
     trial_one_per_device: 0,
-    trial_require_device_proof: 0,
     notes: "",
-    meter_quota: 0,
-    meter_period_sec: 2592000,
     ...overrides,
   };
   db.prepare(
     `INSERT INTO entitlement_policies
-      (id, project, name, type, status, valid_from_offset_sec, duration_sec, assertion_ttl_seconds,
-       pool_size, max_active_devices, max_borrow_sec, expiry_strategy, trial_expiration_basis,
-       trial_duration_sec, trial_one_per_device, trial_require_device_proof, notes, created_at,
-       updated_at, meter_quota, meter_period_sec)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, project, name, type, status, valid_from_offset_sec, duration_sec, max_active_devices,
+       expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, notes,
+       created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     policy.project,
@@ -189,26 +182,20 @@ function seedPolicy(db, id, overrides = {}) {
     policy.status,
     policy.valid_from_offset_sec,
     policy.duration_sec,
-    policy.assertion_ttl_seconds,
-    policy.pool_size,
     policy.max_active_devices,
-    policy.max_borrow_sec,
     policy.expiry_strategy,
     policy.trial_expiration_basis,
     policy.trial_duration_sec,
     policy.trial_one_per_device,
-    policy.trial_require_device_proof,
     policy.notes,
     NOW,
     NOW,
-    policy.meter_quota,
-    policy.meter_period_sec,
   );
 }
 
 function seedCatalog(db) {
   seedPolicy(db, "pol_node");
-  seedPolicy(db, "pol_float", { pool_size: 5, max_active_devices: 5, max_borrow_sec: 86400, meter_quota: 1000, meter_period_sec: 3600 });
+  seedPolicy(db, "pol_team", { max_active_devices: 5 });
 
   const feature = db.prepare(
     "INSERT INTO catalog_features (id, project, feature_key, name, description, category, status, created_at, updated_at) VALUES (?, 'DEFAULT', ?, ?, '', '', 'active', ?, ?)",
@@ -226,14 +213,13 @@ function seedCatalog(db) {
   const planFeature = db.prepare(
     `INSERT INTO catalog_plan_features
       (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
-       assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
-       created_at, updated_at)
-     VALUES ('DEFAULT', ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       max_active_devices, created_at, updated_at)
+     VALUES ('DEFAULT', ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
   );
-  planFeature.run("plan_basic", "core", "included", null, "pol_node", 1, null, null, null, null, null, null, NOW, NOW);
-  planFeature.run("plan_pro", "core", "included", null, "pol_node", 1, null, null, null, null, null, null, NOW, NOW);
-  planFeature.run("plan_pro", "export", "included", null, "pol_node", 2, null, null, null, null, null, null, NOW, NOW);
-  planFeature.run("plan_pro", "team", "addon", "team_seats", "pol_float", 3, null, 7, 7, 172800, 2500, 7200, NOW, NOW);
+  planFeature.run("plan_basic", "core", "included", null, "pol_node", 1, null, NOW, NOW);
+  planFeature.run("plan_pro", "core", "included", null, "pol_node", 1, null, NOW, NOW);
+  planFeature.run("plan_pro", "export", "included", null, "pol_node", 2, null, NOW, NOW);
+  planFeature.run("plan_pro", "team", "addon", "team_seats", "pol_team", 3, 7, NOW, NOW);
 }
 
 function seedEquivalentBasicPlan(db) {
@@ -243,11 +229,9 @@ function seedEquivalentBasicPlan(db) {
   db.prepare(
     `INSERT INTO catalog_plan_features
        (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
-        assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
-        created_at, updated_at)
+        max_active_devices, created_at, updated_at)
      SELECT project, 'plan_basic_equivalent', feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
-       assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
-       ?, ?
+       max_active_devices, ?, ?
      FROM catalog_plan_features
      WHERE plan_id = 'plan_basic'`,
   ).run(NOW, NOW);
@@ -260,9 +244,8 @@ function seedAtomicPlanFeatures(db, count) {
   const planFeature = db.prepare(
     `INSERT INTO catalog_plan_features
       (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
-       assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
-       created_at, updated_at)
-     VALUES ('DEFAULT', 'plan_pro', ?, 'included', NULL, 'pol_node', 'active', ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+       max_active_devices, created_at, updated_at)
+     VALUES ('DEFAULT', 'plan_pro', ?, 'included', NULL, 'pol_node', 'active', ?, NULL, ?, ?)`,
   );
   for (let index = 0; index < count; index += 1) {
     const key = `atomic_${index}`;
@@ -285,12 +268,8 @@ function projectionInput(overrides = {}) {
 }
 
 function projectionApplyState(db, previewId, idempotencyKey) {
-  const cache = db.prepare(
-    "SELECT cache_ttl_seconds FROM entitlements WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?",
-  ).get(FP);
   return {
     entitlements: db.prepare("SELECT COUNT(*) AS c FROM entitlements WHERE license_fingerprint = ?").get(FP).c,
-    cache_ttl_seconds: cache?.cache_ttl_seconds ?? null,
     entitlement_events: db.prepare("SELECT COUNT(*) AS c FROM entitlement_events WHERE license_fingerprint = ?").get(FP).c,
     assignment: db.prepare(
       "SELECT plan_id, license_fingerprint, customer_id, support_until, addons_json, created_at, updated_at FROM license_plan_assignments WHERE license_id = 'lic_1' AND project = 'DEFAULT'",
@@ -335,9 +314,9 @@ for (const state of ["active", "retiring"]) {
     assert.ok(protectedRow.authority_revision > before[0][0].authority_revision);
     assert.deepEqual(snapshot()[1], before[1]);
     // Both the updated grant with connected devices and the created one stay protected and issuable.
-    assert.deepEqual(db.prepare("SELECT feature,enforcement_mode,pool_size,device_hash FROM entitlements ORDER BY feature").all().map((row) => ({ ...row })), [
-      { feature: "core", enforcement_mode: "device_bound_v1", pool_size: 0, device_hash: "" },
-      { feature: "export", enforcement_mode: "device_bound_v1", pool_size: 0, device_hash: "" },
+    assert.deepEqual(db.prepare("SELECT feature,enforcement_mode FROM entitlements ORDER BY feature").all().map((row) => ({ ...row })), [
+      { feature: "core", enforcement_mode: "device_bound_v1" },
+      { feature: "export", enforcement_mode: "device_bound_v1" },
     ]);
     assert.equal(db.prepare("SELECT count(*) AS n FROM mutation_idempotency").get().n, 1);
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
@@ -345,16 +324,16 @@ for (const state of ["active", "retiring"]) {
 }
 
 // The authority read the protected issuer makes before it signs (bound_issue.mjs): an active grant
-// of an active customer, inside its validity window, with no seat pool, in the protected mode.
+// of an active customer, inside its validity window, in the protected mode.
 const PROTECTED_AUTHORITY_SQL = `SELECT e.feature FROM entitlements e JOIN customers c ON c.id = e.customer_id
   WHERE e.project = ? AND e.feature = ? AND e.license_fingerprint = ? AND e.customer_id = ?
-    AND e.status = 'active' AND c.status = 'active' AND e.pool_size = 0
+    AND e.status = 'active' AND c.status = 'active'
     AND (e.valid_from IS NULL OR e.valid_from <= ?) AND (e.valid_until IS NULL OR e.valid_until > ?)
     AND e.enforcement_mode = 'device_bound_v1'`;
 
 test("plan apply keeps a protected grant issuable", async (t) => {
   const db = freshDb(); t.after(() => db.close()); seedCatalog(db);
-  // A catalog row that still carries seat, borrow and meter values, over an existing protected grant.
+  // A catalog row over an existing protected grant.
   db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_1','Customer',1,1);
     INSERT INTO licenses(id,customer_id,project,label,created_at,updated_at) VALUES('lic_1','cus_1','DEFAULT','License',1,1);
     INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,enforcement_mode,max_active_devices,created_at,updated_at)
@@ -362,33 +341,30 @@ test("plan apply keeps a protected grant issuable", async (t) => {
     INSERT INTO catalog_features(id,project,feature_key,name,description,category,status,created_at,updated_at)
       VALUES('feat_vault','DEFAULT','vault','Vault','','','active',${NOW},${NOW});
     INSERT INTO catalog_plan_features(project,plan_id,feature_key,feature_inclusion,addon_key,policy_id,status,display_order,
-        assertion_ttl_seconds,pool_size,max_active_devices,max_borrow_sec,meter_quota,meter_period_sec,created_at,updated_at)
-      VALUES('DEFAULT','plan_pro','vault','included',NULL,'pol_node','active',4,NULL,5,NULL,60,10,NULL,${NOW},${NOW});`);
+        max_active_devices,created_at,updated_at)
+      VALUES('DEFAULT','plan_pro','vault','included',NULL,'pol_node','active',4,NULL,${NOW},${NOW});`);
   const env = { DB: new D1Like(db) };
   const preview = await previewPlanProjection(env, projectionInput({ addons: [] }), "admin", NOW);
   assert.deepEqual(preview.will_update.map((row) => row.feature), ["vault"]);
   await applyPlanProjection(env, preview.preview_id, ctx(), null, NOW);
 
-  const row = db.prepare(`SELECT enforcement_mode, policy_id, pool_size, max_borrow_sec, meter_quota, device_hash
+  const row = db.prepare(`SELECT enforcement_mode, policy_id
     FROM entitlements WHERE project = 'DEFAULT' AND feature = 'vault' AND license_fingerprint = ?`).get(FP);
-  assert.deepEqual({ ...row }, { enforcement_mode: "device_bound_v1", policy_id: "pol_node", pool_size: 0, max_borrow_sec: 0, meter_quota: 0, device_hash: "" });
+  assert.deepEqual({ ...row }, { enforcement_mode: "device_bound_v1", policy_id: "pol_node" });
   assert.deepEqual(db.prepare(PROTECTED_AUTHORITY_SQL).all("DEFAULT", "vault", FP, "cus_1", NOW + 1, NOW + 1).map((found) => found.feature), ["vault"]);
 });
 
 test("plan apply creates protected rows", async (t) => {
   const db = freshDb(); t.after(() => db.close()); seedCatalog(db);
   const env = { DB: new D1Like(db) };
-  // The team add-on's policy and plan row both carry a seat pool, borrowing and a meter.
   const preview = await previewPlanProjection(env, projectionInput(), "admin", NOW);
   assert.deepEqual(preview.will_create.map((row) => [row.feature, row.license_mode]), [["core", "node_locked"], ["export", "node_locked"], ["team", "node_locked"]]);
   await applyPlanProjection(env, preview.preview_id, ctx(), null, NOW);
 
   const protectedRow = (feature, maxActiveDevices) => ({
-    feature, enforcement_mode: "device_bound_v1", device_hash: "", pool_size: 0, max_active_devices: maxActiveDevices,
-    max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000, assertion_ttl_seconds: 300, cache_ttl_seconds: 3600,
+    feature, enforcement_mode: "device_bound_v1", max_active_devices: maxActiveDevices, lease_seconds: 2592000,
   });
-  const rows = db.prepare(`SELECT feature, enforcement_mode, device_hash, pool_size, max_active_devices, max_borrow_sec, meter_quota,
-      meter_period_sec, assertion_ttl_seconds, cache_ttl_seconds
+  const rows = db.prepare(`SELECT feature, enforcement_mode, max_active_devices, lease_seconds
     FROM entitlements WHERE license_fingerprint = ? ORDER BY feature`).all(FP);
   // The plan row's device limit override is the one capacity a protected grant takes from the catalog.
   assert.deepEqual(rows.map((row) => ({ ...row })), [protectedRow("core", 1), protectedRow("export", 1), protectedRow("team", 7)]);
@@ -414,7 +390,7 @@ test("previewPlanProjection is non-mutating and classifies plan + add-on creates
   assert.equal(preview.summary.update, 0);
   assert.equal(preview.summary.disable, 0);
   assert.deepEqual(preview.will_create.map((row) => row.feature), ["core", "export", "team"]);
-  // The team add-on's policy is floating, but a projected grant is protected: it never has a seat pool.
+  // A projected grant is protected: it is a trial or node-locked.
   assert.equal(preview.will_create.find((row) => row.feature === "team").license_mode, "node_locked");
   assert.match(preview.preview_id, /^ppv_/);
   assert.equal(preview.effective_at, NOW);
@@ -446,18 +422,14 @@ test("applyPlanProjection creates stamped concrete entitlements and records assi
   assert.equal(result.applied.disabled.length, 0);
 
   const rows = db
-    .prepare("SELECT feature, status, policy_id, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec, valid_until FROM entitlements WHERE license_fingerprint = ? ORDER BY feature")
+    .prepare("SELECT feature, status, policy_id, max_active_devices, valid_until FROM entitlements WHERE license_fingerprint = ? ORDER BY feature")
     .all(FP);
   assert.deepEqual(rows.map((row) => row.feature), ["core", "export", "team"]);
   assert.equal(rows.find((row) => row.feature === "core").policy_id, "pol_node");
   const team = rows.find((row) => row.feature === "team");
-  assert.equal(team.policy_id, "pol_float");
-  // The plan row's device limit applies; its seat, borrow and meter overrides do not.
-  assert.equal(team.pool_size, 0);
+  assert.equal(team.policy_id, "pol_team");
+  // The plan row's device limit overrides its policy's.
   assert.equal(team.max_active_devices, 7);
-  assert.equal(team.max_borrow_sec, 0);
-  assert.equal(team.meter_quota, 0);
-  assert.equal(team.meter_period_sec, 2592000);
   assert.equal(team.valid_until, SUPPORT_UNTIL);
 
   const assignment = db.prepare("SELECT plan_id, customer_id, support_until, addons_json FROM license_plan_assignments WHERE license_id = ? AND project = 'DEFAULT'").get("lic_1");
@@ -468,33 +440,29 @@ test("applyPlanProjection creates stamped concrete entitlements and records assi
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events WHERE license_fingerprint = ?").get(FP).c, 3);
 });
 
-test("a grant's own TTLs never make a plan change, and an update leaves them and the cache policy private", async () => {
+test("a column plan apply never writes makes no plan change, and an update leaves it alone", async () => {
   const db = freshDb();
   seedCatalog(db);
   const env = { DB: new D1Like(db) };
   const initial = await previewPlanProjection(env, projectionInput({ addons: [] }), "admin", NOW);
   await applyPlanProjection(env, initial.preview_id, ctx(), null, NOW);
-  db.prepare("UPDATE entitlements SET assertion_ttl_seconds = 900, cache_ttl_seconds = 86400 WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").run(FP);
+  db.prepare("UPDATE entitlements SET lease_seconds = 86400 WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").run(FP);
 
-  // Plan apply never writes a TTL, so a TTL alone is no change.
+  // Plan apply never writes the lease length, so a lease change alone is no change.
   const unchanged = await previewPlanProjection(env, projectionInput({ addons: [] }), "admin", NOW + 1);
   assert.deepEqual(unchanged.summary, { create: 0, update: 0, disable: 0, blocked: 0, unchanged: 2 });
 
   db.prepare("UPDATE entitlement_policies SET max_active_devices = 2 WHERE id = 'pol_node'").run();
   const preview = await previewPlanProjection(env, projectionInput({ addons: [] }), "admin", NOW + 2);
   assert.deepEqual(preview.will_update.map((row) => row.feature), ["core", "export"]);
-  assert.equal("cache_ttl_seconds" in preview.will_update[0], false, "cache policy stays out of the public preview");
-  const actions = JSON.parse(db.prepare("SELECT actions_json FROM license_plan_projection_previews WHERE id = ?").get(preview.preview_id).actions_json);
-  assert.equal("cache_ttl_seconds" in actions.updated[0], false, "an action carries no cache policy: apply never writes one");
 
   const applied = await applyPlanProjection(env, preview.preview_id, ctx(), null, NOW + 2);
   assert.equal(applied.applied.updated.length, 2);
-  assert.equal("cache_ttl_seconds" in applied.applied.updated[0], false, "cache policy stays out of the public Apply response");
-  const core = db.prepare("SELECT assertion_ttl_seconds, cache_ttl_seconds, max_active_devices FROM entitlements WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").get(FP);
-  assert.deepEqual({ ...core }, { assertion_ttl_seconds: 900, cache_ttl_seconds: 86400, max_active_devices: 2 });
+  const core = db.prepare("SELECT lease_seconds, max_active_devices FROM entitlements WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").get(FP);
+  assert.deepEqual({ ...core }, { lease_seconds: 86400, max_active_devices: 2 });
   const audit = db.prepare("SELECT prev_json, next_json FROM entitlement_events WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ? ORDER BY id DESC LIMIT 1").get(FP);
-  assert.equal(JSON.parse(audit.prev_json).cache_ttl_seconds, 86400);
-  assert.equal(JSON.parse(audit.next_json).cache_ttl_seconds, 86400);
+  assert.equal(JSON.parse(audit.prev_json).lease_seconds, 86400);
+  assert.equal(JSON.parse(audit.next_json).lease_seconds, 86400);
   assert.equal(JSON.parse(audit.next_json).max_active_devices, 2);
 });
 
@@ -508,9 +476,9 @@ test("current-version projection snapshots persist and apply normally", async ()
 
   const applied = await applyPlanProjection(env, preview.preview_id, ctx(), null, NOW);
   assert.equal(applied.applied.created.length, 1);
-  // The policy's assertion TTL does not apply: a created grant keeps the column defaults.
-  const core = db.prepare("SELECT assertion_ttl_seconds, cache_ttl_seconds FROM entitlements WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").get(FP);
-  assert.deepEqual({ ...core }, { assertion_ttl_seconds: 300, cache_ttl_seconds: 3600 });
+  // Plan apply never writes the lease length: a created grant keeps the column default.
+  const core = db.prepare("SELECT lease_seconds FROM entitlements WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").get(FP);
+  assert.deepEqual({ ...core }, { lease_seconds: 2592000 });
 });
 
 test("a parent-format unchanged preview fails closed before any projection write", async () => {
@@ -679,9 +647,8 @@ test("Free-tier-safe atomic projection boundary accepts nine actions and rejects
   db.prepare(
     `INSERT INTO catalog_plan_features
       (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
-       assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
-       created_at, updated_at)
-     VALUES ('DEFAULT', 'plan_pro', ?, 'included', NULL, 'pol_node', 'active', ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+       max_active_devices, created_at, updated_at)
+     VALUES ('DEFAULT', 'plan_pro', ?, 'included', NULL, 'pol_node', 'active', ?, NULL, ?, ?)`,
   ).run(overflowKey, 17, NOW, NOW);
   const generationBeforeOverflow = db.prepare("SELECT generation FROM license_plan_projection_generations WHERE scope = 'catalog'").get().generation;
   const overflowD1 = new RejectPreviewWritesD1Like(db);
@@ -718,7 +685,7 @@ test("every conservative source dependency mutation invalidates a persisted proj
     ["catalog feature", (db) => db.prepare("UPDATE catalog_features SET name = name WHERE id = 'feat_core'").run()],
     ["catalog plan", (db) => db.prepare("UPDATE catalog_plans SET description = description WHERE id = 'plan_pro'").run()],
     ["catalog plan feature", (db) => db.prepare("UPDATE catalog_plan_features SET display_order = display_order WHERE plan_id = 'plan_pro' AND feature_key = 'core'").run()],
-    ["policy", (db) => db.prepare("UPDATE entitlement_policies SET assertion_ttl_seconds = assertion_ttl_seconds WHERE id = 'pol_node'").run()],
+    ["policy", (db) => db.prepare("UPDATE entitlement_policies SET notes = notes WHERE id = 'pol_node'").run()],
     ["managed entitlement source", (db) => db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, created_at, updated_at) VALUES ('DEFAULT', 'side', ?, 'active', ?, ?)").run("a".repeat(64), NOW, NOW)],
     ["assignment source", (db) => db.prepare("INSERT INTO license_plan_assignments (license_id, project, plan_id, license_fingerprint, customer_id, status, support_until, addons_json, created_at, updated_at) VALUES ('lic_other', 'DEFAULT', 'plan_pro', ?, NULL, 'active', NULL, '[]', ?, ?)").run("d".repeat(64), NOW, NOW)],
   ];

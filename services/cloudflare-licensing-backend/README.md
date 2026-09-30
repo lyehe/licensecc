@@ -288,7 +288,7 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   `feature` defaults to `project`. Unknown top-level, `customer`, or `quantity`
   fields return `400 invalid_order`. Quantity carries only a non-negative
   `max_active_devices` and is required for `quantity.changed`, so a typo cannot
-  consume the monotonic floor; `quantity.pool_size` returns `400 invalid_order`.
+  consume the monotonic floor.
   A billing integration must therefore send the customer id on every event,
   including a revocation or cancellation for which its provider supplies only the
   subscription id.

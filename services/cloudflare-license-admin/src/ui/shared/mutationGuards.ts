@@ -311,7 +311,7 @@ export function parseMutationResponse<T>(
 }
 
 const ENTITLEMENT_STATUSES = ["active", "disabled", "revoked"] as const;
-const LICENSE_MODES = ["trial", "node_locked", "floating"] as const;
+const LICENSE_MODES = ["trial", "node_locked"] as const;
 const POLICY_TYPES = ["trial", "node_locked", "subscription"] as const;
 const CATALOG_STATUSES = ["active", "disabled"] as const;
 const MAX_DURATION_SECONDS = 3_153_600_000;

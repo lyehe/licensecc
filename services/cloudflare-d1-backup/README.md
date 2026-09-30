@@ -77,7 +77,7 @@ npm run validate:deploy -- \
 - Restore drill wrapper that imports a content-verified backup into an empty
   scratch D1, verifies snapshot-pinned row counts, requires the restored
   `d1_migrations` history to exactly match the checked-out backend baseline,
-  and validates the current canonical schema and verifier-facing entitlement
+  and validates the current canonical schema and protected-issuance entitlement
   state semantics.
 - Deploy validator that checks Worker health, unauthenticated manual-trigger
   fail-closed behavior, Worker secret-name presence, and Workflow registration.
@@ -311,10 +311,11 @@ snapshot-counted. When `--source-database` is supplied, its current counts are
 reported explicitly as informational and never invalidate a valid historic
 snapshot merely because the live source has received later writes.
 
-The drill also reports entitlement status counts, restored active rows that
-are currently eligible for verifier acceptance, and revoked/disabled rows that
-should deny. The `--require-restored-status` flags turn those semantic checks
-into release blockers. Wrangler failures expose only operation, exit status,
-and error class; raw stdout/stderr is never copied into the error. Validate row
-counts and verifier behavior before any production restore. Production restore
+The drill also reports entitlement status counts under `authority_candidates`:
+restored active rows that are currently eligible for protected issuance, and
+revoked/disabled rows that must deny it. The `--require-restored-status` flags
+turn those semantic checks into release blockers. Wrangler failures expose only
+operation, exit status, and error class; raw stdout/stderr is never copied into
+the error. Validate row counts and protected-issuance behavior before any
+production restore. Production restore
 should be a deliberate incident-response action, not a routine deploy step.

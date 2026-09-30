@@ -5,7 +5,7 @@ import { boundTrialState, boundTrialSql, boundTrialDeadlineSql } from "@licensec
 
 const key = `sha256:${"a".repeat(64)}`;
 const base = { is_trial: 1, trial_expiration_basis: "from_first_activation", trial_duration_sec: 100,
-  trial_one_per_device: 1, trial_require_device_proof: 1, trial_started_at: null, trial_device_hash: null, valid_until: null };
+  trial_one_per_device: 1, trial_started_at: null, trial_device_hash: null, valid_until: null };
 
 test("protected trial SQL and JS agree on timing, malformed policy and key locks", t => {
   const db = new DatabaseSync(":memory:"); t.after(() => db.close());
@@ -22,7 +22,7 @@ test("protected trial SQL and JS agree on timing, malformed policy and key locks
     { trial_expiration_basis: "from_issue" }, { trial_duration_sec: 0 }, { trial_duration_sec: 1 },
     { trial_duration_sec: 2 }, { trial_duration_sec: 100.5 }, { trial_duration_sec: "100" },
     { trial_duration_sec: Number.MAX_SAFE_INTEGER }, { trial_one_per_device: 2 },
-    { trial_require_device_proof: -1 }, { trial_device_hash: key },
+    { trial_device_hash: key },
     { trial_started_at: 900 }, { trial_started_at: 900, trial_device_hash: key },
     { trial_started_at: 901, trial_device_hash: key }, { trial_started_at: 1001, trial_device_hash: key },
     { trial_started_at: 999.5, trial_device_hash: key }, { trial_started_at: -1, trial_device_hash: key },

@@ -57,7 +57,6 @@ import {
 // 16 KiB raw-body ceiling (blueprint MAX_ORDER_BODY_BYTES). Enforced over the exact
 // stream bytes before any decoding; never re-stringify a parsed object.
 export const MAX_ORDER_BODY_BYTES = 16384;
-const DEFAULT_ASSERTION_TTL_SECONDS = 300;
 // --- small helpers (self-contained; Worker-safe) -----------------------------
 function jsonResponse(body, status) {
   return new Response(JSON.stringify(body), {
@@ -310,10 +309,10 @@ const FLOOR_PREDICATE_UPDATE =
  */
 function buildCreateStatement(env, key, fields, order, floor, now) {
   return env.DB.prepare(
-    `INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, max_active_devices, enforcement_mode, last_applied_order_epoch, last_applied_order_seq, created_at, updated_at) ` +
-      `VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, 'device_bound_v1', ?, ?, ?, ?) ` +
+    `INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, max_active_devices, enforcement_mode, last_applied_order_epoch, last_applied_order_seq, created_at, updated_at) ` +
+      `VALUES (?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, 'device_bound_v1', ?, ?, ?, ?) ` +
       `ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET ` +
-      `device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, ` +
+      `status = excluded.status, ` +
       `revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, ` +
       `valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, license_id = excluded.license_id, ` +
       `max_active_devices = excluded.max_active_devices, ` +
@@ -324,10 +323,7 @@ function buildCreateStatement(env, key, fields, order, floor, now) {
     key.project,
     key.feature,
     key.license_fingerprint,
-    fields.device_hash,
     fields.status,
-    fields.assertion_ttl_seconds,
-    fields.assertion_ttl_seconds,
     key.project,
     key.feature,
     key.license_fingerprint,
@@ -351,15 +347,12 @@ function buildCreateStatement(env, key, fields, order, floor, now) {
  */
 function buildPatchStatement(env, key, fields, owner, floor, now) {
   return env.DB.prepare(
-    `UPDATE entitlements SET device_hash = ?, assertion_ttl_seconds = ?, cache_ttl_seconds = ?, ${REVOCATION_SEQ_BUMP}, ` +
+    `UPDATE entitlements SET ${REVOCATION_SEQ_BUMP}, ` +
       `valid_from = ?, valid_until = ?, notes = ?, license_id = ?, ` +
       `last_applied_order_epoch = ?, last_applied_order_seq = ?, updated_at = ? ` +
       `WHERE project = ? AND feature = ? AND license_fingerprint = ? AND entitlements.customer_id = ? AND entitlements.status <> 'revoked' AND ${FLOOR_PREDICATE_UPDATE} ` +
       `RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
-    fields.device_hash,
-    fields.assertion_ttl_seconds,
-    fields.assertion_ttl_seconds,
     fields.valid_from,
     fields.valid_until,
     fields.notes,
@@ -454,8 +447,8 @@ const ORDER_ACTOR_TYPE = "sync";
 function buildOrderEventStatement(env, key, eventType, order, now, requireNonRevoked) {
   const terminalGuard = requireNonRevoked ? "AND entitlements.status <> 'revoked' " : "";
   return env.DB.prepare(
-    `INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at) ` +
-      `SELECT project, feature, license_fingerprint, device_hash, ?, status, revocation_seq, ?, ?, ?, '${ORDER_CTX_SOURCE}', ?, ?, '', ` +
+    `INSERT INTO entitlement_events (project, feature, license_fingerprint, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at) ` +
+      `SELECT project, feature, license_fingerprint, ?, status, revocation_seq, ?, ?, ?, '${ORDER_CTX_SOURCE}', ?, ?, '', ` +
       `json_object('project', project, 'feature', feature, 'license_fingerprint', license_fingerprint, 'status', status, 'revocation_seq', revocation_seq, 'valid_from', valid_from, 'valid_until', valid_until, 'max_active_devices', max_active_devices, 'id', ?), ` +
       `?, ?, ? ` +
       `FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? AND customer_id = ? AND changes() = 1 ${terminalGuard}` +
@@ -725,9 +718,7 @@ function createFields(order, prev, descriptor, now) {
   }
   const quantity = order.quantity ?? {};
   return {
-    device_hash: prev?.device_hash ?? "",
     status: "active",
-    assertion_ttl_seconds: prev?.assertion_ttl_seconds ?? DEFAULT_ASSERTION_TTL_SECONDS,
     valid_from: validFrom,
     valid_until: validUntil,
     notes: prev?.notes ?? "",
@@ -747,8 +738,6 @@ function patchFields(order, prev, descriptor) {
     validFrom = null;
   }
   return {
-    device_hash: prev.device_hash,
-    assertion_ttl_seconds: prev.assertion_ttl_seconds,
     valid_from: validFrom,
     valid_until: validUntil,
     notes: prev.notes,

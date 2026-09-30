@@ -24,10 +24,7 @@ const NEXT_JSON_KEYS = [
   "project",
   "feature",
   "license_fingerprint",
-  "device_hash",
   "status",
-  "assertion_ttl_seconds",
-  "cache_ttl_seconds",
   "revocation_seq",
   "valid_from",
   "valid_until",
@@ -39,18 +36,10 @@ const NEXT_JSON_KEYS = [
   "trial_expiration_basis",
   "trial_duration_sec",
   "trial_one_per_device",
-  "trial_require_device_proof",
   "trial_started_at",
   "trial_device_hash",
   "max_active_devices",
   "lease_seconds",
-  "rebind_window_sec",
-  "pool_size",
-  "heartbeat_grace_sec",
-  "max_borrow_sec",
-  "allow_overdraft",
-  "meter_quota",
-  "meter_period_sec",
   "license_mode",
   "created_at",
   "updated_at",
@@ -69,16 +58,16 @@ function freshDb() {
 // eventFromCurrentStatement. It nests json_set rather than relying on one
 // over-wide json_object, while preserving explicit null fields.
 function productionJsonObjectExpression() {
-  return entitlementCurrentJsonSql("", "'test-id'", { includeCacheTtl: true });
+  return entitlementCurrentJsonSql("", "'test-id'");
 }
 
 test("real SQLite json_object emits exactly the audit contract keys with preserved types", () => {
   const db = freshDb();
   db.exec(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, " +
-      "assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, " +
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, " +
+      "max_active_devices, lease_seconds, revocation_seq, valid_from, valid_until, notes, " +
       "customer_id, license_id, created_at, updated_at, enforcement_mode) VALUES " +
-      "('DEFAULT', 'DEFAULT', 'fp', 'dev', 'active', 321, 999, 5, NULL, NULL, 'note', NULL, NULL, 1000, 2000, 'device_bound_v1')",
+      "('DEFAULT', 'DEFAULT', 'fp', 'active', 3, 321, 5, NULL, NULL, 'note', NULL, NULL, 1000, 2000, 'device_bound_v1')",
   );
   const expr = productionJsonObjectExpression();
   const { next_json: nextJson } = db
@@ -91,10 +80,10 @@ test("real SQLite json_object emits exactly the audit contract keys with preserv
   assert.deepEqual(Object.keys(next).sort(), [...NEXT_JSON_KEYS].sort());
   assert.equal(next.enforcement_mode, "device_bound_v1");
   // Numbers must stay numbers (not stringified) so audit consumers and idempotency replay see the real types.
-  assert.equal(typeof next.assertion_ttl_seconds, "number");
-  assert.equal(next.assertion_ttl_seconds, 321);
-  assert.equal(typeof next.cache_ttl_seconds, "number");
-  assert.equal(next.cache_ttl_seconds, 999);
+  assert.equal(typeof next.max_active_devices, "number");
+  assert.equal(next.max_active_devices, 3);
+  assert.equal(typeof next.lease_seconds, "number");
+  assert.equal(next.lease_seconds, 321);
   assert.equal(typeof next.revocation_seq, "number");
   assert.equal(typeof next.created_at, "number");
   assert.equal(typeof next.updated_at, "number");
@@ -110,9 +99,9 @@ test("real SQLite json_object emits exactly the audit contract keys with preserv
 test("a failing audit insert rolls back the entitlement write transactionally", () => {
   const db = freshDb();
   db.exec(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, " +
-      "assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, created_at, updated_at) VALUES " +
-      "('DEFAULT', 'DEFAULT', 'fp', '', 'active', 300, 300, 5, 1000, 1000)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, " +
+      "revocation_seq, created_at, updated_at) VALUES " +
+      "('DEFAULT', 'DEFAULT', 'fp', 'active', 5, 1000, 1000)",
   );
   // Model the production D1 batch() contract: the entitlement write and audit event are one transaction.
   let threw = false;

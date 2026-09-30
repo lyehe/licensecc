@@ -8,9 +8,7 @@ export const entitlementRecordSchema = {
     project: { type: "string" },
     feature: { type: "string" },
     license_fingerprint: { type: "string" },
-    device_hash: { type: "string" },
     status: { type: "string", enum: ["active", "disabled", "revoked"] },
-    assertion_ttl_seconds: { type: "integer" },
     revocation_seq: { type: "integer" },
     valid_from: { type: ["integer", "null"] },
     valid_until: { type: ["integer", "null"] },
@@ -24,7 +22,6 @@ export const entitlementRecordSchema = {
     trial_expiration_basis: { type: ["string", "null"], enum: ["from_issue", "from_first_activation", "from_first_use", null] },
     trial_duration_sec: { type: "integer" },
     trial_one_per_device: { type: "integer", enum: [0, 1] },
-    trial_require_device_proof: { type: "integer", enum: [0, 1] },
     trial_started_at: { type: ["integer", "null"] },
     trial_device_hash: { type: ["string", "null"] },
     max_active_devices: { type: "integer", minimum: 0, description: "Device limit: the most devices this license (entitlement) may have connected at once." },
@@ -43,12 +40,21 @@ const protectedGrantFields = {
   valid_until: { type: ["integer", "null"], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
 };
 
+// A create, sync or PATCH body names only the fields its route reads; any other field returns
+// 400 invalid_request. unevaluatedProperties closes each composed schema the same way.
 export const entitlementCreateSchema = {
+  unevaluatedProperties: false,
   allOf: [{ $ref: "#/components/schemas/EntitlementInput" }, {
     type: "object",
     required: ["enforcement_mode", "customer_id", "license_id"],
     properties: {
-      enforcement_mode: { type: "string", const: "device_bound_v1", description: "Required. Every create is protected; an omitted or any other mode returns 400 invalid_request. A protected grant requires an active customer, that customer's license for this project, no seat pool, and a usable policy; it carries no device hash or assertion TTL. An existing row of another mode is never converted in place (409 enforcement_mode_conflict). Retries must repeat the same tuple." },
+      enforcement_mode: { type: "string", const: "device_bound_v1", description: "Required. Every create is protected; an omitted or any other mode returns 400 invalid_request. A protected grant requires an active customer, that customer's license for this project, and a usable policy. An existing row of another mode is never converted in place (409 enforcement_mode_conflict). Retries must repeat the same tuple." },
+      policy_id: {
+        type: "string",
+        maxLength: 128,
+        description:
+          "Optional. When present (and non-empty), the entitlement is STAMPED from this policy template instead of validated directly. Requires POLICY_STAMP_MODE=on (else 400 policy_stamping_disabled); the policy must exist and be active (else 404 policy_not_found). The body's grant fields act as per-field overrides on the stamp.",
+      },
       max_active_devices: { type: "integer", minimum: 1, maximum: MAX_DEVICE_LIMIT, description: "Device limit for a create that selects no policy; omitted, the create keeps the stored limit (1 for a new grant). It is written in the create's own batch. A selected policy stamps its own limit, so sending both returns 400 invalid_request. A limit below the devices already connected is refused as protected_creation_conflict with data.reason invalid_capacity." },
       ...protectedGrantFields,
     },
@@ -63,7 +69,7 @@ export const entitlementCreateSchema = {
 // customer's license, and the Worker supplies the protected mode.
 export const entitlementSyncSchema = {
   description: "Every synced grant is protected. The body names the customer who owns it and that customer's license for the project. A sync that creates a grant, or leaves or makes one active, passes the same protected checks as an admin create (409 protected_creation_conflict names a failed rule). A sync with status disabled or revoked for an existing grant always applies: it is a status-only transition that keeps the stored owner, license, notes and validity, whatever the body names. The body cannot choose the mode, and an existing grant of another mode is 409 enforcement_mode_conflict, even when unchanged.",
-  not: { required: ["enforcement_mode"] },
+  unevaluatedProperties: false,
   allOf: [
     { $ref: "#/components/schemas/EntitlementInput" },
     {
@@ -77,8 +83,8 @@ export const entitlementSyncSchema = {
   ],
 };
 
-// The fields an entitlement PATCH writes through patchEntitlement. Keys the Worker does not patch
-// are ignored, so the schema leaves them open.
+// The fields an entitlement PATCH writes through patchEntitlement. The PATCH request schema closes
+// this schema together with the observed-state precondition.
 const patchFields = {
   valid_from: { type: ["integer", "null"], minimum: 0 },
   valid_until: { type: ["integer", "null"], minimum: 0 },
@@ -89,9 +95,7 @@ const patchFields = {
 
 export const entitlementPatchSchema = {
   type: "object",
-  // A protected grant carries no device hash or assertion TTL, and no PATCH changes its mode.
-  not: { anyOf: [{ required: ["enforcement_mode"] }, { required: ["device_hash"] }, { required: ["assertion_ttl_seconds"] }] },
-  description: "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable. device_hash and assertion_ttl_seconds are refused with 400 invalid_request: a protected grant carries neither. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the required expected_* precondition may), or the PATCH returns 400 invalid_request.",
+  description: "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status/enforcement_mode are NOT patchable: a body naming any field other than the properties below and the expected_* precondition returns 400 invalid_request. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the required expected_* precondition may), or the PATCH returns 400 invalid_request.",
   properties: {
     ...patchFields,
     max_active_devices: { type: "integer", minimum: 1, maximum: MAX_DEVICE_LIMIT, description: "Device limit. A protected grant refuses a limit below its connected devices with 409 capacity_in_use and data.devices_in_use." },

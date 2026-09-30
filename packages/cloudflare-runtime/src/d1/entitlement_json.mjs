@@ -49,22 +49,16 @@ function column(alias, name) {
 
 /**
  * Canonical entitlement representation used by both the general entitlement
- * mutation adapter and the plan-projection protocol. Keep the optional cache
- * field explicit because historic idempotency payloads intentionally omit it.
+ * mutation adapter and the plan-projection protocol.
  */
-export function entitlementCurrentJsonSql(alias, idExpression, { includeCacheTtl = false } = {}) {
+export function entitlementCurrentJsonSql(alias, idExpression) {
   const value = (name) => column(alias, name);
-  const entries = [
+  return d1SafeJsonObjectSql([
     ["project", value("project")],
     ["feature", value("feature")],
     ["license_fingerprint", value("license_fingerprint")],
-    ["device_hash", value("device_hash")],
     ["enforcement_mode", value("enforcement_mode")],
     ["status", value("status")],
-    ["assertion_ttl_seconds", value("assertion_ttl_seconds")],
-  ];
-  if (includeCacheTtl) entries.push(["cache_ttl_seconds", value("cache_ttl_seconds")]);
-  entries.push(
     ["revocation_seq", value("revocation_seq")],
     ["valid_from", value("valid_from")],
     ["valid_until", value("valid_until")],
@@ -76,24 +70,15 @@ export function entitlementCurrentJsonSql(alias, idExpression, { includeCacheTtl
     ["trial_expiration_basis", value("trial_expiration_basis")],
     ["trial_duration_sec", value("trial_duration_sec")],
     ["trial_one_per_device", value("trial_one_per_device")],
-    ["trial_require_device_proof", value("trial_require_device_proof")],
     ["trial_started_at", value("trial_started_at")],
     ["trial_device_hash", value("trial_device_hash")],
     ["max_active_devices", value("max_active_devices")],
     ["lease_seconds", value("lease_seconds")],
-    ["rebind_window_sec", value("rebind_window_sec")],
-    ["pool_size", value("pool_size")],
-    ["heartbeat_grace_sec", value("heartbeat_grace_sec")],
-    ["max_borrow_sec", value("max_borrow_sec")],
-    ["allow_overdraft", value("allow_overdraft")],
-    ["meter_quota", value("meter_quota")],
-    ["meter_period_sec", value("meter_period_sec")],
-    ["license_mode", `CASE WHEN ${value("is_trial")} = 1 THEN 'trial' WHEN ${value("pool_size")} > 0 THEN 'floating' ELSE 'node_locked' END`],
+    ["license_mode", `CASE WHEN ${value("is_trial")} = 1 THEN 'trial' ELSE 'node_locked' END`],
     ["created_at", value("created_at")],
     ["updated_at", value("updated_at")],
     ["id", idExpression],
-  );
-  return d1SafeJsonObjectSql(entries);
+  ]);
 }
 
 function skipQuoted(sql, index) {

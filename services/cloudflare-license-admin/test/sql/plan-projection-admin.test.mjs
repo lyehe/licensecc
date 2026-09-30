@@ -265,9 +265,8 @@ test("license-plan preview is non-mutating and returns the concrete entitlement 
   const team = json.data.will_create.find((row) => row.feature === "team");
   assert.equal(team.license_mode, "node_locked");
   assert.equal(team.max_active_devices, 6);
-  for (const legacy of ["assertion_ttl_seconds", "pool_size", "max_borrow_sec", "meter_quota", "meter_period_sec"]) {
-    assert.equal(Object.hasOwn(team, legacy), false, `a preview item has no ${legacy}`);
-  }
+  assert.deepEqual(Object.keys(team).sort(), ["addon_key", "feature", "license_fingerprint", "license_mode", "max_active_devices",
+    "policy_id", "project", "source", "status", "valid_from", "valid_until"]);
   assert.match(json.data.preview_id, /^ppv_/);
   assert.equal(typeof json.data.effective_at, "number");
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
@@ -338,9 +337,8 @@ test("catalog admin APIs create plan definitions consumed by projection", async 
   assert.equal(planFeatureBody.data.feature_inclusion, "included");
   assert.equal(planFeatureBody.data.policy_id, "pol_node");
   assert.equal(planFeatureBody.data.max_active_devices, null);
-  for (const legacy of ["assertion_ttl_seconds", "pool_size", "max_borrow_sec", "meter_quota", "meter_period_sec"]) {
-    assert.equal(Object.hasOwn(planFeatureBody.data, legacy), false, `a plan feature has no ${legacy}`);
-  }
+  assert.deepEqual(Object.keys(planFeatureBody.data).sort(), ["addon_key", "created_at", "display_order", "feature_inclusion",
+    "feature_key", "feature_name", "max_active_devices", "plan_id", "plan_key", "policy_id", "project", "status", "updated_at"]);
 
   const list = await worker.fetch(devReq(`/api/admin/catalog/plans/${encodeURIComponent(planBody.data.id)}/features?project=DEFAULT`), env);
   assert.equal(list.status, 200, await list.clone().text());

@@ -48,12 +48,8 @@ test("admin UI workflow normalizes the policy editor form", async () => {
     trial_one_per_device: 0,
     notes: "",
   });
-  // A policy stamps a protected grant: the body names no seat, borrowing, meter, TTL or device-proof
-  // field, since the Worker refuses a create naming any of them.
-  for (const field of ["pool_size", "max_borrow_sec", "meter_quota", "meter_period_sec", "assertion_ttl_seconds", "trial_require_device_proof"]) {
-    assert.equal(field in workflow.emptyPolicyForm, false, field);
-    assert.equal(field in minimal, false, field);
-  }
+  // The form names exactly the fields a policy create reads, since the Worker refuses any other field.
+  assert.deepEqual(Object.keys(workflow.emptyPolicyForm).sort(), Object.keys(minimal).sort());
 
   const full = workflow.normalizePolicyForm({
     ...workflow.emptyPolicyForm,

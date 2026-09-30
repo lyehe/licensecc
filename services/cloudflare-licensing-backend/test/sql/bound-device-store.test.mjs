@@ -91,7 +91,7 @@ test("consumed challenge admission rejects missing, incomplete or unrelated oper
 });
 
 test("renewal challenges reject current inactive or unsupported authority", async t => {
-  for (const mutation of ["UPDATE customers SET status='disabled'", "UPDATE entitlements SET status='disabled'", "UPDATE entitlements SET is_trial=1", "UPDATE entitlements SET pool_size=1", "UPDATE entitlements SET valid_until=1000", "UPDATE entitlements SET valid_from=1001"]) {
+  for (const mutation of ["UPDATE customers SET status='disabled'", "UPDATE entitlements SET status='disabled'", "UPDATE entitlements SET is_trial=1", "UPDATE entitlements SET valid_until=1000", "UPDATE entitlements SET valid_from=1001"]) {
     const f=fixture(); t.after(()=>f.sql.close());
     const c={...candidate(),bindingId:boundRandomId()};
     c.responseJson=JSON.stringify({ok:true,code:"device_activated",request_id:c.operationId,data:{binding_id:c.bindingId,lease:c.token,expires_at:c.expiresAt}});
@@ -283,16 +283,12 @@ test("fresh authenticated recovery works after code expiry without changing a le
 });
 
 test("result recovery rejects changed intent and retired authority without consuming its fresh challenge", async () => {
-  for (const mode of ["digest","retired","owner","pool"]) {
+  for (const mode of ["digest","retired","owner"]) {
     const f=fixture(),c=candidate(); seed(f,c); await commitBoundDeviceLease(f.db,c);
     const r={...c,challengeId:"recover",nonceHash:"recover-nonce"}; challenge(f,r);
     if (mode==="digest") r.requestDigest="different";
     if (mode==="retired") f.sql.exec("UPDATE device_bound_devices SET status='disabled'");
     if (mode==="owner") f.sql.exec("UPDATE customers SET status='disabled'; UPDATE customers SET status='active'");
-    if (mode==="pool") {
-      f.sql.exec("UPDATE entitlements SET pool_size=1");
-      r.entitlementRevision=f.sql.prepare("SELECT authority_revision FROM entitlements").get().authority_revision;
-    }
     await assert.rejects(recoverBoundDeviceLease(f.db,r),/CHECK/);
     assert.equal(f.sql.prepare("SELECT consumed_invocation_id FROM device_bound_challenges WHERE id='recover'").get().consumed_invocation_id,null);
     assert.equal(count(f,"device_bound_leases"),1);
@@ -328,7 +324,7 @@ test("retirement revisions cannot be reset and trial authority changes invalidat
   assert.throws(()=>f.sql.exec("UPDATE device_bound_devices SET revision=0"),/cannot_shrink/);
   assert.throws(()=>f.sql.exec("UPDATE device_bound_bindings SET generation=1"),/cannot_shrink/);
   assert.throws(()=>f.sql.exec("UPDATE device_bound_bindings SET revision=0"),/cannot_shrink/);
-  for (const field of ["trial_one_per_device","trial_require_device_proof","trial_device_hash"]) {
+  for (const field of ["trial_one_per_device","trial_device_hash"]) {
     const before=f.sql.prepare("SELECT authority_revision FROM entitlements").get().authority_revision;
     f.sql.exec(`UPDATE entitlements SET ${field}=${field==='trial_device_hash' ? "'device-hash'" : '1'}`);
     assert.equal(f.sql.prepare("SELECT authority_revision FROM entitlements").get().authority_revision,before+1);

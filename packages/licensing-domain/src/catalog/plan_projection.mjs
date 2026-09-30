@@ -1,8 +1,7 @@
 import { stampFromPolicy } from "../entitlements/policy.mjs";
 
 // A plan-projected grant is protected. It takes only its device limit from the plan feature or its
-// policy: it never carries a seat pool, borrowing or a meter, and apply leaves its TTLs and meter
-// window at the column defaults.
+// policy.
 const DEFAULT_CAPACITY = Object.freeze({ max_active_devices: 1 });
 
 const ZERO_TRIAL = Object.freeze({
@@ -10,7 +9,6 @@ const ZERO_TRIAL = Object.freeze({
   trial_expiration_basis: null,
   trial_duration_sec: 0,
   trial_one_per_device: 0,
-  trial_require_device_proof: 0,
 });
 
 // Apply accepts an opaque server capability, never a client-selected form
@@ -105,7 +103,6 @@ function policyFromCatalogRow(row) {
     trial_expiration_basis: row.policy_trial_expiration_basis,
     trial_duration_sec: row.policy_trial_duration_sec,
     trial_one_per_device: row.policy_trial_one_per_device,
-    trial_require_device_proof: row.policy_trial_require_device_proof,
     notes: row.policy_notes,
     created_at: row.policy_created_at,
     updated_at: row.policy_updated_at,
@@ -156,7 +153,7 @@ export function desiredPlanProjectionRow(row, input, now) {
   };
 }
 
-// A projected grant is protected, so it is a trial or node-locked, never floating.
+// A projected grant is protected, so it is a trial or node-locked.
 function capabilityMode(trial) {
   return Number(trial.is_trial) === 1 ? "trial" : "node_locked";
 }
@@ -214,8 +211,7 @@ export function planProjectionMatchesDesired(existing, desired) {
     Number(existing.is_trial) === Number(trial.is_trial) &&
     valuesEqual(existing.trial_expiration_basis, trial.trial_expiration_basis) &&
     Number(existing.trial_duration_sec) === Number(trial.trial_duration_sec) &&
-    Number(existing.trial_one_per_device) === Number(trial.trial_one_per_device) &&
-    Number(existing.trial_require_device_proof) === Number(trial.trial_require_device_proof);
+    Number(existing.trial_one_per_device) === Number(trial.trial_one_per_device);
 }
 
 export function classifyPlanProjection({ input, plan, desired, existingRows }) {

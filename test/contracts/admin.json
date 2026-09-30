@@ -1520,7 +1520,7 @@
                 },
                 "enforcement_mode": {
                   "const": "device_bound_v1",
-                  "description": "Required. Every create is protected; an omitted or any other mode returns 400 invalid_request. A protected grant requires an active customer, that customer's license for this project, no seat pool, and a usable policy; it carries no device hash or assertion TTL. An existing row of another mode is never converted in place (409 enforcement_mode_conflict). Retries must repeat the same tuple.",
+                  "description": "Required. Every create is protected; an omitted or any other mode returns 400 invalid_request. A protected grant requires an active customer, that customer's license for this project, and a usable policy. An existing row of another mode is never converted in place (409 enforcement_mode_conflict). Retries must repeat the same tuple.",
                   "type": "string"
                 },
                 "feature": {
@@ -1542,6 +1542,11 @@
                   "maximum": 1000000,
                   "minimum": 1,
                   "type": "integer"
+                },
+                "policy_id": {
+                  "description": "Optional. When present (and non-empty), the entitlement is STAMPED from this policy template instead of validated directly. Requires POLICY_STAMP_MODE=on (else 400 policy_stamping_disabled); the policy must exist and be active (else 404 policy_not_found). The body's grant fields act as per-field overrides on the stamp.",
+                  "maxLength": 128,
+                  "type": "string"
                 },
                 "project": {
                   "pattern": "^[A-Za-z0-9_.:-]{1,127}(?![\\s\\S])",
@@ -1591,24 +1596,11 @@
                 }
               }
             }
-          ]
+          ],
+          "unevaluatedProperties": false
         },
         "EntitlementInput": {
-          "description": "A protected grant carries no device hash (its device key proves the device) and no assertion TTL; a body naming device_hash or assertion_ttl_seconds returns 400 invalid_request.",
-          "not": {
-            "anyOf": [
-              {
-                "required": [
-                  "device_hash"
-                ]
-              },
-              {
-                "required": [
-                  "assertion_ttl_seconds"
-                ]
-              }
-            ]
-          },
+          "description": "The grant fields a create and a sync share. Each route refuses a body naming any field it does not read with 400 invalid_request.",
           "properties": {
             "customer_id": {
               "default": null,
@@ -1638,11 +1630,6 @@
             "notes": {
               "default": "",
               "maxLength": 1000,
-              "type": "string"
-            },
-            "policy_id": {
-              "description": "Optional. When present (and non-empty), the entitlement is STAMPED from this policy template instead of validated directly. Requires POLICY_STAMP_MODE=on (else 400 policy_stamping_disabled); the policy must exist and be active (else 404 policy_not_found). Body fields above act as per-field overrides on the stamp.",
-              "maxLength": 128,
               "type": "string"
             },
             "project": {
@@ -1718,26 +1705,7 @@
               }
             }
           },
-          "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable. device_hash and assertion_ttl_seconds are refused with 400 invalid_request: a protected grant carries neither. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the required expected_* precondition may), or the PATCH returns 400 invalid_request.",
-          "not": {
-            "anyOf": [
-              {
-                "required": [
-                  "enforcement_mode"
-                ]
-              },
-              {
-                "required": [
-                  "device_hash"
-                ]
-              },
-              {
-                "required": [
-                  "assertion_ttl_seconds"
-                ]
-              }
-            ]
-          },
+          "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status/enforcement_mode are NOT patchable: a body naming any field other than the properties below and the expected_* precondition returns 400 invalid_request. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the required expected_* precondition may), or the PATCH returns 400 invalid_request.",
           "properties": {
             "customer_id": {
               "maxLength": 128,
@@ -1782,9 +1750,6 @@
         },
         "EntitlementRecord": {
           "properties": {
-            "assertion_ttl_seconds": {
-              "type": "integer"
-            },
             "created_at": {
               "type": "integer"
             },
@@ -1793,9 +1758,6 @@
                 "string",
                 "null"
               ]
-            },
-            "device_hash": {
-              "type": "string"
             },
             "enforcement_mode": {
               "description": "Stored enforcement protocol, independent of commercial license_mode. Historical cached mutation responses may omit this field; read the current entitlement to establish its mode.",
@@ -1877,13 +1839,6 @@
               ]
             },
             "trial_one_per_device": {
-              "enum": [
-                0,
-                1
-              ],
-              "type": "integer"
-            },
-            "trial_require_device_proof": {
               "enum": [
                 0,
                 1
@@ -1990,11 +1945,7 @@
             }
           ],
           "description": "Every synced grant is protected. The body names the customer who owns it and that customer's license for the project. A sync that creates a grant, or leaves or makes one active, passes the same protected checks as an admin create (409 protected_creation_conflict names a failed rule). A sync with status disabled or revoked for an existing grant always applies: it is a status-only transition that keeps the stored owner, license, notes and validity, whatever the body names. The body cannot choose the mode, and an existing grant of another mode is 409 enforcement_mode_conflict, even when unchanged.",
-          "not": {
-            "required": [
-              "enforcement_mode"
-            ]
-          }
+          "unevaluatedProperties": false
         },
         "ErrorEnvelope": {
           "properties": {
@@ -10900,7 +10851,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / id / idempotency key (including an omitted or non-protected enforcement_mode, a device_hash or assertion_ttl_seconds, and max_active_devices outside 1-1,000,000 or sent with a policy_id), or a policy_id was supplied while POLICY_STAMP_MODE is off."
+              "description": "Invalid request / json / id / idempotency key (including an omitted or non-protected enforcement_mode, a field a create does not read, and max_active_devices outside 1-1,000,000 or sent with a policy_id), or a policy_id was supplied while POLICY_STAMP_MODE is off."
             },
             "401": {
               "content": {
@@ -11324,7 +11275,8 @@
                       ],
                       "type": "object"
                     }
-                  ]
+                  ],
+                  "unevaluatedProperties": false
                 }
               }
             },
@@ -11397,7 +11349,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / id / idempotency key, a device_hash or assertion_ttl_seconds, or max_active_devices outside 1-1,000,000 or sent with another patch field."
+              "description": "Invalid request / json / id / idempotency key, a field a PATCH does not read, or max_active_devices outside 1-1,000,000 or sent with another patch field."
             },
             "401": {
               "content": {
@@ -18065,7 +18017,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / idempotency key (including a body without customer_id or license_id, one naming enforcement_mode, device_hash or assertion_ttl_seconds, or an identifier outside the protected rules), or missing reason for a non-active status."
+              "description": "Invalid request / json / idempotency key (including a body without customer_id or license_id, one naming a field a sync does not read such as enforcement_mode, or an identifier outside the protected rules), or missing reason for a non-active status."
             },
             "401": {
               "content": {

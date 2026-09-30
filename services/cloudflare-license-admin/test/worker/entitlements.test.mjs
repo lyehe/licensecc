@@ -46,15 +46,25 @@ test("admin create with enforcement_mode legacy is refused", async () => {
   assert.equal(response.status, 400);
 });
 
-// A protected grant carries no device hash (the device key proves the device) and no assertion TTL.
-test("admin create refuses device_hash and assertion_ttl_seconds", async () => {
+// A create reads exactly its grant fields, its mode, and a policy or its own device limit. A body
+// naming anything else (a column no request writes, a column the schema no longer has, or a typo)
+// is refused whole, so a caller never believes a field it sent took effect.
+const UNREAD_FIELDS = ["revocation_seq", "authority_revision", "lease_seconds", "trial_started_at", "trial_device_hash",
+  "license_mode", "id", "seats", "hash", "ttl_seconds", "unknown_field"];
+
+test("admin create refuses a body naming any field a create does not read", async () => {
   const { env, request } = protectedCreateFixture();
-  for (const field of [{ device_hash: "" }, { device_hash: "d".repeat(64) }, { assertion_ttl_seconds: 300 }]) {
-    const response = await request("/api/admin/entitlements", { ...protectedGrant, ...field });
-    assert.equal(response.status, 400, JSON.stringify(field));
-    assert.equal((await response.json()).code, "invalid_request");
+  for (const field of UNREAD_FIELDS) {
+    for (const value of ["", 0, "d".repeat(64)]) {
+      for (const body of [{ ...protectedGrant, [field]: value }, { ...protectedGrant, policy_id: "pol_1", [field]: value }]) {
+        const response = await request("/api/admin/entitlements", body);
+        assert.equal(response.status, 400, JSON.stringify(body));
+        assert.equal((await response.json()).code, "invalid_request", JSON.stringify(body));
+      }
+    }
   }
   assert.equal(env.DB.entitlements.size, 0);
+  assert.equal(env.DB.events.length, 0);
 });
 
 // The mandatory owner/revocation-sequence precondition is checked before any D1 read, for every
@@ -87,37 +97,32 @@ test("PATCH, disable, reenable and revoke each refuse a missing precondition bef
   }
 });
 
-test("PATCH refuses device_hash on a protected grant", async () => {
+// A PATCH reads exactly its patch fields, the device limit and the precondition; anything else,
+// including the grant's identity, status and mode, is refused whole and writes nothing.
+test("PATCH refuses a body naming any field a PATCH does not read", async () => {
   const { env, request } = protectedCreateFixture();
   const created = await request("/api/admin/entitlements", protectedGrant);
   assert.equal(created.status, 200);
   const { id, customer_id: customerId, revocation_seq: revocationSeq } = (await created.json()).data;
   const key = keyOf(protectedGrant.project, protectedGrant.feature, protectedGrant.license_fingerprint);
   const before = clone(env.DB.entitlements.get(key));
-  const patched = await worker.fetch(authed(`/api/admin/entitlements/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify({ device_hash: "d".repeat(64), expected_customer_id: customerId, expected_revocation_seq: revocationSeq }),
-  }), env);
-  assert.equal(patched.status, 400);
-  assert.equal((await patched.json()).code, "invalid_request");
+  for (const field of [...UNREAD_FIELDS, "project", "feature", "license_fingerprint", "status", "enforcement_mode", "policy_id"]) {
+    for (const extra of [{}, { notes: "with an unread field" }, { max_active_devices: 2 }]) {
+      const body = { ...extra, [field]: "d".repeat(64), expected_customer_id: customerId, expected_revocation_seq: revocationSeq };
+      const patched = await worker.fetch(authed(`/api/admin/entitlements/${id}`, { method: "PATCH", body: JSON.stringify(body) }), env);
+      assert.equal(patched.status, 400, JSON.stringify(body));
+      assert.equal((await patched.json()).code, "invalid_request", JSON.stringify(body));
+    }
+  }
   assert.deepEqual(env.DB.entitlements.get(key), before);
   assert.equal(env.DB.events.length, 1);
-});
-
-test("PATCH refuses assertion_ttl_seconds on a protected grant", async () => {
-  const { env, request } = protectedCreateFixture();
-  const created = await request("/api/admin/entitlements", protectedGrant);
-  assert.equal(created.status, 200);
-  const { id, customer_id: customerId, revocation_seq: revocationSeq } = (await created.json()).data;
-  const key = keyOf(protectedGrant.project, protectedGrant.feature, protectedGrant.license_fingerprint);
-  const before = clone(env.DB.entitlements.get(key));
-  const patched = await worker.fetch(authed(`/api/admin/entitlements/${id}`, {
+  // The same body without the unread field applies.
+  const applied = await worker.fetch(authed(`/api/admin/entitlements/${id}`, {
     method: "PATCH",
-    body: JSON.stringify({ assertion_ttl_seconds: 120, expected_customer_id: customerId, expected_revocation_seq: revocationSeq }),
+    body: JSON.stringify({ notes: "patched", expected_customer_id: customerId, expected_revocation_seq: revocationSeq }),
   }), env);
-  assert.equal(patched.status, 400);
-  assert.equal((await patched.json()).code, "invalid_request");
-  assert.deepEqual(env.DB.entitlements.get(key), before);
+  assert.equal(applied.status, 200);
+  assert.equal((await applied.json()).data.notes, "patched");
 });
 
 test("cloudflare access reader can read but cannot mutate", async (t) => {
@@ -160,7 +165,6 @@ test("admin create is audited and idempotent", async () => {
   const env = baseEnv(db);
   const body = {
     ...protectedGrant,
-    cache_ttl_seconds: 3600,
     notes: "first",
   };
   const request = authed("/api/admin/entitlements", {
@@ -172,8 +176,6 @@ test("admin create is audited and idempotent", async () => {
   assert.equal(first.status, 200);
   const firstBody = await json(first);
   assert.equal(firstBody.data.revocation_seq, 1);
-  assert.equal(firstBody.data.cache_ttl_seconds, undefined);
-  assert.equal(db.entitlements.get(keyOf("APP", "PRO", fingerprint)).cache_ttl_seconds, 300);
   assert.equal(db.events.length, 1);
   assert.equal(db.events[0].event_type, "create");
   assert.equal(JSON.parse(db.events[0].next_json).id, firstBody.data.id);
@@ -232,10 +234,7 @@ test("admin upsert increments the stored revocation sequence", async () => {
     project: "APP",
     feature: "PRO",
     license_fingerprint: fingerprint,
-    device_hash: "",
     status: "active",
-    assertion_ttl_seconds: 300,
-    cache_ttl_seconds: 3600,
     revocation_seq: 7,
     valid_from: null,
     valid_until: null,
@@ -267,7 +266,6 @@ test("admin upsert preserves historical revocation floor when row is recreated",
     project: "APP",
     feature: "PRO",
     license_fingerprint: fingerprint,
-    device_hash: "",
     event_type: "revoke",
     status: "revoked",
     revocation_seq: 10,
@@ -416,9 +414,8 @@ test("audit next_json carries the full production json_object field set", async 
   const saved = (await json(res)).data;
   const next = JSON.parse(db.events[0].next_json);
   assert.deepEqual(Object.keys(next).sort(), [...NEXT_JSON_KEYS].sort());
-  // Intentional shape divergence: next_json includes cache_ttl_seconds; the API response (withId) does not.
-  assert.ok("cache_ttl_seconds" in next);
-  assert.equal(saved.cache_ttl_seconds, undefined);
+  // The audit snapshot and the API response describe the same record.
+  assert.deepEqual(Object.keys(next).sort(), Object.keys(saved).sort());
   assert.equal(next.id, saved.id);
   assert.equal(next.enforcement_mode, "device_bound_v1");
   assert.equal(next.customer_id, "cus_1");
@@ -430,7 +427,7 @@ test("canonical D1-safe next_json key set matches the audit contract (drift guar
   // Both entitlement mutation and plan projection interpolate this shared
   // expression. Keep the semantic key contract independent of its safe nested
   // json_set representation; a monolithic json_object exceeds D1's arg cap.
-  const expression = entitlementCurrentJsonSql("", "?", { includeCacheTtl: true });
+  const expression = entitlementCurrentJsonSql("", "?");
   const keys = [
     ...expression.matchAll(/'([a-z_]+)'\s*,/g),
     ...expression.matchAll(/'\$\.([a-z_]+)'\s*,/g),

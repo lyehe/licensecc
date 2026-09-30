@@ -23,13 +23,6 @@ export function observedExpectation(row) {
 export const CAPACITY_COLUMNS = new Set([
   "max_active_devices",
   "lease_seconds",
-  "rebind_window_sec",
-  "pool_size",
-  "heartbeat_grace_sec",
-  "max_borrow_sec",
-  "allow_overdraft",
-  "meter_quota",
-  "meter_period_sec",
 ]);
 
 export function isNonNegativeInteger(value) {

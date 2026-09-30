@@ -66,12 +66,7 @@ CREATE TABLE IF NOT EXISTS catalog_plan_features (
   policy_id TEXT NULL,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
   display_order INTEGER NOT NULL DEFAULT 0,
-  assertion_ttl_seconds INTEGER NULL,
-  pool_size INTEGER NULL,
   max_active_devices INTEGER NULL,
-  max_borrow_sec INTEGER NULL,
-  meter_quota INTEGER NULL,
-  meter_period_sec INTEGER NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (plan_id, feature_key),
@@ -261,7 +256,6 @@ CREATE TABLE IF NOT EXISTS "entitlement_events" (
   project TEXT NOT NULL,
   feature TEXT NOT NULL,
   license_fingerprint TEXT NOT NULL,
-  device_hash TEXT NOT NULL DEFAULT '',
   event_type TEXT NOT NULL CHECK (event_type IN ('create', 'update', 'disable', 'reenable', 'revoke', 'upsert', 'revoked-override')),
   status TEXT NOT NULL CHECK (status IN ('active', 'revoked', 'disabled')),
   revocation_seq INTEGER NOT NULL,
@@ -282,37 +276,47 @@ CREATE TABLE IF NOT EXISTS entitlement_policies (
   id                          TEXT PRIMARY KEY,
   project                     TEXT NOT NULL,
   name                        TEXT NOT NULL,
-  type                        TEXT NOT NULL CHECK (type IN ('trial', 'node_locked', 'floating', 'subscription')),
+  type                        TEXT NOT NULL CHECK (type IN ('trial', 'node_locked', 'subscription')),
   status                      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
   valid_from_offset_sec       INTEGER NULL,
   duration_sec                INTEGER NULL,
-  assertion_ttl_seconds       INTEGER NOT NULL DEFAULT 300,
-  pool_size                   INTEGER NOT NULL DEFAULT 0,
   max_active_devices          INTEGER NOT NULL DEFAULT 1,
-  max_borrow_sec              INTEGER NOT NULL DEFAULT 0,
   expiry_strategy             TEXT NOT NULL DEFAULT 'fixed_window' CHECK (expiry_strategy IN ('fixed_window', 'non_expiring')),
   trial_expiration_basis      TEXT NOT NULL DEFAULT 'from_issue' CHECK (trial_expiration_basis IN ('from_issue', 'from_first_activation', 'from_first_use')),
   trial_duration_sec          INTEGER NOT NULL DEFAULT 0,
   trial_one_per_device        INTEGER NOT NULL DEFAULT 0,
-  trial_require_device_proof  INTEGER NOT NULL DEFAULT 0,
   notes                       TEXT NOT NULL DEFAULT '',
   created_at                  INTEGER NOT NULL,
   updated_at                  INTEGER NOT NULL
-, meter_quota INTEGER NOT NULL DEFAULT 0, meter_period_sec INTEGER NOT NULL DEFAULT 2592000);
+);
 
 CREATE TABLE IF NOT EXISTS entitlements (
   project TEXT NOT NULL,
   feature TEXT NOT NULL,
   license_fingerprint TEXT NOT NULL,
-  device_hash TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL CHECK (status IN ('active', 'revoked', 'disabled')),
-  assertion_ttl_seconds INTEGER NOT NULL DEFAULT 300,
-  cache_ttl_seconds INTEGER NOT NULL DEFAULT 3600,
   revocation_seq INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL, valid_from INTEGER NULL, valid_until INTEGER NULL, notes TEXT NOT NULL DEFAULT '', customer_id TEXT NULL, license_id TEXT NULL, max_active_devices INTEGER NOT NULL DEFAULT 1, lease_seconds INTEGER NOT NULL DEFAULT 2592000, rebind_window_sec INTEGER NOT NULL DEFAULT 7776000, pool_size INTEGER NOT NULL DEFAULT 0, heartbeat_grace_sec INTEGER NOT NULL DEFAULT 900, max_borrow_sec INTEGER NOT NULL DEFAULT 0, allow_overdraft INTEGER NOT NULL DEFAULT 0, last_applied_order_seq INTEGER NOT NULL DEFAULT -1, last_applied_order_epoch INTEGER NOT NULL DEFAULT 0, policy_id TEXT NULL, is_trial INTEGER NOT NULL DEFAULT 0, trial_expiration_basis TEXT NULL, trial_duration_sec INTEGER NOT NULL DEFAULT 0, trial_one_per_device INTEGER NOT NULL DEFAULT 0, trial_require_device_proof INTEGER NOT NULL DEFAULT 0, trial_started_at INTEGER NULL, trial_device_hash TEXT NULL, meter_quota INTEGER NOT NULL DEFAULT 0, meter_period_sec INTEGER NOT NULL DEFAULT 2592000, enforcement_mode TEXT NOT NULL DEFAULT 'legacy'
-  CHECK (enforcement_mode IN ('legacy', 'device_bound_v1')), authority_revision INTEGER NOT NULL DEFAULT 0
-  CHECK (authority_revision = CAST(authority_revision AS BIGINT) AND authority_revision BETWEEN 0 AND 9007199254740991),
+  updated_at INTEGER NOT NULL,
+  valid_from INTEGER NULL,
+  valid_until INTEGER NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  customer_id TEXT NULL,
+  license_id TEXT NULL,
+  max_active_devices INTEGER NOT NULL DEFAULT 1,
+  lease_seconds INTEGER NOT NULL DEFAULT 2592000,
+  last_applied_order_seq INTEGER NOT NULL DEFAULT -1,
+  last_applied_order_epoch INTEGER NOT NULL DEFAULT 0,
+  policy_id TEXT NULL,
+  is_trial INTEGER NOT NULL DEFAULT 0,
+  trial_expiration_basis TEXT NULL,
+  trial_duration_sec INTEGER NOT NULL DEFAULT 0,
+  trial_one_per_device INTEGER NOT NULL DEFAULT 0,
+  trial_started_at INTEGER NULL,
+  trial_device_hash TEXT NULL,
+  enforcement_mode TEXT NOT NULL DEFAULT 'legacy' CHECK (enforcement_mode IN ('legacy', 'device_bound_v1')),
+  authority_revision INTEGER NOT NULL DEFAULT 0
+    CHECK (authority_revision = CAST(authority_revision AS BIGINT) AND authority_revision BETWEEN 0 AND 9007199254740991),
   PRIMARY KEY (project, feature, license_fingerprint)
 );
 
@@ -1011,11 +1015,10 @@ WHEN NEW.status IS NOT OLD.status OR NEW.customer_id IS NOT OLD.customer_id
   OR NEW.valid_from IS NOT OLD.valid_from OR NEW.valid_until IS NOT OLD.valid_until
   OR NEW.max_active_devices IS NOT OLD.max_active_devices OR NEW.lease_seconds IS NOT OLD.lease_seconds
   OR NEW.enforcement_mode IS NOT OLD.enforcement_mode OR NEW.revocation_seq IS NOT OLD.revocation_seq
-  OR NEW.pool_size IS NOT OLD.pool_size OR NEW.is_trial IS NOT OLD.is_trial
+  OR NEW.is_trial IS NOT OLD.is_trial
   OR NEW.trial_started_at IS NOT OLD.trial_started_at OR NEW.trial_duration_sec IS NOT OLD.trial_duration_sec
   OR NEW.trial_expiration_basis IS NOT OLD.trial_expiration_basis
   OR NEW.trial_one_per_device IS NOT OLD.trial_one_per_device
-  OR NEW.trial_require_device_proof IS NOT OLD.trial_require_device_proof
   OR NEW.trial_device_hash IS NOT OLD.trial_device_hash
 BEGIN
   UPDATE entitlements SET authority_revision = OLD.authority_revision + 1

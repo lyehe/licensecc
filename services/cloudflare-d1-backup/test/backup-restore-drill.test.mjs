@@ -932,9 +932,9 @@ test("count comparison reports exact mismatches", () => {
   assert.deepEqual(compareCounts(source, source), []);
 });
 
-test("entitlement semantic SQL and normalization track verifier-facing states", () => {
+test("entitlement semantic SQL and normalization track protected-issuance states", () => {
   const sql = entitlementSemanticsSql();
-  assert.match(sql, /active_verifier_candidate_count/);
+  assert.match(sql, /active_authority_candidate_count/);
   assert.match(sql, /valid_until IS NULL OR valid_until > CAST/);
 
   const semantics = entitlementSemanticsFromRows([{
@@ -942,9 +942,9 @@ test("entitlement semantic SQL and normalization track verifier-facing states", 
     active_count: "1",
     revoked_count: 1,
     disabled_count: 1,
-    active_verifier_candidate_count: "1",
-    revoked_verifier_denial_count: "1",
-    disabled_verifier_denial_count: 1,
+    active_authority_candidate_count: "1",
+    revoked_authority_denial_count: "1",
+    disabled_authority_denial_count: 1,
     min_revocation_seq: "2",
     max_revocation_seq: "9",
   }]);
@@ -955,7 +955,7 @@ test("entitlement semantic SQL and normalization track verifier-facing states", 
       revoked: 1,
       disabled: 1,
     },
-    verifier_candidates: {
+    authority_candidates: {
       active_accept: 1,
       revoked_deny: 1,
       disabled_deny: 1,
@@ -967,22 +967,22 @@ test("entitlement semantic SQL and normalization track verifier-facing states", 
   });
 });
 
-test("required restored status checks fail on missing verifier candidates", () => {
+test("required restored status checks fail on missing authority candidates", () => {
   const semantics = entitlementSemanticsFromRows([{
     total: 2,
     active_count: 1,
     revoked_count: 1,
     disabled_count: 0,
-    active_verifier_candidate_count: 0,
-    revoked_verifier_denial_count: 1,
-    disabled_verifier_denial_count: 0,
+    active_authority_candidate_count: 0,
+    revoked_authority_denial_count: 1,
+    disabled_authority_denial_count: 0,
     min_revocation_seq: 1,
     max_revocation_seq: 2,
   }]);
   assert.deepEqual(requiredStatusMismatches(semantics, ["active", "revoked"]), [
     {
       status: "active",
-      reason: "no restored active entitlement is currently eligible for verifier acceptance",
+      reason: "no restored active entitlement is currently eligible for protected issuance",
     },
   ]);
   assert.deepEqual(requiredStatusMismatches(semantics, ["revoked"]), []);

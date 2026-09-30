@@ -124,8 +124,8 @@ const LICENSE_FOR = { [FP_A]: "lic_race_a", [FP_B]: "lic_race_b" };
 function seedPolicy(db) {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
-    "INSERT INTO entitlement_policies (id, project, name, type, status, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-  ).run(POLICY_ID, "DEFAULT", "Idempotency race policy", "node_locked", "active", 600, 0, 4, 0, now, now);
+    "INSERT INTO entitlement_policies (id, project, name, type, status, max_active_devices, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(POLICY_ID, "DEFAULT", "Idempotency race policy", "node_locked", "active", 4, now, now);
   db.prepare("INSERT INTO customers (id, name, created_at, updated_at) VALUES ('cus_race', 'Race owner', ?, ?)").run(now, now);
   for (const license of Object.values(LICENSE_FOR)) {
     db.prepare("INSERT INTO licenses (id, customer_id, project, created_at, updated_at) VALUES (?, 'cus_race', 'DEFAULT', ?, ?)").run(license, now, now);
@@ -186,10 +186,9 @@ test("policy create: a strict collection idempotency claim rolls back a losing t
   // conflict must roll the whole losing batch back, including the policy extra
   // statement that sits between the entitlement write and audit projection.
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM entitlements").get().count, 1);
-  const entitlement = db.prepare("SELECT license_fingerprint, policy_id, pool_size, max_active_devices FROM entitlements").get();
+  const entitlement = db.prepare("SELECT license_fingerprint, policy_id, max_active_devices FROM entitlements").get();
   assert.equal(entitlement.license_fingerprint, FP_B);
   assert.equal(entitlement.policy_id, POLICY_ID);
-  assert.equal(entitlement.pool_size, 0);
   assert.equal(entitlement.max_active_devices, 4);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM entitlement_events").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM mutation_idempotency WHERE scope = ? AND idempotency_key = ?").get(POLICY_SCOPE, key).count, 1);

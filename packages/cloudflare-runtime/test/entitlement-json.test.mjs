@@ -107,7 +107,7 @@ function projectionProbe() {
     },
     policy_id: "pol_probe",
     capacity: { max_active_devices: 1 },
-    trial: { is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0, trial_require_device_proof: 0 },
+    trial: { is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0 },
     source: "included",
     addon_key: null,
     feature_name: "Core",
@@ -118,8 +118,7 @@ function projectionProbe() {
     assignment,
     desired: [{
       project: "DEFAULT", feature: "core", license_fingerprint: fingerprint, policy_id: "pol_probe", source: "included", addon_key: null,
-      license_mode: "node_locked", status: "active", valid_from: null, valid_until: null, assertion_ttl_seconds: 300,
-      pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000,
+      license_mode: "node_locked", status: "active", valid_from: null, valid_until: null, max_active_devices: 1,
     }],
     will_create: [], will_update: [], will_disable: [], blocked: [], unchanged: [],
     summary: { create: 1, update: 0, disable: 0, blocked: 0, unchanged: 0 },
@@ -128,13 +127,12 @@ function projectionProbe() {
   const actions = { projection_snapshot_version: 3, created: [action], updated: [], disabled: [], assignment, assignment_snapshot: null };
   const entitlement = {
     enforcement_mode: "legacy",
-    project: "DEFAULT", feature: "core", license_fingerprint: fingerprint, device_hash: "", status: "active",
-    assertion_ttl_seconds: 600, cache_ttl_seconds: 600, revocation_seq: 1, valid_from: null, valid_until: null,
+    project: "DEFAULT", feature: "core", license_fingerprint: fingerprint, status: "active",
+    revocation_seq: 1, valid_from: null, valid_until: null,
     notes: "probe", customer_id: null, license_id: "lic_probe", policy_id: "pol_probe", is_trial: 0,
-    trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0, trial_require_device_proof: 0,
-    trial_started_at: null, trial_device_hash: null, max_active_devices: 1, lease_seconds: 0, rebind_window_sec: 0,
-    pool_size: 0, heartbeat_grace_sec: 300, max_borrow_sec: 0, allow_overdraft: 0, meter_quota: 0,
-    meter_period_sec: 2592000, created_at: now, updated_at: now,
+    trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0,
+    trial_started_at: null, trial_device_hash: null, max_active_devices: 1, lease_seconds: 0,
+    created_at: now, updated_at: now,
   };
   const previewRow = {
     id: previewId, actor_subject: "admin", source_generation: 1, normalized_input_json: "{}",
@@ -182,8 +180,6 @@ async function generatedStatements() {
   assert.ok(planAudit, "plan-projection must generate an entitlement audit statement");
   assert.ok(planAssignmentAudit, "plan-projection must generate an assignment audit statement");
   assert.ok(planResponse, "plan-projection must generate an applied-response statement");
-  assert.match(planAudit.sql, /cache_ttl_seconds/, "projection audit must retain private cache policy");
-  assert.doesNotMatch(planResponse.sql, /cache_ttl_seconds/, "public projection response must not expose private cache policy");
 
   const mutationDb = new CapturingD1();
   const mutationCtx = {
@@ -264,18 +260,14 @@ if connection.getlimit(sqlite3.SQLITE_LIMIT_FUNCTION_ARG) != 32:
 connection.executescript("""
 CREATE TABLE entitlements (
   enforcement_mode TEXT,
-  project TEXT, feature TEXT, license_fingerprint TEXT, device_hash TEXT, status TEXT,
-  assertion_ttl_seconds INTEGER, cache_ttl_seconds INTEGER, revocation_seq INTEGER,
+  project TEXT, feature TEXT, license_fingerprint TEXT, status TEXT, revocation_seq INTEGER,
   valid_from INTEGER, valid_until INTEGER, notes TEXT, customer_id TEXT, license_id TEXT,
   policy_id TEXT, is_trial INTEGER, trial_expiration_basis TEXT, trial_duration_sec INTEGER,
-  trial_one_per_device INTEGER, trial_require_device_proof INTEGER, trial_started_at INTEGER,
-  trial_device_hash TEXT, max_active_devices INTEGER, lease_seconds INTEGER,
-  rebind_window_sec INTEGER, pool_size INTEGER, heartbeat_grace_sec INTEGER,
-  max_borrow_sec INTEGER, allow_overdraft INTEGER, meter_quota INTEGER,
-  meter_period_sec INTEGER, created_at INTEGER, updated_at INTEGER
+  trial_one_per_device INTEGER, trial_started_at INTEGER, trial_device_hash TEXT,
+  max_active_devices INTEGER, lease_seconds INTEGER, created_at INTEGER, updated_at INTEGER
 );
 CREATE TABLE entitlement_events (
-  project TEXT, feature TEXT, license_fingerprint TEXT, device_hash TEXT, event_type TEXT,
+  project TEXT, feature TEXT, license_fingerprint TEXT, event_type TEXT,
   status TEXT, revocation_seq INTEGER, detail TEXT, actor TEXT, actor_type TEXT, source TEXT,
   request_id TEXT, ip TEXT, prev_json TEXT, next_json TEXT, reason TEXT,
   idempotency_key TEXT, created_at INTEGER
@@ -378,7 +370,7 @@ test("D1-safe entitlement JSON keeps every generated audit/response function at 
   const generated = await generatedStatements();
   const sqlStatements = [
     entitlementCurrentJsonSql("e", "?"),
-    entitlementCurrentJsonSql("", "?", { includeCacheTtl: true }),
+    entitlementCurrentJsonSql("", "?"),
     generated.planAudit.sql,
     generated.planAssignmentAudit.sql,
     generated.planResponse.sql,

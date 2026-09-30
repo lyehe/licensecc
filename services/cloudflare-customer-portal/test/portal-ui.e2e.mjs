@@ -640,8 +640,8 @@ function makePortalApiFixture() {
   const requests = { authRequests: 0, verifies: 0, refreshRejects: 0, logouts: 0, retires: [] };
 
   const entitlements = [
-    { id: "ent_pro", project: "DEFAULT", feature: "pro", status: "active", license_fingerprint: "a".repeat(64), valid_from: 1_710_000_000, valid_until: null, enforcement_mode: "device_bound_v1", license_mode: "trial", pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_pro", trial_ends_at: null, trial_starts_on_activation: false },
-    { id: "ent_node", project: "DEFAULT", feature: "solo", status: "active", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: 2_100_000_000, enforcement_mode: "device_bound_v1", license_mode: "node_locked", pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_node", trial_ends_at: null, trial_starts_on_activation: false },
+    { id: "ent_pro", project: "DEFAULT", feature: "pro", status: "active", license_fingerprint: "a".repeat(64), valid_from: 1_710_000_000, valid_until: null, enforcement_mode: "device_bound_v1", license_mode: "trial", max_active_devices: 1, policy_id: "pol_pro", trial_ends_at: null, trial_starts_on_activation: false },
+    { id: "ent_node", project: "DEFAULT", feature: "solo", status: "active", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: 2_100_000_000, enforcement_mode: "device_bound_v1", license_mode: "node_locked", max_active_devices: 1, policy_id: "pol_node", trial_ends_at: null, trial_starts_on_activation: false },
   ];
   const bindingNow = 1_800_000_000;
   const bindings = [

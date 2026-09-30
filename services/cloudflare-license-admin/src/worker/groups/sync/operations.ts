@@ -7,11 +7,14 @@ import { authenticateSync } from "../../auth.js";
 import { MAX_NOTES_SIZE, parseJsonBody, safeNotes } from "../../request.js";
 import { clientIp } from "../../support.js";
 import { syncWithEnforcement, validateEntitlementCreate, type ProtectedCreateInput } from "../entitlements/create-enforcement.js";
-import { validateEntitlementInput } from "../entitlements/validation.js";
+import { ENTITLEMENT_SYNC_FIELDS, namesOnly, validateEntitlementInput } from "../entitlements/validation.js";
 
 // A synced grant is protected: it names the customer who owns it and that customer's license, and
 // it meets the same wire rules as an admin create. The body cannot choose the mode; sync supplies it.
 function validateSyncInput(body: unknown): ProtectedCreateInput | null {
+  if (!namesOnly(body, ENTITLEMENT_SYNC_FIELDS)) {
+    return null;
+  }
   const fields = validateEntitlementInput(body);
   if (fields === null || typeof fields.customer_id !== "string" || typeof fields.license_id !== "string") {
     return null;

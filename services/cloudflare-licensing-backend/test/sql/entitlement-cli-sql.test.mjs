@@ -65,9 +65,9 @@ function freshDb() {
 
 function seed(db, status, seq) {
   db.exec(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, " +
-      "assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, created_at, updated_at) VALUES " +
-      `('DEFAULT', 'DEFAULT', '${fingerprint}', '', '${status}', 300, 300, ${seq}, unixepoch(), unixepoch())`,
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, " +
+      "revocation_seq, created_at, updated_at) VALUES " +
+      `('DEFAULT', 'DEFAULT', '${fingerprint}', '${status}', ${seq}, unixepoch(), unixepoch())`,
   );
 }
 

@@ -55,7 +55,7 @@ const renewSubject = `SELECT b.id AS subject_id,d.key_id,unixepoch()+60 AS deadl
   JOIN entitlements e ON e.project=b.project AND e.feature=b.feature AND e.license_fingerprint=b.license_fingerprint
   JOIN customers c ON c.id=d.customer_id AND c.id=e.customer_id
   WHERE b.id=? AND b.state='active' AND d.status='active' AND c.status='active'
-    AND e.status='active' AND e.enforcement_mode='device_bound_v1' AND e.pool_size=0
+    AND e.status='active' AND e.enforcement_mode='device_bound_v1'
     AND ${boundTrialSql("e", "d.key_id", "unixepoch()", false)}
     AND (e.valid_from IS NULL OR e.valid_from<=unixepoch())
     AND (e.valid_until IS NULL OR e.valid_until>unixepoch())`;

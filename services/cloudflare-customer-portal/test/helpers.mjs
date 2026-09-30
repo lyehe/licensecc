@@ -102,18 +102,16 @@ export function seedCustomer(db, id, email, status = "active") {
   ).run(id, `cust-${id}`, email, NOW, NOW, status);
 }
 
-// Every grant is protected (device_bound_v1) and owned, as production writes it: a node-locked row
-// with no seat pool and an empty device_hash. Seed the owning customer first; a grant without one
-// is refused here rather than silently seeded.
+// Every grant is protected (device_bound_v1) and owned, as production writes it: a node-locked row.
+// Seed the owning customer first; a grant without one is refused here rather than silently seeded.
 export function seedEntitlement(db, { project = "DEFAULT", feature = "DEFAULT", fingerprint, customerId, status = "active", validUntil = NOW + 365 * 86400 } = {}) {
   if (typeof customerId !== "string" || db.prepare("SELECT 1 FROM customers WHERE id = ?").get(customerId) === undefined) {
     throw new Error(`seedEntitlement needs an existing owning customer, got ${String(customerId)}`);
   }
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, enforcement_mode, status, " +
-      "assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, " +
-      "customer_id, max_active_devices, pool_size, created_at, updated_at) VALUES " +
-      "(?, ?, ?, '', 'device_bound_v1', ?, 300, 300, 0, ?, ?, ?, 10, 0, ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, enforcement_mode, status, " +
+      "revocation_seq, valid_from, valid_until, customer_id, max_active_devices, created_at, updated_at) VALUES " +
+      "(?, ?, ?, 'device_bound_v1', ?, 0, ?, ?, ?, 10, ?, ?)",
   ).run(project, feature, fingerprint, status, NOW - 86400, validUntil, customerId, NOW, NOW);
 }
 

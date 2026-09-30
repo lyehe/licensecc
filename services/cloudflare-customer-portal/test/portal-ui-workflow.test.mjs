@@ -361,7 +361,6 @@ test("license mode names a trial's end, says the first activation starts it, or 
   assert.equal(mode({ ...usable, license_mode: "trial" }, now), "Trial");
   assert.equal(mode({ ...usable, enforcement_mode: "device_bound_v1", license_mode: "node_locked", trial_ends_at: null }, now), "Protected device");
   assert.equal(mode({ ...usable, license_mode: "node_locked", trial_ends_at: null }, now), "Node-locked");
-  assert.equal(mode({ ...usable, license_mode: "floating", trial_ends_at: null }, now), "Floating");
 });
 
 // "starts when you activate" is a promise about a license the customer can still activate. Next

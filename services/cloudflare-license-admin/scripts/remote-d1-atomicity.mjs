@@ -154,10 +154,10 @@ export default {
     ).bind(customerId).run();
 
     const entitlementWrite = env.DB.prepare(
-      "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, enforcement_mode, created_at, updated_at) VALUES (?, ?, ?, '', 'active', 60, 60, 1, NULL, NULL, 'remote d1 batch atomicity probe', ?, 'atomicity', 'device_bound_v1', unixepoch(), unixepoch())",
+      "INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, enforcement_mode, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, NULL, NULL, 'remote d1 batch atomicity probe', ?, 'atomicity', 'device_bound_v1', unixepoch(), unixepoch())",
     ).bind(project, feature, fingerprint, customerId);
     const failingAuditWrite = env.DB.prepare(
-      "INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at) VALUES (?, ?, ?, '', 'invalid_event_type_for_atomicity_probe', 'active', 1, 'probe', 'remote-d1-atomicity', 'system', 'system', 'probe', '', '', '', 'probe', NULL, unixepoch())",
+      "INSERT INTO entitlement_events (project, feature, license_fingerprint, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at) VALUES (?, ?, ?, 'invalid_event_type_for_atomicity_probe', 'active', 1, 'probe', 'remote-d1-atomicity', 'system', 'system', 'probe', '', '', '', 'probe', NULL, unixepoch())",
     ).bind(project, feature, fingerprint);
 
     let batchFailed = false;

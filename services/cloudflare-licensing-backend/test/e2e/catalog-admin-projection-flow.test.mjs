@@ -218,12 +218,11 @@ test("admin catalog import and plan projection yield protected grants that suppo
     assert.equal(appliedBody.code, "license_plan_projection_applied");
     assert.equal(appliedBody.data.applied.created.length, 2);
 
-    assert.equal("cache_ttl_seconds" in appliedBody.data.applied.created[0], false, "private cache policy must not change the public Apply response shape");
-    const rows = db.prepare(`SELECT feature, enforcement_mode, device_hash, license_id, customer_id, pool_size, max_active_devices, max_borrow_sec
+    const rows = db.prepare(`SELECT feature, enforcement_mode, license_id, customer_id, max_active_devices
       FROM entitlements WHERE project = 'DEFAULT' AND license_fingerprint = ? ORDER BY feature`).all(FP).map((row) => ({ ...row }));
-    const protectedGrant = (feature, maxActiveDevices) => ({ feature, enforcement_mode: "device_bound_v1", device_hash: "", license_id: "lic_catalog_e2e",
-      customer_id: "cus_catalog_e2e", pool_size: 0, max_active_devices: maxActiveDevices, max_borrow_sec: 0 });
-    // The plan row's device limit overrides the team policy's; no grant has a seat pool or borrowing.
+    const protectedGrant = (feature, maxActiveDevices) => ({ feature, enforcement_mode: "device_bound_v1", license_id: "lic_catalog_e2e",
+      customer_id: "cus_catalog_e2e", max_active_devices: maxActiveDevices });
+    // The plan row's device limit overrides the team policy's.
     assert.deepEqual(rows, [protectedGrant("core", 1), protectedGrant("team", 6)]);
 
     // Each plan-applied grant supports the protected consent and signed exchange.

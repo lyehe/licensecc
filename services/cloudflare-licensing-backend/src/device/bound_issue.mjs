@@ -53,7 +53,6 @@ async function authority(db, purpose, request, verified, operation) {
     WHERE e.project=? AND e.feature=? AND e.license_fingerprint=? AND e.customer_id=?`)
     .bind(subject.project, subject.feature, subject.license_fingerprint, subject.customer_id).first();
   if (!entitlement || entitlement.status !== "active" || entitlement.customer_status !== "active"
-      || entitlement.pool_size !== 0
       || (entitlement.valid_from !== null && entitlement.valid_from > entitlement.now)
       || (entitlement.valid_until !== null && entitlement.valid_until <= entitlement.now)) deny("access_denied", 403);
   if (entitlement.enforcement_mode !== "device_bound_v1") deny("legacy_protocol_disabled", 403);

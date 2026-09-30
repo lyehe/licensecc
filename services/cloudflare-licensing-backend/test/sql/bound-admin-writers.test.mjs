@@ -34,7 +34,7 @@ function fixture(t, state) {
   return { sql, env, snapshot };
 }
 const key = { project: "APP", feature: "PRO", license_fingerprint: "fingerprint" };
-const input = { ...key, customer_id: "owner", status: "active", assertion_ttl_seconds: 300, cache_ttl_seconds: 300 };
+const input = { ...key, customer_id: "owner", status: "active" };
 const ctx = { actor: { subject: "operator", email: "", actorType: "access" }, requestId: "request", ip: "", idempotencyKey: "operation", source: "admin" };
 const idempotency = { scope: "writer-test", responseCode: "updated" };
 
@@ -58,7 +58,7 @@ for (const state of ["active", "retiring"]) {
       assert.deepEqual(f.snapshot(), before);
     }
     const stamp = buildPolicyStampStatement(f.env, key, null, { max_active_devices: 0 },
-      { is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0, trial_require_device_proof: 0 });
+      { is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0 });
     await assert.rejects(createEntitlement(f.env, input, ctx, "", undefined, idempotency, [stamp]), /capacity_in_use/);
     assert.deepEqual(f.snapshot(), before, "failed policy stamp rolls back the preceding upsert and all evidence");
     const result = await patchEntitlement(f.env, key, { valid_until: 4102445000 }, { ...ctx, expectedEntitlement: observed(f) }, idempotency);
@@ -92,15 +92,3 @@ for (const state of ["active", "retiring"]) {
     assert.deepEqual(f.sql.prepare("PRAGMA foreign_key_check").all(), []);
   });
 }
-
-// A protected grant carries no device hash: its device key proves the device. The shared PATCH writer
-// refuses one, as createEntitlement never writes one, whatever its caller validated.
-test("patchEntitlement refuses a device hash on a protected grant", async t => {
-  const f = fixture(t, "active"), before = f.snapshot();
-  await assert.rejects(patchEntitlement(f.env, key, { device_hash: "d".repeat(64) }, { ...ctx, expectedEntitlement: observed(f) }, idempotency), /invalid_patch/);
-  await assert.rejects(patchEntitlement(f.env, key, { device_hash: "d".repeat(64), notes: "with a hash" }, { ...ctx, expectedEntitlement: observed(f) }, idempotency), /invalid_patch/);
-  assert.deepEqual(f.snapshot(), before);
-  const result = await patchEntitlement(f.env, key, { device_hash: "", notes: "no hash" }, { ...ctx, expectedEntitlement: observed(f) }, idempotency);
-  assert.equal(result.data.device_hash, "");
-  assert.equal(result.data.notes, "no hash");
-});

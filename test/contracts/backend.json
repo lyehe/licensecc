@@ -478,7 +478,7 @@
                   }
                 }
               },
-              "description": "invalid_order: validly signed bytes that are malformed UTF-8, malformed JSON, invalid normalize result (including a missing customer.id or a quantity.pool_size), a license id that conflicts with its immutable project/customer identity, a customer/license id that contradicts the subscription's established identity, or Step 5 redrive failure. Omitting license_id carries the established license forward; it does not transfer it."
+              "description": "invalid_order: validly signed bytes that are malformed UTF-8, malformed JSON, invalid normalize result (including a missing customer.id or a quantity field other than max_active_devices), a license id that conflicts with its immutable project/customer identity, a customer/license id that contradicts the subscription's established identity, or Step 5 redrive failure. Omitting license_id carries the established license forward; it does not transfer it."
             },
             "401": {
               "content": {

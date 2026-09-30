@@ -43,9 +43,9 @@ test("plan projection worker validation uses the documented safe epoch ceiling",
   }
 });
 
-test("a plan feature with pool_size is refused", async () => {
-  // A plan feature names only its device limit and policy; seat, borrow, meter and TTL fields are refused.
-  for (const field of [{ pool_size: 5 }, { max_borrow_sec: 60 }, { meter_quota: 10 }, { meter_period_sec: 60 }, { assertion_ttl_seconds: 120 }]) {
+test("a plan feature naming any field besides its device limit and policy is refused", async () => {
+  // A plan feature names only its device limit and policy; any other field is refused whole.
+  for (const field of [{ seats: 5 }, { lease_seconds: 60 }, { ttl_seconds: 120 }, { unknown_field: 10 }]) {
     const db = recordingDb();
     const response = await worker.fetch(authed("/api/admin/catalog/plans/plan_1/features", {
       method: "POST",

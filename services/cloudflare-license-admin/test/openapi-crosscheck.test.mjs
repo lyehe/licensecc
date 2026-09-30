@@ -24,6 +24,7 @@ import {
   ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE,
 } from "../dist-worker/shared/api.js";
 import * as sharedApi from "../dist-worker/shared/api.js";
+import { ENTITLEMENT_CREATE_FIELDS, ENTITLEMENT_PATCH_FIELDS, ENTITLEMENT_SYNC_FIELDS } from "../dist-worker/worker/groups/entitlements/validation.js";
 import { POLICY_TYPES } from "@licensecc/licensing-domain/entitlements/policy";
 import { MAX_SUPPORT_UNTIL_EPOCH_SECONDS } from "@licensecc/licensing-domain/catalog/plan_projection";
 
@@ -114,12 +115,30 @@ test("plan projection Apply documents the canonical opaque preview-id grammar an
   assert.match(projectionErrors, /assignment-or-entitlement identity/i);
 });
 
-test("plan projection documents the bounded epoch contract without exposing private cache policy", () => {
+test("plan projection documents the bounded epoch contract", () => {
   const input = openApiDocument.components.schemas.PlanProjectionInput;
   assert.equal(input.properties.support_until.minimum, 0);
   assert.equal(input.properties.support_until.maximum, MAX_SUPPORT_UNTIL_EPOCH_SECONDS);
   assert.match(input.properties.support_until.description, /9999-12-31T23:59:59Z/);
-  assert.equal(Object.hasOwn(openApiDocument.components.schemas.PlanProjectionItem.properties, "cache_ttl_seconds"), false);
+});
+
+// Each entitlement route refuses a body naming a field it does not read, so its request schema is
+// closed and documents exactly the Worker's own field list.
+test("entitlement create, sync and PATCH bodies are closed to exactly the fields the Worker reads", () => {
+  const schemas = openApiDocument.components.schemas;
+  const documented = (...parts) => [...new Set(parts.flatMap((part) => Object.keys(part.properties ?? {})))].sort();
+  const create = schemas.EntitlementCreateInput;
+  assert.equal(create.unevaluatedProperties, false);
+  assert.deepEqual(documented(schemas.EntitlementInput, ...create.allOf.slice(1)), [...ENTITLEMENT_CREATE_FIELDS].sort());
+  const sync = schemas.EntitlementSyncInput;
+  assert.equal(sync.unevaluatedProperties, false);
+  assert.deepEqual(documented(schemas.EntitlementInput, ...sync.allOf.slice(1)), [...ENTITLEMENT_SYNC_FIELDS].sort());
+  const patch = openApiDocument.paths["/api/admin/entitlements/{id}"].patch.requestBody.content["application/json"].schema;
+  assert.equal(patch.unevaluatedProperties, false);
+  assert.deepEqual(patch.allOf[0], { $ref: "#/components/schemas/EntitlementPatch" });
+  assert.deepEqual(documented(schemas.EntitlementPatch, ...patch.allOf.slice(1)), [...ENTITLEMENT_PATCH_FIELDS].sort());
+  // The transitions keep their open reason-and-precondition body.
+  assert.equal(openApiDocument.paths["/api/admin/entitlements/{id}/revoke"].post.requestBody.content["application/json"].schema.unevaluatedProperties, undefined);
 });
 
 test("entitlement batch documents the Free-tier-safe pre-query cap and recovery data", () => {
@@ -236,13 +255,10 @@ test("the device limit is documented on create and PATCH, with the capacity conf
   })), "create documents that a policy excludes max_active_devices");
   const patch = schemas.EntitlementPatch;
   assert.ok(inRange(patch.properties.max_active_devices), "PATCH documents the device limit range");
-  // Exactly what the Worker enforces: no other PATCH field beside the limit. Like every PATCH, keys
-  // the Worker does not patch are ignored, so the schema does not forbid them.
+  // Exactly what the Worker enforces: no other PATCH field beside the limit. The PATCH request schema
+  // closes the body to these fields and the precondition.
   const otherFields = Object.keys(patch.properties).filter((field) => field !== "max_active_devices");
   assert.ok(otherFields.length >= 5);
-  // A protected grant carries no device hash or assertion TTL, so PATCH documents neither and refuses both.
-  assert.deepEqual(otherFields.filter((field) => field === "device_hash" || field === "assertion_ttl_seconds"), []);
-  assert.deepEqual(patch.not, { anyOf: ["enforcement_mode", "device_hash", "assertion_ttl_seconds"].map((field) => ({ required: [field] })) });
   assert.deepEqual(patch.dependentSchemas.max_active_devices, { not: { anyOf: otherFields.map((field) => ({ required: [field] })) } });
   assert.equal(schemas.EntitlementRecord.properties.max_active_devices.type, "integer");
 

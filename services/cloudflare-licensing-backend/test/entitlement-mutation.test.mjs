@@ -65,36 +65,25 @@ function makeDb(state) {
           project: a[0],
           feature: a[1],
           license_fingerprint: a[2],
-          device_hash: a[3],
-          status: a[4],
-          assertion_ttl_seconds: a[5],
-          cache_ttl_seconds: a[6],
-          // a[7..9] are the COALESCE subquery key args; revocation_seq is derived.
+          status: a[3],
+          // a[4..6] are the COALESCE subquery key args; revocation_seq is derived.
           revocation_seq: (state.entitlement?.revocation_seq ?? 0) + 1,
-          valid_from: a[10],
-          valid_until: a[11],
-          notes: a[12],
-          customer_id: a[13],
-          license_id: a[14],
+          valid_from: a[7],
+          valid_until: a[8],
+          notes: a[9],
+          customer_id: a[10],
+          license_id: a[11],
           policy_id: null,
           is_trial: 0,
           trial_expiration_basis: null,
           trial_duration_sec: 0,
           trial_one_per_device: 0,
-          trial_require_device_proof: 0,
           trial_started_at: null,
           trial_device_hash: null,
           max_active_devices: 1,
           lease_seconds: 2592000,
-          rebind_window_sec: 7776000,
-          pool_size: 0,
-          heartbeat_grace_sec: 900,
-          max_borrow_sec: 0,
-          allow_overdraft: 0,
-          meter_quota: 0,
-          meter_period_sec: 2592000,
-          created_at: a[15],
-          updated_at: a[16],
+          created_at: a[12],
+          updated_at: a[13],
         };
         state.entitlement = row;
         returnedRow = { ...row };
@@ -171,8 +160,6 @@ test("createEntitlement returns a MutationResult with an id and writes an audit 
   assert.equal(result.data.status, "active");
   assert.equal(result.data.enforcement_mode, "device_bound_v1", "every grant createEntitlement writes is protected");
   assert.equal(result.data.license_mode, "node_locked");
-  // cache_ttl_seconds must be stripped from the public record by withId().
-  assert.equal("cache_ttl_seconds" in result.data, false);
   // Exactly one audit event was written atomically with the row.
   assert.equal(state.events.length, 1);
   assert.ok(state.events[0].sql.includes("INSERT INTO entitlement_events"));
@@ -198,25 +185,24 @@ test("setEntitlementCapacity updates only provided columns and preserves the res
   const state = {};
   const env = { DB: makeDb(state) };
   // Seed an existing entitlement.
-  await createEntitlement(env, input({ notes: "keep-me", device_hash: "" }), ctx());
+  await createEntitlement(env, input({ notes: "keep-me" }), ctx());
   const seededRevSeq = state.entitlement.revocation_seq;
   state.events = []; // reset audit log to isolate the capacity write
 
   const result = await setEntitlementCapacity(
     env,
     KEY,
-    { max_active_devices: 5, lease_seconds: 1000, bogus_column: 99, pool_size: -1 },
+    { max_active_devices: 5, lease_seconds: -1, bogus_column: 99 },
     ctx({ expectedEntitlement: { customer_id: state.entitlement.customer_id, revocation_seq: seededRevSeq } }),
   );
   assert.ok(result, "result is non-null for an existing entitlement");
-  // Only the two valid provided columns were written.
+  // Only the valid provided column was written.
   assert.equal(state.entitlement.max_active_devices, 5);
-  assert.equal(state.entitlement.lease_seconds, 1000);
   assert.equal(result.data.max_active_devices, 5);
   // Unknown key is ignored.
   assert.equal("bogus_column" in state.entitlement, false);
-  // Negative value is ignored (pool_size remains at the migrated default).
-  assert.equal(state.entitlement.pool_size, 0);
+  // Negative value is ignored (lease_seconds keeps its default).
+  assert.equal(state.entitlement.lease_seconds, 2592000);
   // Untouched body columns are preserved.
   assert.equal(state.entitlement.notes, "keep-me");
   assert.equal(state.entitlement.status, "active");
@@ -268,15 +254,13 @@ test("patchEntitlement, transitionEntitlement and setEntitlementCapacity each re
   }
 });
 
-test("withId derives the id and strips cache_ttl_seconds", () => {
+test("withId derives the id and the license mode", () => {
   const record = withId({
     project: "DEFAULT",
     feature: "DEFAULT",
     license_fingerprint: "a".repeat(64),
-    cache_ttl_seconds: 3600,
     status: "active",
   });
   assert.equal(record.id, entitlementId("DEFAULT", "DEFAULT", "a".repeat(64)));
   assert.equal(record.license_mode, "node_locked");
-  assert.equal("cache_ttl_seconds" in record, false);
 });

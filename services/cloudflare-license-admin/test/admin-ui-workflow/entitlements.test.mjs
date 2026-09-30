@@ -84,12 +84,11 @@ test("admin UI workflow stamps a create-from-policy payload (attaches policy_id)
   assert.equal(inherited.policy_id, "pol_123");
   assert.equal(inherited.license_fingerprint, "b".repeat(64));
   assert.equal(inherited.project, "DEFAULT");
-  // A protected grant has no device hash or assertion TTL, so the form has no field for either.
-  for (const field of ["device_hash", "assertion_ttl_seconds"]) {
-    assert.equal(field in workflow.emptyEntitlementForm, false);
-    assert.equal(field in workflow.emptyEntitlementEditForm, false);
-    assert.equal(field in inherited, false);
-  }
+  // The forms carry exactly the fields a create or PATCH reads; the Worker refuses any other field.
+  assert.deepEqual(Object.keys(workflow.emptyEntitlementForm).sort(), ["customer_id", "enforcement_mode", "feature", "license_fingerprint",
+    "license_id", "max_active_devices", "notes", "policy_id", "project", "valid_from", "valid_until"]);
+  assert.deepEqual(Object.keys(workflow.emptyEntitlementEditForm).sort(), ["customer_id", "license_id", "notes", "valid_from", "valid_until"]);
+  assert.deepEqual(Object.keys(inherited).sort(), ["enforcement_mode", "feature", "license_fingerprint", "policy_id", "project"]);
   assert.equal("valid_from" in inherited, false, "blank valid_from inherits from the policy");
   assert.equal("valid_until" in inherited, false, "blank valid_until inherits from the policy");
 
@@ -280,7 +279,7 @@ test("the entitlement record guard accepts the protected row shape", async () =>
   assert.equal(guards.hasEntitlementRecordData(withoutDeviceLimit), false);
 });
 
-test("the policy record guard accepts a policy without seat, borrow, meter or TTL fields", async () => {
+test("the policy record guard accepts a protected policy record", async () => {
   const guards = await loadWorkflowModule("shared/mutationGuards.ts");
   const policy = {
     id: "pol_1", project: "APP", name: "Pro", type: "node_locked", status: "active",
@@ -289,9 +288,6 @@ test("the policy record guard accepts a policy without seat, borrow, meter or TT
     trial_one_per_device: 1, notes: "tier", created_at: 1, updated_at: 2,
   };
   assert.equal(guards.hasPolicyData(policy), true);
-  for (const field of ["assertion_ttl_seconds", "pool_size", "max_borrow_sec", "trial_require_device_proof", "meter_quota", "meter_period_sec"]) {
-    assert.equal(field in policy, false, field);
-  }
 });
 
 test("entitlement date edits preserve stored instants and use UTC midnight for changed dates", async () => {

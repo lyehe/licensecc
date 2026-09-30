@@ -76,7 +76,7 @@ async function approvedResponse(db, a, customerId, input, digest, keyRing) {
     WHERE a.handle_hash=? AND a.revision=? AND a.approval_ciphertext=? AND a.customer_id=? AND a.status='approved'
       AND a.code_expires_at>unixepoch() AND a.expires_at>unixepoch()
       AND (a.requested_feature IS NULL OR a.feature=a.requested_feature)
-      AND e.status='active' AND c.status='active' AND e.enforcement_mode='device_bound_v1' AND e.pool_size=0
+      AND e.status='active' AND c.status='active' AND e.enforcement_mode='device_bound_v1'
       AND ${boundTrialSql("e","a.key_id")}
       AND (e.valid_from IS NULL OR e.valid_from<=unixepoch()) AND (e.valid_until IS NULL OR e.valid_until>unixepoch())`)
     .bind(a.handle_hash, a.revision, a.approval_ciphertext, customerId).first();
@@ -99,7 +99,7 @@ export async function approveBoundAuthorization(db, customerId, input, config, k
   if (a.revision !== input.expected_attempt_revision) deny("revision_conflict", 409);
   const entitlement = await db.prepare(`SELECT *,unixepoch() AS now FROM entitlements
     WHERE project=? AND feature=? AND license_fingerprint=? AND customer_id=? AND status='active'
-      AND enforcement_mode='device_bound_v1' AND pool_size=0
+      AND enforcement_mode='device_bound_v1'
       AND (valid_from IS NULL OR valid_from<=unixepoch()) AND (valid_until IS NULL OR valid_until>unixepoch())`)
     .bind(...tuple, customerId).first();
   if (!entitlement || !boundTrialState(entitlement,a.key_id,entitlement.now)) deny("access_denied", 403);
@@ -114,7 +114,7 @@ export async function approveBoundAuthorization(db, customerId, input, config, k
       AND EXISTS(SELECT 1 FROM customers WHERE id=? AND status='active' AND authority_revision=?)
       AND EXISTS(SELECT 1 FROM entitlements e WHERE project=? AND feature=? AND license_fingerprint=? AND customer_id=?
         AND (device_bound_authorizations.requested_feature IS NULL OR e.feature=device_bound_authorizations.requested_feature)
-        AND status='active' AND authority_revision=? AND enforcement_mode='device_bound_v1' AND pool_size=0
+        AND status='active' AND authority_revision=? AND enforcement_mode='device_bound_v1'
         AND ${boundTrialSql("e","device_bound_authorizations.key_id")}
         AND (valid_from IS NULL OR valid_from<=unixepoch()) AND (valid_until IS NULL OR valid_until>unixepoch()))
     RETURNING revision`)

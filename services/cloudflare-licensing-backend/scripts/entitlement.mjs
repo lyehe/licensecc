@@ -12,7 +12,7 @@ const STATUS = new Set(["active", "revoked", "disabled"]);
 
 function usage() {
   console.error(`usage:
-  node scripts/entitlement.mjs upsert --fingerprint <64-hex> --actor <operator> --customer-id <text> --license-id <text> [--project DEFAULT] [--feature DEFAULT] [--device-hash <64-hex>] [--status active] [--assertion-ttl 300] [--valid-from <epoch>] [--valid-until <epoch>] [--reason <text>] [--allow-revoked-override] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
+  node scripts/entitlement.mjs upsert --fingerprint <64-hex> --actor <operator> --customer-id <text> --license-id <text> [--project DEFAULT] [--feature DEFAULT] [--status active] [--valid-from <epoch>] [--valid-until <epoch>] [--reason <text>] [--allow-revoked-override] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
   node scripts/entitlement.mjs revoke --fingerprint <64-hex> --actor <operator> --reason <text> [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
   node scripts/entitlement.mjs disable --fingerprint <64-hex> --actor <operator> --reason <text> [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
   node scripts/entitlement.mjs reenable --fingerprint <64-hex> --actor <operator> [--reason <text>] [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
@@ -71,14 +71,6 @@ function validatedHex(value, label, required = true) {
   return value.toLowerCase();
 }
 
-function validatedInt(value, label, fallback, min, max) {
-  const raw = value === undefined ? fallback : Number(value);
-  if (!Number.isInteger(raw) || raw < min || raw > max) {
-    throw new Error(`${label} must be an integer in [${min}, ${max}]`);
-  }
-  return raw;
-}
-
 function validatedOptionalInt(value, label, min, max) {
   if (value === undefined || value === "") {
     return null;
@@ -116,7 +108,6 @@ function baseFields(options) {
     project: validatedName(options.project ?? "DEFAULT", "project", 127),
     feature: validatedName(options.feature ?? "DEFAULT", "feature", 15),
     fingerprint: validatedHex(options.fingerprint, "fingerprint"),
-    deviceHash: validatedHex(options["device-hash"], "device-hash", false),
   };
 }
 
@@ -128,7 +119,7 @@ function mutationContext(options, reasonRequired = false) {
 }
 
 function eventSqlFromCurrent(fields, eventType, status, actor, reason = "") {
-  return `INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, reason, created_at) SELECT project, feature, license_fingerprint, device_hash, ${sqlString(eventType)}, status, revocation_seq, ${sqlString(reason)}, ${sqlString(actor)}, 'cli', 'cli', 'cli-' || lower(hex(randomblob(8))), ${sqlString(reason)}, unixepoch() FROM entitlements WHERE project = ${sqlString(fields.project)} AND feature = ${sqlString(fields.feature)} AND license_fingerprint = ${sqlString(fields.fingerprint)} AND status = ${sqlString(status)}`;
+  return `INSERT INTO entitlement_events (project, feature, license_fingerprint, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, reason, created_at) SELECT project, feature, license_fingerprint, ${sqlString(eventType)}, status, revocation_seq, ${sqlString(reason)}, ${sqlString(actor)}, 'cli', 'cli', 'cli-' || lower(hex(randomblob(8))), ${sqlString(reason)}, unixepoch() FROM entitlements WHERE project = ${sqlString(fields.project)} AND feature = ${sqlString(fields.feature)} AND license_fingerprint = ${sqlString(fields.fingerprint)} AND status = ${sqlString(status)}`;
 }
 
 function eventHistoryFloorSql(projectExpr, featureExpr, fingerprintExpr, fallbackExpr) {
@@ -151,8 +142,6 @@ function sqlFor(command, options) {
       throw new Error("status must be active, revoked, or disabled");
     }
     const allowRevokedOverride = options["allow-revoked-override"] === true;
-    const assertionTtl = validatedInt(options["assertion-ttl"], "assertion-ttl", 300, 1, 3600);
-    const cacheTtl = assertionTtl;
     const validFrom = validatedOptionalInt(options["valid-from"], "valid-from", 0, Number.MAX_SAFE_INTEGER);
     const validUntil = validatedOptionalInt(options["valid-until"], "valid-until", 0, Number.MAX_SAFE_INTEGER);
     const customerId = validatedText(options["customer-id"], "customer-id", 128, true);
@@ -168,7 +157,7 @@ function sqlFor(command, options) {
     const conflictGuard = allowRevokedOverride ? "" : " WHERE entitlements.status != 'revoked'";
     const eventType = allowRevokedOverride ? "revoked-override" : "upsert";
     return [
-      `INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, customer_id, license_id, enforcement_mode, created_at, updated_at) VALUES (${sqlString(fields.project)}, ${sqlString(fields.feature)}, ${sqlString(fields.fingerprint)}, ${sqlString(fields.deviceHash)}, ${sqlString(status)}, ${assertionTtl}, ${cacheTtl}, ${nextInsertedRevocationSeqSql(fields)}, ${sqlNullableInt(validFrom)}, ${sqlNullableInt(validUntil)}, ${sqlString(customerId)}, ${sqlString(licenseId)}, 'device_bound_v1', unixepoch(), unixepoch()) ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, revocation_seq = ${nextExistingRevocationSeqSql()}, valid_from = excluded.valid_from, valid_until = excluded.valid_until, updated_at = unixepoch()${conflictGuard}`,
+      `INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, customer_id, license_id, enforcement_mode, created_at, updated_at) VALUES (${sqlString(fields.project)}, ${sqlString(fields.feature)}, ${sqlString(fields.fingerprint)}, ${sqlString(status)}, ${nextInsertedRevocationSeqSql(fields)}, ${sqlNullableInt(validFrom)}, ${sqlNullableInt(validUntil)}, ${sqlString(customerId)}, ${sqlString(licenseId)}, 'device_bound_v1', unixepoch(), unixepoch()) ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET status = excluded.status, revocation_seq = ${nextExistingRevocationSeqSql()}, valid_from = excluded.valid_from, valid_until = excluded.valid_until, updated_at = unixepoch()${conflictGuard}`,
       eventSqlFromCurrent(fields, eventType, status, ctx.actor, ctx.reason),
     ].join(";\n");
   }
@@ -185,7 +174,7 @@ function sqlFor(command, options) {
   }
   if (command === "get") {
     const fields = baseFields(options);
-    return `SELECT project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, created_at, updated_at FROM entitlements WHERE project = ${sqlString(fields.project)} AND feature = ${sqlString(fields.feature)} AND license_fingerprint = ${sqlString(fields.fingerprint)}`;
+    return `SELECT project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, notes, created_at, updated_at FROM entitlements WHERE project = ${sqlString(fields.project)} AND feature = ${sqlString(fields.feature)} AND license_fingerprint = ${sqlString(fields.fingerprint)}`;
   }
   if (command === "list") {
     const project = options.project === undefined ? undefined : validatedName(options.project, "project", 127);
@@ -197,7 +186,7 @@ function sqlFor(command, options) {
     if (feature !== undefined) {
       filters.push(`feature = ${sqlString(feature)}`);
     }
-    return `SELECT project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, created_at, updated_at FROM entitlements${filters.length === 0 ? "" : ` WHERE ${filters.join(" AND ")}`} ORDER BY updated_at DESC LIMIT 100`;
+    return `SELECT project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, notes, created_at, updated_at FROM entitlements${filters.length === 0 ? "" : ` WHERE ${filters.join(" AND ")}`} ORDER BY updated_at DESC LIMIT 100`;
   }
   usage();
 }

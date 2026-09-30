@@ -277,11 +277,11 @@ export function licenseStatusLead(item: LicenseDates, now: number): string {
 // while the license is active or not yet valid; beside "Revoked.", "Suspended." or "Expired on ..."
 // it would contradict the status.
 export function licenseModeLabel(
-  item: LicenseDates & { enforcement_mode?: string; license_mode: string; trial_starts_on_activation?: boolean },
+  item: LicenseDates & { enforcement_mode?: string; license_mode: "trial" | "node_locked"; trial_starts_on_activation?: boolean },
   now: number,
 ): string {
   const enforcement = item.enforcement_mode === "device_bound_v1" ? "Protected device" : null;
-  if (item.license_mode !== "trial") return enforcement ?? (item.license_mode === "floating" ? "Floating" : "Node-locked");
+  if (item.license_mode !== "trial") return enforcement ?? "Node-locked";
   const activatable = ["active", "not_started"].includes(licenseDisplayStatus(item, now));
   const trial = typeof item.trial_ends_at === "number" ? `Trial · ${item.trial_ends_at <= now ? "ended" : "ends"} ${formatEndDate(item.trial_ends_at)}`
     : item.trial_starts_on_activation === true && activatable ? "Trial starts when you activate"

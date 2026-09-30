@@ -1,4 +1,4 @@
-// Protected-only trial policy. Legacy trial evaluation remains unchanged.
+// Protected trial policy.
 // Callers supply a verified/registered key, never a self-reported machine ID.
 // Shared by two deployables: the licensing backend decides protected-trial access with it, and the
 // customer portal uses its deadline rule (boundTrialDeadlineSql) for protected rows, to show when
@@ -10,7 +10,7 @@ const keyId = value => typeof value === "string" && value.length === 71 && /^sha
 export function boundTrialState(row, provenKeyId, now, allowUnstarted = true) {
   if (row.is_trial === 0) return { stamp: 0, expiresAt: null };
   if (row.is_trial !== 1 || !safeTime(now) || !keyId(provenKeyId)
-      || ![0, 1].includes(row.trial_one_per_device) || ![0, 1].includes(row.trial_require_device_proof)) return null;
+      || ![0, 1].includes(row.trial_one_per_device)) return null;
   const pending = row.trial_started_at === null;
   if (pending ? (!allowUnstarted || row.trial_device_hash !== null)
     : (!safeTime(row.trial_started_at) || row.trial_started_at > now || !keyId(row.trial_device_hash))) return null;
@@ -34,7 +34,7 @@ export function boundTrialSql(e, provenKey, now = "unixepoch()", allowUnstarted 
   return `(${e}.is_trial=0 OR (${e}.is_trial=1
     AND length(${provenKey})=71 AND length(CAST(${provenKey} AS BLOB))=71 AND substr(${provenKey},1,7)='sha256:'
     AND substr(${provenKey},8) NOT GLOB '*[^0-9a-f]*'
-    AND ${e}.trial_one_per_device IN (0,1) AND ${e}.trial_require_device_proof IN (0,1)
+    AND ${e}.trial_one_per_device IN (0,1)
     AND ((${allowUnstarted ? "1" : "0"}=1 AND ${started} IS NULL AND ${hash} IS NULL)
       OR (typeof(${started})='integer' AND ${started} BETWEEN 0 AND ${now}
         AND length(${hash})=71 AND length(CAST(${hash} AS BLOB))=71 AND substr(${hash},1,7)='sha256:'

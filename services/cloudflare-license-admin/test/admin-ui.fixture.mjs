@@ -55,26 +55,28 @@ export const test = base.extend({
 
 /** The fields a policy PATCH may name; a create adds project, name and type. Mirrors the Worker. */
 const POLICY_PATCHABLE_FIELDS = ["valid_from_offset_sec", "duration_sec", "max_active_devices", "expiry_strategy", "trial_expiration_basis", "trial_duration_sec", "trial_one_per_device", "notes"];
-/** A protected grant has no device hash or assertion TTL, and no PATCH chooses its mode; a create
- * or PATCH naming any of them is refused. Derived from the Worker's own list (rather than hand-copied)
- * so the two can never drift. The scrape only understands double-quoted string literals, so the
- * parsed list is checked against the exact expected value: a reformatted Worker source (single
- * quotes, a renamed field, a different literal shape) fails loudly here instead of silently
- * producing a wrong or empty refusal list. */
-const REFUSED_ENTITLEMENT_FIELDS = (() => {
+/** Each entitlement route reads exactly its own fields and refuses a body naming any other. The lists
+ * are derived from the Worker's own (rather than hand-copied) so the two can never drift. The scrape
+ * only understands double-quoted string literals and a spread of another list, so each parsed list
+ * is checked against the exact expected value: a reformatted Worker source (single quotes, a renamed
+ * field, a different literal shape) fails loudly here instead of silently producing a wrong list. */
+function workerEntitlementFields(name, expected) {
   const source = readFileSync(new URL("../src/worker/groups/entitlements/validation.ts", import.meta.url), "utf8");
-  const match = /REFUSED_ENTITLEMENT_FIELDS = \[([^\]]+)\]/.exec(source);
-  if (match === null) throw new Error("could not find REFUSED_ENTITLEMENT_FIELDS in validation.ts");
+  const match = new RegExp(`\\b${name}(?:: ReadonlySet<string>)? = (?:new Set\\()?\\[([^\\]]+)\\]`).exec(source);
+  if (match === null) throw new Error(`could not find ${name} in validation.ts`);
   const parsed = match[1].split(",").map((field) => field.trim().replace(/^"|"$/g, "")).filter(Boolean);
-  const expected = ["enforcement_mode", "device_hash", "assertion_ttl_seconds"];
   if (parsed.length !== expected.length || parsed.some((field, index) => field !== expected[index])) {
-    throw new Error(`REFUSED_ENTITLEMENT_FIELDS scrape produced ${JSON.stringify(parsed)}; expected exactly ${JSON.stringify(expected)}. Update this expectation only after confirming the scrape still parses the Worker's real list correctly.`);
+    throw new Error(`${name} scrape produced ${JSON.stringify(parsed)}; expected exactly ${JSON.stringify(expected)}. Update this expectation only after confirming the scrape still parses the Worker's real list correctly.`);
   }
   return parsed;
-})();
-/** A create's own body legitimately names its mode (the Worker validates it separately and strips
- * it before this same refusal check); only a PATCH naming it is refused. */
-const REFUSED_ENTITLEMENT_CREATE_FIELDS = REFUSED_ENTITLEMENT_FIELDS.filter((field) => field !== "enforcement_mode");
+}
+const ENTITLEMENT_INPUT_FIELDS = workerEntitlementFields("ENTITLEMENT_INPUT_FIELDS",
+  ["project", "feature", "license_fingerprint", "status", "valid_from", "valid_until", "notes", "customer_id", "license_id"]);
+const ENTITLEMENT_CREATE_FIELDS = workerEntitlementFields("ENTITLEMENT_CREATE_FIELDS",
+  ["...ENTITLEMENT_INPUT_FIELDS", "enforcement_mode", "policy_id", "max_active_devices"])
+  .flatMap((field) => field === "...ENTITLEMENT_INPUT_FIELDS" ? ENTITLEMENT_INPUT_FIELDS : [field]);
+const ENTITLEMENT_PATCH_FIELDS = workerEntitlementFields("ENTITLEMENT_PATCH_FIELDS",
+  ["valid_from", "valid_until", "notes", "customer_id", "license_id", "max_active_devices", "expected_customer_id", "expected_revocation_seq"]);
 const namesOnly = (body, allowed) => Object.keys(body).every((field) => allowed.includes(field));
 
 export function makeEnvelope(code, data) {
@@ -600,9 +602,7 @@ export function makeAdminApiFixture() {
       project: "DEFAULT",
       feature: `seed-${index}`,
       license_fingerprint: index.toString(16).padStart(64, "0"),
-      device_hash: "",
       status,
-      assertion_ttl_seconds: 300,
       revocation_seq: 1,
       valid_from: null,
       valid_until: null,
@@ -614,18 +614,10 @@ export function makeAdminApiFixture() {
       trial_expiration_basis: null,
       trial_duration_sec: 0,
       trial_one_per_device: 0,
-      trial_require_device_proof: 0,
       trial_started_at: null,
       trial_device_hash: null,
       max_active_devices: 1,
       lease_seconds: 0,
-      rebind_window_sec: 0,
-      pool_size: 0,
-      heartbeat_grace_sec: 300,
-      max_borrow_sec: 0,
-      allow_overdraft: 0,
-      meter_quota: 0,
-      meter_period_sec: 2_592_000,
       license_mode: "node_locked",
       created_at: now,
       updated_at: now,
@@ -1734,9 +1726,7 @@ export function makeAdminApiFixture() {
           project: item.project,
           feature: item.feature,
           license_fingerprint: item.license_fingerprint,
-          device_hash: "",
           status: "active",
-          assertion_ttl_seconds: 300,
           revocation_seq: 1,
           valid_from: item.valid_from,
           valid_until: item.valid_until,
@@ -1748,18 +1738,10 @@ export function makeAdminApiFixture() {
           trial_expiration_basis: null,
           trial_duration_sec: 0,
           trial_one_per_device: 0,
-          trial_require_device_proof: 0,
           trial_started_at: null,
           trial_device_hash: null,
           max_active_devices: item.max_active_devices,
           lease_seconds: 0,
-          rebind_window_sec: 0,
-          pool_size: 0,
-          heartbeat_grace_sec: 300,
-          max_borrow_sec: 0,
-          allow_overdraft: 0,
-          meter_quota: 0,
-          meter_period_sec: 2_592_000,
           license_mode: item.license_mode,
           created_at: now,
           updated_at: now,
@@ -1778,7 +1760,7 @@ export function makeAdminApiFixture() {
       requests.creates += 1;
       await new Promise((resolve) => setTimeout(resolve, 100));
       const body = await jsonBody(request);
-      if (REFUSED_ENTITLEMENT_CREATE_FIELDS.some((field) => Object.hasOwn(body, field))) {
+      if (!namesOnly(body, ENTITLEMENT_CREATE_FIELDS)) {
         return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-entitlement-refused-field" });
       }
       now += 1;
@@ -1788,9 +1770,7 @@ export function makeAdminApiFixture() {
         project: body.project,
         feature: body.feature,
         license_fingerprint: body.license_fingerprint,
-        device_hash: "",
         status: body.status ?? "active",
-        assertion_ttl_seconds: 300,
         revocation_seq: 1,
         valid_from: body.valid_from ?? null,
         valid_until: body.valid_until ?? null,
@@ -1802,18 +1782,10 @@ export function makeAdminApiFixture() {
         trial_expiration_basis: null,
         trial_duration_sec: 0,
         trial_one_per_device: 0,
-        trial_require_device_proof: 0,
         trial_started_at: null,
         trial_device_hash: null,
         max_active_devices: body.max_active_devices ?? 1,
         lease_seconds: 0,
-        rebind_window_sec: 0,
-        pool_size: 0,
-        heartbeat_grace_sec: 300,
-        max_borrow_sec: 0,
-        allow_overdraft: 0,
-        meter_quota: 0,
-        meter_period_sec: 2_592_000,
         license_mode: "node_locked",
         created_at: now,
         updated_at: now,
@@ -1833,7 +1805,7 @@ export function makeAdminApiFixture() {
       if (method === "PATCH" && match[2] === undefined) {
         const body = await jsonBody(request);
         requests.patches.push(body);
-        if (REFUSED_ENTITLEMENT_FIELDS.some((field) => Object.hasOwn(body, field))) {
+        if (!namesOnly(body, ENTITLEMENT_PATCH_FIELDS)) {
           return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-entitlement-refused-field" });
         }
         // The device limit is patched alone, and a protected grant keeps room for its connected devices.

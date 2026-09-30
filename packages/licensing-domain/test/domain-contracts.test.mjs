@@ -37,8 +37,8 @@ test("every explicit domain export resolves without Worker bindings", async () =
 test("entitlement value contract is stable without a Worker binding", () => {
   const id = entitlementId("project", "FEATURE", "fingerprint");
   assert.deepEqual(decodeEntitlementId(id), { project: "project", feature: "FEATURE", license_fingerprint: "fingerprint" });
-  // A grant is protected: a trial or node-locked, and a stray seat pool never makes it floating.
-  assert.equal(withId({ project: "project", feature: "FEATURE", license_fingerprint: "fingerprint", pool_size: 2, cache_ttl_seconds: 30 }).license_mode, "node_locked");
+  // A grant is protected: a trial or node-locked.
+  assert.equal(withId({ project: "project", feature: "FEATURE", license_fingerprint: "fingerprint", is_trial: 0 }).license_mode, "node_locked");
   assert.equal(withId({ project: "project", feature: "FEATURE", license_fingerprint: "fingerprint", is_trial: 1 }).license_mode, "trial");
 });
 
@@ -47,10 +47,11 @@ test("policies are trial, node-locked or subscription, and a stamp is pure and c
   const stamped = stampFromPolicy({
     type: "trial", trial_expiration_basis: "from_issue", expiry_strategy: "fixed_window", trial_duration_sec: 60,
     valid_from_offset_sec: null, duration_sec: null, max_active_devices: 2,
-    trial_one_per_device: 0, trial_require_device_proof: 0,
+    trial_one_per_device: 0,
   }, { project: "p", feature: "F", license_fingerprint: "fp" }, 100);
   assert.equal(stamped.input.valid_until, 160);
   assert.deepEqual(stamped.capacity, { max_active_devices: 2 });
+  assert.deepEqual(stamped.trial, { is_trial: 1, trial_expiration_basis: "from_issue", trial_duration_sec: 60, trial_one_per_device: 0 });
   assert.deepEqual(Object.keys(stamped.input).sort(), ["customer_id", "feature", "license_fingerprint", "license_id", "notes", "project", "status", "valid_from", "valid_until"]);
 });
 
@@ -89,21 +90,19 @@ test("a plan-projected grant takes only its device limit from the catalog, and a
     max_active_devices: 3,
   }, input, 100);
   assert.deepEqual(desired.capacity, { max_active_devices: 3 });
-  assert.equal("device_hash" in desired.input, false);
-  assert.equal("assertion_ttl_seconds" in desired.input, false);
+  assert.deepEqual(Object.keys(desired.input).sort(), ["customer_id", "feature", "license_fingerprint", "license_id", "notes", "project", "status", "valid_from", "valid_until"]);
+  assert.deepEqual(desired.trial, { is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0 });
   const existing = {
     ...desired.input,
     policy_id: null,
     ...desired.capacity,
     ...desired.trial,
     // Columns plan apply never writes: a grant keeps its own values, so they never make a change.
-    device_hash: "",
-    assertion_ttl_seconds: 900,
-    cache_ttl_seconds: 86_400,
-    pool_size: 0,
-    max_borrow_sec: 0,
-    meter_quota: 0,
-    meter_period_sec: 2_592_000,
+    enforcement_mode: "device_bound_v1",
+    revocation_seq: 7,
+    lease_seconds: 86_400,
+    trial_started_at: null,
+    trial_device_hash: null,
   };
 
   assert.equal(planProjectionMatchesDesired(existing, desired), true);

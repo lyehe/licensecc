@@ -215,7 +215,7 @@ test("events accepts a well-formed keyset cursor and rejects a plain digit (the 
 test("CSV HTTP exports neutralize formula cells for customers, entitlements, and events", async () => {
   const cases = [
     ["/api/admin/customers?format=csv", [{ id: "c-1", name: "\n=SUM(\"A1\")", email: "customer@example.com", status: "active", external_ref: "ref", entitlement_count: 0, active_entitlement_count: 0, created_at: 1, updated_at: 1 }]],
-    ["/api/admin/entitlements?format=csv", [{ project: "p", feature: "f", license_fingerprint: "a".repeat(64), device_hash: "", status: "active", assertion_ttl_seconds: 300, revocation_seq: 1, valid_from: null, valid_until: null, notes: "\uFEFF＠SUM(A1)", customer_id: null, license_id: null, created_at: 1, updated_at: 1 }]],
+    ["/api/admin/entitlements?format=csv", [{ project: "p", feature: "f", license_fingerprint: "a".repeat(64), status: "active", revocation_seq: 1, valid_from: null, valid_until: null, notes: "\uFEFF＠SUM(A1)", customer_id: null, license_id: null, created_at: 1, updated_at: 1 }]],
     ["/api/admin/events?format=csv", [{ id: 1, project: "p", feature: "f", license_fingerprint: "a".repeat(64), event_type: "update", status: "active", revocation_seq: 1, actor: "admin", actor_type: "admin", source: "admin", request_id: "req", reason: "\u00A0＋SUM(A1)", detail: "", created_at: 1 }]],
   ];
   for (const [path, rows] of cases) {

@@ -20,7 +20,7 @@ const MAX_BACKUP_MANIFEST_BYTES = 16 * 1024;
 const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const MAX_MANIFEST_STRING_LENGTH = 2048;
 const SQL_HASH_CHUNK_BYTES = 64 * 1024;
-const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "af18db6420440c1ee872761bde0cae33ca4e2c2e9ed95b7d59c8e890a5b5b505";
+const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "d51ad2f5b08088de2cc6a403d5e65ff7dd497c00d250672c6fb701234895b1b1";
 const SNAPSHOT_INVENTORY_ALGORITHM = "d1-export-sql-insert-count-v1";
 const DEFAULT_BACKEND_MIGRATIONS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -702,14 +702,12 @@ SELECT
   SUM(CASE WHEN status = 'disabled' THEN 1 ELSE 0 END) AS disabled_count,
   SUM(CASE
     WHEN status = 'active'
-      AND assertion_ttl_seconds > 0
-      AND (device_hash = '' OR length(device_hash) = 64)
       AND (valid_from IS NULL OR valid_from <= CAST(strftime('%s','now') AS INTEGER))
       AND (valid_until IS NULL OR valid_until > CAST(strftime('%s','now') AS INTEGER))
     THEN 1 ELSE 0
-  END) AS active_verifier_candidate_count,
-  SUM(CASE WHEN status = 'revoked' THEN 1 ELSE 0 END) AS revoked_verifier_denial_count,
-  SUM(CASE WHEN status = 'disabled' THEN 1 ELSE 0 END) AS disabled_verifier_denial_count,
+  END) AS active_authority_candidate_count,
+  SUM(CASE WHEN status = 'revoked' THEN 1 ELSE 0 END) AS revoked_authority_denial_count,
+  SUM(CASE WHEN status = 'disabled' THEN 1 ELSE 0 END) AS disabled_authority_denial_count,
   MIN(revocation_seq) AS min_revocation_seq,
   MAX(revocation_seq) AS max_revocation_seq
 FROM entitlements`;
@@ -728,10 +726,10 @@ function entitlementSemanticsFromRows(rows) {
       revoked: toNonnegativeInteger(row.revoked_count ?? 0, "revoked entitlement count"),
       disabled: toNonnegativeInteger(row.disabled_count ?? 0, "disabled entitlement count"),
     },
-    verifier_candidates: {
-      active_accept: toNonnegativeInteger(row.active_verifier_candidate_count ?? 0, "active verifier candidate count"),
-      revoked_deny: toNonnegativeInteger(row.revoked_verifier_denial_count ?? 0, "revoked verifier denial count"),
-      disabled_deny: toNonnegativeInteger(row.disabled_verifier_denial_count ?? 0, "disabled verifier denial count"),
+    authority_candidates: {
+      active_accept: toNonnegativeInteger(row.active_authority_candidate_count ?? 0, "active authority candidate count"),
+      revoked_deny: toNonnegativeInteger(row.revoked_authority_denial_count ?? 0, "revoked authority denial count"),
+      disabled_deny: toNonnegativeInteger(row.disabled_authority_denial_count ?? 0, "disabled authority denial count"),
     },
     revocation_seq: {
       min: total === 0 ? null : toNonnegativeInteger(row.min_revocation_seq, "minimum revocation sequence"),
@@ -782,14 +780,14 @@ function unavailableLiveSourceCountObservation() {
 
 function requiredStatusMismatches(semantics, requiredStatuses) {
   return requiredStatuses.flatMap((status) => {
-    if (status === "active" && semantics.verifier_candidates.active_accept < 1) {
-      return [{ status, reason: "no restored active entitlement is currently eligible for verifier acceptance" }];
+    if (status === "active" && semantics.authority_candidates.active_accept < 1) {
+      return [{ status, reason: "no restored active entitlement is currently eligible for protected issuance" }];
     }
-    if (status === "revoked" && semantics.verifier_candidates.revoked_deny < 1) {
-      return [{ status, reason: "no restored revoked entitlement is available for verifier denial" }];
+    if (status === "revoked" && semantics.authority_candidates.revoked_deny < 1) {
+      return [{ status, reason: "no restored revoked entitlement is available to confirm protected issuance is denied" }];
     }
-    if (status === "disabled" && semantics.verifier_candidates.disabled_deny < 1) {
-      return [{ status, reason: "no restored disabled entitlement is available for verifier denial" }];
+    if (status === "disabled" && semantics.authority_candidates.disabled_deny < 1) {
+      return [{ status, reason: "no restored disabled entitlement is available to confirm protected issuance is denied" }];
     }
     return [];
   });

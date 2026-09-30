@@ -66,8 +66,8 @@ function freshDb({ entitlementStatus = "active", revocationSeq = 0, enforcementM
     db.exec(readFileSync(join(migrationsDir, f), "utf8"));
   }
   db.exec(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, enforcement_mode, created_at, updated_at) " +
-      `VALUES ('DEFAULT', 'DEFAULT', '${FP}', '', '${entitlementStatus}', 300, 300, ${revocationSeq}, '${enforcementMode}', ${NOW}, ${NOW})`,
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, enforcement_mode, created_at, updated_at) " +
+      `VALUES ('DEFAULT', 'DEFAULT', '${FP}', '${entitlementStatus}', ${revocationSeq}, '${enforcementMode}', ${NOW}, ${NOW})`,
   );
   return db;
 }
@@ -270,8 +270,8 @@ test("real SQLite guards every other pre-read entitlement writer against a concu
           env,
           KEY,
           "stale-policy",
-          { pool_size: 9, max_active_devices: 9, max_borrow_sec: 9, meter_quota: 9, meter_period_sec: 3600 },
-          { is_trial: 1, trial_expiration_basis: "from_issue", trial_duration_sec: 9, trial_one_per_device: 1, trial_require_device_proof: 1 },
+          { max_active_devices: 9 },
+          { is_trial: 1, trial_expiration_basis: "from_issue", trial_duration_sec: 9, trial_one_per_device: 1 },
         )],
       ),
     },

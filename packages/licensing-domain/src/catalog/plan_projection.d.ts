@@ -33,8 +33,7 @@ export interface NormalizedPlanProjectionInput {
 
 /**
  * The complete protected-grant payload derived from one catalog feature row. A projected grant
- * takes only its device limit from the catalog; it carries no device hash, TTL, seat pool,
- * borrowing or meter.
+ * takes only its device limit from the catalog.
  */
 export interface PlanProjectionDesiredRow {
   input: {
@@ -57,7 +56,6 @@ export interface PlanProjectionDesiredRow {
     trial_expiration_basis: string | null;
     trial_duration_sec: number;
     trial_one_per_device: number;
-    trial_require_device_proof: number;
   };
   source: string;
   addon_key: string | null;

@@ -32,6 +32,8 @@ const expectedState = {
   properties: EXPECTED_ENTITLEMENT_PROPERTIES,
 };
 function withExpected(ref: string): Record<string, unknown> { return { allOf: [{ $ref: ref }, expectedState] }; }
+// A PATCH body names only its patch fields and the precondition.
+function closedWithExpected(ref: string): Record<string, unknown> { return { ...withExpected(ref), unevaluatedProperties: false }; }
 export const entitlementPaths: LabeledPathFragment = {
   label: "entitlements",
   entries: [
@@ -69,7 +71,7 @@ export const entitlementPaths: LabeledPathFragment = {
       },
       responses: {
         "200": okResponse("Entitlement created (directly, or stamped from a policy).", "#/components/schemas/EntitlementRecord", "entitlement_saved"),
-        "400": errorResponse("Invalid request / json / id / idempotency key (including an omitted or non-protected enforcement_mode, a device_hash or assertion_ttl_seconds, and max_active_devices outside 1-1,000,000 or sent with a policy_id), or a policy_id was supplied while POLICY_STAMP_MODE is off.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request", "policy_stamping_disabled"),
+        "400": errorResponse("Invalid request / json / id / idempotency key (including an omitted or non-protected enforcement_mode, a field a create does not read, and max_active_devices outside 1-1,000,000 or sent with a policy_id), or a policy_id was supplied while POLICY_STAMP_MODE is off.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request", "policy_stamping_disabled"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("Referenced resource not found, or the policy_id is unknown/disabled.", "not_found", "policy_not_found"),
         "409": protectedCreationConflictResponse("Terminal or concurrent state, enforcement mismatch, protected eligibility failure (data.reason names the failed rule), or an idempotency key already used for another tuple.", "revoked_entitlement_is_terminal", "stale_transition", "enforcement_mode_conflict", "protected_creation_conflict", "idempotency_request_conflict"),
@@ -100,12 +102,12 @@ export const entitlementPaths: LabeledPathFragment = {
       parameters: [idParam, idempotencyKeyHeader],
       requestBody: {
         required: true,
-        content: { "application/json": { schema: withExpected("#/components/schemas/EntitlementPatch") } },
+        content: { "application/json": { schema: closedWithExpected("#/components/schemas/EntitlementPatch") } },
       },
       responses: {
         "200": okResponse("Entitlement updated.", "#/components/schemas/EntitlementRecord", "entitlement_patched"),
 
-        "400": errorResponse("Invalid request / json / id / idempotency key, a device_hash or assertion_ttl_seconds, or max_active_devices outside 1-1,000,000 or sent with another patch field.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request"),
+        "400": errorResponse("Invalid request / json / id / idempotency key, a field a PATCH does not read, or max_active_devices outside 1-1,000,000 or sent with another patch field.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No entitlement with that id.", "not_found"),
         "409": capacityConflictResponse("Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry), or a protected grant has more connected devices than the requested device limit (data.devices_in_use; disconnect devices first).", "revoked_entitlement_is_terminal", "stale_transition", "capacity_in_use"),

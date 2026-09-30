@@ -104,7 +104,6 @@ test("the backend serves exactly eight routes and no /v1/verify", async () => {
         project: "DEFAULT",
         feature: "DEFAULT",
         license_fingerprint: "a".repeat(64),
-        device_hash: "",
         nonce: "b".repeat(64),
       }),
     }),

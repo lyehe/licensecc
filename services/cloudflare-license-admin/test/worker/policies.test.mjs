@@ -77,13 +77,11 @@ test("validatePolicyInput honors explicit values and rejects malformed bodies", 
     { project: "P", name: "x", type: "trial", max_active_devices: -1 },
     { project: "P", name: "x", type: "trial", duration_sec: -5 },
     { project: "P", name: "x", type: "floating" },
-    { project: "P", name: "x", type: "floating", pool_size: 2 },
-    { project: "P", name: "x", type: "node_locked", pool_size: 0 },
-    { project: "P", name: "x", type: "trial", max_borrow_sec: 0 },
-    { project: "P", name: "x", type: "trial", meter_quota: 0 },
-    { project: "P", name: "x", type: "trial", meter_period_sec: 2592000 },
-    { project: "P", name: "x", type: "trial", assertion_ttl_seconds: 300 },
-    { project: "P", name: "x", type: "trial", trial_require_device_proof: 0 },
+    { project: "P", name: "x", type: "floating", max_active_devices: 2 },
+    { project: "P", name: "x", type: "node_locked", seats: 0 },
+    { project: "P", name: "x", type: "trial", lease_seconds: 60 },
+    { project: "P", name: "x", type: "trial", ttl_seconds: 300 },
+    { project: "P", name: "x", type: "trial", unknown_field: 0 },
     { project: "P", name: "x", type: "trial", status: "active" },
   ]) {
     assert.equal(validatePolicyInput(bad), null, `expected null for ${JSON.stringify(bad)}`);
@@ -103,9 +101,9 @@ test("validatePolicyPatch updates mutable fields and rejects identity fields", (
   for (const bad of [
     { max_active_devices: -1 },
     { trial_one_per_device: 5 },
-    { pool_size: 8 },
-    { assertion_ttl_seconds: 300 },
-    { trial_require_device_proof: 0 },
+    { seats: 8 },
+    { ttl_seconds: 300 },
+    { unknown_field: 0 },
     { expiry_strategy: "weird" },
     { trial_expiration_basis: "weird" },
     { notes: "a".repeat(2000) },
@@ -146,7 +144,7 @@ test("a policy PATCH writes every field its validator accepts, and no other", as
 
 test("a floating policy is refused", async () => {
   for (const body of [
-    { project: "APP", name: "Float", type: "floating", pool_size: 2 },
+    { project: "APP", name: "Float", type: "floating", max_active_devices: 2 },
     { project: "APP", name: "Float", type: "floating" },
   ]) {
     const db = recordingDb();
@@ -157,14 +155,12 @@ test("a floating policy is refused", async () => {
   }
 });
 
-test("policy create and PATCH refuse seat, borrow, meter, TTL and device-proof fields", async () => {
+test("policy create and PATCH refuse any field a policy does not have", async () => {
   for (const field of [
-    { pool_size: 0 },
-    { max_borrow_sec: 0 },
-    { meter_quota: 0 },
-    { meter_period_sec: 2592000 },
-    { assertion_ttl_seconds: 300 },
-    { trial_require_device_proof: 0 },
+    { seats: 0 },
+    { lease_seconds: 60 },
+    { ttl_seconds: 300 },
+    { unknown_field: 0 },
   ]) {
     const db = recordingDb();
     const created = await worker.fetch(authed("/api/admin/policies", {

@@ -26,26 +26,21 @@ export function decodeEntitlementId(id) {
   }
 }
 
-// A grant is protected, so it is a trial or node-locked; a seat pool never makes it floating.
+// A grant is protected, so it is a trial or node-locked.
 export function effectiveLicenseMode(row) {
   return Number(row?.is_trial ?? 0) === 1 ? "trial" : "node_locked";
 }
 
 export function withId(row) {
-  const publicRow = { ...row };
-  delete publicRow.cache_ttl_seconds;
   return {
-    ...publicRow,
+    ...row,
     license_mode: effectiveLicenseMode(row),
     id: entitlementId(row.project, row.feature, row.license_fingerprint),
   };
 }
 
 export function entitlementMatchesInput(row, input) {
-  const defaultAssertionTtlSeconds = 300;
-  return row.device_hash === (input.device_hash ?? "") &&
-    row.status === (input.status ?? "active") &&
-    row.assertion_ttl_seconds === (input.assertion_ttl_seconds ?? defaultAssertionTtlSeconds) &&
+  return row.status === (input.status ?? "active") &&
     row.valid_from === (input.valid_from ?? null) &&
     row.valid_until === (input.valid_until ?? null) &&
     row.notes === (input.notes ?? "") &&

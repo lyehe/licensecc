@@ -329,8 +329,7 @@ export const openApiComponents: LabeledComponentFragment = {
       ["EntitlementInput", {
         type: "object",
         required: ["project", "feature", "license_fingerprint"],
-        description: "A protected grant carries no device hash (its device key proves the device) and no assertion TTL; a body naming device_hash or assertion_ttl_seconds returns 400 invalid_request.",
-        not: { anyOf: [{ required: ["device_hash"] }, { required: ["assertion_ttl_seconds"] }] },
+        description: "The grant fields a create and a sync share. Each route refuses a body naming any field it does not read with 400 invalid_request.",
         properties: {
           project: { type: "string", maxLength: 127 },
           feature: { type: "string", maxLength: 15 },
@@ -341,12 +340,6 @@ export const openApiComponents: LabeledComponentFragment = {
           notes: { type: "string", maxLength: 1000, default: "" },
           customer_id: { type: ["string", "null"], maxLength: 128, default: null },
           license_id: { type: ["string", "null"], maxLength: 128, default: null },
-          policy_id: {
-            type: "string",
-            maxLength: 128,
-            description:
-              "Optional. When present (and non-empty), the entitlement is STAMPED from this policy template instead of validated directly. Requires POLICY_STAMP_MODE=on (else 400 policy_stamping_disabled); the policy must exist and be active (else 404 policy_not_found). Body fields above act as per-field overrides on the stamp.",
-          },
         },
       }],
       ["EntitlementPatch", entitlementPatchSchema],

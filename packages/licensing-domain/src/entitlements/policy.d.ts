@@ -19,7 +19,6 @@ export interface Policy {
   trial_expiration_basis: TrialExpirationBasis;
   trial_duration_sec: number;
   trial_one_per_device: number;
-  trial_require_device_proof: number;
   notes: string;
   created_at: number;
   updated_at: number;
@@ -47,7 +46,6 @@ export interface PolicyTrialState {
   trial_expiration_basis: TrialExpirationBasis | null;
   trial_duration_sec: number;
   trial_one_per_device: number;
-  trial_require_device_proof: number;
 }
 
 export interface PolicyStamp {

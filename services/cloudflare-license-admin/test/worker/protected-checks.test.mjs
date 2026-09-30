@@ -10,9 +10,8 @@ const checksModule = () => import("../../dist-worker/worker/groups/entitlements/
 const input = { project: "APP", feature: "PRO", license_fingerprint: "a".repeat(64), customer_id: "owner", license_id: "license", enforcement_mode: "device_bound_v1" };
 const policy = {
   id: "policy", project: "APP", name: "Policy", type: "trial", status: "active", valid_from_offset_sec: null, duration_sec: null,
-  assertion_ttl_seconds: 300, pool_size: 0, max_active_devices: 3, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000,
-  expiry_strategy: "fixed_window", trial_expiration_basis: "from_first_activation", trial_duration_sec: 600, trial_one_per_device: 0,
-  trial_require_device_proof: 0, notes: "", created_at: 1, updated_at: 1,
+  max_active_devices: 3, expiry_strategy: "fixed_window", trial_expiration_basis: "from_first_activation", trial_duration_sec: 600,
+  trial_one_per_device: 0, notes: "", created_at: 1, updated_at: 1,
 };
 
 function capturingEnv(row = { reason: "customer_inactive" }) {

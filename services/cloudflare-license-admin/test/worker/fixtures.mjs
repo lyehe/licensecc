@@ -14,17 +14,13 @@ const protectedGrant = { project: PROTECTED_PROJECT, feature: "PRO", license_fin
 
 // The exact field set the production json_object emits into entitlement_events.next_json
 // (eventFromCurrentStatement, now in the shared @licensecc/cloudflare-runtime
-// entitlement_mutation core). cache_ttl_seconds is present here even though withId() strips
-// it from the API response body; the drift-guard test pins this contract.
+// entitlement_mutation core); the drift-guard test pins this contract.
 const NEXT_JSON_KEYS = [
   "enforcement_mode",
   "project",
   "feature",
   "license_fingerprint",
-  "device_hash",
   "status",
-  "assertion_ttl_seconds",
-  "cache_ttl_seconds",
   "revocation_seq",
   "valid_from",
   "valid_until",
@@ -36,18 +32,10 @@ const NEXT_JSON_KEYS = [
   "trial_expiration_basis",
   "trial_duration_sec",
   "trial_one_per_device",
-  "trial_require_device_proof",
   "trial_started_at",
   "trial_device_hash",
   "max_active_devices",
   "lease_seconds",
-  "rebind_window_sec",
-  "pool_size",
-  "heartbeat_grace_sec",
-  "max_borrow_sec",
-  "allow_overdraft",
-  "meter_quota",
-  "meter_period_sec",
   "license_mode",
   "created_at",
   "updated_at",
@@ -133,9 +121,7 @@ function clone(value) {
 }
 
 function effectiveLicenseMode(row) {
-  if (Number(row.is_trial ?? 0) === 1) return "trial";
-  if (Number(row.pool_size ?? 0) > 0) return "floating";
-  return "node_locked";
+  return Number(row.is_trial ?? 0) === 1 ? "trial" : "node_locked";
 }
 
 function entitlementDefaults(overrides = {}) {
@@ -146,18 +132,10 @@ function entitlementDefaults(overrides = {}) {
     trial_expiration_basis: null,
     trial_duration_sec: 0,
     trial_one_per_device: 0,
-    trial_require_device_proof: 0,
     trial_started_at: null,
     trial_device_hash: null,
     max_active_devices: 1,
     lease_seconds: 2592000,
-    rebind_window_sec: 7776000,
-    pool_size: 0,
-    heartbeat_grace_sec: 900,
-    max_borrow_sec: 0,
-    allow_overdraft: 0,
-    meter_quota: 0,
-    meter_period_sec: 2592000,
     ...overrides,
   };
   return { ...row, license_mode: effectiveLicenseMode(row) };
@@ -300,13 +278,13 @@ class MockD1 {
   }
 
   // Models the core protected-create rules only; the SQL suite runs the real assertion. The written
-  // row is protected, owned by an active seeded customer through that customer's licence for its
-  // project, and has no device hash and no pool.
+  // row is protected, and owned by an active seeded customer through that customer's licence for its
+  // project.
   protectedGrantHolds([project, feature, licenseFingerprint]) {
     const row = this.entitlements.get(keyOf(project, feature, licenseFingerprint));
     const license = row === undefined ? undefined : this.licenses.get(row.license_id);
     return row !== undefined && row.enforcement_mode === "device_bound_v1" && this.customers.get(row.customer_id)?.status === "active"
-      && license?.customer_id === row.customer_id && license.project === row.project && row.device_hash === "" && row.pool_size === 0;
+      && license?.customer_id === row.customer_id && license.project === row.project;
   }
 
   maxEventSeq(project, feature, licenseFingerprint) {
@@ -346,7 +324,6 @@ class MockD1 {
           project: row.project,
           feature: row.feature,
           license_fingerprint: row.license_fingerprint,
-          device_hash: row.device_hash,
           event_type: values[0],
           status: row.status,
           revocation_seq: row.revocation_seq,
@@ -369,21 +346,20 @@ class MockD1 {
         project: values[0],
         feature: values[1],
         license_fingerprint: values[2],
-        device_hash: values[3],
-        event_type: values[4],
-        status: values[5],
-        revocation_seq: values[6],
-        detail: values[7],
-        actor: values[8],
-        actor_type: values[9],
+        event_type: values[3],
+        status: values[4],
+        revocation_seq: values[5],
+        detail: values[6],
+        actor: values[7],
+        actor_type: values[8],
         source: "admin",
-        request_id: values[10],
-        ip: values[11],
-        prev_json: values[12],
-        next_json: values[13],
-        reason: values[14],
-        idempotency_key: values[15],
-        created_at: values[16],
+        request_id: values[9],
+        ip: values[10],
+        prev_json: values[11],
+        next_json: values[12],
+        reason: values[13],
+        idempotency_key: values[14],
+        created_at: values[15],
       });
       return { meta: { changes: 1 } };
     }
@@ -400,7 +376,6 @@ class MockD1 {
           return { meta: { changes: 0 } };
         }
         const data = { ...clone(row), id: values[4] };
-        delete data.cache_ttl_seconds;
         responseJson = JSON.stringify({
           ok: true,
           code: values[2],
@@ -428,10 +403,7 @@ MockD1.prototype.first = function first(sql, values) {
       project,
       feature,
       licenseFingerprint,
-      deviceHash,
       status,
-      assertionTtl,
-      cacheTtl,
       _historyProject,
       _historyFeature,
       _historyFingerprint,
@@ -450,10 +422,7 @@ MockD1.prototype.first = function first(sql, values) {
       project,
       feature,
       license_fingerprint: licenseFingerprint,
-      device_hash: deviceHash,
       status,
-      assertion_ttl_seconds: assertionTtl,
-      cache_ttl_seconds: cacheTtl,
       revocation_seq: Math.max(previous?.revocation_seq ?? 0, this.maxEventSeq(project, feature, licenseFingerprint)) + 1,
       valid_from: validFrom,
       valid_until: validUntil,
@@ -466,22 +435,20 @@ MockD1.prototype.first = function first(sql, values) {
     this.entitlements.set(key, row);
     return clone(row);
   }
-  if (sql.startsWith("UPDATE entitlements SET device_hash")) {
-    const key = keyOf(values[9], values[10], values[11]);
+  // patchEntitlement: the revocation bump comes first, then the patched body columns.
+  if (sql.startsWith("UPDATE entitlements SET revocation_seq")) {
+    const key = keyOf(values[6], values[7], values[8]);
     const previous = this.entitlements.get(key);
     if (previous === undefined) return null;
     const row = {
       ...previous,
-      device_hash: values[0],
-      assertion_ttl_seconds: values[1],
-      cache_ttl_seconds: values[2],
       revocation_seq: Math.max(previous.revocation_seq, this.maxEventSeq(previous.project, previous.feature, previous.license_fingerprint)) + 1,
-      valid_from: values[3],
-      valid_until: values[4],
-      notes: values[5],
-      customer_id: values[6],
-      license_id: values[7],
-      updated_at: values[8],
+      valid_from: values[0],
+      valid_until: values[1],
+      notes: values[2],
+      customer_id: values[3],
+      license_id: values[4],
+      updated_at: values[5],
     };
     this.entitlements.set(key, row);
     return clone(row);

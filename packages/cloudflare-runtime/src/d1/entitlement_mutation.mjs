@@ -33,7 +33,7 @@ export {
  *  statements off the same single source of truth without re-coupling the admin
  *  mutators below — keeping the admin write path byte-identical. */
 export const ENTITLEMENT_COLUMNS =
-  "project, feature, license_fingerprint, device_hash, enforcement_mode, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, policy_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, trial_started_at, trial_device_hash, max_active_devices, lease_seconds, rebind_window_sec, pool_size, heartbeat_grace_sec, max_borrow_sec, allow_overdraft, meter_quota, meter_period_sec, created_at, updated_at";
+  "project, feature, license_fingerprint, enforcement_mode, status, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, policy_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_started_at, trial_device_hash, max_active_devices, lease_seconds, created_at, updated_at";
 
 /** UPDATE assignment that re-derives the revocation_seq floor from the audit log
  *  and bumps it. Security-relevant (monotonic revocation counter) — keep identical
@@ -43,11 +43,6 @@ export const ENTITLEMENT_COLUMNS =
  *  exact same monotonic bump rather than re-deriving it. */
 export const REVOCATION_SEQ_BUMP =
   "revocation_seq = max(revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), revocation_seq)) + 1";
-
-/** Default assertion TTL (seconds) applied when an input omits it. Shared by
- *  createEntitlement and entitlementMatchesInput so the sync no-op check cannot
- *  drift from what createEntitlement actually writes. */
-const DEFAULT_ASSERTION_TTL_SECONDS = 300;
 
 /** Canonical public column projection (ENTITLEMENT_COLUMNS); the RETURNING tails
  *  in the mutators must list these same columns in this order. */
@@ -130,9 +125,9 @@ export function eventFromCurrentStatement(
 ) {
   const source = ctx.source === "sync" ? "sync" : "admin";
   return env.DB.prepare(
-    `INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at)
-     SELECT project, feature, license_fingerprint, device_hash, ?, status, revocation_seq, ?, ?, ?, '${source}', ?, ?, ?,
-       ${entitlementCurrentJsonSql("", "?", { includeCacheTtl: true })},
+    `INSERT INTO entitlement_events (project, feature, license_fingerprint, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at)
+     SELECT project, feature, license_fingerprint, ?, status, revocation_seq, ?, ?, ?, '${source}', ?, ?, ?,
+       ${entitlementCurrentJsonSql("", "?")},
        ?, ?, ?
      FROM entitlements
      WHERE project = ? AND feature = ? AND license_fingerprint = ?
@@ -330,17 +325,12 @@ export async function createEntitlement(
     // landed between findEntitlement() and this batch.  When the observation was
     // "missing", a concurrent insert instead returns no row (never an implicit
     // update of an unknown newer entitlement).
-    `INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at, enforcement_mode) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?, 'device_bound_v1') ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, updated_at = excluded.updated_at WHERE ? IS NOT NULL AND entitlements.status = ? AND entitlements.revocation_seq = ? AND entitlements.enforcement_mode = 'device_bound_v1' RETURNING ${ENTITLEMENT_COLUMNS}`,
+    `INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at, enforcement_mode) VALUES (?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?, 'device_bound_v1') ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET status = excluded.status, revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, updated_at = excluded.updated_at WHERE ? IS NOT NULL AND entitlements.status = ? AND entitlements.revocation_seq = ? AND entitlements.enforcement_mode = 'device_bound_v1' RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     input.project,
     input.feature,
     input.license_fingerprint,
-    // A protected grant carries no device hash: its device key proves the device. An update keeps
-    // the stored (empty) value.
-    "",
     input.status ?? "active",
-    input.assertion_ttl_seconds ?? DEFAULT_ASSERTION_TTL_SECONDS,
-    input.assertion_ttl_seconds ?? DEFAULT_ASSERTION_TTL_SECONDS,
     input.project,
     input.feature,
     input.license_fingerprint,
@@ -385,9 +375,6 @@ export async function patchEntitlement(env, key, patch, ctx, idempotency) {
   if (prev.status === "revoked") {
     throw new Error("revoked_terminal");
   }
-  // A protected grant carries no device hash: its device key proves the device.
-  if (prev.enforcement_mode === "device_bound_v1" && (patch.device_hash ?? "") !== "") throw new Error("invalid_patch");
-  const assertionTtl = patch.assertion_ttl_seconds ?? prev.assertion_ttl_seconds;
   const validFrom = patch.valid_from !== undefined ? patch.valid_from : prev.valid_from;
   const validUntil = patch.valid_until !== undefined ? patch.valid_until : prev.valid_until;
   if (validFrom !== null && validUntil !== null && validFrom >= validUntil) {
@@ -395,11 +382,8 @@ export async function patchEntitlement(env, key, patch, ctx, idempotency) {
   }
   const now = Math.floor(Date.now() / 1000);
   const statement = env.DB.prepare(
-    `UPDATE entitlements SET device_hash = ?, assertion_ttl_seconds = ?, cache_ttl_seconds = ?, ${REVOCATION_SEQ_BUMP}, valid_from = ?, valid_until = ?, notes = ?, customer_id = ?, license_id = ?, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND status = ? AND revocation_seq = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
+    `UPDATE entitlements SET ${REVOCATION_SEQ_BUMP}, valid_from = ?, valid_until = ?, notes = ?, customer_id = ?, license_id = ?, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND status = ? AND revocation_seq = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
-    patch.device_hash ?? prev.device_hash,
-    assertionTtl,
-    assertionTtl,
     validFrom,
     validUntil,
     patch.notes ?? prev.notes,
@@ -459,17 +443,13 @@ export async function syncEntitlement(env, input, reason, ctx, idempotency, extr
   return createEntitlement(env, input, ctx, reason, syncEventType(prev, targetStatus), idempotency, extraStatements);
 }
 
-// The seat/device capacity + metering-quota columns this module is allowed to write.
-// Deliberately disjoint from createEntitlement's INSERT...ON CONFLICT column set: those
-// are owned by the lease/seat subsystem and must not be clobbered on an admin upsert.
-// setEntitlementCapacity is the single chokepoint for quantity changes (Slice 1
-// order-ingest) so capacity can be moved without touching the entitlement body.
-// meter_quota / meter_period_sec (audit R6.3) live here so a per-period consumption
-// quota is CONFIGURABLE through the supported capacity path (order-ingest / admin),
-// not just via raw SQL; both are non-negative integers (meterUsage treats a 0/absent
-// period_sec as the 30d default), so isNonNegativeInteger validates them unchanged.
+// The device capacity columns this module is allowed to write (CAPACITY_COLUMNS).
+// Deliberately disjoint from createEntitlement's INSERT...ON CONFLICT column set, so an
+// admin upsert never clobbers them. setEntitlementCapacity is the single chokepoint for
+// quantity changes (order-ingest) so capacity can be moved without touching the
+// entitlement body.
 /**
- * Update ONLY the seat/device capacity columns provided in `capacity` on an
+ * Update ONLY the device capacity columns provided in `capacity` on an
  * EXISTING entitlement, preserving every other column (including the entitlement
  * body that createEntitlement owns). Bumps revocation_seq and writes an audit row
  * atomically. Returns null if the entitlement does not exist; throws

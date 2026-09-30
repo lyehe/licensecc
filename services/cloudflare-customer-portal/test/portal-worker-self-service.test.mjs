@@ -142,21 +142,11 @@ export const DIRECT_ROUTE_TESTS = Object.freeze([
 test("portal entitlement projection lists each owned protected grant without exposing another owner", async () => {
   const { db, env } = baseFixture();
   try {
-    db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,enforcement_mode,status,pool_size,max_active_devices,created_at,updated_at) VALUES ('PROTECTED','DEFAULT',?,'A','device_bound_v1','active',0,1,?,?)").run("c".repeat(64), NOW, NOW);
+    db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,enforcement_mode,status,max_active_devices,created_at,updated_at) VALUES ('PROTECTED','DEFAULT',?,'A','device_bound_v1','active',1,?,?)").run("c".repeat(64), NOW, NOW);
     const result = await call(env, "GET", "/api/portal/entitlements", { cookie: await cookieFor(env, "A") });
     assert.equal(result.status, 200);
     assert.equal(result.body.data.items.find(row => row.project === "PROTECTED").enforcement_mode, "device_bound_v1");
     assert.ok(!JSON.stringify(result.body).includes(FP_B));
-  } finally { db.close(); }
-});
-
-test("a stray seat pool on a grant never makes the portal show a floating license", async () => {
-  const { db, env } = baseFixture();
-  try {
-    db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,enforcement_mode,status,pool_size,max_active_devices,created_at,updated_at) VALUES ('POOLED','DEFAULT',?,'A','device_bound_v1','active',3,1,?,?)").run("c".repeat(64), NOW, NOW);
-    const result = await call(env, "GET", "/api/portal/entitlements", { cookie: await cookieFor(env, "A") });
-    assert.equal(result.status, 200);
-    assert.deepEqual(result.body.data.items.map((row) => row.license_mode), ["node_locked", "node_locked"], "every grant binds devices; none is floating");
   } finally { db.close(); }
 });
 
@@ -172,10 +162,10 @@ const DAY = 86400;
 // A protected trial grant owned by A, inserted with its trial columns and, once started, the trial key.
 function seedProtectedTrial(db, feature, fingerprint, { basis, duration, started = null, validUntil = null }) {
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, customer_id, enforcement_mode, status, pool_size, max_active_devices, " +
-      "valid_until, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, " +
+    "INSERT INTO entitlements (project, feature, license_fingerprint, customer_id, enforcement_mode, status, max_active_devices, " +
+      "valid_until, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, " +
       "trial_started_at, trial_device_hash, created_at, updated_at) " +
-      "VALUES ('DEFAULT', ?, ?, 'A', 'device_bound_v1', 'active', 0, 1, ?, 1, ?, ?, 1, 1, ?, ?, ?, ?)",
+      "VALUES ('DEFAULT', ?, ?, 'A', 'device_bound_v1', 'active', 1, ?, 1, ?, ?, 1, ?, ?, ?, ?)",
   ).run(feature, fingerprint, validUntil, basis, duration, started, started === null ? null : TRIAL_KEY, NOW, NOW);
 }
 

@@ -2,7 +2,7 @@ import type { EntitlementKey } from "@licensecc/licensing-domain/entitlements/co
 import type { PolicyCapacity, PolicyTrialState } from "@licensecc/licensing-domain/entitlements/policy";
 import type { D1DatabaseLike, D1PreparedStatementLike } from "../d1/entitlement_mutation";
 
-/** Stamps provenance, the device limit and the trial state; never a seat pool, borrowing or a meter. */
+/** Stamps provenance, the device limit and the trial state. */
 export function buildPolicyStampStatement(
   env: { DB: D1DatabaseLike },
   key: EntitlementKey,

@@ -71,20 +71,29 @@ export function nullableEpoch(value: unknown): number | null | undefined {
   return value;
 }
 
-// A protected grant carries no device hash (its device key proves the device) and no assertion TTL,
-// and no request chooses its mode. A create, sync or PATCH body naming any of them is refused.
-const REFUSED_ENTITLEMENT_FIELDS = ["enforcement_mode", "device_hash", "assertion_ttl_seconds"] as const;
+// Each entitlement route accepts exactly the fields it reads. A body naming any other field (a mode
+// on sync or PATCH, a column no request writes, or anything else) is refused whole, so a caller
+// never believes a field it sent took effect.
+const ENTITLEMENT_INPUT_FIELDS = ["project", "feature", "license_fingerprint", "status", "valid_from", "valid_until", "notes", "customer_id", "license_id"] as const;
+/** A create: the grant's fields, its mode, and either a policy to stamp from or its own device limit. */
+export const ENTITLEMENT_CREATE_FIELDS: ReadonlySet<string> = new Set([...ENTITLEMENT_INPUT_FIELDS, "enforcement_mode", "policy_id", "max_active_devices"]);
+/** A sync: the grant's fields and the audit reason. The Worker supplies the mode. */
+export const ENTITLEMENT_SYNC_FIELDS: ReadonlySet<string> = new Set([...ENTITLEMENT_INPUT_FIELDS, "reason"]);
+/** A PATCH: the patchable fields, the device limit, and the observed-state precondition. */
+export const ENTITLEMENT_PATCH_FIELDS: ReadonlySet<string> = new Set(["valid_from", "valid_until", "notes", "customer_id", "license_id",
+  "max_active_devices", "expected_customer_id", "expected_revocation_seq"]);
 
-function entitlementBody(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  return REFUSED_ENTITLEMENT_FIELDS.some((field) => Object.hasOwn(value, field)) ? null : value as Record<string, unknown>;
+/** A JSON object naming only allowed fields. */
+export function namesOnly(value: unknown, allowed: ReadonlySet<string>): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).every((key) => allowed.has(key));
 }
 
+/** The grant fields every create and sync body shares. The caller has already checked its body's field names. */
 export function validateEntitlementInput(value: unknown): EntitlementInput | null {
-  const input = entitlementBody(value);
-  if (input === null) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
+  const input = value as Record<string, unknown>;
   const project = safeString(input.project, MAX_PROJECT_SIZE);
   const feature = safeString(input.feature, MAX_FEATURE_SIZE);
   const licenseFingerprint = typeof input.license_fingerprint === "string" && HEX_64.test(input.license_fingerprint)
@@ -119,10 +128,10 @@ export function validateEntitlementInput(value: unknown): EntitlementInput | nul
 }
 
 export function validateEntitlementPatch(value: unknown): AdminEntitlementPatch | null {
-  const input = entitlementBody(value);
-  if (input === null) {
+  if (!namesOnly(value, ENTITLEMENT_PATCH_FIELDS)) {
     return null;
   }
+  const input = value;
   const patch: AdminEntitlementPatch = {};
   if (input.max_active_devices !== undefined) {
     const limit = deviceLimit(input.max_active_devices);

@@ -400,8 +400,8 @@ test("valid HMAC but unknown intent -> 400 invalid_order (no mutation)", async (
   assert.equal(calls.batch, 0, "invalid_order never reaches the mutator");
 });
 
-test("empty, misspelled or pool quantity cannot consume the order floor", async () => {
-  for (const quantity of [{}, { lease_seconds: 60 }, { pool_szie: 5 }, { pool_size: 5 }, { pool_size: 5, max_active_devices: 2 }]) {
+test("empty, misspelled or unknown quantity cannot consume the order floor", async () => {
+  for (const quantity of [{}, { lease_seconds: 60 }, { max_active_device: 5 }, { seats: 5 }, { seats: 5, max_active_devices: 2 }]) {
     const { db, calls } = stubDb({ failBatch: true });
     const env = baseEnv({ DB: db });
     const bodyText = validBody({ intent: "quantity.changed", quantity });

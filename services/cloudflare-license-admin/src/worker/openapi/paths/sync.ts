@@ -31,7 +31,7 @@ export const syncPaths: LabeledPathFragment = {
       },
       responses: {
         "200": okResponse("Entitlement synced (created or updated).", "#/components/schemas/EntitlementRecord", "entitlement_synced"),
-        "400": errorResponse("Invalid request / json / idempotency key (including a body without customer_id or license_id, one naming enforcement_mode, device_hash or assertion_ttl_seconds, or an identifier outside the protected rules), or missing reason for a non-active status.", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
+        "400": errorResponse("Invalid request / json / idempotency key (including a body without customer_id or license_id, one naming a field a sync does not read such as enforcement_mode, or an identifier outside the protected rules), or missing reason for a non-active status.", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
         "401": errorResponse("Sync token not configured on the Worker.", "sync_auth_not_configured"),
         "403": errorResponse("Bearer token did not match SYNC_API_TOKEN.", "invalid_sync_token"),
         "404": errorResponse("Referenced resource not found.", "not_found"),

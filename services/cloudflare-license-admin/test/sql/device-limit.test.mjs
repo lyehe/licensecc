@@ -222,8 +222,8 @@ test("a console re-create of an existing key keeps its stored device limit", asy
 });
 
 // The PATCH body rule is stated once in OpenAPI: no other patchable field may accompany the limit.
-// The Worker must refuse exactly those, and, like every PATCH, ignore keys it does not patch.
-test("a device-limit PATCH refuses every other patchable field that OpenAPI names, and ignores the rest", async t => {
+// The Worker must refuse exactly those, and any field a PATCH does not read.
+test("a device-limit PATCH refuses every other patchable field that OpenAPI names, and any field a PATCH does not read", async t => {
   const f = fixture(t);
   const grant = await created(await f.send(protectedGrant));
   const excluded = openApiDocument.components.schemas.EntitlementPatch.dependentSchemas.max_active_devices.not.anyOf.map((rule) => rule.required[0]);
@@ -238,7 +238,10 @@ test("a device-limit PATCH refuses every other patchable field that OpenAPI name
     revocationSeq = (await alone.json()).data.revocation_seq;
   }
   assert.equal(f.snapshot()[0][0].max_active_devices, before[0][0].max_active_devices);
-  const ignored = await created(await f.patch(grant.id, { max_active_devices: 5, status: "disabled", expected_customer_id: "owner", expected_revocation_seq: revocationSeq }));
-  assert.equal(ignored.max_active_devices, 5);
-  assert.equal(ignored.status, "active", "status is not a PATCH field, so it is ignored");
+  const unread = f.snapshot();
+  await refused(await f.patch(grant.id, { max_active_devices: 5, status: "disabled", expected_customer_id: "owner", expected_revocation_seq: revocationSeq }), 400, "invalid_request", undefined);
+  assert.deepEqual(f.snapshot(), unread, "status is not a PATCH field, so the body is refused whole");
+  const limited = await created(await f.patch(grant.id, { max_active_devices: 5, expected_customer_id: "owner", expected_revocation_seq: revocationSeq }));
+  assert.equal(limited.max_active_devices, 5);
+  assert.equal(limited.status, "active");
 });

@@ -48,7 +48,7 @@ function parseExpectedEntitlement(candidate: Record<string, unknown>): { custome
   return { customer_id: customerId as string | null, revocation_seq: revocationSeq as number };
 }
 
-// The stored policy row as the stamp reads it, including columns the policy record omits.
+// The stored policy row, as the stamp reads it.
 async function findPolicy(env: Env, policyId: string): Promise<Policy | null> {
   return env.DB.prepare("SELECT * FROM entitlement_policies WHERE id = ?").bind(policyId).first<Policy>();
 }
@@ -186,7 +186,7 @@ export async function createFromPolicy(request: Request, env: Env, ctx: Mutation
     // Optional per-field overrides; each is "absent (undefined) -> fall back to policy" or
     // "present-but-malformed -> 400". valid_from/valid_until are only validated when present
     // (nullableEpoch returns undefined for both absent AND malformed, so gate on presence).
-    // validateEntitlementCreate has already refused a device hash or an assertion TTL.
+    // validateEntitlementCreate has already refused any field a create does not read.
     const validFrom = input.valid_from === undefined ? undefined : nullableEpoch(input.valid_from);
     const validUntil = input.valid_until === undefined ? undefined : nullableEpoch(input.valid_until);
     const notes = input.notes === undefined ? undefined : safeNotes(input.notes);

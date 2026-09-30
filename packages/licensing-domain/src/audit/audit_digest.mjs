@@ -16,7 +16,6 @@ export function canonicalEntitlementEvent(row) {
     row.project,
     row.feature,
     row.license_fingerprint,
-    row.device_hash ?? "",
     row.event_type,
     row.status,
     Number(row.revocation_seq),

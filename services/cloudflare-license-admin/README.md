@@ -76,11 +76,10 @@ The whole path runs in the console; no SQL is needed.
 
 Changing the project clears dependent selections. Protected project and feature
 IDs use ASCII letters, numbers, `_`, `.`, `:`, or `-` (127 and 15 characters).
-A protected grant has no device hash and no assertion TTL: a create or PATCH
-that names `device_hash` or `assertion_ttl_seconds` returns `400
-invalid_request`. A selected policy stamps its device limit and trial/expiry
-settings, so it must have at least one device slot and usable trial/expiry
-settings.
+A create or PATCH body names only the fields its route reads: a body that
+names any other field returns `400 invalid_request`. A selected policy stamps
+its device limit and trial/expiry settings, so it must have at least one device
+slot and usable trial/expiry settings.
 
 To change an existing grant's device limit, open it with **Edit** and use **Save
 device limit**. A protected grant cannot go below the devices already connected;
@@ -528,10 +527,8 @@ project, name, and type cannot change.
 
 A policy is `trial`, `node_locked` or `subscription`. It carries a device
 limit, a validity window and trial rules, and nothing else: a create or PATCH
-that names any other field returns `400 invalid_request`. This includes the
-`floating` type and the seat, borrowing, meter, assertion-TTL and device-proof
-fields (`pool_size`, `max_borrow_sec`, `meter_quota`, `meter_period_sec`,
-`assertion_ttl_seconds`, `trial_require_device_proof`).
+that names any other field returns `400 invalid_request`, as does the
+`floating` type.
 
 Node-locked policy example:
 
@@ -640,7 +637,7 @@ Then send a bearer-authenticated projection update:
 Every synced grant is protected (`device_bound_v1`); the body cannot choose the
 mode. It must name `customer_id` and `license_id`: the active customer who owns
 the grant and that customer's license for the project. A body without either,
-or one that names `enforcement_mode`, `device_hash` or `assertion_ttl_seconds`,
+or one that names any field a sync does not read (such as `enforcement_mode`),
 returns `400 invalid_request`, as do identifiers outside the protected rules
 (see [Create protected application access](#create-protected-application-access)).
 

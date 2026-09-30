@@ -89,11 +89,13 @@ for (const [change, reason] of [[{ customer_id: "other" }, "license_customer_mis
   });
 }
 
-// A protected grant carries no device hash and no assertion TTL, on a direct or a policy create.
-test("a create naming a device hash or an assertion TTL is refused before any write", async t => {
+// A direct or a policy create reads only its own fields; a body naming any other field (a column no
+// request writes, a column the schema no longer has, or a typo) is refused before any write.
+test("a create naming a field it does not read is refused before any write", async t => {
   const f = fixture(t), before = f.snapshot();
   for (const policy of [{}, { policy_id: "policy" }]) {
-    for (const field of [{ device_hash: "" }, { device_hash: "d".repeat(64) }, { assertion_ttl_seconds: 300 }]) {
+    for (const field of [{ lease_seconds: 60 }, { revocation_seq: 1 }, { trial_device_hash: "" }, { hash: "d".repeat(64) },
+      { seats: 2 }, { ttl_seconds: 300 }]) {
       const refused = await f.send({ ...input, ...policy, ...field }, JSON.stringify({ ...policy, ...field }));
       assert.equal(refused.status, 400, JSON.stringify(field)); assert.equal((await refused.json()).code, "invalid_request");
     }
@@ -112,7 +114,7 @@ test("policy creation copies standard and trial settings and retries after polic
     f.sql.exec("UPDATE entitlement_policies SET status='disabled'");
     const retry = await f.send(request); assert.equal(retry.status, 200); assert.equal(await retry.text(), text);
     for (const policy_id of [[], "p".repeat(129)]) assert.equal((await f.send({ ...request, policy_id })).status, 400);
-    assert.equal((await f.send({ ...request, assertion_ttl_seconds: null })).status, 400);
+    assert.equal((await f.send({ ...request, ttl_seconds: null })).status, 400);
   }
 });
 
@@ -146,17 +148,6 @@ test("an unusable trial policy cannot leave a partial protected grant", async t 
   f.sql.exec("UPDATE entitlement_policies SET type='trial',trial_expiration_basis='from_first_use',trial_duration_sec=0");
   await refusedFor(await f.send({ ...input, policy_id: "policy" }), "invalid_trial");
   assert.deepEqual(f.snapshot(), before);
-});
-
-// The stamp writes provenance, the device limit and the trial state only, so a policy that still
-// carries a seat pool, borrowing or a meter yields an issuable protected grant without any of them.
-test("a policy with a seat pool, borrowing or a meter stamps a protected grant without them", async t => {
-  const f = fixture(t);
-  f.sql.exec("UPDATE entitlement_policies SET type='floating',pool_size=2,max_active_devices=2,max_borrow_sec=60,meter_quota=10,meter_period_sec=3600,assertion_ttl_seconds=900");
-  const created = await f.send({ ...input, policy_id: "policy" }); assert.equal(created.status, 200, await created.clone().text());
-  const row = f.sql.prepare("SELECT enforcement_mode,policy_id,pool_size,max_active_devices,max_borrow_sec,meter_quota,meter_period_sec,assertion_ttl_seconds,device_hash FROM entitlements").get();
-  assert.deepEqual({ ...row }, { enforcement_mode: "device_bound_v1", policy_id: "policy", pool_size: 0, max_active_devices: 2, max_borrow_sec: 0,
-    meter_quota: 0, meter_period_sec: 2592000, assertion_ttl_seconds: 300, device_hash: "" });
 });
 
 test("a missing or incorrect policy side-write rolls back the preceding upsert", async t => {
@@ -234,10 +225,8 @@ const WITHDRAWAL_CASES = [
   ["the license moved to another customer", "UPDATE licenses SET customer_id='other' WHERE id='license'"],
   ["the license is detached", "UPDATE licenses SET customer_id=NULL WHERE id='license'"],
   ["its from_issue trial has expired", "UPDATE entitlements SET is_trial=1, trial_expiration_basis='from_issue', valid_until=100"],
-  ["the protected row carries a seat pool", "UPDATE entitlements SET pool_size=5"],
-  ["the protected row carries a stale device hash", `UPDATE entitlements SET device_hash='${"d".repeat(64)}'`],
 ];
-const KEPT_COLUMNS = "customer_id, license_id, notes, valid_from, valid_until, is_trial, pool_size, device_hash, enforcement_mode";
+const KEPT_COLUMNS = "customer_id, license_id, notes, valid_from, valid_until, is_trial, enforcement_mode";
 
 for (const [name, change] of WITHDRAWAL_CASES) {
   for (const status of ["disabled", "revoked"]) {
@@ -366,12 +355,6 @@ const REASON_CASES = [
   // A policy window pushed past the largest safe time breaks only the integrity rule.
   { reason: "unknown", setup: "UPDATE entitlement_policies SET duration_sec=100", body: { policy_id: "policy", valid_from: Number.MAX_SAFE_INTEGER - 1 },
     fixedBody: { policy_id: "policy" } },
-  // A re-create keeps the stored device hash, so a stale one breaks the integrity rule; the diagnostic
-  // must read it from the stored row rather than from the create's empty input.
-  { reason: "unknown", name: "a stored stale device hash",
-    setup: `INSERT INTO entitlements(project,feature,license_fingerprint,device_hash,status,customer_id,license_id,enforcement_mode,created_at,updated_at)
-      VALUES('APP','PRO','${fp}','${"d".repeat(64)}','active','owner','license','device_bound_v1',1,1)`,
-    fix: "UPDATE entitlements SET device_hash=''" },
 ];
 
 for (const { reason, name = reason, setup, race, body = {}, fix, fixedBody = body } of REASON_CASES) {
@@ -439,7 +422,8 @@ for (const { name, policy, creates } of WOULD_BE_ROW_CASES) {
     assert.equal((await f.send(last, "final")).status, 200);
     const committed = f.sql.prepare(`SELECT ${Object.keys(wouldBe).join(", ")} FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=?`)
       .get(input.project, input.feature, input.license_fingerprint);
-    assert.ok(Object.keys(wouldBe).length >= 16);
+    // Its seven input columns and the six stamp columns a create writes or keeps.
+    assert.equal(Object.keys(wouldBe).length, 13);
     assert.deepEqual({ ...wouldBe }, { ...committed });
   });
 }

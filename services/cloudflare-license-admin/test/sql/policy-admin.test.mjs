@@ -188,14 +188,12 @@ const POLICY_RECORD_KEYS = [
   "expiry_strategy", "trial_expiration_basis", "trial_duration_sec", "trial_one_per_device", "notes", "created_at", "updated_at",
 ].sort();
 
-// Fields a policy no longer has; each is refused on create and PATCH.
+// Fields a policy does not have; each is refused on create and PATCH.
 const REFUSED_POLICY_FIELDS = [
-  { pool_size: 0 },
-  { max_borrow_sec: 0 },
-  { meter_quota: 0 },
-  { meter_period_sec: 2592000 },
-  { assertion_ttl_seconds: 300 },
-  { trial_require_device_proof: 0 },
+  { seats: 0 },
+  { lease_seconds: 60 },
+  { ttl_seconds: 300 },
+  { unknown_field: 0 },
 ];
 
 async function createPolicy(env, payload) {
@@ -284,7 +282,7 @@ test("policy: invalid create bodies are 400 invalid_request", async () => {
     { project: "DEFAULT", name: "x", type: "trial", trial_one_per_device: 2 },
     { project: "DEFAULT", name: "x\ninjection", type: "trial" }, // newline rejected
     { project: "DEFAULT", name: "x", type: "floating" },
-    { project: "DEFAULT", name: "x", type: "floating", pool_size: 2 },
+    { project: "DEFAULT", name: "x", type: "floating", max_active_devices: 2 },
     ...REFUSED_POLICY_FIELDS.map((field) => ({ project: "DEFAULT", name: "x", type: "node_locked", ...field })),
   ]) {
     const res = await worker.fetch(devReq("/api/admin/policies", { method: "POST", body: JSON.stringify(bad) }), env);

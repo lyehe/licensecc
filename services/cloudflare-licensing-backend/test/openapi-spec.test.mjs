@@ -239,7 +239,7 @@ test("OrderRequest matches the runtime normalizer's closed contract", () => {
     assert.equal(normalizeOrderEventForReplay(withoutCustomer, now).error, "invalid_order", intent);
   }
   assert.equal(normalizeOrderEventForReplay({
-    event_id: "evt_pool", subscription_id: "sub_A", project: "DEFAULT", intent: "quantity.changed", seq: 1,
-    customer: { id: "cus_A" }, quantity: { pool_size: 1 },
+    event_id: "evt_seats", subscription_id: "sub_A", project: "DEFAULT", intent: "quantity.changed", seq: 1,
+    customer: { id: "cus_A" }, quantity: { seats: 1 },
   }, now).error, "invalid_order");
 });

@@ -22,16 +22,15 @@ export interface ProtectedCheck {
 // Compare all fields used by stampFromPolicy, including nullable values. An
 // updated_at comparison alone misses changes made within the same second.
 const POLICY_FIELDS = ["id", "project", "status", "type", "valid_from_offset_sec", "duration_sec", "max_active_devices",
-  "expiry_strategy", "trial_expiration_basis", "trial_duration_sec", "trial_one_per_device", "trial_require_device_proof"] as const;
+  "expiry_strategy", "trial_expiration_basis", "trial_duration_sec", "trial_one_per_device"] as const;
 
 // The provenance, capacity and trial columns the would-be row models, with the schema default each
 // keeps when a create writes none of them (pinned to schema.sql by the SQL suite). A policy stamp
-// writes policy_id, the device limit and the trial state; nothing a create writes sets the seat
-// pool, which the integrity rule reads. A create that updates an existing protected grant keeps
-// that grant's values for every column it does not write.
+// writes policy_id, the device limit and the trial state. A create that updates an existing
+// protected grant keeps that grant's values for every column it does not write.
 export const STAMP_COLUMN_DEFAULTS = {
-  policy_id: null, pool_size: 0, max_active_devices: 1,
-  is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0, trial_require_device_proof: 0,
+  policy_id: null, max_active_devices: 1,
+  is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0,
 } as const;
 type StampColumn = keyof typeof STAMP_COLUMN_DEFAULTS;
 
@@ -67,7 +66,7 @@ export function protectedCreateChecks(input: CreateInput, policy?: Policy): read
     { reason: "policy_mismatch", sql: policy === undefined ? "1" : `EXISTS (SELECT 1 FROM entitlement_policies p WHERE ${POLICY_FIELDS.map((field) => `p.${field} IS ?`).join(" AND ")} AND p.status='active' AND p.project=e.project)
       AND ${expected.map(([column]) => `e.${column} IS ?`).join(" AND ")}`,
     binds: policy === undefined ? [] : [...POLICY_FIELDS.map((field) => policy[field]), ...expected.map(([, value]) => value)] },
-    { reason: "invalid_trial", sql: `e.is_trial=0 OR (e.is_trial=1 AND e.trial_one_per_device IN (0,1) AND e.trial_require_device_proof IN (0,1)
+    { reason: "invalid_trial", sql: `e.is_trial=0 OR (e.is_trial=1 AND e.trial_one_per_device IN (0,1)
       AND ((e.trial_expiration_basis='from_issue' AND typeof(e.valid_until)='integer' AND e.valid_until>unixepoch())
         OR (e.trial_expiration_basis IN ('from_first_activation','from_first_use') AND typeof(e.trial_duration_sec)='integer'
           AND e.trial_duration_sec BETWEEN 2 AND 3153600000)))`, binds: [] },
@@ -78,8 +77,7 @@ export function protectedCreateChecks(input: CreateInput, policy?: Policy): read
         AND EXISTS (SELECT 1 FROM device_bound_bindings b WHERE ${sameKey("b")} AND ${boundOccupiedSql("b", "unixepoch()")}))`, binds: [] },
     { reason: "invalid_capacity", sql: `typeof(e.max_active_devices)='integer' AND e.max_active_devices BETWEEN 1 AND ${MAX_DEVICE_LIMIT}`, binds: [] },
     // Integrity rules with no operator-specific fix: the row is exactly what this create wrote.
-    { reason: "unknown", sql: `e.device_hash='' AND e.pool_size=0
-      AND (e.valid_from IS NULL OR (typeof(e.valid_from)='integer' AND e.valid_from BETWEEN 0 AND 9007199254740991))
+    { reason: "unknown", sql: `(e.valid_from IS NULL OR (typeof(e.valid_from)='integer' AND e.valid_from BETWEEN 0 AND 9007199254740991))
       AND (e.valid_until IS NULL OR (typeof(e.valid_until)='integer' AND e.valid_until BETWEEN 0 AND 9007199254740991))
       AND (e.valid_from IS NULL OR e.valid_until IS NULL OR e.valid_from<e.valid_until)
       AND e.customer_id IS ? AND e.license_id IS ?${ownWrites.map(([column]) => ` AND e.${column} IS ?`).join("")}`,
@@ -102,8 +100,7 @@ export function protectedCreateAssertion(env: Env, input: CreateInput, policy?: 
 /**
  * The row a create would have written, as a CTE named `e`: its input columns, its policy stamp or
  * its own device limit, and otherwise what an existing protected grant with this key keeps (or the
- * schema default). The writer never writes a device hash, so an update keeps the stored one (empty
- * for a new grant). Values travel as one JSON document so json_extract types numbers the way an
+ * schema default). Values travel as one JSON document so json_extract types numbers the way an
  * INTEGER column stores them.
  * A create that writes another column before the assertion must model it here too; the SQL suite
  * compares this row with the committed one after real creates.
@@ -119,8 +116,8 @@ export function protectedWouldBeRowQuery(input: CreateInput, policy?: Policy): {
     .map(([column, fallback]) => `${fallback === null ? `x.${column}` : `coalesce(x.${column}, ${fallback})`} AS ${column}`);
   return {
     sql: `WITH w(doc) AS (SELECT ?),
-    x AS (SELECT device_hash, ${Object.keys(STAMP_COLUMN_DEFAULTS).join(", ")} FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=? AND enforcement_mode='device_bound_v1'),
-    e AS (SELECT ${[...Object.keys(written).map((column) => `json_extract(w.doc,'$.${column}') AS ${column}`), "coalesce(x.device_hash, '') AS device_hash", ...kept].join(", ")} FROM w LEFT JOIN x ON 1)`,
+    x AS (SELECT ${Object.keys(STAMP_COLUMN_DEFAULTS).join(", ")} FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=? AND enforcement_mode='device_bound_v1'),
+    e AS (SELECT ${[...Object.keys(written).map((column) => `json_extract(w.doc,'$.${column}') AS ${column}`), ...kept].join(", ")} FROM w LEFT JOIN x ON 1)`,
     binds: [JSON.stringify(written), input.project, input.feature, input.license_fingerprint],
   };
 }

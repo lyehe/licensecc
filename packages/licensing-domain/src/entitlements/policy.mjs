@@ -17,7 +17,7 @@ const TRIAL_BASES = new Set(["from_issue", "from_first_activation", "from_first_
 /**
  * The three policy types, in canonical order. This is the ONE runtime source of the enum that the
  * admin validators, UI form, OpenAPI spec crosscheck, and SQL CHECK backstops all mirror. A policy
- * stamps a protected grant, which never has a seat pool, so there is no floating type.
+ * stamps a protected grant.
  */
 export const POLICY_TYPES = /** @type {const} */ (["trial", "node_locked", "subscription"]);
 
@@ -26,7 +26,7 @@ export const POLICY_TYPES = /** @type {const} */ (["trial", "node_locked", "subs
  * override any default. Returns { input, capacity, trial }:
  *   input    -> EntitlementInput for createEntitlement (status forced 'active' on a fresh stamp)
  *   capacity -> { max_active_devices }: a protected grant takes only its device limit from a policy
- *   trial    -> { is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof }
+ *   trial    -> { is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device }
  */
 export function stampFromPolicy(policy, overrides, now) {
   const isTrial = policy.type === "trial";
@@ -84,9 +84,8 @@ export function stampFromPolicy(policy, overrides, now) {
         trial_expiration_basis: basis,
         trial_duration_sec: policy.trial_duration_sec,
         trial_one_per_device: policy.trial_one_per_device,
-        trial_require_device_proof: policy.trial_require_device_proof,
       }
-    : { is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0, trial_require_device_proof: 0 };
+    : { is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0 };
 
   return { input, capacity, trial };
 }

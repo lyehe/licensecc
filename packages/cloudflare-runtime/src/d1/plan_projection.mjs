@@ -106,7 +106,6 @@ function planFeatureStatement(env, input) {
        ep.trial_expiration_basis AS policy_trial_expiration_basis,
        ep.trial_duration_sec AS policy_trial_duration_sec,
        ep.trial_one_per_device AS policy_trial_one_per_device,
-       ep.trial_require_device_proof AS policy_trial_require_device_proof,
        ep.notes AS policy_notes,
        ep.created_at AS policy_created_at,
        ep.updated_at AS policy_updated_at
@@ -223,10 +222,7 @@ async function buildProjectionSnapshot(env, input, effectiveAt) {
   if (plan.status !== "active") throw new Error("plan_disabled");
   const rows = selectedPlanRows(resultsOf(results[2]), plan, normalized.addons);
   const desired = rows.map((row) => desiredPlanProjectionRow(row, normalized, effectiveAt));
-  // Public records intentionally omit cache_ttl_seconds. The audit's previous row
-  // is internal state, so restore it only on this private snapshot instead of
-  // leaking it into the preview or Apply response.
-  const existingRows = resultsOf(results[3]).map((row) => ({ ...withId(row), cache_ttl_seconds: row.cache_ttl_seconds }));
+  const existingRows = resultsOf(results[3]).map((row) => withId(row));
   const entitlementConflict = firstResult(results[4]);
   const assignmentSnapshot = firstResult(results[5]);
   if (entitlementConflict !== null || (assignmentSnapshot !== null && assignmentSnapshot.license_fingerprint !== normalized.license_fingerprint)) {
@@ -466,8 +462,7 @@ function claimFailureStatement(env, previewId, actorSubject, now) {
 }
 
 // Plan apply writes only the columns a protected grant takes from its plan, and this comparison
-// covers exactly those. A grant's device hash, TTLs, seat pool, borrowing and meter are never
-// written after create, so apply cannot make a protected grant unissuable.
+// covers exactly those.
 function valuesForDesired(action) {
   const desired = action.desired;
   const input = desired.input;
@@ -487,7 +482,6 @@ function valuesForDesired(action) {
     desired.trial.trial_expiration_basis,
     desired.trial.trial_duration_sec,
     desired.trial.trial_one_per_device,
-    desired.trial.trial_require_device_proof,
   ];
 }
 
@@ -503,24 +497,21 @@ function desiredSatisfiedSql(alias = "e") {
     AND ${alias}.is_trial IS ?
     AND ${alias}.trial_expiration_basis IS ?
     AND ${alias}.trial_duration_sec IS ?
-    AND ${alias}.trial_one_per_device IS ?
-    AND ${alias}.trial_require_device_proof IS ?`;
+    AND ${alias}.trial_one_per_device IS ?`;
 }
 
-// A plan-applied grant is protected: no device hash, no seat pool, no borrowing and no meter. Its
-// TTLs and meter window keep the column defaults.
+// A plan-applied grant is protected.
 function createEntitlementStatement(env, action, now, previewId, claimToken) {
   const { desired } = action;
   const { input, capacity, trial } = desired;
   return env.DB.prepare(
     `INSERT INTO entitlements
-       (project, feature, license_fingerprint, enforcement_mode, device_hash, status, revocation_seq,
-        valid_from, valid_until, notes, customer_id, license_id, policy_id, pool_size, max_active_devices, max_borrow_sec,
-        meter_quota, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device,
-        trial_require_device_proof, created_at, updated_at)
-     SELECT ?, ?, ?, 'device_bound_v1', '', ?,
+       (project, feature, license_fingerprint, enforcement_mode, status, revocation_seq,
+        valid_from, valid_until, notes, customer_id, license_id, policy_id, max_active_devices,
+        is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, created_at, updated_at)
+     SELECT ?, ?, ?, 'device_bound_v1', ?,
        COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1),
-       ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?
+       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
      WHERE ${claimGuardSql()}
      RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
@@ -542,7 +533,6 @@ function createEntitlementStatement(env, action, now, previewId, claimToken) {
     trial.trial_expiration_basis,
     trial.trial_duration_sec,
     trial.trial_one_per_device,
-    trial.trial_require_device_proof,
     now,
     now,
     previewId,
@@ -558,7 +548,7 @@ function updateEntitlementStatement(env, action, now, previewId, claimToken) {
      SET status = ?, ${REVOCATION_SEQ_BUMP},
          valid_from = ?, valid_until = ?, notes = ?, customer_id = ?, license_id = ?, policy_id = ?,
          max_active_devices = ?, is_trial = ?, trial_expiration_basis = ?, trial_duration_sec = ?,
-         trial_one_per_device = ?, trial_require_device_proof = ?, updated_at = ?
+         trial_one_per_device = ?, updated_at = ?
      WHERE project = ? AND feature = ? AND license_fingerprint = ?
        AND ${claimGuardSql()}
      RETURNING ${ENTITLEMENT_COLUMNS}`,
@@ -575,7 +565,6 @@ function updateEntitlementStatement(env, action, now, previewId, claimToken) {
     trial.trial_expiration_basis,
     trial.trial_duration_sec,
     trial.trial_one_per_device,
-    trial.trial_require_device_proof,
     now,
     input.project,
     input.feature,
@@ -606,12 +595,12 @@ function entitlementAuditStatement(env, action, eventType, reason, ctx, now, pre
     : desiredSatisfiedSql("e");
   const expectedValues = desired === undefined ? [] : valuesForDesired(action).slice(3);
   // valuesForDesired starts with the key values; the current-row predicate needs
-  // only the 13 persisted target fields that follow them.
+  // only the 12 persisted target fields that follow them.
   return env.DB.prepare(
     `INSERT INTO entitlement_events
-       (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at)
-     SELECT e.project, e.feature, e.license_fingerprint, e.device_hash, ?, e.status, e.revocation_seq, ?, ?, ?, ?, ?, ?, ?,
-       ${entitlementCurrentJsonSql("e", "?", { includeCacheTtl: true })}, ?, ?, ?
+       (project, feature, license_fingerprint, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at)
+     SELECT e.project, e.feature, e.license_fingerprint, ?, e.status, e.revocation_seq, ?, ?, ?, ?, ?, ?, ?,
+       ${entitlementCurrentJsonSql("e", "?")}, ?, ?, ?
      FROM entitlements e
      WHERE e.project = ? AND e.feature = ? AND e.license_fingerprint = ?
        AND ${claimGuardSql()}

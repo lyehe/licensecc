@@ -3,7 +3,7 @@ import type { Policy } from "@licensecc/licensing-domain/entitlements/policy";
 import type { Env } from "../../env.js";
 import type { ReplayAdmission } from "../../idempotency.js";
 import { envelope } from "../../responses.js";
-import { deviceLimit, validateEntitlementInput } from "./validation.js";
+import { deviceLimit, ENTITLEMENT_CREATE_FIELDS, namesOnly, validateEntitlementInput } from "./validation.js";
 import { protectedCapacityReason, protectedCreateAssertion, protectedCreateReason } from "./protected-checks.js";
 import { createEntitlement, syncEntitlement, type MutationContext, type MutationResult, type IdempotencyCommit, type D1PreparedStatementLike } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import { buildDeviceLimitStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
@@ -56,8 +56,8 @@ function protectedCreationConflict(ctx: MutationContext, reason: ProtectedCreate
 }
 
 export function validateEntitlementCreate(value: unknown): ProtectedCreateInput | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const { enforcement_mode: mode, max_active_devices: limit, ...rest } = value as Record<string, unknown>;
+  if (!namesOnly(value, ENTITLEMENT_CREATE_FIELDS)) return null;
+  const { enforcement_mode: mode, max_active_devices: limit, ...rest } = value;
   const selectsPolicy = rest.policy_id !== undefined && rest.policy_id !== null && rest.policy_id !== "";
   if (selectsPolicy && (typeof rest.policy_id !== "string" || rest.policy_id.length > 128)) return null;
   // A selected policy owns the device limit; only a create without one may set its own.
