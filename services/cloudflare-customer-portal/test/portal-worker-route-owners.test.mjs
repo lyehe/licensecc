@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { META_ROUTES, PUBLIC_ROUTES, SESSION_ROUTES } from "../dist-worker/worker/routes.js";
+import { ALL_ROUTES, META_ROUTES, PUBLIC_ROUTES, SESSION_ROUTES } from "../dist-worker/worker/routes.js";
+import { PORTAL_ROUTE_KEYS } from "../dist-worker/worker/index.js";
 import { DIRECT_ROUTE_TESTS as publicRoutes } from "./portal-worker-public.test.mjs";
 import { DIRECT_ROUTE_TESTS as authRoutes } from "./portal-worker-auth.test.mjs";
 import { DIRECT_ROUTE_TESTS as sessionRoutes } from "./portal-worker-session.test.mjs";
@@ -69,6 +70,25 @@ const ROUTE_OWNER_TABLE = Object.freeze({
 
 const routeKey = (route) => `${route.method} ${route.path}`;
 const inventory = [...META_ROUTES, ...PUBLIC_ROUTES, ...SESSION_ROUTES].map(routeKey);
+
+// Session routes are the customer's own reads plus protected device consent and connected-device
+// retirement. Seats, license downloads, usage reports and the older device list are not served.
+const PROTECTED_SESSION_ROUTES = Object.freeze([
+  "GET /api/portal/me",
+  "GET /api/portal/entitlements",
+  "GET /api/portal/device-bindings",
+  "POST /api/portal/device-bindings/retire",
+  "POST /api/portal/device-authorizations/inspect",
+  "POST /api/portal/device-authorizations/approve",
+  "POST /api/portal/device-authorizations/deny",
+]);
+
+test("the portal serves exactly the protected self-service routes", () => {
+  assert.deepEqual(new Set(SESSION_ROUTES.map(routeKey)), new Set(PROTECTED_SESSION_ROUTES));
+  const served = PORTAL_ROUTE_KEYS.filter((key) => key.split(" ")[1].startsWith("/api/portal/"));
+  assert.deepEqual(new Set(served), new Set(PROTECTED_SESSION_ROUTES), "the Worker dispatches only the protected session routes");
+  assert.equal(ALL_ROUTES.length, 29);
+});
 
 test("every META/PUBLIC/SESSION route has one explicit direct group-test owner", () => {
   assert.deepEqual(new Set(Object.keys(ROUTE_OWNER_TABLE)), new Set(inventory), "owner table must equal the canonical route inventory");
