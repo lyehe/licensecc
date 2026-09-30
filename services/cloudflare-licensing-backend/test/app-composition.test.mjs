@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import app, { scheduled } from "../dist/app.js";
+import { allCanonicalRoutes } from "../dist/routes.js";
 
 function recordingDb(statements = []) {
   return {
@@ -75,6 +76,23 @@ test("app returns the generic top-level 404 contract", async () => {
   const response = await app.fetch(new Request("https://example.test/not-a-route"), {});
   assert.equal(response.status, 404);
   assert.deepEqual(await responseBody(response), { ok: false, code: "not_found" });
+});
+
+test("the backend serves no lease, seat, meter, report or emergency route", async () => {
+  assert.equal(allCanonicalRoutes().length, 9);
+  // A configured break-glass bearer must not reopen anything: the prefix is gone, not merely closed.
+  for (const path of ["/v1/activate", "/v1/checkout", "/v1/emergency/v1/release"]) {
+    const response = await app.fetch(
+      new Request(`https://example.test${path}`, {
+        method: "POST",
+        headers: { authorization: "Bearer emergency", "content-type": "application/json" },
+        body: "{}",
+      }),
+      { DB: recordingDb(), EMERGENCY_OPERATOR_BEARER: "emergency" },
+    );
+    assert.equal(response.status, 404, `POST ${path}`);
+    assert.deepEqual(await responseBody(response), { ok: false, code: "not_found" }, `POST ${path}`);
+  }
 });
 
 test("scheduled is directly callable and retains each best-effort retention sweep", async () => {
