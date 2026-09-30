@@ -262,6 +262,38 @@ test("a finished batch reads as one sentence, with every per-row outcome in word
   assert.equal(workflow.batchResultSentence("reenable", []), "Reenable finished: 0 done.");
 });
 
+test("the entitlement record guard accepts the protected row shape", async () => {
+  const guards = await loadWorkflowModule("shared/mutationGuards.ts");
+  // Only the columns the next removal keeps, plus the enforcement mode every
+  // grant now carries; none of the dropped seat, borrow, meter or TTL columns.
+  const row = {
+    id: "ent-1", project: "APP", feature: "PRO", license_fingerprint: "a".repeat(64),
+    status: "active", license_mode: "node_locked", enforcement_mode: "device_bound_v1",
+    revocation_seq: 1, valid_from: null, valid_until: null, notes: "",
+    customer_id: "cus_1", license_id: "lic_1", policy_id: null,
+    is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0,
+    trial_one_per_device: 0, trial_started_at: null, trial_device_hash: null,
+    max_active_devices: 3, lease_seconds: 0, created_at: 1, updated_at: 2,
+  };
+  assert.equal(guards.hasEntitlementRecordData(row), true);
+  const { max_active_devices, ...withoutDeviceLimit } = row;
+  assert.equal(guards.hasEntitlementRecordData(withoutDeviceLimit), false);
+});
+
+test("the policy record guard accepts a policy without seat, borrow, meter or TTL fields", async () => {
+  const guards = await loadWorkflowModule("shared/mutationGuards.ts");
+  const policy = {
+    id: "pol_1", project: "APP", name: "Pro", type: "node_locked", status: "active",
+    valid_from_offset_sec: null, duration_sec: 86400, max_active_devices: 3,
+    expiry_strategy: "fixed_window", trial_expiration_basis: "from_issue", trial_duration_sec: 0,
+    trial_one_per_device: 1, notes: "tier", created_at: 1, updated_at: 2,
+  };
+  assert.equal(guards.hasPolicyData(policy), true);
+  for (const field of ["assertion_ttl_seconds", "pool_size", "max_borrow_sec", "trial_require_device_proof", "meter_quota", "meter_period_sec"]) {
+    assert.equal(field in policy, false, field);
+  }
+});
+
 test("entitlement date edits preserve stored instants and use UTC midnight for changed dates", async () => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
   const original = {
