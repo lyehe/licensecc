@@ -96,14 +96,6 @@ test("schema permits the revoked-override audit event type", () => {
   assert.match(schema, /event_type IN \([^)]*'revoked-override'\)/);
 });
 
-test("schema defines entitlement device keys", () => {
-  const schema = readFileSync("schema.sql", "utf8");
-  assert.match(schema, /CREATE TABLE IF NOT EXISTS entitlement_devices/);
-  assert.match(schema, /device_key_id TEXT NOT NULL/);
-  assert.match(schema, /public_key_spki_der_base64 TEXT NOT NULL/);
-  assert.match(schema, /status TEXT NOT NULL CHECK \(status IN \('active', 'revoked', 'disabled'\)\)/);
-});
-
 test("interpretWranglerResult flags 0-row mutations and ignores reads", () => {
   // --remote --file (D1 import) reports rows_written; 0 means a guarded no-op.
   assert.equal(interpretWranglerResult([{ meta: { rows_written: 0 } }], "upsert"), "noop");

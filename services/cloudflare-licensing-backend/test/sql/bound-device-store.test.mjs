@@ -256,7 +256,7 @@ test("renewal extends one binding, retirement retains its maximum, and cleanup c
   f.clock(3120); f.sql.exec("UPDATE device_bound_bindings SET state='released'; UPDATE entitlements SET max_active_devices=0");
 });
 
-test("schema refuses fractional authority, null identities, identity rewrites and legacy revival", async () => {
+test("schema refuses fractional authority, null identities and identity rewrites", async () => {
   const f=fixture(),c=candidate(); seed(f,c); await commitBoundDeviceLease(f.db,c);
   assert.throws(()=>f.sql.exec("UPDATE entitlements SET authority_revision=1.5"),/CHECK/);
   assert.throws(()=>f.sql.exec("UPDATE customers SET authority_revision=1.5"),/CHECK/);
@@ -265,7 +265,6 @@ test("schema refuses fractional authority, null identities, identity rewrites an
   assert.throws(()=>f.sql.exec("UPDATE device_bound_bindings SET generation=1.5"),/CHECK/);
   assert.throws(()=>f.sql.exec("INSERT INTO device_bound_commit_checks(invocation_id,ok) VALUES(NULL,1)"),/NOT NULL/);
   assert.throws(()=>f.sql.exec("UPDATE entitlements SET enforcement_mode='legacy'"),/downgrade/);
-  assert.throws(()=>f.sql.prepare("INSERT INTO entitlement_devices(project,feature,license_fingerprint,device_key_id,public_key_spki_der_base64,status,created_at,updated_at) VALUES('APP','DEFAULT',?,'key','spki','active',1000,1000)").run(fp),/legacy_protocol_disabled/);
 });
 
 test("fresh authenticated recovery works after code expiry without changing a lease or hold", async () => {
@@ -357,12 +356,10 @@ test("renewal cannot commit if its verified-contact write is omitted", async () 
   assert.equal(f.sql.prepare("SELECT last_proof_at FROM device_bound_devices").get().last_proof_at,1020);
 });
 
-test("empty or pruned legacy issuance history never authorizes automatic protected conversion", () => {
+test("a legacy entitlement never authorizes automatic protected conversion", () => {
   const f=fixture();
   f.sql.exec("INSERT INTO entitlements(project,feature,license_fingerprint,status,created_at,updated_at,customer_id) VALUES('OLD','DEFAULT','legacy','active',1000,1000,'customer')");
   const convert=()=>f.sql.exec("UPDATE entitlements SET enforcement_mode='device_bound_v1' WHERE project='OLD'");
-  assert.throws(convert,/protected_mode_migration_required/);
-  f.sql.exec("INSERT INTO lease_issuance(project,feature,license_fingerprint,device_key_id,lease_key_id,issued_at,valid_from,valid_to) VALUES('OLD','DEFAULT','legacy','key','signer',1,1,999999); DELETE FROM lease_issuance WHERE project='OLD'");
   assert.throws(convert,/protected_mode_migration_required/);
   assert.equal(f.sql.prepare("SELECT enforcement_mode FROM entitlements WHERE project='OLD'").get().enforcement_mode,'legacy');
 });
@@ -400,18 +397,6 @@ test("an expired unconsumed approval cannot recover or create an operation", asy
   await assert.rejects(recoverBoundDeviceLease(f.db,r),/CHECK/);
   await assert.rejects(commitBoundDeviceLease(f.db,r),/CHECK/);
   emptyCommit(f);
-});
-
-test("the baseline triggers refuse seat inserts and updates for a protected entitlement", () => {
-  const f=fixture();
-  const insert="INSERT INTO seat_checkouts(project,feature,license_fingerprint,seat_id,client_instance_id,mode,checked_out_at,heartbeat_deadline) VALUES('APP','DEFAULT',?,'seat','client','live',1000,1100)";
-  assert.throws(()=>f.sql.prepare(insert).run(fp),/legacy_protocol_disabled/);
-  assert.equal(count(f,"seat_checkouts"),0);
-  // Inject an old row to exercise UPDATE independently of the INSERT guard.
-  f.sql.exec("DROP TRIGGER tr_bound_reject_legacy_seat_insert");
-  f.sql.prepare(insert).run(fp);
-  assert.throws(()=>f.sql.exec("UPDATE seat_checkouts SET heartbeat_deadline=9999"),/legacy_protocol_disabled/);
-  assert.equal(f.sql.prepare("SELECT heartbeat_deadline FROM seat_checkouts").get().heartbeat_deadline,1100);
 });
 
 test("unstarted trials cannot bypass the stamp through exchange, renewal or recovery", async () => {

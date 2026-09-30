@@ -52,16 +52,16 @@ which stays until your own retention policy removes it.
 | `customer_events` | Admin audit of disable and re-enable. | Whatever an operator typed as `reason`. |
 | `portal_bootstrap_events` | Audit of operator break-glass sign-in codes. | The address the code was issued for (`email_lower`). |
 | `order_events` | Order ingest journal and order webhook source. | `raw_payload` is the order exactly as your commerce system sent it, which can include the name and email. |
-| `account_token_events`, `policy_events`, `catalog_events`, `license_plan_assignment_events`, `webhook_events` | Admin audit. | Operator text only. |
+| `policy_events`, `catalog_events`, `license_plan_assignment_events`, `webhook_events` | Admin audit. | Operator text only. |
 | `device_bound_devices`, `device_bound_bindings`, `device_bound_events`, `device_bound_operations` | Protected-device enforcement history. Triggers forbid deleting devices, bindings and operations. | None after the labels are cleared. |
-| `entitlements`, `licenses`, `orders`, `license_plan_assignments`, `entitlement_devices`, `account_tokens` | License records and revoked tokens, keyed by the customer ID. | Only what an operator wrote into a note or label: `entitlements.notes`, `licenses.label`, `licenses.metadata_json`, `entitlement_devices.notes`, and `account_tokens.name`. The token name is the CLI's `--name`; the `issue` row in `account_token_events` also keeps it as its `reason`, and that audit copy stays. If one names the person, clear it. Clear entitlement notes in the admin console's entitlement editor, which records the change, and the others with a reviewed SQL `UPDATE`. The trigger `tr_bound_reject_legacy_device_update` aborts an `UPDATE` of an `entitlement_devices` row whose entitlement is `device_bound_v1`, so limit that one to legacy entitlements. |
+| `entitlements`, `licenses`, `orders`, `license_plan_assignments` | License records, keyed by the customer ID. | Only what an operator wrote into a note or label: `entitlements.notes`, `licenses.label`, `licenses.metadata_json`. Clear entitlement notes in the admin console's entitlement editor, which records the change, and the others with a reviewed SQL `UPDATE`. |
 
 ## 1. Disable the customer
 
 1. In the admin console, open the customer under Customers and choose
    **Disable**, with a ticket number as the reason. The customer then shows as
-   suspended. Disabling ends their license and token access and their portal
-   access at once, records a `customer_events` row, and does not notify them.
+   suspended. Disabling ends their license and portal access at once, records
+   a `customer_events` row, and does not notify them.
 
 Decide separately what happens to the customer's licenses. This runbook does
 not revoke or reassign entitlements.

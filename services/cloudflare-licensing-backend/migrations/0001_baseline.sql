@@ -2,19 +2,6 @@
 -- run `npm run schema:write` to regenerate schema.sql. A database created from any
 -- earlier migration history cannot be upgraded; recreate it from this baseline.
 
-CREATE TABLE IF NOT EXISTS account_token_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  account_token_id TEXT NOT NULL,
-  customer_id TEXT NOT NULL,
-  event_type TEXT NOT NULL CHECK (event_type IN ('issue', 'rotate', 'revoke', 'revoke-customer', 'repepper', 'merge')),
-  actor TEXT NOT NULL DEFAULT '',
-  actor_type TEXT NOT NULL DEFAULT 'unknown' CHECK (actor_type IN ('access', 'dev', 'cli', 'sync', 'system', 'unknown')),
-  source TEXT NOT NULL DEFAULT 'admin',
-  reason TEXT NOT NULL DEFAULT '',
-  request_id TEXT NOT NULL DEFAULT '',
-  created_at INTEGER NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS audit_digests (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   source      TEXT    NOT NULL,
@@ -96,32 +83,6 @@ CREATE TABLE IF NOT EXISTS "customers" (
   external_ref TEXT NOT NULL DEFAULT ''
 , authority_revision INTEGER NOT NULL DEFAULT 0
   CHECK (authority_revision = CAST(authority_revision AS BIGINT) AND authority_revision BETWEEN 0 AND 9007199254740991));
-
-CREATE TABLE IF NOT EXISTS account_token_revocations (
-  customer_id TEXT PRIMARY KEY,
-  revocation_seq INTEGER NOT NULL DEFAULT 0,
-  updated_at INTEGER NOT NULL,
-  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS account_tokens (
-  id TEXT PRIMARY KEY,
-  customer_id TEXT NOT NULL,
-  token_hmac TEXT NOT NULL,
-  pepper_key_id TEXT NOT NULL,
-  token_prefix TEXT NOT NULL,
-  name TEXT NOT NULL DEFAULT '',
-  scopes_json TEXT NOT NULL DEFAULT '{}',
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked', 'disabled')),
-  expires_at INTEGER NOT NULL,
-  last_used_at INTEGER NULL,
-  replaced_by TEXT NULL,
-  created_by TEXT NOT NULL DEFAULT '',
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-  FOREIGN KEY (replaced_by) REFERENCES account_tokens(id) ON DELETE SET NULL
-);
 
 CREATE TABLE IF NOT EXISTS customer_events (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -346,38 +307,6 @@ CREATE TABLE IF NOT EXISTS device_bound_leases (
   token TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS entitlement_devices (
-  project TEXT NOT NULL,
-  feature TEXT NOT NULL,
-  license_fingerprint TEXT NOT NULL,
-  device_key_id TEXT NOT NULL,
-  public_key_spki_der_base64 TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('active', 'revoked', 'disabled')),
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  last_seen_at INTEGER NULL,
-  notes TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY (project, feature, license_fingerprint, device_key_id),
-  FOREIGN KEY (project, feature, license_fingerprint)
-    REFERENCES entitlements(project, feature, license_fingerprint)
-    ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS lease_issuance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  project TEXT NOT NULL,
-  feature TEXT NOT NULL,
-  license_fingerprint TEXT NOT NULL,
-  device_key_id TEXT NOT NULL,
-  lease_key_id TEXT NOT NULL,
-  issued_at INTEGER NOT NULL,
-  valid_from INTEGER NOT NULL,
-  valid_to INTEGER NOT NULL,
-  request_id TEXT NULL,
-  FOREIGN KEY (project, feature, license_fingerprint)
-    REFERENCES entitlements(project, feature, license_fingerprint) ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS license_plan_assignment_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   license_id TEXT NOT NULL,
@@ -569,15 +498,13 @@ CREATE TABLE IF NOT EXISTS portal_sessions (
   customer_id      TEXT NOT NULL,
   session_hmac     TEXT NOT NULL,
   pepper_key_id    TEXT NOT NULL,
-  account_token_id TEXT NULL,
   status           TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
   user_agent       TEXT NOT NULL DEFAULT '',
   created_at       INTEGER NOT NULL,
   last_used_at     INTEGER NULL,
   expires_at       INTEGER NOT NULL, auth_method TEXT NOT NULL DEFAULT 'legacy'
   CHECK (auth_method IN ('legacy', 'otp', 'oauth', 'password')),
-  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-  FOREIGN KEY (account_token_id) REFERENCES account_tokens(id) ON DELETE SET NULL
+  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS portal_oauth_states (
@@ -599,32 +526,6 @@ CREATE TABLE IF NOT EXISTS rate_limit_counters (
   PRIMARY KEY (namespace, rate_key, window_start)
 );
 
-CREATE TABLE IF NOT EXISTS request_proof_nonces (
-  project TEXT NOT NULL,
-  feature TEXT NOT NULL,
-  license_fingerprint TEXT NOT NULL,
-  device_key_id TEXT NOT NULL,
-  nonce TEXT NOT NULL,
-  request_timestamp INTEGER NOT NULL,
-  consumed_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  PRIMARY KEY (project, feature, license_fingerprint, device_key_id, nonce)
-);
-
-CREATE TABLE IF NOT EXISTS seat_checkouts (
-  project TEXT NOT NULL,
-  feature TEXT NOT NULL,
-  license_fingerprint TEXT NOT NULL,
-  seat_id TEXT NOT NULL,
-  client_instance_id TEXT NOT NULL,
-  mode TEXT NOT NULL CHECK (mode IN ('live', 'borrowed')),
-  checked_out_at INTEGER NOT NULL,
-  heartbeat_deadline INTEGER NOT NULL,
-  PRIMARY KEY (project, feature, license_fingerprint, seat_id),
-  FOREIGN KEY (project, feature, license_fingerprint)
-    REFERENCES entitlements(project, feature, license_fingerprint) ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS usage_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project TEXT NOT NULL,
@@ -635,16 +536,6 @@ CREATE TABLE IF NOT EXISTS usage_events (
   device_key_id TEXT NULL,
   reason TEXT NULL,
   ts INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS usage_meters (
-  project             TEXT    NOT NULL,
-  feature             TEXT    NOT NULL,
-  license_fingerprint TEXT    NOT NULL,
-  period_start        INTEGER NOT NULL,
-  units_consumed      INTEGER NOT NULL DEFAULT 0,
-  updated_at          INTEGER NOT NULL,
-  PRIMARY KEY (project, feature, license_fingerprint, period_start)
 );
 
 CREATE TABLE IF NOT EXISTS webhook_cursor (
@@ -694,16 +585,6 @@ CREATE TABLE IF NOT EXISTS "webhook_events" (
   created_at  INTEGER NOT NULL,
   FOREIGN KEY (endpoint_id) REFERENCES webhook_endpoints(id) ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS idx_account_token_events_customer ON account_token_events(customer_id);
-
-CREATE INDEX IF NOT EXISTS idx_account_token_events_token ON account_token_events(account_token_id);
-
-CREATE INDEX IF NOT EXISTS idx_account_tokens_customer ON account_tokens(customer_id);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_account_tokens_hmac ON account_tokens(token_hmac);
-
-CREATE INDEX IF NOT EXISTS idx_account_tokens_status ON account_tokens(status);
 
 CREATE INDEX IF NOT EXISTS idx_audit_digests_source ON audit_digests(source, id);
 
@@ -773,12 +654,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email
   ON customers(lower(email))
   WHERE email <> '';
 
-CREATE INDEX IF NOT EXISTS idx_entitlement_devices_entitlement
-  ON entitlement_devices(project, feature, license_fingerprint);
-
-CREATE INDEX IF NOT EXISTS idx_entitlement_devices_status
-  ON entitlement_devices(status);
-
 CREATE INDEX IF NOT EXISTS idx_entitlement_events_actor
   ON entitlement_events(actor, created_at);
 
@@ -810,12 +685,6 @@ CREATE INDEX IF NOT EXISTS idx_entitlements_status
 
 CREATE INDEX IF NOT EXISTS idx_entitlements_valid_until
   ON entitlements(valid_until);
-
-CREATE INDEX IF NOT EXISTS idx_lease_issuance_entitlement
-  ON lease_issuance(project, feature, license_fingerprint, issued_at);
-
-CREATE INDEX IF NOT EXISTS idx_lease_issuance_issued_at
-  ON lease_issuance(issued_at);
 
 CREATE INDEX IF NOT EXISTS idx_license_plan_assignment_events_assignment
   ON license_plan_assignment_events(license_id, project, id DESC);
@@ -873,20 +742,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_sessions_hmac ON portal_sessions(se
 CREATE INDEX IF NOT EXISTS idx_rate_limit_counters_expires_at
   ON rate_limit_counters(expires_at);
 
-CREATE INDEX IF NOT EXISTS idx_request_proof_nonces_expires_at
-  ON request_proof_nonces(expires_at);
-
-CREATE INDEX IF NOT EXISTS idx_seat_checkouts_live
-  ON seat_checkouts(project, feature, license_fingerprint, heartbeat_deadline);
-
 CREATE INDEX IF NOT EXISTS idx_usage_events_ts
   ON usage_events(ts);
 
 CREATE INDEX IF NOT EXISTS idx_usage_events_window
   ON usage_events(project, feature, license_fingerprint, ts);
-
-CREATE INDEX IF NOT EXISTS idx_usage_meters_entitlement
-  ON usage_meters(project, feature, license_fingerprint);
 
 CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_due
   ON webhook_deliveries(status, next_attempt_at);
@@ -1207,31 +1067,6 @@ WHEN NEW.customer_id IS NOT OLD.customer_id AND EXISTS (
   AND (b.state = 'active' OR (b.state = 'retiring' AND b.hold_until > unixepoch()))
 )
 BEGIN SELECT RAISE(ABORT, 'capacity_in_use'); END;
-
-CREATE TRIGGER IF NOT EXISTS tr_bound_reject_legacy_device_insert BEFORE INSERT ON entitlement_devices
-WHEN EXISTS (SELECT 1 FROM entitlements e WHERE e.project = NEW.project AND e.feature = NEW.feature
-  AND e.license_fingerprint = NEW.license_fingerprint AND e.enforcement_mode = 'device_bound_v1')
-BEGIN SELECT RAISE(ABORT, 'legacy_protocol_disabled'); END;
-
-CREATE TRIGGER IF NOT EXISTS tr_bound_reject_legacy_device_update BEFORE UPDATE ON entitlement_devices
-WHEN EXISTS (SELECT 1 FROM entitlements e WHERE e.project = NEW.project AND e.feature = NEW.feature
-  AND e.license_fingerprint = NEW.license_fingerprint AND e.enforcement_mode = 'device_bound_v1')
-BEGIN SELECT RAISE(ABORT, 'legacy_protocol_disabled'); END;
-
-CREATE TRIGGER IF NOT EXISTS tr_bound_reject_legacy_lease BEFORE INSERT ON lease_issuance
-WHEN EXISTS (SELECT 1 FROM entitlements e WHERE e.project = NEW.project AND e.feature = NEW.feature
-  AND e.license_fingerprint = NEW.license_fingerprint AND e.enforcement_mode = 'device_bound_v1')
-BEGIN SELECT RAISE(ABORT, 'legacy_protocol_disabled'); END;
-
-CREATE TRIGGER IF NOT EXISTS tr_bound_reject_legacy_seat_insert BEFORE INSERT ON seat_checkouts
-WHEN EXISTS (SELECT 1 FROM entitlements e WHERE e.project = NEW.project AND e.feature = NEW.feature
-  AND e.license_fingerprint = NEW.license_fingerprint AND e.enforcement_mode = 'device_bound_v1')
-BEGIN SELECT RAISE(ABORT, 'legacy_protocol_disabled'); END;
-
-CREATE TRIGGER IF NOT EXISTS tr_bound_reject_legacy_seat_update BEFORE UPDATE ON seat_checkouts
-WHEN EXISTS (SELECT 1 FROM entitlements e WHERE e.project = NEW.project AND e.feature = NEW.feature
-  AND e.license_fingerprint = NEW.license_fingerprint AND e.enforcement_mode = 'device_bound_v1')
-BEGIN SELECT RAISE(ABORT, 'legacy_protocol_disabled'); END;
 
 CREATE TRIGGER IF NOT EXISTS tr_bound_requested_feature_immutable BEFORE UPDATE OF requested_feature ON device_bound_authorizations
 WHEN NEW.requested_feature IS NOT OLD.requested_feature

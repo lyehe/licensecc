@@ -766,20 +766,20 @@ test("wrangler json parser tolerates advisory text before json", () => {
 
 test("restore inventory pins all migrated tables in the baseline schema", () => {
   const migratedTables = [
-    "account_token_events", "account_token_revocations", "account_tokens", "audit_digests",
+    "audit_digests",
     "catalog_events", "catalog_features", "catalog_import_previews", "catalog_plan_features", "catalog_plans",
     "customer_events", "customers",
     "device_bound_authorizations", "device_bound_bindings", "device_bound_challenges", "device_bound_commit_checks",
     "device_bound_devices", "device_bound_events", "device_bound_leases", "device_bound_operations",
-    "entitlement_devices", "entitlement_events", "entitlement_policies", "entitlements",
-    "lease_issuance", "license_plan_assignment_events", "license_plan_assignments",
+    "entitlement_events", "entitlement_policies", "entitlements",
+    "license_plan_assignment_events", "license_plan_assignments",
     "license_plan_projection_generations", "license_plan_projection_previews", "licenses", "mutation_idempotency",
     "order_events", "order_ingest_nonces", "orders", "policy_events", "portal_bootstrap_events", "portal_identities", "portal_oauth_states", "portal_otp", "portal_password_actions", "portal_passwords",
-    "portal_sessions", "rate_limit_counters", "request_proof_nonces", "seat_checkouts", "usage_events", "usage_meters",
+    "portal_sessions", "rate_limit_counters", "usage_events",
     "webhook_cursor", "webhook_deliveries", "webhook_endpoints", "webhook_events",
   ];
   assert.deepEqual([...ALL_RESTORE_TABLES].sort(), migratedTables);
-  assert.equal(ALL_RESTORE_TABLES.length, 50);
+  assert.equal(ALL_RESTORE_TABLES.length, 42);
 
   for (const durable of [
     "entitlements", "entitlement_policies", "catalog_features", "catalog_plans",
@@ -812,10 +812,10 @@ test("remote count inspection avoids compound SELECT limits and retains every ta
 
 test("high-churn and internal tables are presence-only and disjoint from durable count checks", () => {
   for (const table of [
-    "rate_limit_counters", "request_proof_nonces", "order_ingest_nonces",
-    "lease_issuance", "seat_checkouts", "usage_events",
+    "rate_limit_counters", "order_ingest_nonces",
+    "usage_events",
     "portal_otp", "portal_sessions", "portal_bootstrap_events",
-    "webhook_deliveries", "webhook_cursor", "usage_meters",
+    "webhook_deliveries", "webhook_cursor",
     "license_plan_projection_generations", "license_plan_projection_previews", "catalog_import_previews",
   ]) {
     assert.ok(PRESENCE_ONLY_TABLES.includes(table), `PRESENCE_ONLY_TABLES missing ${table}`);
@@ -835,9 +835,9 @@ test("table and named schema-object checks cover migrated identity", () => {
     assert.ok(sql.includes(`'${table}'`), `tableListSql does not assert ${table} present`);
   }
 
-  assert.equal(Object.keys(EXPECTED_INDEXES).length, 75);
+  assert.equal(Object.keys(EXPECTED_INDEXES).length, 63);
   assert.equal(EXPECTED_INDEXES.idx_bound_unconsumed_attempt_cleanup, "device_bound_authorizations");
-  assert.equal(Object.keys(EXPECTED_TRIGGERS).length, 53);
+  assert.equal(Object.keys(EXPECTED_TRIGGERS).length, 48);
   assert.equal(EXPECTED_INDEXES.idx_license_plan_projection_previews_expiry_id, "license_plan_projection_previews");
   assert.equal("idx_license_plan_projection_previews_expiry" in EXPECTED_INDEXES, false);
   assert.equal("idx_license_plan_projection_previews_consumed" in EXPECTED_INDEXES, false);
@@ -848,15 +848,15 @@ test("table and named schema-object checks cover migrated identity", () => {
   assert.match(schemaSql, /bump_license_plan_projection_generation_assignments_delete/);
   const snapshot = readFileSync(new URL("../../cloudflare-licensing-backend/schema.sql", import.meta.url), "utf8");
   const rows = schemaRowsFromGeneratedSnapshot(snapshot);
-  assert.equal(rows.length, 178);
+  assert.equal(rows.length, 153);
   assert.equal(schemaSignature(rows), EXPECTED_SCHEMA_SIGNATURE_SHA256);
   assert.deepEqual(validateSchemaObjectRows(rows), {
     verified: true,
     algorithm: "sha256",
     digest: EXPECTED_SCHEMA_SIGNATURE_SHA256,
-    table_count: 50,
-    named_index_count: 75,
-    trigger_count: 53,
+    table_count: 42,
+    named_index_count: 63,
+    trigger_count: 48,
   });
   assert.throws(() => validateSchemaObjectRows(rows.filter((row) => row.name !== "entitlements")), /restored_schema_objects_missing:table:entitlements/);
   assert.throws(() => validateSchemaObjectRows(rows.map((row) => row.name === "entitlements"

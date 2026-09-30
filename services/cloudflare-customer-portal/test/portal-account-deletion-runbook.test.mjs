@@ -9,7 +9,7 @@ import { freshDb, seedCustomer, NOW } from "./helpers.mjs";
 const RUNBOOK = readFileSync(new URL("../../../doc/operations/customer-account-deletion.md", import.meta.url), "utf8");
 const SQL_BLOCKS = [...RUNBOOK.matchAll(/```sql\r?\n([\s\S]*?)```/g)].map((match) => match[1]);
 const CHECK = /--command "([^"]+)"/.exec(RUNBOOK)?.[1];
-const KEPT = ["customer_events", "portal_bootstrap_events", "entitlement_events", "order_events", "account_token_events"];
+const KEPT = ["customer_events", "portal_bootstrap_events", "entitlement_events", "order_events"];
 
 function seed() {
   const db = freshDb();
@@ -44,7 +44,6 @@ function seed() {
   run("INSERT INTO portal_bootstrap_events (id, customer_id, email_lower, actor, created_at) VALUES ('pb-x', 'cust_x', 'alice@example.com', 'operator', ?)", NOW);
   run("INSERT INTO entitlement_events (project, feature, license_fingerprint, event_type, status, revocation_seq, actor, ip, created_at) VALUES ('DEFAULT', 'DEFAULT', ?, 'revoke', 'revoked', 1, 'cust_x', '203.0.113.9', ?)", "a".repeat(64), NOW);
   run("INSERT INTO order_events (event_id, subscription_id, project, feature, order_epoch, seq, intent, key_id, payload_digest, raw_payload, status, received_at) VALUES ('ev1', 'sub1', 'DEFAULT', 'DEFAULT', 1, 1, 'subscription.created', 'k', 'd', '{\"customer\":{\"email\":\"alice@example.com\"}}', 'processed', ?)", NOW);
-  run("INSERT INTO account_token_events (account_token_id, customer_id, event_type, actor, reason, created_at) VALUES ('*', 'cust_x', 'revoke-customer', 'op@example.com', 'TICKET-1', ?)", NOW);
   db.exec("PRAGMA foreign_keys = ON");
   return db;
 }

@@ -87,8 +87,8 @@ export async function mintSession(env, { customerId, userAgent = "", now = Math.
   crypto.getRandomValues(random);
   const raw = SESSION_PREFIX + base64Url(random);
   const sessionHmac = await hmac(pepperBytes, raw);
-  const statement = "INSERT INTO portal_sessions (id, customer_id, session_hmac, pepper_key_id, account_token_id, status, user_agent, created_at, last_used_at, expires_at, auth_method) " +
-    "SELECT ?, ?, ?, ?, NULL, 'active', ?, ?, ?, ?, ? FROM customers c WHERE c.id = ? AND c.status = 'active'";
+  const statement = "INSERT INTO portal_sessions (id, customer_id, session_hmac, pepper_key_id, status, user_agent, created_at, last_used_at, expires_at, auth_method) " +
+    "SELECT ?, ?, ?, ?, 'active', ?, ?, ?, ?, ? FROM customers c WHERE c.id = ? AND c.status = 'active'";
   const values = [newSessionId(), customerId, sessionHmac, activeId, userAgent.slice(0, 256), now, now, now + SESSION_TTL_SEC, authMethod, customerId];
   const guard = passwordHash === undefined ? "" : " AND EXISTS (SELECT 1 FROM portal_passwords p WHERE p.customer_id = c.id AND p.password_hash = ?)";
   if (passwordHash !== undefined) values.push(passwordHash);

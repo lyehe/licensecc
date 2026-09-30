@@ -20,7 +20,7 @@ const MAX_BACKUP_MANIFEST_BYTES = 16 * 1024;
 const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const MAX_MANIFEST_STRING_LENGTH = 2048;
 const SQL_HASH_CHUNK_BYTES = 64 * 1024;
-const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "f3e5ddf8b2eb6b77274580ac2d76a438ac2b811de0dd8d41c1256343c859e23e";
+const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "8aef91774616fbbb428e9963721519cfe815fb2c8a3a5c0c59438a339d422b36";
 const SNAPSHOT_INVENTORY_ALGORITHM = "d1-export-sql-insert-count-v1";
 const DEFAULT_BACKEND_MIGRATIONS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -41,12 +41,8 @@ const REQUIRED_TABLES = [
   "mutation_idempotency",
   "customers",
   "licenses",
-  "entitlement_devices",
   "orders",
   "order_events",
-  "account_tokens",
-  "account_token_revocations",
-  "account_token_events",
   "customer_events",
   "entitlement_policies",
   "policy_events",
@@ -71,10 +67,7 @@ const PRESENCE_ONLY_TABLES = [
   "device_bound_leases",
   "device_bound_commit_checks",
   "rate_limit_counters",
-  "request_proof_nonces",
   "order_ingest_nonces",
-  "lease_issuance",
-  "seat_checkouts",
   "usage_events",
   "portal_otp",
   "portal_sessions",
@@ -85,7 +78,6 @@ const PRESENCE_ONLY_TABLES = [
   "portal_bootstrap_events",
   "webhook_deliveries",
   "webhook_cursor",
-  "usage_meters",
   "license_plan_projection_generations",
   "license_plan_projection_previews",
   "catalog_import_previews",
@@ -102,9 +94,6 @@ const SENSITIVE_TABLES = [
   "device_bound_operations",
   "device_bound_leases",
   "customers",
-  "account_tokens",
-  "account_token_revocations",
-  "request_proof_nonces",
   "order_ingest_nonces",
   "portal_otp",
   "portal_sessions",
@@ -137,11 +126,6 @@ const EXPECTED_INDEXES = {
   idx_bound_leases_binding_expiry: "device_bound_leases",
   idx_bound_operations_retention: "device_bound_operations",
 
-  idx_account_token_events_customer: "account_token_events",
-  idx_account_token_events_token: "account_token_events",
-  idx_account_tokens_customer: "account_tokens",
-  idx_account_tokens_hmac: "account_tokens",
-  idx_account_tokens_status: "account_tokens",
   idx_audit_digests_source: "audit_digests",
   idx_catalog_events_entity: "catalog_events",
   idx_catalog_events_project: "catalog_events",
@@ -153,8 +137,6 @@ const EXPECTED_INDEXES = {
   idx_catalog_plans_project_status: "catalog_plans",
   idx_customer_events_customer: "customer_events",
   idx_customers_email: "customers",
-  idx_entitlement_devices_entitlement: "entitlement_devices",
-  idx_entitlement_devices_status: "entitlement_devices",
   idx_entitlement_events_actor: "entitlement_events",
   idx_entitlement_events_lookup: "entitlement_events",
   idx_entitlement_events_request: "entitlement_events",
@@ -166,8 +148,6 @@ const EXPECTED_INDEXES = {
   idx_entitlements_project_license_fingerprint: "entitlements",
   idx_entitlements_status: "entitlements",
   idx_entitlements_valid_until: "entitlements",
-  idx_lease_issuance_entitlement: "lease_issuance",
-  idx_lease_issuance_issued_at: "lease_issuance",
   idx_license_plan_assignment_events_assignment: "license_plan_assignment_events",
   idx_license_plan_assignments_customer: "license_plan_assignments",
   idx_license_plan_assignments_plan: "license_plan_assignments",
@@ -189,11 +169,8 @@ const EXPECTED_INDEXES = {
   idx_portal_sessions_expires: "portal_sessions",
   idx_portal_sessions_hmac: "portal_sessions",
   idx_rate_limit_counters_expires_at: "rate_limit_counters",
-  idx_request_proof_nonces_expires_at: "request_proof_nonces",
-  idx_seat_checkouts_live: "seat_checkouts",
   idx_usage_events_ts: "usage_events",
   idx_usage_events_window: "usage_events",
-  idx_usage_meters_entitlement: "usage_meters",
   idx_webhook_deliveries_due: "webhook_deliveries",
   idx_webhook_endpoints_status: "webhook_endpoints",
   idx_webhook_events_endpoint: "webhook_events",
@@ -248,11 +225,6 @@ const EXPECTED_TRIGGERS = {
   tr_bound_operation_tombstone: "device_bound_operations",
   tr_bound_operation_no_replace: "device_bound_operations",
   tr_bound_owner_change: "entitlements",
-  tr_bound_reject_legacy_device_insert: "entitlement_devices",
-  tr_bound_reject_legacy_device_update: "entitlement_devices",
-  tr_bound_reject_legacy_lease: "lease_issuance",
-  tr_bound_reject_legacy_seat_insert: "seat_checkouts",
-  tr_bound_reject_legacy_seat_update: "seat_checkouts",
 };
 
 function usage(exitCode = 2) {
