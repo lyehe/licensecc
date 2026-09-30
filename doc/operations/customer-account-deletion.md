@@ -37,7 +37,6 @@ The steps below change these records.
 | `rate_limit_counters` keyed `request:email:<address>` | Deleted: the address in plain text. These counters expire within 30 minutes anyway. |
 | `mutation_idempotency` entries whose cached response is this customer | Deleted: the admin console's create and disable responses copy the name and email addresses. |
 | `device_bound_devices.label`, `device_bound_authorizations.device_label` | Emptied: device names reported by the customer's apps, which often contain a person's name. |
-| `account_tokens` | Revoked, with an audit row. |
 
 Registration links and `request:email:` counters are found through the
 customer's contact and login addresses only, not through the email addresses of
@@ -57,21 +56,12 @@ which stays until your own retention policy removes it.
 | `device_bound_devices`, `device_bound_bindings`, `device_bound_events`, `device_bound_operations` | Protected-device enforcement history. Triggers forbid deleting devices, bindings and operations. | None after the labels are cleared. |
 | `entitlements`, `licenses`, `orders`, `license_plan_assignments`, `entitlement_devices`, `account_tokens` | License records and revoked tokens, keyed by the customer ID. | Only what an operator wrote into a note or label: `entitlements.notes`, `licenses.label`, `licenses.metadata_json`, `entitlement_devices.notes`, and `account_tokens.name`. The token name is the CLI's `--name`; the `issue` row in `account_token_events` also keeps it as its `reason`, and that audit copy stays. If one names the person, clear it. Clear entitlement notes in the admin console's entitlement editor, which records the change, and the others with a reviewed SQL `UPDATE`. The trigger `tr_bound_reject_legacy_device_update` aborts an `UPDATE` of an `entitlement_devices` row whose entitlement is `device_bound_v1`, so limit that one to legacy entitlements. |
 
-## 1. Disable the customer and revoke their tokens
+## 1. Disable the customer
 
 1. In the admin console, open the customer under Customers and choose
    **Disable**, with a ticket number as the reason. The customer then shows as
    suspended. Disabling ends their license and token access and their portal
    access at once, records a `customer_events` row, and does not notify them.
-2. Revoke the customer's account tokens, so that re-enabling the customer by
-   mistake cannot bring them back. From `services/cloudflare-licensing-backend`,
-   with the Wrangler configuration that binds the production database:
-
-   ```console
-   node scripts/account-token.mjs revoke-customer --customer-id <customer-id> --reason "TICKET-123" --actor you@example.com --database <database-name> --remote
-   ```
-
-   This writes one `revoke-customer` row to `account_token_events`.
 
 Decide separately what happens to the customer's licenses. This runbook does
 not revoke or reassign entitlements.

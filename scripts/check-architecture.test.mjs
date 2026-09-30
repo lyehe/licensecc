@@ -364,7 +364,6 @@ test("hygiene reads the tracked list and permits only documented deterministic e
       "services/admin/wrangler.example.jsonc",
       "test/vectors/deterministic.lic",
       "test/vectors/device_identity/namespace_v1.json",
-      "test/vectors/device_proof/v1/manifest.json",
       "test/vectors/public_key.pkcs1.der.hex",
     ],
     checkerConfig: config({
@@ -391,14 +390,11 @@ test("hygiene permits only the exact reviewed JSON vector fixtures", () => {
       "test/vectors/device_bound/v1/unreviewed.json",
       "test/vectors/device_identity/namespace_v1.json",
       "test/vectors/device_identity/unreviewed.json",
-      "test/vectors/device_proof/v1/manifest.json",
-      "test/vectors/device_proof/v1/unreviewed.json",
       "test/vectors/other/manifest.json",
     ],
   });
   assert.equal(result.exitCode, 1);
   assert.deepEqual(errorCodes(result), [
-    "ARCH_UNAPPROVED_VECTOR_FIXTURE",
     "ARCH_UNAPPROVED_VECTOR_FIXTURE",
     "ARCH_UNAPPROVED_VECTOR_FIXTURE",
     "ARCH_UNAPPROVED_VECTOR_FIXTURE",

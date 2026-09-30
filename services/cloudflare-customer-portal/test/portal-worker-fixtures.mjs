@@ -1,8 +1,7 @@
-// portal-worker IDOR / isolation matrix (blueprint (g)). Ported from the backend's
-// account_isolation.test.mjs discipline: drive the REAL worker fetch() over a node:sqlite DB built
-// from the SHARED migrations, asserting that EVERY /api/portal route binds the session-derived
-// customer_id and that no client-supplied tuple/customer_id can cross an account boundary.
-// Requires node:sqlite.
+// portal-worker IDOR / isolation matrix (blueprint (g)): drive the REAL worker fetch() over a
+// node:sqlite DB built from the SHARED migrations, asserting that EVERY /api/portal route binds
+// the session-derived customer_id and that no client-supplied tuple/customer_id can cross an
+// account boundary. Requires node:sqlite.
 
 import assert from "node:assert/strict";
 import worker from "../dist-worker/worker/index.js";

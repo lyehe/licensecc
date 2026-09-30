@@ -115,7 +115,7 @@ public sealed class DeviceBoundVectorsTests
         byte[] signature = Decode(token[2]);
         Assert.AreEqual(384, signature.Length);
         Assert.IsTrue(key.VerifyData(input, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
-        Assert.IsFalse(key.VerifyData(Bytes("lccoa1." + payload), signature, HashAlgorithmName.SHA256,
+        Assert.IsFalse(key.VerifyData(Bytes("lcccfg1." + payload), signature, HashAlgorithmName.SHA256,
             RSASignaturePadding.Pkcs1), "Wrong envelope");
         input[input.Length - 2] ^= 1;
         Assert.IsFalse(key.VerifyData(input, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1), "Changed expiry");

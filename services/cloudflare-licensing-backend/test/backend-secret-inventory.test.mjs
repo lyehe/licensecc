@@ -15,13 +15,9 @@ import {
 function protectedConfig(profile = "staging", overrides = {}) {
   const name = profile === "production" ? "licensecc-online-verifier" : "licensecc-online-verifier-staging";
   const values = {
-    REQUEST_SIGNATURE_MODE: "required",
-    DEVICE_PROOF_MODE: "off",
-    ACCOUNT_TOKEN_MODE: "required",
     ORDER_INGEST_MODE: "required",
     ORDER_SIGNER_SCOPE_MODE: "required",
     ORDER_INGEST_AUDIENCE: `licensecc-${profile}`,
-    ACCOUNT_TOKEN_ACTIVE_PEPPER_ID: "p1",
     ...overrides,
   };
   return [
@@ -45,20 +41,15 @@ function inventory(names = REQUIRED_BACKEND_SECRET_NAMES) {
   return JSON.stringify(names.map((name) => ({ name, type: "secret_text" })));
 }
 
-test("protected backend config requires exact security selectors and a structured active pepper id", () => {
+test("protected backend config requires exact security selectors and the environment order audience", () => {
   assert.deepEqual(validateProtectedConfig(protectedConfig("production"), "production"), {
     profile: "production",
-    selectorCount: 7,
+    selectorCount: 3,
   });
   for (const [key, value] of [
-    ["REQUEST_SIGNATURE_MODE", "soft"],
-    ["DEVICE_PROOF_MODE", "required"],
-    ["ACCOUNT_TOKEN_MODE", "soft"],
     ["ORDER_INGEST_MODE", "soft"],
     ["ORDER_SIGNER_SCOPE_MODE", "off"],
     ["ORDER_INGEST_AUDIENCE", "licensecc-production"],
-    ["ACCOUNT_TOKEN_ACTIVE_PEPPER_ID", "change-me"],
-    ["ACCOUNT_TOKEN_ACTIVE_PEPPER_ID", "bad pepper"],
   ]) {
     assert.throws(
       () => validateProtectedConfig(protectedConfig("staging", { [key]: value }), "staging"),
@@ -67,7 +58,7 @@ test("protected backend config requires exact security selectors and a structure
     );
   }
   assert.throws(
-    () => validateProtectedConfig(protectedConfig("staging").replace('ACCOUNT_TOKEN_ACTIVE_PEPPER_ID = "p1"', ""), "staging"),
+    () => validateProtectedConfig(protectedConfig("staging").replace('ORDER_INGEST_AUDIENCE = "licensecc-staging"', ""), "staging"),
     /invalid_protected_config/u,
   );
 });
@@ -85,8 +76,8 @@ test("inventory validator invokes one bounded JSON name-only Wrangler command", 
     });
     assert.equal(result.ok, true);
     assert.equal(result.evidence.verdict, "pass");
-    assert.equal(result.evidence.required_secret_count, 9);
-    assert.equal(result.evidence.discovered_secret_count, 10);
+    assert.equal(result.evidence.required_secret_count, 6);
+    assert.equal(result.evidence.discovered_secret_count, 7);
     assert.deepEqual(result.evidence.missing_required_secret_names, []);
     assert.deepEqual(calls, [{
       command: process.platform === "win32" ? "npx.cmd" : "npx",
@@ -104,7 +95,7 @@ test("inventory validator invokes one bounded JSON name-only Wrangler command", 
 
 test("missing required names fail without exposing discovered extra names or values", async () => {
   await withConfig(protectedConfig("production"), async (configPath) => {
-    const missing = ["ONLINE_SIGNING_KEY_ID", "ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM"];
+    const missing = ["BOUND_APPROVAL_ENCRYPTION_KEYS", "BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM"];
     const present = REQUIRED_BACKEND_SECRET_NAMES.filter((name) => !missing.includes(name));
     const result = await inspectBackendSecretInventory({
       profile: "production",
@@ -138,7 +129,7 @@ test("malformed, duplicate, and oversized inventories fail closed", () => {
 });
 
 test("protected config failure prevents the remote inventory command and emits generic evidence", async () => {
-  await withConfig(protectedConfig("staging", { ACCOUNT_TOKEN_ACTIVE_PEPPER_ID: "placeholder" }), async (configPath) => {
+  await withConfig(protectedConfig("staging", { ORDER_INGEST_AUDIENCE: "licensecc-production" }), async (configPath) => {
     let invoked = false;
     const result = await inspectBackendSecretInventory({
       profile: "staging",

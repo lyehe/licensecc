@@ -79,13 +79,13 @@ function globalLimit(env) {
   return parseGlobalRateLimit(env.BOUND_GLOBAL_RATE_LIMIT) ?? DEFAULT_GLOBAL_RATE_LIMIT;
 }
 
-// Fixed protected-protocol namespaces. Legacy rate/proof/account-token "off"
-// switches never disable this gate. Registration has a tighter IP budget;
-// challenge/issuance traffic shares a coarse NAT-tolerant abuse budget.
+// Fixed protected-protocol namespaces. No configuration switch disables this
+// gate. Registration has a tighter IP budget; challenge/issuance traffic shares
+// a coarse NAT-tolerant abuse budget.
 export async function limitBoundRequest(request, env, db) {
   const client = await boundSecretHash(boundSourceIdentity(request.headers.get("cf-connecting-ip") || "unknown-client"));
   const registration = new URL(request.url).pathname === "/v2/device-authorizations";
-  const edge = registration ? env.VERIFY_RATE_LIMITER : env.BOUND_SESSION_RATE_LIMITER;
+  const edge = registration ? env.BOUND_REGISTRATION_RATE_LIMITER : env.BOUND_SESSION_RATE_LIMITER;
   if (edge) {
     const decision = await edge.limit({ key: `${registration ? "device-v2" : "device-v2-session"}:${client}` });
     if (decision.success !== true) throw new BoundRequestError("rate_limited", 429);

@@ -28,8 +28,7 @@ for(const trial of [false,true])test(`actual local Worker and D1 execute ${trial
     compatibilityDate:"2026-08-01",d1Databases:{DB:"device-http"},bindings:{BOUND_DEVICE_CONFIG:JSON.stringify(config),
       BOUND_APPROVAL_ENCRYPTION_KEYS:JSON.stringify({active:"test",keys:{test:boundRandomId(32)}}),
       BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM:pem("PRIVATE KEY",await crypto.subtle.exportKey("pkcs8",signer.privateKey)),
-      BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM:pem("PUBLIC KEY",await crypto.subtle.exportKey("spki",signer.publicKey)),
-      DEVICE_PROOF_MODE:"off",ACCOUNT_TOKEN_MODE:"off",REQUEST_SIGNATURE_MODE:"off",D1_RATE_LIMIT_ENABLED:"0"}},
+      BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM:pem("PUBLIC KEY",await crypto.subtle.exportKey("spki",signer.publicKey))}},
     // Test-only caller: production portal will derive identity from its session.
     {name:"consent-caller",modules:true,compatibilityDate:"2026-08-01",
       serviceBindings:{CONSENT:{name:"device-http",entrypoint:"DeviceConsent"},OPERATOR:{name:"device-http",entrypoint:"DeviceOperator"},PUBLIC:"device-http",PORTAL:"real-portal"},

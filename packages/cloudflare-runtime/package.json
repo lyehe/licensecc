@@ -12,9 +12,6 @@
       "types": "./src/d1/audit_digest.d.ts",
       "default": "./src/d1/audit_digest.mjs"
     },
-    "./auth/account_token_issue": {
-      "default": "./src/auth/account_token_issue.mjs"
-    },
     "./auth/primitives": {
       "default": "./src/auth/primitives.mjs"
     },

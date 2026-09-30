@@ -1,40 +1,7 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { interpretWranglerResult, sqlFor } from "../../scripts/entitlement.mjs";
-import { derPayloadOffset } from "./fixtures.mjs";
-
-test("key generator emits PKCS#1 public key records for the C++ verifier", () => {
-  const outDir = mkdtempSync(join(tmpdir(), "licensecc-online-key-"));
-  try {
-    const result = spawnSync(process.execPath, ["scripts/generate-online-key.mjs", "--out-dir", outDir], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-    });
-    assert.equal(result.status, 0, result.stderr);
-
-    const publicRecord = JSON.parse(readFileSync(join(outDir, "online_public_key.json"), "utf8"));
-    const publicDer = Buffer.from(publicRecord.public_key_der_base64, "base64");
-    const payloadOffset = derPayloadOffset(publicDer, 0);
-    assert.equal(publicDer[payloadOffset], 0x02, "PKCS#1 RSA public key starts with a modulus INTEGER");
-
-    const expectedKeyId = `sha256:${createHash("sha256").update(publicDer).digest("hex")}`;
-    assert.equal(publicRecord.key_id, expectedKeyId);
-    assert.match(readFileSync(join(outDir, "online_private_key.pkcs8.pem"), "utf8"), new RegExp("BEGIN " + "PRIVATE KEY"));
-    const cmakeRecord = readFileSync(join(outDir, "online_public_key_record.cmake.txt"), "utf8");
-    assert.match(cmakeRecord, /CACHE STRING/);
-    assert.match(
-      cmakeRecord,
-      new RegExp(`SignaturePublicKey\\(\\\\"${expectedKeyId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\\\"`),
-    );
-  } finally {
-    rmSync(outDir, { recursive: true, force: true });
-  }
-});
 
 test("break-glass CLI upsert does not update revoked entitlements", () => {
   const sql = sqlFor("upsert", {

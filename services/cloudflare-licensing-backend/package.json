@@ -3,19 +3,13 @@
   "version": "0.1.0-rc.2",
   "private": true,
   "type": "module",
-  "exports": {
-    "./device/request_proof": {
-      "types": "./src/device/request_proof.d.ts",
-      "default": "./src/device/request_proof.mjs"
-    }
-  },
   "dependencies": {
     "@licensecc/cloudflare-runtime": "file:../../packages/cloudflare-runtime",
     "@licensecc/licensing-domain": "file:../../packages/licensing-domain"
   },
   "scripts": {
     "build": "npm run generate:wrangler-types && tsc -p tsconfig.json",
-    "test": "npm run build && node --test test/*.mjs test/contexts/*.test.mjs test/fulfillment/order_event.test.mjs test/fulfillment/order_hmac.test.mjs test/fulfillment/order_ingest_gates.test.mjs test/fulfillment/order_sign.test.mjs test/auth/account_token.test.mjs test/auth/account_token_cli.test.mjs",
+    "test": "npm run build && node --test test/*.mjs test/contexts/*.test.mjs test/fulfillment/order_event.test.mjs test/fulfillment/order_hmac.test.mjs test/fulfillment/order_ingest_gates.test.mjs test/fulfillment/order_sign.test.mjs",
     "test:openapi": "npm run build && node --test test/openapi-spec.test.mjs",
     "test:sql": "npm run build && node --experimental-sqlite --test test/db/*.mjs test/sql/*.mjs test/fulfillment/order_ingest_exactly_once.test.mjs",
     "test:e2e": "npm --prefix ../cloudflare-license-admin run build:worker && npm --prefix ../cloudflare-customer-portal run build:worker && npm run build && node --experimental-sqlite --test test/e2e/*.mjs",
@@ -32,19 +26,12 @@
     "db:local:init": "node --experimental-sqlite local-host/migrate.mjs",
     "db:local:reset": "node --experimental-sqlite local-host/migrate.mjs --reset",
     "entitlement": "node scripts/entitlement.mjs",
-    "account-token": "node scripts/account-token.mjs",
-    "device-key": "node scripts/device-key.mjs",
     "order:sign": "node scripts/order-sign.mjs",
-    "generate-online-key": "node scripts/generate-online-key.mjs",
-    "generate-online-assertion-fixture": "node scripts/generate-online-assertion-fixture.mjs",
-    "validate:public-verifier": "node scripts/public-verifier-drill.mjs",
     "validate:protected-config": "node scripts/protected-device-readiness.mjs",
     "validate:protected-smoke": "node scripts/protected-readiness-smoke.mjs",
     "validate:secret-inventory": "node scripts/backend-secret-inventory.mjs",
     "validate:staging-order": "node scripts/staging-order-drill.mjs",
-    "capacity:public-verifier": "node scripts/public-verifier-capacity.mjs",
-    "test:capacity": "node --test test/public-verifier-capacity.test.mjs",
-    "test:deployed-readiness": "node --test test/backend-secret-inventory.test.mjs test/protected-readiness-smoke.test.mjs test/public-verifier-drill.test.mjs test/staging-order-drill.test.mjs"
+    "test:deployed-readiness": "node --test test/backend-secret-inventory.test.mjs test/protected-readiness-smoke.test.mjs test/staging-order-drill.test.mjs"
   },
   "devDependencies": {
     "@typescript/typescript6": "6.0.2",

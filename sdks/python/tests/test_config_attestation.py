@@ -163,7 +163,7 @@ def test_config_unknown_key_id_rejected(config_golden, embedded_config_golden):
 
 @pytest.mark.parametrize(
     "bad_token",
-    ["", "lcccfg1", "lcccfg1.onlyone", "lcccfg1.a.b.c", "lccoa1.aGVsbG8=.aGVsbG8="],
+    ["", "lcccfg1", "lcccfg1.onlyone", "lcccfg1.a.b.c", "lccdl1.aGVsbG8=.aGVsbG8="],
 )
 def test_config_malformed_envelope_rejected(bad_token, config_golden, trusted):
     result = verify_config_token(bad_token, _expected(config_golden), trusted)

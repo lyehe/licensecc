@@ -55,7 +55,7 @@ export function pemBytes(pem, label) {
   return Uint8Array.from(binary, char => char.charCodeAt(0));
 }
 
-// No reuse/fallback to the legacy v201 or online-assertion signing secrets.
+// No reuse/fallback to the v201 license-signing secrets.
 export async function loadBoundSigner(env) {
   const algorithm = { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" };
   const publicBytes = pemBytes(env.BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM, "PUBLIC KEY");

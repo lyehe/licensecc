@@ -3,8 +3,7 @@ import type { DbDatabaseLike, DbPreparedStatementLike } from "@licensecc/cloudfl
 export type D1PreparedStatementLike = DbPreparedStatementLike;
 export type D1DatabaseLike = DbDatabaseLike;
 
-// Minimal Workers ExecutionContext surface (we only use waitUntil to keep the throttled
-// last_used_at write + lazy re-pepper off the response path on the hot endpoints).
+// Minimal Workers ExecutionContext surface passed to the route and scheduled handlers.
 export interface ExecutionContextLike {
   waitUntil(promise: Promise<unknown>): void;
 }
@@ -32,53 +31,29 @@ type AssertNoIncompatibleGeneratedBindings<Bindings extends never> = Bindings;
 // Worker typecheck instead of silently falling back to this service contract.
 type WranglerBindings = Pick<Cloudflare.Env,
   | "DB"
-  | "VERIFY_RATE_LIMITER"
-  | "D1_RATE_LIMIT_ENABLED"
-  | "D1_RATE_LIMIT_LIMIT"
-  | "D1_RATE_LIMIT_PERIOD_SECONDS"
-  | "REQUEST_SIGNATURE_MODE"
-  | "REQUEST_SIGNATURE_MAX_SKEW_SECONDS"
-  | "DEVICE_PROOF_MODE"
+  | "BOUND_REGISTRATION_RATE_LIMITER"
+  | "BOUND_SESSION_RATE_LIMITER"
   | "ORDER_INGEST_MODE"
   | "ORDER_INGEST_AUDIENCE"
   | "ORDER_MAX_SKEW_SECONDS"
   | "ORDER_SIGNER_SCOPE_MODE"
-  | "ACCOUNT_TOKEN_MODE"
-  | "ACCOUNT_TOKEN_ACTIVE_PEPPER_ID"
-  | "ACCOUNT_TOKEN_LAST_USED_THROTTLE_SEC"
 >;
 
 interface RuntimeEnv {
   DB: D1DatabaseLike;
-  VERIFY_RATE_LIMITER?: RateLimitBindingLike;
-  ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM: string;
-  ONLINE_SIGNING_KEY_ID: string;
-  MAX_ASSERTION_TTL_SECONDS?: string;
-  MAX_CACHE_TTL_SECONDS?: string;
-  LOG_RATE_LIMIT_DECISIONS?: string;
-  D1_RATE_LIMIT_ENABLED?: string;
-  D1_RATE_LIMIT_LIMIT?: string;
-  D1_RATE_LIMIT_PERIOD_SECONDS?: string;
-  D1_CLIENT_RATE_LIMIT_LIMIT?: string;
-  D1_CLIENT_RATE_LIMIT_PERIOD_SECONDS?: string;
-  D1_ENTITLEMENT_RATE_LIMIT_LIMIT?: string;
-  D1_ENTITLEMENT_RATE_LIMIT_PERIOD_SECONDS?: string;
-  D1_GLOBAL_RATE_LIMIT_ENABLED?: string;
-  D1_GLOBAL_RATE_LIMIT_LIMIT?: string;
-  D1_GLOBAL_RATE_LIMIT_PERIOD_SECONDS?: string;
-  REQUEST_SIGNATURE_MODE?: string;
-  REQUEST_SIGNATURE_MAX_SKEW_SECONDS?: string;
+  // Optional Cloudflare edge limiters in front of the protected routes: registration
+  // (POST /v2/device-authorizations) and session traffic (challenge, exchange, renew).
+  // The fixed D1 budgets apply whether or not they are bound.
+  BOUND_REGISTRATION_RATE_LIMITER?: RateLimitBindingLike;
+  BOUND_SESSION_RATE_LIMITER?: RateLimitBindingLike;
+  // Protected-device global fuse (requests/minute); default 1000, range 100..1000000.
+  BOUND_GLOBAL_RATE_LIMIT?: string;
   // Protected device v2: explicit registry/issuer and independently purposed
   // RSA-3072 signer. Missing configuration fails closed; no legacy key fallback.
   BOUND_DEVICE_CONFIG?: string;
   BOUND_APPROVAL_ENCRYPTION_KEYS?: string;
   BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM?: string;
   BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM?: string;
-  LEASE_ISSUE_BEARER?: string; // phase-1 placeholder authn; replaced by account_token (phase 2)
-  // Device-proof (ECDSA relay-resistance) gate for lease/seat issuance: off | required.
-  // A presented proof is always verified; "required" denies issuance without one. Default off
-  // for back-compat; production sets "required" to make the hardware lock actually bind.
-  DEVICE_PROOF_MODE?: string;
   // Slice 1 order-ingest (POST /v1/orders): the signed, exactly-once subscription
   // fulfillment inbox. ORDER_HMAC_SECRETS is a JSON map {key_id: base64-secret} (each
   // secret >= 32 bytes); the map / audience are asserted non-empty at verify time
@@ -93,14 +68,6 @@ interface RuntimeEnv {
   // `soft`, or `required`; unknown non-empty values are a fail-closed config error.
   ORDER_SIGNER_SCOPE_MODE?: string;
   ORDER_SIGNER_SCOPES?: string;
-  // Slice 2 account-token isolation (D9/D10). ACCOUNT_TOKEN_PEPPERS is a JSON map
-  // {id: base64 >= 32B} (fail-closed). MODE mirrors REQUEST_SIGNATURE_MODE: off (runtime
-  // default; legacy bearer + shadow-eval) | soft (token required, NULL-owner allowed+logged,
-  // populated-mismatch denied) | required (production; NULL/mismatch denied).
-  ACCOUNT_TOKEN_PEPPERS?: string;
-  ACCOUNT_TOKEN_ACTIVE_PEPPER_ID?: string;
-  ACCOUNT_TOKEN_MODE?: string;
-  ACCOUNT_TOKEN_LAST_USED_THROTTLE_SEC?: string;
   // Webhook dispatcher (cron-drained read-side outbox). WEBHOOK_SIGNING_SECRETS is a JSON map
   // {keyId: base64-secret} (each secret >= 32 bytes), mirroring ORDER_HMAC_SECRETS; the active
   // WEBHOOK_SIGNING_KEY_ID names which key signs deliveries. Fail-closed: with no usable secret /
@@ -115,82 +82,3 @@ type GeneratedBindingsMatchRuntime = AssertNoIncompatibleGeneratedBindings<
 >;
 
 export type Env = WithRuntimeNarrowing<WidenWranglerStringBindings<WranglerBindings>, RuntimeEnv>;
-
-export interface VerifyRequest {
-  project: string;
-  feature: string;
-  license_fingerprint: string;
-  device_hash?: string;
-  nonce: string;
-  client_version?: string;
-  client_hardening?: number;
-  request_proof?: RequestProof;
-}
-
-export interface RequestProof {
-  version: 1;
-  device_key_id: string;
-  request_timestamp: number;
-  algorithm: "ecdsa-p256-sha256";
-  signature: string;
-}
-
-export interface EntitlementRow {
-  project: string;
-  feature: string;
-  license_fingerprint: string;
-  device_hash: string;
-  status: "active" | "revoked" | "disabled";
-  assertion_ttl_seconds: number;
-  cache_ttl_seconds: number;
-  revocation_seq: number;
-  valid_from?: number | null;
-  valid_until?: number | null;
-}
-
-export interface EntitlementDeviceRow {
-  device_key_id: string;
-  public_key_spki_der_base64: string;
-  status: "active" | "revoked" | "disabled";
-}
-
-export interface AssertionClaims {
-  purpose: string;
-  version: string;
-  alg: string;
-  keyId: string;
-  project: string;
-  feature: string;
-  licenseFingerprint: string;
-  deviceHash: string;
-  nonce: string;
-  status: "ok" | "denied";
-  issuedAt: number;
-  expiresAt: number;
-  cacheUntil: number;
-  revocationSeq: number;
-}
-
-export interface RateLimitDecision {
-  limited: boolean;
-  source?: "cloudflare-client" | "d1-client" | "d1-entitlement" | "d1-global";
-}
-
-export type RequestSignatureMode = "off" | "soft" | "required";
-
-export interface RequestProofEvaluation {
-  mode: RequestSignatureMode;
-  result:
-    | "not_configured"
-    | "missing"
-    | "valid"
-    | "stale_timestamp"
-    | "unknown_device"
-    | "disabled_device"
-    | "invalid_signature"
-    | "malformed_public_key"
-    | "replayed_nonce"
-    | "d1_error";
-  detail?: string;
-  device_key_id?: string;
-}

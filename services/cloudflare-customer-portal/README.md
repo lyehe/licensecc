@@ -226,11 +226,9 @@ does not issue or log out that operator-supplied session, so it does not claim
 cookie-issuance or post-logout coverage.
 
 The shipped browser/session workflow does not hold a native device private key.
-The standard protected four-Worker topology therefore uses
-`DEVICE_PROOF_MODE=off`: absence is permitted, but the backend still verifies
-every proof that a native client presents. Global `required` mode is a future
-client-registration/signing migration; never place a device private key in this
-Worker or in browser-delivered configuration to simulate possession.
+Device keys stay on the native client, which signs its own protected proofs;
+never place a device private key in this Worker or in browser-delivered
+configuration to simulate possession.
 
 ## Credential-bearing destinations
 

@@ -228,7 +228,7 @@ test("admin catalog import and plan projection yield protected grants that suppo
 
     // Each plan-applied grant supports the protected consent and signed exchange.
     const backendEnv = { DB: adapter, BOUND_DEVICE_CONFIG: JSON.stringify(config), BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM: privatePem,
-      BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM: publicPem, DEVICE_PROOF_MODE: "off", ACCOUNT_TOKEN_MODE: "off", REQUEST_SIGNATURE_MODE: "off", D1_RATE_LIMIT_ENABLED: "0" };
+      BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM: publicPem };
     for (const created of appliedBody.data.applied.created) {
       const claims = await signedExchange(adapter, backendEnv, "cus_catalog_e2e", created.id);
       assert.equal(claims.project, "DEFAULT"); assert.equal(claims.feature, created.feature); assert.equal(claims["license-fingerprint"], FP);

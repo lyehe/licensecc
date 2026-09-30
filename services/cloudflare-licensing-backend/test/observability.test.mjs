@@ -16,10 +16,10 @@ function capture(method, action) {
 }
 
 test("structured logs retain operational fields and drop sensitive or unbounded values", () => {
-  const lines = capture("error", () => logEvent("error", "verify.d1_error", {
+  const lines = capture("error", () => logEvent("error", "request.unhandled_error", {
     request_id: `ray\n${"r".repeat(300)}`,
     affected_rows: 42,
-    invalid_config_modes: ["REQUEST_SIGNATURE_MODE"],
+    invalid_config_modes: ["ORDER_SIGNER_SCOPE_MODE"],
     license_fingerprint: "a".repeat(64),
     client_ip: "192.0.2.1",
     token: "must-not-appear",
@@ -28,10 +28,10 @@ test("structured logs retain operational fields and drop sensitive or unbounded 
 
   assert.equal(lines.length, 1);
   const parsed = JSON.parse(lines[0]);
-  assert.equal(parsed.event, "verify.d1_error");
+  assert.equal(parsed.event, "request.unhandled_error");
   assert.equal(parsed.severity, "error");
   assert.equal(parsed.affected_rows, 42);
-  assert.deepEqual(parsed.invalid_config_modes, ["REQUEST_SIGNATURE_MODE"]);
+  assert.deepEqual(parsed.invalid_config_modes, ["ORDER_SIGNER_SCOPE_MODE"]);
   assert.equal(parsed.request_id.includes("\n"), false);
   assert.equal(parsed.request_id.length, 256);
   assert.equal(parsed.license_fingerprint, undefined);
@@ -42,8 +42,8 @@ test("structured logs retain operational fields and drop sensitive or unbounded 
 });
 
 test("structured logs use the selected console severity and neutralize invalid event names", () => {
-  assert.equal(capture("log", () => logEvent("info", "verify.ok", { success: true })).length, 1);
-  assert.equal(capture("warn", () => logEvent("warn", "verify.denied", { success: false })).length, 1);
+  assert.equal(capture("log", () => logEvent("info", "device.cleanup_completed", { limit_reached: false })).length, 1);
+  assert.equal(capture("warn", () => logEvent("warn", "device.cleanup_limit_reached", { limit_reached: true })).length, 1);
   const line = capture("error", () => logEvent("error", "TOKEN=value", { error: "secret" }))[0];
   assert.deepEqual(JSON.parse(line), {
     event: "observability.invalid_event_name",
@@ -53,10 +53,10 @@ test("structured logs use the selected console severity and neutralize invalid e
 
 test("structured logs classify error_type through a closed safe taxonomy", () => {
   const customName = "DatabaseError: authorization=must-not-appear";
-  const customLine = capture("error", () => logEvent("error", "verify.d1_error", {
+  const customLine = capture("error", () => logEvent("error", "request.unhandled_error", {
     error_type: customName,
   }))[0];
-  const knownLine = capture("error", () => logEvent("error", "verify.d1_error", {
+  const knownLine = capture("error", () => logEvent("error", "request.unhandled_error", {
     error_type: "TypeError",
   }))[0];
 

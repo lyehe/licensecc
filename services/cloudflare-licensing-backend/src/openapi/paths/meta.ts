@@ -75,7 +75,7 @@ const healthPath: Record<string, unknown> = {
                   service: "licensecc-online-verifier",
                   protected_device_ready: true,
                   code: "config_error",
-                  invalid_config_modes: ["REQUEST_SIGNATURE_MODE"],
+                  invalid_config_modes: ["ORDER_SIGNER_SCOPE_MODE"],
                 },
               },
             },

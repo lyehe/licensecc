@@ -61,8 +61,8 @@ export async function report(env: Env, requestIdValue: string): Promise<Response
   });
 }
 
-// Customer kill-switch (admin-only). Flipping customers.status to 'disabled' severs that customer's
-// account-token auth (resolveAccountToken JOINs customers c ON c.status='active') and portal login.
+// Customer kill-switch (admin-only). Flipping customers.status to 'disabled' stops that customer's
+// protected device issuance and renewal (the backend rechecks customers.status on each one) and portal login.
 // Atomic: the guarded UPDATE...RETURNING and the conditional audit INSERT commit in one batch.
 function epochParam(url: URL, name: string): number | null {
   const raw = url.searchParams.get(name);

@@ -411,7 +411,6 @@ const REVIEWED_JSON_VECTOR_FIXTURES = new Set([
   "test/vectors/device_bound/v1/registration_wire.json",
   "test/vectors/device_bound/v1/renewal_wire.json",
   "test/vectors/device_identity/namespace_v1.json",
-  "test/vectors/device_proof/v1/manifest.json",
 ]);
 
 const VENDORED_GENERATOR_HYGIENE_FIXTURES = new Set([

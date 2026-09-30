@@ -5,13 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import worker from "../dist/app.js";
-import { accountAuth, accountTokenMode } from "../src/auth/account_auth.mjs";
-import {
-  parseAccountTokenMode,
-  parseDeviceProofMode,
-  parseOrderSignerScopeMode,
-  parseRequestSignatureMode,
-} from "../src/security_modes.mjs";
+import { parseOrderSignerScopeMode } from "../src/security_modes.mjs";
 
 function countingDb(calls) {
   return {
@@ -32,9 +26,6 @@ function ordersRequest() {
 
 test("security-mode parsers preserve legacy empty values and every exact supported value", () => {
   const cases = [
-    [parseAccountTokenMode, "ACCOUNT_TOKEN_MODE", ["off", "soft", "required"]],
-    [parseRequestSignatureMode, "REQUEST_SIGNATURE_MODE", ["off", "soft", "required"]],
-    [parseDeviceProofMode, "DEVICE_PROOF_MODE", ["off", "required"]],
     [parseOrderSignerScopeMode, "ORDER_SIGNER_SCOPE_MODE", ["off", "soft", "required"]],
   ];
   for (const [parse, selector, supported] of cases) {
@@ -47,7 +38,7 @@ test("security-mode parsers preserve legacy empty values and every exact support
 });
 
 test("invalid security-mode selectors are observable and block Worker work before D1", async () => {
-  const selectors = ["ACCOUNT_TOKEN_MODE", "REQUEST_SIGNATURE_MODE", "DEVICE_PROOF_MODE", "ORDER_SIGNER_SCOPE_MODE"];
+  const selectors = ["ORDER_SIGNER_SCOPE_MODE"];
   for (const raw of ["typo", "REQUIRED", " required"]) {
     for (const selector of selectors) {
       const calls = { prepare: 0 };
@@ -66,23 +57,5 @@ test("invalid security-mode selectors are observable and block Worker work befor
       assert.ok(events.some((event) => event.event === "config.invalid_security_modes" && event.invalid_config_modes.includes(selector)));
       assert.doesNotMatch(JSON.stringify(events), new RegExp(raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "logs omit raw values");
     }
-  }
-});
-
-test("account-token mode parser rejects unknown values before bearer auth or token lookup", async () => {
-  for (const raw of ["typo", "REQUIRED", " required"]) {
-    const calls = { prepare: 0 };
-    const env = { ACCOUNT_TOKEN_MODE: raw, DB: countingDb(calls), LEASE_ISSUE_BEARER: "secret" };
-    assert.equal(accountTokenMode(env), "invalid");
-    const result = await accountAuth(
-      new Request("https://example.test/", { headers: { authorization: "Bearer secret" } }),
-      env,
-      "activate",
-      "DEFAULT",
-      "DEFAULT",
-      1,
-    );
-    assert.deepEqual(result, { ok: false, status: 503, code: "config_error" });
-    assert.equal(calls.prepare, 0);
   }
 });

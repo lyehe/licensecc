@@ -40,7 +40,7 @@ function fixture(t) {
     catch(error){sql.exec("ROLLBACK");throw error;}
   }};
   const env={DB:db,BOUND_DEVICE_CONFIG:JSON.stringify(config),BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM:privatePem,
-    BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM:publicPem,DEVICE_PROOF_MODE:"off",ACCOUNT_TOKEN_MODE:"off",REQUEST_SIGNATURE_MODE:"off",D1_RATE_LIMIT_ENABLED:"0"};
+    BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM:publicPem};
   async function call(path,body,headers={}) {
     const response=await worker.fetch(new Request(`https://untrusted-host.test${path}`,{method:"POST",headers:{"content-type":"application/json","cf-connecting-ip":"127.0.0.2",...headers},body:typeof body==="string"?body:JSON.stringify(body)}),env);
     assert.equal(response.headers.get("cache-control"),"no-store");
@@ -361,7 +361,7 @@ test("HTTP rejects unsigned URL queries and keeps configuration failures no-stor
     assert.equal(response.status,400); assert.equal(response.body.code,"invalid_request");
   }
   assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_leases").get().n,0);
-  f.env.REQUEST_SIGNATURE_MODE="invalid-mode";
+  f.env.ORDER_SIGNER_SCOPE_MODE="invalid-mode";
   const response=await f.call("/v2/device-authorizations/exchange",request);
   assert.equal(response.status,503); assert.equal(response.body.code,"temporarily_unavailable");
   assert.equal(typeof response.body.request_id,"string");
@@ -388,11 +388,11 @@ test("HTTP current denial is not hidden by a competing successful operation",asy
 
 test("HTTP rate infrastructure errors never reach issuance or expose exceptions",async t=>{
   const f=fixture(t),d=await enrollment(f),request=await signed(f,d,"exchange");
-  f.env.VERIFY_RATE_LIMITER={async limit(){throw new Error("private binding details");}};
+  f.env.BOUND_REGISTRATION_RATE_LIMITER={async limit(){throw new Error("private binding details");}};
   const response=await f.call("/v2/device-authorizations",{});
   assert.equal(response.status,503); assert.equal(response.body.code,"temporarily_unavailable");
   assert.equal(JSON.stringify(response.body).includes("private"),false);
-  delete f.env.VERIFY_RATE_LIMITER;
+  delete f.env.BOUND_REGISTRATION_RATE_LIMITER;
   f.db.batch=async()=>{throw new Error("private SQL details");};
   assert.equal((await f.call("/v2/device-authorizations/exchange",request)).status,503);
   assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_leases").get().n,0);

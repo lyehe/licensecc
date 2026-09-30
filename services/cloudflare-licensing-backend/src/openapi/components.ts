@@ -17,7 +17,7 @@ export function errorResponse(description: string, code: string | readonly strin
 }
 
 export const INVALID_SECURITY_MODE_CONFIG_ERROR =
-  "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance.";
+  "config_error: a nonempty ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance.";
 
 export function securityModeConfigErrorResponse(
   additionalDescription = "",
@@ -107,7 +107,7 @@ export const openApiComponents: LabeledComponentFragment = {
             minItems: 1,
             items: {
               type: "string",
-              enum: ["ACCOUNT_TOKEN_MODE", "REQUEST_SIGNATURE_MODE", "DEVICE_PROOF_MODE", "ORDER_SIGNER_SCOPE_MODE"],
+              enum: ["ORDER_SIGNER_SCOPE_MODE"],
             },
             description: "Invalid selector names only; raw values are never returned.",
           },

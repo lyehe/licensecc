@@ -46,7 +46,7 @@ async function enrolledSyncGrant(t) {
   assert.equal(db.prepare("SELECT source FROM entitlement_events ORDER BY id DESC LIMIT 1").get().source, "sync");
 
   const env = { DB: portal.DB, BOUND_DEVICE_CONFIG: JSON.stringify(config), BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM: privatePem,
-    BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM: publicPem, DEVICE_PROOF_MODE: "off", ACCOUNT_TOKEN_MODE: "off", REQUEST_SIGNATURE_MODE: "off", D1_RATE_LIMIT_ENABLED: "0" };
+    BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM: publicPem };
   const send = async (path, body) => {
     const response = await backend.fetch(new Request(`https://license.test${path}`, { method: "POST",
       headers: { "content-type": "application/json", "cf-connecting-ip": "127.0.0.2" }, body: JSON.stringify(body) }), env);

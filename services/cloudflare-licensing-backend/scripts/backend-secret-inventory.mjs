@@ -14,11 +14,8 @@ const COMMAND_TIMEOUT_MS = 30_000;
 const MAX_INVENTORY_ENTRIES = 256;
 
 export const REQUIRED_BACKEND_SECRET_NAMES = Object.freeze([
-  "ACCOUNT_TOKEN_PEPPERS",
   "BOUND_APPROVAL_ENCRYPTION_KEYS",
   "BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM",
-  "ONLINE_SIGNING_KEY_ID",
-  "ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM",
   "ORDER_HMAC_SECRETS",
   "ORDER_SIGNER_SCOPES",
   "WEBHOOK_SIGNING_KEY_ID",
@@ -26,14 +23,12 @@ export const REQUIRED_BACKEND_SECRET_NAMES = Object.freeze([
 ]);
 
 const REQUIRED_MODES = Object.freeze([
-  "REQUEST_SIGNATURE_MODE",
-  "ACCOUNT_TOKEN_MODE",
   "ORDER_INGEST_MODE",
   "ORDER_SIGNER_SCOPE_MODE",
 ]);
-const PROTECTED_SELECTOR_COUNT = REQUIRED_MODES.length + 3;
+// The required modes plus ORDER_INGEST_AUDIENCE.
+const PROTECTED_SELECTOR_COUNT = REQUIRED_MODES.length + 1;
 const SECRET_NAME = /^[A-Z][A-Z0-9_]{0,127}$/u;
-const SELECTOR_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u;
 
 class InventoryError extends Error {
   constructor(code) {
@@ -88,12 +83,7 @@ export function validateProtectedConfig(configText, profile) {
   for (const mode of REQUIRED_MODES) {
     if (extractBasicString(configText, "vars", mode) !== "required") fail("invalid_protected_config");
   }
-  if (extractBasicString(configText, "vars", "DEVICE_PROOF_MODE") !== "off") fail("invalid_protected_config");
   if (extractBasicString(configText, "vars", "ORDER_INGEST_AUDIENCE") !== `licensecc-${profile}`) {
-    fail("invalid_protected_config");
-  }
-  const activePepperId = extractBasicString(configText, "vars", "ACCOUNT_TOKEN_ACTIVE_PEPPER_ID");
-  if (!SELECTOR_ID.test(activePepperId) || /^(?:replace|placeholder|example|change-me)/iu.test(activePepperId)) {
     fail("invalid_protected_config");
   }
   return { profile, selectorCount: PROTECTED_SELECTOR_COUNT };

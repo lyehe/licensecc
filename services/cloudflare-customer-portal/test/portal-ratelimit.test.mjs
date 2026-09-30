@@ -1,5 +1,5 @@
-// portal_ratelimit unit tests (blueprint (g)): ALWAYS-ON throttling even with D1_RATE_LIMIT_ENABLED
-// unset (invariant 5); per-key counters are independent.
+// portal_ratelimit unit tests (blueprint (g)): ALWAYS-ON throttling with no enabling
+// configuration (invariant 5); per-key counters are independent.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -7,11 +7,11 @@ import { freshDb, D1Like, NOW } from "./helpers.mjs";
 import { portalRateLimit } from "../src/auth/portal_ratelimit.mjs";
 
 function env() {
-  // NOTE: D1_RATE_LIMIT_ENABLED is intentionally UNSET — the portal limiter must throttle anyway.
+  // NOTE: the env carries only DB, no limiter configuration — the portal limiter must throttle anyway.
   return { DB: new D1Like(freshDb()) };
 }
 
-test("throttles with D1_RATE_LIMIT_ENABLED unset (invariant 5)", async () => {
+test("throttles with no limiter configuration (invariant 5)", async () => {
   const e = env();
   let lastLimited = false;
   for (let i = 0; i < 5; i += 1) {
@@ -19,7 +19,7 @@ test("throttles with D1_RATE_LIMIT_ENABLED unset (invariant 5)", async () => {
     lastLimited = r.limited;
   }
   // limit=3 -> the 4th and 5th calls are over the cap.
-  assert.equal(lastLimited, true, "limiter trips despite no D1_RATE_LIMIT_ENABLED flag");
+  assert.equal(lastLimited, true, "limiter trips with no limiter configuration");
 });
 
 test("counter is per-key: a different key starts fresh", async () => {

@@ -2,37 +2,30 @@ import type { Env } from "../env.js";
 import { safeErrorType } from "@licensecc/cloudflare-runtime/http/kit";
 import {
   invalidSecurityModeNames as invalidSecurityModeNamesFromEnv,
-  parseAccountTokenMode,
   parseOrderSignerScopeMode,
-  parseRequestSignatureMode,
 } from "../security_modes.mjs";
 
 export type LogSeverity = "info" | "warn" | "error";
 
+// Only fields that a remaining event emits: request failures (app.ts), protected-device
+// cleanup (maintenance/device_cleanup.ts) and the webhook dispatcher.
 const LOG_FIELD_NAMES = new Set([
   "affected_rows",
   "attempts",
   "backlog_age_seconds",
   "backlog_present",
   "delivery_id",
-  "detail",
   "endpoint_id",
   "error_type",
-  "event_type",
   "invalid_config_modes",
   "last_status",
   "limit_reached",
   "measured_at",
-  "method",
-  "mode",
   "oldest_expired_at",
   "path",
   "request_id",
-  "result",
-  "revocation_seq",
   "skipped",
   "source",
-  "success",
   "target",
 ]);
 
@@ -78,26 +71,14 @@ export function invalidSecurityModeNames(env: Env): string[] {
 }
 
 // Config-consistency warnings (audit R2.3): surface half-configured deploys where a security
-// secret is present but its enforcing mode is left off, so an operator who set the peppers/keys
-// but forgot to flip a mode sees it on /health instead of silently shipping a permissive posture.
+// secret is present but its enforcing mode is left off, so an operator who set the scope map
+// but forgot to flip the mode sees it on /health instead of silently shipping a permissive posture.
 export function configConsistencyWarnings(env: Env): string[] {
   const warnings: string[] = [];
   const has = (v: string | undefined): boolean => typeof v === "string" && v.length > 0;
-  const accountToken = parseAccountTokenMode(env);
-  const requestSignature = parseRequestSignatureMode(env);
   const orderSignerScope = parseOrderSignerScopeMode(env);
   for (const name of invalidSecurityModeNames(env)) {
     warnings.push(`${name} has an invalid value — use only its documented exact mode names`);
-  }
-  if (has(env.ACCOUNT_TOKEN_PEPPERS) && accountToken.valid && accountToken.mode !== "required") {
-    warnings.push(
-      "ACCOUNT_TOKEN_PEPPERS is set but ACCOUNT_TOKEN_MODE is not 'required' — per-customer isolation is not enforced",
-    );
-  }
-  if (has(env.ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM) && requestSignature.valid && requestSignature.mode === "off") {
-    warnings.push(
-      "online signing is configured but REQUEST_SIGNATURE_MODE is off — request device-proofs are not enforced",
-    );
   }
   if (has(env.ORDER_SIGNER_SCOPES) && orderSignerScope.valid && orderSignerScope.mode === "off") {
     warnings.push(

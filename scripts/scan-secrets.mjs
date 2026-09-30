@@ -1,7 +1,6 @@
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runSecretLint, SIGNING_KEY_NEEDLES } from "./secret-lint.mjs";
-import { checkTokenGuards } from "../services/cloudflare-licensing-backend/scripts/token-guards.mjs";
 
 const REPOSITORY_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
@@ -16,7 +15,6 @@ const REPOSITORY_EXCLUSIONS = [
   "extern/license-generator/test/data/private_key_3072.rsa",
 ];
 
-checkTokenGuards();
 runSecretLint({
   root: REPOSITORY_ROOT,
   label: "repository",

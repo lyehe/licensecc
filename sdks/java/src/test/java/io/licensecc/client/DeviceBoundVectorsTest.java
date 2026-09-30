@@ -119,7 +119,7 @@ final class DeviceBoundVectorsTest {
         byte[] signature = decode(token[2]);
         check(key.getModulus().bitLength() == 3072 && signature.length == 384, "RSA3072 sizes");
         check(verify("SHA256withRSA", key, input, signature), "lease signature");
-        check(!verify("SHA256withRSA", key, bytes("lccoa1." + payload), signature), "wrong envelope rejects");
+        check(!verify("SHA256withRSA", key, bytes("lcccfg1." + payload), signature), "wrong envelope rejects");
         input[input.length - 2] ^= 1;
         check(!verify("SHA256withRSA", key, input, signature), "changed expiry rejects");
     }

@@ -8,8 +8,8 @@
 // Covers: every read endpoint returns the seeded rows + filters; customer detail returns only the
 // customer, grants, licenses, orders and events; the report aggregates; the customer kill-switch
 // is atomic + audited and its 404/409/reason gates; and reader RBAC blocks the only write
-// (disable/reenable) while allowing every read. The kill-switch is what severs a customer's account-token auth downstream (the backend
-// resolveAccountToken JOINs customers c ON c.status='active') — proven here at the status+audit layer.
+// (disable/reenable) while allowing every read. The kill-switch is what stops a customer's protected device issuance
+// downstream (the backend rechecks customers.status on each exchange and renewal) — proven here at the status+audit layer.
 //
 // Requires node:sqlite (Node >= 22 with --experimental-sqlite). Run via `npm run test:sql`.
 

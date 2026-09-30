@@ -258,52 +258,10 @@ its deployed proof.
 The required workflow inputs identify only pre-created synthetic staging
 fixtures. They must never name a production tenant or entitlement. A shared
 `licensecc-staging-operations` concurrency group serializes deployment,
-rollback, capacity, and recovery work. As in production, before/after Worker
+rollback, and recovery work. As in production, before/after Worker
 deployment identities and bounded drill results are retained as a redacted
 30-day workflow artifact, then digest-bound into the restricted long-term
 archive before expiry when they support a release decision.
-
-The standard portal-compatible topology deliberately requires
-`DEVICE_PROOF_MODE=off` for `/v1/verify`. Missing proof is accepted, while any
-presented proof is still verified. The portal never receives or signs with a
-device private key. Moving this global selector to `required` remains blocked
-on a reviewed client/browser device-key registration and signing workflow; the
-compatibility posture is a recorded residual risk, not a claim of device
-possession.
-
-## Protected staging capacity evidence
-
-`.github/workflows/capacity.yml` is the only repository-owned acceptance-load
-entry point. It is manual, serialized through
-`licensecc-staging-operations`, restricted to `main` and the protected
-`staging` environment, checks out the exact workflow commit, and requires the
-confirmation `run-staging-capacity`. The operator selects only `burst` or
-`soak`, supplies the declared peak rate `P` and maximum concurrency, and cannot
-shorten the 30-minute `2P` burst or four-hour `P` soak. Rehearsal mode is
-intentionally not available in the protected workflow.
-
-The operator must also supply the exact backend deployment ID, sole active
-version UUID, and an attestation that the commit recorded in the matching
-staging deployment artifact equals `github.sha`. Before any load credential is
-used, the workflow materializes all four staging configs and binds the
-Cloudflare account, D1 ID, and capacity URL origin to the validated backend
-route. It then requires that approved backend deployment/version to be the sole
-100% target both before and after the run. A changed or mismatched target fails
-the evidence. The attested SHA is recorded as operator-supplied provenance;
-Cloudflare's deployment listing does not independently bind that version to a
-source commit.
-
-Staging variables identify the verifier URL, project, and feature. Protected
-secrets supply the synthetic fingerprint, optional device hash, and registered
-request-proof key. The public `/v1/verify` route does not use an account token,
-so the capacity workflow neither requests nor sends one and makes no
-account-token readiness claim. The workflow validates inputs without printing
-them, runs the harness tests, executes the bounded load, normalizes a redacted
-JSON attestation, uploads it even when the harness fails, and then fails closed
-unless the acceptance verdict is `pass`. This artifact is only the capacity
-portion of PRD-05; the dashboard, alert, and sensitive-log review in
-[`doc/operations/observability.md`](operations/observability.md) remain
-required for the same UTC window.
 
 ## Protected recovery drill
 

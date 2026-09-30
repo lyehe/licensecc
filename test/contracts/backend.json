@@ -95,9 +95,6 @@
               "description": "Invalid selector names only; raw values are never returned.",
               "items": {
                 "enum": [
-                  "ACCOUNT_TOKEN_MODE",
-                  "REQUEST_SIGNATURE_MODE",
-                  "DEVICE_PROOF_MODE",
                   "ORDER_SIGNER_SCOPE_MODE"
                 ],
                 "type": "string"
@@ -423,7 +420,7 @@
                       "value": {
                         "code": "config_error",
                         "invalid_config_modes": [
-                          "REQUEST_SIGNATURE_MODE"
+                          "ORDER_SIGNER_SCOPE_MODE"
                         ],
                         "ok": false,
                         "protected_device_ready": true,
@@ -672,7 +669,7 @@
                   }
                 }
               },
-              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. config_error also covers unusable ORDER_HMAC_SECRETS or ORDER_INGEST_AUDIENCE, and a missing/invalid required ORDER_SIGNER_SCOPES map. write_failed: DB batch unavailable, DB errors, or order_ingest_nonces store unavailable."
+              "description": "config_error: a nonempty ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. config_error also covers unusable ORDER_HMAC_SECRETS or ORDER_INGEST_AUDIENCE, and a missing/invalid required ORDER_SIGNER_SCOPES map. write_failed: DB batch unavailable, DB errors, or order_ingest_nonces store unavailable."
             }
           },
           "security": [
@@ -690,7 +687,7 @@
       },
       "/v2/device-authorizations": {
         "post": {
-          "description": "Protected device protocol, independent of legacy proof/account-token switches. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
+          "description": "Protected device protocol; no configuration switch disables its checks. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
           "operationId": "createDeviceAuthorization",
           "requestBody": {
             "content": {
@@ -1155,7 +1152,7 @@
       },
       "/v2/device-authorizations/exchange": {
         "post": {
-          "description": "Protected device protocol, independent of legacy proof/account-token switches. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
+          "description": "Protected device protocol; no configuration switch disables its checks. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
           "operationId": "exchangeDeviceAuthorization",
           "requestBody": {
             "content": {
@@ -1684,7 +1681,7 @@
       },
       "/v2/device-challenges": {
         "post": {
-          "description": "Protected device protocol, independent of legacy proof/account-token switches. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
+          "description": "Protected device protocol; no configuration switch disables its checks. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
           "operationId": "createDeviceChallenge",
           "requestBody": {
             "content": {
@@ -2137,7 +2134,7 @@
       },
       "/v2/device-leases/renew": {
         "post": {
-          "description": "Protected device protocol, independent of legacy proof/account-token switches. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
+          "description": "Protected device protocol; no configuration switch disables its checks. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
           "operationId": "renewDeviceLease",
           "requestBody": {
             "content": {

@@ -156,7 +156,7 @@ test("invalid security-mode config leaves static docs available and is documente
     assert.match(JSON.stringify(response), route.path.startsWith("/v2/") ? /temporarily_unavailable/ : /config_error/, route.path + " 503 documents its config failure envelope");
   }
 
-  const invalidEnv = { REQUEST_SIGNATURE_MODE: "not-a-mode" };
+  const invalidEnv = { ORDER_SIGNER_SCOPE_MODE: "not-a-mode" };
   const spec = await worker.fetch(new Request("http://test/openapi.json"), invalidEnv);
   assert.equal(spec.status, 200);
   const docs = await worker.fetch(new Request("http://test/docs"), invalidEnv);
@@ -178,6 +178,8 @@ test("health documents protected readiness, warnings, and invalid-mode config er
   assert.deepEqual(failure.dependentRequired, { code: ["invalid_config_modes"], invalid_config_modes: ["code"] });
   assert.deepEqual(Object.keys(healthy.properties).sort(), ["config_warnings", "ok", "protected_device_ready", "service"]);
   assert.deepEqual(Object.keys(failure.properties).sort(), ["code", "config_warnings", "invalid_config_modes", "ok", "protected_device_ready", "service"]);
+  // ORDER_SIGNER_SCOPE_MODE is the only security-mode selector left.
+  assert.deepEqual(failure.properties.invalid_config_modes.items.enum, ["ORDER_SIGNER_SCOPE_MODE"]);
 
   const healthOperation = openApiSpec.paths["/health"].get;
   assert.ok(healthOperation.responses["503"]);
@@ -206,7 +208,7 @@ test("order ingest documents distinct config/write failures and raw-wire body se
   const order503 = operation.responses["503"];
   const examples = order503.content["application/json"].examples;
   assert.deepEqual(Object.keys(examples).sort(), ["config_error", "write_failed"]);
-  assert.match(order503.description, /config_error/);
+  assert.match(order503.description, /^config_error: a nonempty ORDER_SIGNER_SCOPE_MODE is not an exact documented mode\. /u);
   assert.match(order503.description, /write_failed/);
   assert.match(operation.responses["400"].description, /UTF-8/);
   assert.match(operation.responses["413"].description, /raw wire bytes/);

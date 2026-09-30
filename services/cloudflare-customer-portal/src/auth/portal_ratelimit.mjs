@@ -1,11 +1,10 @@
 // portal_ratelimit.mjs — ALWAYS-ON fixed-window D1 rate limiter for the customer portal auth paths.
 //
-// Invariant 5: portal auth throttling is dedicated and ALWAYS ON. Unlike the backend verifier's
-// checkD1RateLimitTier (which short-circuits when D1_RATE_LIMIT_ENABLED is unset), this limiter
-// IGNORES D1_RATE_LIMIT_ENABLED entirely — an unconfigured/dev Worker must STILL throttle the
-// login/OTP surface (it is the brute-force / enumeration surface). The counter row lives in the
-// shared rate_limit_counters table (baseline schema) under portal-* namespaces, isolated from the
-// verifier's verify-v1-* namespaces by the namespace column.
+// Invariant 5: portal auth throttling is dedicated and ALWAYS ON. No configuration flag disables
+// this limiter — an unconfigured/dev Worker must STILL throttle the login/OTP surface (it is the
+// brute-force / enumeration surface). The counter row lives in the shared rate_limit_counters
+// table (baseline schema) under portal-* namespaces, isolated from the backend's device-v2-*
+// namespaces by the namespace column.
 //
 // Worker-safe: no node:/Buffer; only standard globals + env.DB (D1).
 

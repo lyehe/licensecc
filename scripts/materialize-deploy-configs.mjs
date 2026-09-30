@@ -78,14 +78,11 @@ const deploymentProfiles = Object.freeze({
 });
 
 const workerSecretNames = new Set([
-  "ACCOUNT_TOKEN_PEPPERS",
   "ADMIN_DEV_BEARER",
   "BACKUP_TRIGGER_TOKEN",
   "BOUND_APPROVAL_ENCRYPTION_KEYS",
   "BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM",
   "D1_REST_API_TOKEN",
-  "ONLINE_SIGNING_KEY_ID",
-  "ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM",
   "ORDER_HMAC_SECRETS",
   "ORDER_SIGNER_SCOPES",
   "PORTAL_BOOTSTRAP_BEARER",
@@ -352,20 +349,12 @@ function validateCronList(config, target, label, { exact = undefined } = {}) {
 
 function validateBackend(config, target, profile, profileName) {
   const vars = objectValue(config.vars, target, "vars");
-  for (const key of ["REQUEST_SIGNATURE_MODE", "ACCOUNT_TOKEN_MODE", "ORDER_INGEST_MODE", "ORDER_SIGNER_SCOPE_MODE"]) {
+  for (const key of ["ORDER_INGEST_MODE", "ORDER_SIGNER_SCOPE_MODE"]) {
     exactString(vars[key], "required", target, `vars.${key}`);
   }
-  // The shipped portal has no device private key and must never receive one. In the current
-  // backend contract, `off` permits a missing proof but still verifies every presented proof.
-  // Move the hosted topology to global `required` only with a real client registration/signing UX.
-  exactString(vars.DEVICE_PROOF_MODE, "off", target, "vars.DEVICE_PROOF_MODE");
   exactString(vars.ORDER_INGEST_AUDIENCE, profile.orderAudience, target, "vars.ORDER_INGEST_AUDIENCE");
-  const activePepperId = nonEmptyString(vars.ACCOUNT_TOKEN_ACTIVE_PEPPER_ID, target, "vars.ACCOUNT_TOKEN_ACTIVE_PEPPER_ID");
-  if (!/^[A-Za-z0-9._-]{1,64}$/u.test(activePepperId) || placeholderText.test(activePepperId)) fail(target, "must set vars.ACCOUNT_TOKEN_ACTIVE_PEPPER_ID to a safe deployed pepper selector");
-  for (const key of ["REQUEST_SIGNATURE_MAX_SKEW_SECONDS", "ORDER_MAX_SKEW_SECONDS"]) {
-    if (!/^\d{1,4}$/u.test(String(vars[key] ?? "")) || Number(vars[key]) < 1 || Number(vars[key]) > 3600) {
-      fail(target, `must set vars.${key} to an integer in [1, 3600]`);
-    }
+  if (!/^\d{1,4}$/u.test(String(vars.ORDER_MAX_SKEW_SECONDS ?? "")) || Number(vars.ORDER_MAX_SKEW_SECONDS) < 1 || Number(vars.ORDER_MAX_SKEW_SECONDS) > 3600) {
+    fail(target, "must set vars.ORDER_MAX_SKEW_SECONDS to an integer in [1, 3600]");
   }
   // Protected licensing is non-secret deployment configuration: the client registry and the public
   // half of the dedicated RSA-3072 lease signer. The private half stays a Worker secret.
@@ -386,13 +375,19 @@ function validateBackend(config, target, profile, profileName) {
     fail(target, "must set vars.BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM to an RSA-3072 PEM PUBLIC KEY");
   }
   const databaseId = validateD1(config, target, profile, "migrations");
+  // The protected routes' edge limiters: registration and session traffic each have their own.
+  const limiterNames = ["BOUND_REGISTRATION_RATE_LIMITER", "BOUND_SESSION_RATE_LIMITER"];
   const limiters = arrayValue(config.ratelimits, target, "ratelimits");
-  if (limiters.length !== 1) fail(target, "must define exactly one VERIFY_RATE_LIMITER binding");
-  const limiter = objectValue(limiters[0], target, "ratelimits[0]");
-  exactString(limiter.name, "VERIFY_RATE_LIMITER", target, "ratelimits[0].name");
-  if (!/^[1-9]\d*$/u.test(String(limiter.namespace_id ?? ""))) fail(target, "must set a positive ratelimits[0].namespace_id");
-  const simple = objectValue(limiter.simple, target, "ratelimits[0].simple");
-  if (!Number.isInteger(simple.limit) || simple.limit < 1 || !Number.isInteger(simple.period) || simple.period < 1) fail(target, "must set positive integer rate-limit values");
+  if (limiters.length !== limiterNames.length) fail(target, `must define exactly two rate-limit bindings: ${limiterNames.join(" and ")}`);
+  limiters.forEach((entry, index) => {
+    const limiter = objectValue(entry, target, `ratelimits[${index}]`);
+    if (!/^[1-9]\d*$/u.test(String(limiter.namespace_id ?? ""))) fail(target, `must set a positive ratelimits[${index}].namespace_id`);
+    const simple = objectValue(limiter.simple, target, `ratelimits[${index}].simple`);
+    if (!Number.isInteger(simple.limit) || simple.limit < 1 || !Number.isInteger(simple.period) || simple.period < 1) fail(target, "must set positive integer rate-limit values");
+  });
+  for (const name of limiterNames) {
+    if (limiters.filter((limiter) => limiter.name === name).length !== 1) fail(target, `must define exactly one ${name} binding`);
+  }
   validateCronList(config, target, "maintenance");
   if (config.assets !== undefined) fail(target, "must not define static assets for the backend");
   const flags = config.compatibility_flags;

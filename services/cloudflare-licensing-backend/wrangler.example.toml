@@ -11,23 +11,6 @@ preview_urls = false
 crons = ["*/5 * * * *"]
 
 [vars]
-# Security mode selectors are exact and case/whitespace sensitive. Empty/unset
-# retains the legacy off default; any other non-empty value fails closed with
-# 503 config_error and is surfaced by /health without reflecting its value.
-D1_RATE_LIMIT_ENABLED = "0"
-D1_RATE_LIMIT_LIMIT = "20"
-D1_RATE_LIMIT_PERIOD_SECONDS = "60"
-# Request proof-of-possession rollout mode: off, soft, or required.
-# off keeps legacy clients compatible. soft logs missing/invalid/replayed proof but
-# still allows otherwise-valid entitlements. required denies missing/invalid/replayed
-# proof and is the PRODUCTION DEFAULT. Roll out off -> soft (observe) -> required.
-REQUEST_SIGNATURE_MODE = "required"
-REQUEST_SIGNATURE_MAX_SKEW_SECONDS = "300"
-# Device-proof gate for lease /activate-/renew + seat /checkout: off | required.
-# A presented ECDSA device proof is always verified (binds the issuance to a registered,
-# non-exportable key); "required" denies issuance without one -- set it in production to make
-# the hardware lock actually bind (a cloned hw_id alone cannot get a lease/seat).
-DEVICE_PROOF_MODE = "off"
 # Protected device v2 stays closed until explicitly configured. See README's
 # staged API section for BOUND_DEVICE_CONFIG (registry, fixed issuer/audience).
 # Dedicated Worker secret: BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM.
@@ -47,26 +30,6 @@ ORDER_MAX_SKEW_SECONDS = "300"
 # HMAC signer authorization scope: off (default), soft (log), or required
 # (deny a signer outside ORDER_SIGNER_SCOPES). The scope map remains a secret.
 ORDER_SIGNER_SCOPE_MODE = "off"
-# --- Slice 2 account tokens (per-customer credentials + account isolation) ---
-# Mode: off (DEFAULT, back-compat — legacy LEASE_ISSUE_BEARER path, NO per-customer isolation;
-# runs shadow-eval logging) | soft (account token required; NULL-owner entitlement allowed+logged,
-# populated cross-account DENIED) | required (full isolation; NULL/mismatch denied).
-# WARNING: the default is `off`, which is FAIL-OPEN (no isolation). PRODUCTION MUST set `required`
-# after the staged cutover: off -> soft (flip when account.shadow_nomatch for active callers is 0)
-# -> required (flip when zero active NULL-owner entitlements remain).
-ACCOUNT_TOKEN_MODE = "required"
-# The pepper id used to MINT new tokens; must be a key in ACCOUNT_TOKEN_PEPPERS (secret below).
-ACCOUNT_TOKEN_ACTIVE_PEPPER_ID = "p1"
-# last_used_at write throttle (seconds); best-effort, never gates auth. Default 300.
-ACCOUNT_TOKEN_LAST_USED_THROTTLE_SEC = "300"
-# Optional D1 limiter tier overrides. Defaults fall back to D1_RATE_LIMIT_*.
-# D1_CLIENT_RATE_LIMIT_LIMIT = "20"
-# D1_CLIENT_RATE_LIMIT_PERIOD_SECONDS = "60"
-# D1_ENTITLEMENT_RATE_LIMIT_LIMIT = "20"
-# D1_ENTITLEMENT_RATE_LIMIT_PERIOD_SECONDS = "60"
-# D1_GLOBAL_RATE_LIMIT_ENABLED = "0"
-# D1_GLOBAL_RATE_LIMIT_LIMIT = "200"
-# D1_GLOBAL_RATE_LIMIT_PERIOD_SECONDS = "60"
 # Protected-device global fuse (requests/minute across all sources); counts only
 # traffic already admitted by its own per-source budget. Default 1000, range 100..1000000.
 # BOUND_GLOBAL_RATE_LIMIT = "1000"
@@ -87,8 +50,10 @@ database_name = "licensecc-online-verifier"
 database_id = "replace-with-d1-database-id"
 migrations_dir = "migrations"
 
+# Per-source edge limit for POST /v2/device-authorizations registration. Rejects
+# floods before any D1 write. Keep >= the D1 per-registration budget (20/min).
 [[ratelimits]]
-name = "VERIFY_RATE_LIMITER"
+name = "BOUND_REGISTRATION_RATE_LIMITER"
 namespace_id = "1001"
 simple = { limit = 20, period = 60 }
 
@@ -100,16 +65,10 @@ namespace_id = "1002"
 simple = { limit = 600, period = 60 }
 
 # Set these as Worker secrets, not plaintext vars:
-# wrangler secret put ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM
-# wrangler secret put ONLINE_SIGNING_KEY_ID
 # Order-ingest HMAC key map: a JSON object { "<key_id>": "<base64-secret>" }; each secret
 # decodes to >= 32 bytes. The map is asserted non-empty / well-formed at verify time
 # (fail-closed). Rotate by adding a new key_id before retiring the old.
 # wrangler secret put ORDER_HMAC_SECRETS
-# Account-token peppers: a JSON object { "<pepper_key_id>": "<base64-pepper>" }; each pepper decodes
-# to >= 32 bytes (fail-closed). Tokens are stored as keyed HMAC under a pepper; rotate by adding a
-# new pepper_key_id + flipping ACCOUNT_TOKEN_ACTIVE_PEPPER_ID (old tokens keep validating until drained).
-# wrangler secret put ACCOUNT_TOKEN_PEPPERS
 # Webhook signing key map: a JSON object { "<key_id>": "<base64-secret>" }; each secret decodes to
 # >= 32 bytes (fail-closed; mirrors ORDER_HMAC_SECRETS). The cron-drained webhook dispatcher signs
 # each delivery HMAC-SHA256 over "<t>.<rawjsonbody>" and sends header

@@ -42,7 +42,7 @@ function operation(operationId: string, summary: string, request: unknown, code:
     content: { "application/json": { schema: object({ ok: { const: false }, code: { type: "string", enum: codes }, request_id: { type: "string" } }) } },
   };
   return { post: { tags: ["device"], operationId, summary, security: [],
-    description: "Protected device protocol, independent of legacy proof/account-token switches. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
+    description: "Protected device protocol; no configuration switch disables its checks. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
     requestBody: { required: true, content: { "application/json": { schema: request } } }, responses } };
 }
 

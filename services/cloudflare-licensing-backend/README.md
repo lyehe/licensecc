@@ -1,4 +1,4 @@
-# Licensecc Cloudflare Online Verifier
+# Licensecc Cloudflare Licensing Backend
 
 Reference Cloudflare Worker for low-volume online license verification.
 
@@ -21,28 +21,26 @@ Unless a section says otherwise, run service-local commands from
 root. Blocks labelled staging or production require authority for the named
 remote resources; copying this README never grants that authority.
 
-The Worker accepts `POST /v1/verify`, looks up an entitlement in D1, and returns
-a signed `lccoa1.<payload_b64>.<signature_b64>` assertion for active
-entitlements. Unknown, revoked, disabled, expired, or not-yet-valid
-entitlements return a generic unsigned denial by default. The C++ library does
-not verify these assertions: native hosts check offline `.lic` licenses with
-`acquire_license_ex()` and use the device-bound API for protected online
-sessions.
+The Worker serves the protected device-bound routes
+(`POST /v2/device-authorizations`, `/v2/device-challenges`,
+`/v2/device-authorizations/exchange` and `/v2/device-leases/renew`), the signed
+order inbox `POST /v1/orders`, and `/health`, `/openapi.json` and `/docs`.
+Native hosts check offline `.lic` licenses with `acquire_license_ex()` and use
+the device-bound API for protected online sessions.
 
-The successful hot path is one validated request, rate-limit checks, one D1
-lookup by primary key, one signed assertion, and one JSON response. The Worker
-also supports an optional Cloudflare rate-limit binding named
-`VERIFY_RATE_LIMITER`.
+Two optional Cloudflare rate-limit bindings reject floods at the edge before any
+D1 write: `BOUND_REGISTRATION_RATE_LIMITER` for registration and
+`BOUND_SESSION_RATE_LIMITER` for challenge, exchange and renewal traffic.
 
 > **Directory renamed (operator note).** This service directory was renamed
 > from `cloudflare-online-verifier` to `cloudflare-licensing-backend` to reflect
-> its multiple roles (online verifier, offline config signer, device/relay
-> tooling). The deployed Worker `name` and the D1 `database_name` are
+> its multiple roles (protected device licensing, order fulfillment, webhooks,
+> offline config signer). The deployed Worker `name` and the D1 `database_name` are
 > intentionally **unchanged** (still `licensecc-online-verifier`) so live infra
 > and hardcoded client URLs are not orphaned. After moving to this path you must
 > re-create / reinstall the gitignored working files at the new location:
-> `wrangler.toml`, `.dev.vars`, `.online-key/`, `node_modules/`, and
-> `.wrangler/`. Run `npx --yes npm@10.9.8 ci` from the repository root; the root
+> `wrangler.toml`, `.dev.vars`, `node_modules/`, and `.wrangler/`. Run
+> `npx --yes npm@10.9.8 ci` from the repository root; the root
 > `package-lock.json` is authoritative for every Worker workspace.
 
 ## Hosted setup (remote changes)
@@ -59,10 +57,11 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
 
 2. Copy `wrangler.example.toml` to `wrangler.toml` and set the D1 database id.
    Keep `workers_dev`, `preview_urls`, `observability`, `migrations_dir`, and
-   `ratelimits` explicit. If your account cannot use the rate-limit binding,
-   remove `[[ratelimits]]`; the Worker will still run without the optional
-   binding. Cloudflare requires `namespace_id` to be a positive integer string,
-   for example `"1001"`.
+   `ratelimits` explicit. If your account cannot use rate-limit bindings,
+   remove both `[[ratelimits]]` blocks; the Worker will still run without the
+   optional bindings, but the protected deploy workflows require both.
+   Cloudflare requires `namespace_id` to be a positive integer string, for
+   example `"1001"`.
 
 3. Apply the baseline schema to the newly created database:
 
@@ -77,27 +76,12 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
    restore scratch databases), apply the baseline, and take a fresh backup.
    Backups of an earlier database cannot be restored into the new schema.
 
-4. Generate a dedicated online assertion key:
+4. Store each name listed under
+   [Protected deployment readiness checks](#protected-deployment-readiness-checks)
+   as a Worker secret with `npx wrangler secret put <NAME>`. Do not commit them,
+   and never reuse the license-issuing private key as the protected lease signer.
 
-   ```console
-   npm run generate-online-key -- --out-dir .online-key
-   ```
-
-   Store `.online-key/online_private_key.pkcs8.pem` as a Worker secret. Do not
-   reuse the license-issuing private key for online assertions.
-
-5. Store signing material as Worker secrets:
-
-   ```console
-   npx wrangler secret put ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM
-   npx wrangler secret put ONLINE_SIGNING_KEY_ID
-   ```
-
-   The private key must be PKCS#8 PEM. Do not commit it. `ONLINE_SIGNING_KEY_ID`
-   must match the `key_id` that `generate-online-key` wrote to
-   `.online-key/online_public_key.json`.
-
-6. Insert or update an entitlement:
+5. Insert or update an entitlement:
 
    From the repository root in PowerShell, with an authorized short-lived
    staging sync credential:
@@ -119,7 +103,7 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
    device limit and trial state, never a seat pool, as documented in
    `../cloudflare-license-admin/README.md`.
 
-7. Deploy:
+6. Deploy:
 
    ```console
    npx --yes npm@10.9.8 ci
@@ -132,104 +116,23 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
    After the root install, the same `npm run <script>` commands also work from
    this service directory; do not create a package-local lockfile.
 
-8. Validate the public verifier abuse controls against a staging Worker:
+7. Validate protected readiness against the deployed Worker:
 
    ```console
-   npm run validate:public-verifier --url=https://licensecc-online-verifier.example.workers.dev --expect-rate-limit --json
+   npm run validate:protected-smoke -- --url https://licensecc-online-verifier.example.workers.dev
    ```
 
-   In a legacy unproved configuration the drill sends a malformed request, an
-   unknown-entitlement request, and a bounded burst from one source. In the
-   protected deployment workflows it instead reads a dedicated registered
-   fixture and P-256 private key from `LICENSECC_PUBLIC_VERIFIER_*`, signs a
-   fresh proof for every structurally valid request, requires a signed allow,
-   observes `429 rate_limited`, waits for a proof-authenticated signed recovery,
-   and redacts the target, fixture, proof key, fingerprint, and assertion.
-   Use `--flag=value` form when invoking through `npm run`; the script also
-   supports direct `node scripts/public-verifier-drill.mjs --url <url> ...`.
-
-## Capacity and observability evidence
-
-`npm run capacity:public-verifier` is the bounded, open-loop load harness for
-the production-readiness `PRD-05` public-verification objectives. It always
-requires a declared peak rate `P` and maximum in-flight concurrency. The
-acceptance modes cannot be shortened below their contract durations:
-
-| Mode | Offered load | Minimum duration | Promotion use |
-| --- | ---: | ---: | --- |
-| `burst` | `2P` | 30 minutes | Acceptance evidence for the burst objective |
-| `soak` | `P` | 4 hours | Acceptance evidence for the soak objective |
-| `rehearsal` | `P` | 0.1 seconds; 60-second cap | Fast local/CI validation only; never acceptance evidence |
-
-Run acceptance modes only against an approved staging environment containing
-a dedicated active entitlement. Supply sensitive request identity through the
-environment so it is not copied into shell history, and record the exact
-candidate commit explicitly:
-
-```powershell
-$env:LICENSECC_CAPACITY_URL = "https://staging-verifier.example.workers.dev"
-$env:LICENSECC_CAPACITY_FINGERPRINT = "<dedicated-staging-64-hex-fingerprint>"
-$env:LICENSECC_CAPACITY_PEAK_RPS = "<declared-P>"
-$env:LICENSECC_CAPACITY_MAX_CONCURRENCY = "<declared-concurrency>"
-$env:LICENSECC_CAPACITY_ENVIRONMENT = "staging"
-$env:LICENSECC_RELEASE_COMMIT = "<exact-40-hex-commit>"
-npm run capacity:public-verifier -- --mode=burst
-npm run capacity:public-verifier -- --mode=soak
-```
-
-The public `/v1/verify` route does not use account-token Authorization, so the
-capacity harness neither accepts nor sends an account token. When request
-proof is enforced, set
-`LICENSECC_CAPACITY_DEVICE_PRIVATE_KEY_PKCS8_PEM` and
-`LICENSECC_CAPACITY_DEVICE_KEY_ID` to a dedicated registered staging P-256 key.
-The key is imported once in memory and signs a fresh nonce and timestamp for
-every request; neither key material nor key id appears in evidence. A short
-plumbing check is explicitly labeled and emitted as non-promotable:
-
-```powershell
-npm run capacity:public-verifier -- --mode=rehearsal --url=http://127.0.0.1:8787 --peak-rps=5 --max-concurrency=2 --duration-seconds=5 --fingerprint=<64-hex> --expected-result=deny
-```
-
-Each run emits one JSON evidence document to standard output. It records the
-declared and offered rates, planned/dispatched/completed totals, scheduling
-misses, achieved throughput, maximum concurrency, p50/p95/p99 latency,
-availability, unexpected-server-error percentage, status counts, and separate
-allow, entitlement-deny, and rate-limit classifications. Acceptance modes use
-representative `allow` traffic and enforce all of these checks: p95 below 500
-ms, p99 below 1 second, recognized-response availability at least 99.9%,
-allowed responses at least 99.9%, unexpected server errors below 0.1%, no
-unexplained error class, and no dropped scheduled request. The target URL,
-project, feature, fingerprint, device hash, request body,
-response body, and signed assertion are never included in evidence.
-
-The harness caps concurrency at 512, each request at the Worker's 4,096-byte
-body limit, each response at 65,536 bytes, and each request timeout at 60
-seconds. A concurrency-saturated scheduler records missed requests and fails
-the run instead of building an unbounded queue. A single-source load can
-legitimately encounter the public client-network limiter; those `429`
-responses are reported separately and fail an acceptance run's representative
-`allow` check. Use approved distributed staging runners or a reviewed staging
-rate-limit profile when the declared traffic model has multiple sources.
-
-Capacity evidence does not by itself prove the observability half of `PRD-05`.
-For the same UTC window, retain Workers Logs/dashboard evidence, exercise the
-documented elevated-error and stale-backup alert paths, and inspect structured
-logs for tokens, OTPs, signing material, license payloads, and customer data.
-The exact dashboard panels, thresholds, drill sequence, and evidence fields are
-defined in [`doc/operations/observability.md`](../../doc/operations/observability.md).
-Do not run the harness against production unless that separate operator action
-is explicitly approved.
+   The smoke is credential-free; the
+   [protected-device API](#protected-device-api-staged-implementation) section
+   describes what it proves.
 
 ## Protected deployment readiness checks
 
 The protected production and staging deployment workflows run a bounded,
 name-only Worker secret inventory before any deploy. The check validates the
 materialized `wrangler.toml` as the exact environment profile, requires
-`REQUEST_SIGNATURE_MODE`, `ACCOUNT_TOKEN_MODE`, `ORDER_INGEST_MODE`, and
-`ORDER_SIGNER_SCOPE_MODE` to be `required`, requires `DEVICE_PROOF_MODE=off`
-for the standard portal-compatible topology, requires
-the environment-specific `ORDER_INGEST_AUDIENCE`, and requires a structured
-`ACCOUNT_TOKEN_ACTIVE_PEPPER_ID`. It then invokes one
+`ORDER_INGEST_MODE` and `ORDER_SIGNER_SCOPE_MODE` to be `required`, and
+requires the environment-specific `ORDER_INGEST_AUDIENCE`. It then invokes one
 `npx wrangler secret list --format json` command with a 30-second timeout and
 bounded output. Only secret names are parsed; secret values, Wrangler
 diagnostics, the account, and the Worker target are never emitted.
@@ -250,15 +153,16 @@ The materializer also refuses a backend config whose `vars` lack a valid
 Add both to `LICENSECC_BACKEND_WRANGLER_CONFIG_B64` in both the `staging` and
 `production` environments before any protected workflow runs: every workflow
 that materializes the backend config (`deploy-production.yml`,
-`deploy-staging.yml`, `rollback-workers.yml`, `recovery-drill.yml` and
-`capacity.yml`) fails at materialization until they are there, including an
-emergency rollback.
+`deploy-staging.yml`, `rollback-workers.yml` and `recovery-drill.yml`) fails at
+materialization until they are there, including an emergency rollback. The
+materializer also requires exactly two `[[ratelimits]]` bindings,
+`BOUND_REGISTRATION_RATE_LIMITER` and `BOUND_SESSION_RATE_LIMITER`, each with a
+positive `namespace_id`, `limit` and `period`.
 
 The required deployed secret names are:
 
-- `ACCOUNT_TOKEN_PEPPERS`
-- `ONLINE_SIGNING_KEY_ID`
-- `ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM`
+- `BOUND_APPROVAL_ENCRYPTION_KEYS`
+- `BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM`
 - `ORDER_HMAC_SECRETS`
 - `ORDER_SIGNER_SCOPES`
 - `WEBHOOK_SIGNING_KEY_ID`
@@ -269,11 +173,6 @@ check with `npm run validate:secret-inventory -- --profile=staging` (or
 `--profile=production`). This proves presence by name, not the contents of a
 secret map or whether an active selector names an entry in that map; runtime
 health and the signed post-deploy drills remain necessary.
-
-The standard four-Worker topology keeps `DEVICE_PROOF_MODE=off` because the
-current portal checkout/download flows do not originate a device-held proof.
-That selector controls whether proof is mandatory; a proof that is presented
-is still always verified.
 
 Staging additionally runs `npm run validate:staging-order` with no command-line
 arguments. Its URL, dedicated HMAC key id and key bytes, and exact synthetic
@@ -302,18 +201,10 @@ duplicate check as crash-redrive evidence.
 
 ## Notes
 
-- Request `client_hardening` is telemetry only. The Worker logs it on allow and
-  deny paths for operator visibility, but it is not included in the signed
-  assertion payload and must not be treated as proof of host integrity.
-- Request proof-of-possession is opt-in. Set `REQUEST_SIGNATURE_MODE=soft` to
-  log missing or invalid device-key proof while preserving otherwise-valid
-  allows, then move selected products to `required` only after clients register
-  device keys and support has a recovery path. `off` is the compatibility
-  default. Security rollout selectors are exact: `ACCOUNT_TOKEN_MODE`,
-  `REQUEST_SIGNATURE_MODE`, `DEVICE_PROOF_MODE`, and
-  `ORDER_SIGNER_SCOPE_MODE` accept only their documented lowercase values.
-  An unset/empty value keeps its legacy `off` default; any other non-empty
-  value fails closed with `503 config_error`. `/health` stays callable: a
+- The security rollout selector is exact: `ORDER_SIGNER_SCOPE_MODE` accepts
+  only its documented lowercase values. An unset/empty value keeps its `off`
+  default; any other non-empty value fails closed with `503 config_error`
+  (`503 temporarily_unavailable` on the `/v2` routes). `/health` stays callable: a
   healthy `200` reports `protected_device_ready: true` plus optional
   names-only `config_warnings`; a protected device configuration that fails
   its local readiness checks returns `503` with `protected_device_ready:
@@ -321,56 +212,13 @@ duplicate check as crash-redrive evidence.
   names only. Static `/openapi.json` and `/docs`
   remain available so operators can inspect this contract during a readiness
   failure.
-- `required` request-proof mode expects `request_signature_version=1`,
-  `device_key_id=sha256:<64-hex>`, `request_timestamp`,
-  `request_signature_algorithm=ecdsa-p256-sha256`, and a base64
-  `request_signature` over the canonical request payload. The public key is
-  loaded from `entitlement_devices.public_key_spki_der_base64` for the exact
-  project/feature/license fingerprint and device key id. Device key material
-  is generated on the client/device side (`npm run device-key -- generate`).
-  Production hosts should create or import the P-256 key through their own
-  platform key-store or secure-enclave integration when available, then
-  persist only the public SPKI and `sha256:<spki der>` key id. The optional
-  request-proof protocol is available for integration. The C++ client runtime
+- Protected device keys are created and held on the client. The C++ client runtime
   provides conditional Windows Platform KSP and Ubuntu TPM2/OpenSSL provider
   surfaces, but they remain platform-specific and are not a universal client
   integration or a hosted-service feature. This service does not claim TPM
   support; callers must provision and configure their provider locally.
-- `REQUEST_SIGNATURE_MAX_SKEW_SECONDS` bounds request timestamp skew for proof
-  verification. Keep the default small for production, and use `soft` mode to
-  learn whether customer clocks or proxies need product-specific handling before
-  enforcing it.
-- Active entitlement assertions use `assertion_ttl_seconds` and are clamped to
-  `valid_until` when that optional D1 column is set. A `NULL` validity window
-  means unbounded.
-- Denied entitlements are unsigned to avoid spending signing CPU on arbitrary
-  unknown fingerprints.
-- `VERIFY_RATE_LIMITER` protects the public verification endpoint before D1 is
-  queried. The key is client-network scoped (`client:<ip>`) so rotating license
-  fingerprints from one source cannot bypass the Cloudflare binding.
-- `D1_RATE_LIMIT_ENABLED=1` enables deterministic fixed-window D1 fallback
-  limiters. The Worker checks a client-network tier and an entitlement tier by
-  default. Optional per-tier overrides are available through
-  `D1_CLIENT_RATE_LIMIT_*`, `D1_ENTITLEMENT_RATE_LIMIT_*`, and
-  `D1_GLOBAL_RATE_LIMIT_*`. D1 fallback limiting adds D1 writes before each
-  entitlement lookup, so keep it conservative for low-volume deployments.
-- Rate-limit tier defaults are a deliberate low-scale decision, not an omission:
-  the client-network tier and the entitlement tier are on (with
-  `D1_RATE_LIMIT_ENABLED`, plus the optional Cloudflare `VERIFY_RATE_LIMITER`),
-  and the global tier is **off** by default because it adds a contended D1 write
-  on every request. Enable `D1_GLOBAL_RATE_LIMIT_ENABLED=1` only if you observe
-  rotating-fingerprint abuse spread across many client IPs (where the per-IP and
-  per-entitlement tiers cannot bound the aggregate). Validate that a
-  rotating-fingerprint flood from one source is still limited with
-  `npm run validate:public-verifier -- --url <staging> --rotate-fingerprint
-  --expect-rate-limit`: distinct fingerprints cannot trip the entitlement tier,
-  so a 429 proves the client-network tier holds. The HTTP response is a single
-  `rate_limited` code for every tier; the limiting tier appears only in the
-  `LOG_RATE_LIMIT_DECISIONS` server log.
-- Set `LOG_RATE_LIMIT_DECISIONS=1` temporarily when validating a live rate-limit
-  binding; leave it unset during normal operation.
-- Logs are structured JSON and redact fingerprints/device hashes. Do not log
-  assertions or private key material.
+- Logs are structured JSON and carry only allowlisted operational fields. Do
+  not log lease tokens or private key material.
 - `schema.sql` is a generated snapshot of the single baseline migration
   `migrations/0001_baseline.sql`, which stays authoritative and is edited in
   place. After editing the baseline, run `npm run schema:write`;
@@ -711,7 +559,7 @@ bytes and `nonce` is 32, both canonical unpadded base64url.
 Configure `BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM` as an independently purposed
 Worker secret and `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM` with its public key.
 The pair must use RSA-3072/SHA-256; the key ID is derived from public SPKI. There
-is no fallback to v201/online-assertion keys. Keep the private key out of local
+is no fallback to the v201 license-signing keys. Keep the private key out of local
 tracked configuration and client artifacts. `BOUND_DEVICE_CONFIG` and
 `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM` are deploy-config vars, and the
 protected deploy materializer refuses a backend config without a valid registry
@@ -727,8 +575,8 @@ before switching signers. Old public keys can still be required to load saved
 checkpoints after their leases expire; lease expiry alone is not a removal rule.
 
 All four routes share mandatory fixed D1 budgets of 20 requests per client per
-minute and 1,000 per backend per minute; the Cloudflare limiter also applies when
-bound. Legacy limiter/proof/account-token `off` settings do not disable v2 checks.
+minute and 1,000 per backend per minute; the Cloudflare edge limiters also apply
+when bound. No configuration switch disables these checks.
 Limits run before JSON parsing/key import. Responses are no-store, and 429 includes
 `Retry-After: 60`. A request URL must have no query or fragment, including empty
 delimiters; those bytes are not part of the signed protocol path.
@@ -793,12 +641,11 @@ and a max(240, 2 × `max_active_devices`)/minute customer limit, computed
 from the entitlement being renewed or exchanged and charged against one
 counter shared by every entitlement of that customer; replaying an
 already-committed operation returns the stored lease without spending
-either budget, so idempotent reconciliation is never rate-limited. These
-gates are independent of legacy optional-proof switches. The configured
-legacy `VERIFY_RATE_LIMITER` additionally protects registration; the
-optional `BOUND_SESSION_RATE_LIMITER`
-Cloudflare rate limiter rejects session-route (challenge/exchange/renew)
-floods at the edge, before any D1 write. Neither edge limiter imposes a low
+either budget, so idempotent reconciliation is never rate-limited. The
+optional `BOUND_REGISTRATION_RATE_LIMITER` Cloudflare rate limiter rejects
+registration floods and the optional `BOUND_SESSION_RATE_LIMITER` rejects
+session-route (challenge/exchange/renew) floods at the edge, before any D1
+write. Neither edge limiter imposes a low
 shared-IP budget on short feature jobs. Operators should also add a WAF rate
 rule in front of these routes to blunt floods distributed across many source
 IPs, which per-source edge and D1 limits cannot address alone.

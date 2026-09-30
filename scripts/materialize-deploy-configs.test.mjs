@@ -99,11 +99,6 @@ routes = [{ pattern = "${values.backendHost}", custom_domain = true }]
 crons = ["*/5 * * * *"]
 
 [vars]
-REQUEST_SIGNATURE_MODE = "required"
-REQUEST_SIGNATURE_MAX_SKEW_SECONDS = "300"
-DEVICE_PROOF_MODE = "off"
-ACCOUNT_TOKEN_MODE = "required"
-ACCOUNT_TOKEN_ACTIVE_PEPPER_ID = "p1"
 ORDER_INGEST_MODE = "required"
 ORDER_INGEST_AUDIENCE = "${values.audience}"
 ORDER_MAX_SKEW_SECONDS = "300"
@@ -128,9 +123,14 @@ database_id = "${values.databaseId}"
 migrations_dir = "migrations"
 
 [[ratelimits]]
-name = "VERIFY_RATE_LIMITER"
+name = "BOUND_REGISTRATION_RATE_LIMITER"
 namespace_id = "1001"
 simple = { limit = 20, period = 60 }
+
+[[ratelimits]]
+name = "BOUND_SESSION_RATE_LIMITER"
+namespace_id = "1002"
+simple = { limit = 600, period = 60 }
 `;
 }
 
@@ -402,12 +402,11 @@ test("rejects D1 split-brain and unsafe backend or backup operations", () => {
     ["backup export account mismatch", (env) => mutateJson(env, "LICENSECC_BACKUP_WRANGLER_CONFIG_B64", (config) => { config.vars.ACCOUNT_ID = "11111111111111111111111111111111"; }), /vars\.ACCOUNT_ID must match/u],
     ["preview database", (env) => mutateJson(env, "LICENSECC_ADMIN_WRANGLER_CONFIG_B64", (config) => { config.d1_databases[0].preview_database_id = config.d1_databases[0].database_id; }), /preview D1 identity/u],
     ["wrong migrations owner", (env) => mutateJson(env, "LICENSECC_PORTAL_WRANGLER_CONFIG_B64", (config) => { config.d1_databases[0].migrations_dir = "migrations"; }), /migrations_dir/u],
-    ["request proof soft", (env) => mutateBackend(env, (source) => source.replace('REQUEST_SIGNATURE_MODE = "required"', 'REQUEST_SIGNATURE_MODE = "soft"')), /REQUEST_SIGNATURE_MODE/u],
-    ["device proof globally required before portal proof support", (env) => mutateBackend(env, (source) => source.replace('DEVICE_PROOF_MODE = "off"', 'DEVICE_PROOF_MODE = "required"')), /DEVICE_PROOF_MODE/u],
-    ["missing active pepper selector", (env) => mutateBackend(env, (source) => source.replace('ACCOUNT_TOKEN_ACTIVE_PEPPER_ID = "p1"', 'ACCOUNT_TOKEN_ACTIVE_PEPPER_ID = ""')), /ACCOUNT_TOKEN_ACTIVE_PEPPER_ID/u],
-    ["unsafe request skew", (env) => mutateBackend(env, (source) => source.replace('REQUEST_SIGNATURE_MAX_SKEW_SECONDS = "300"', 'REQUEST_SIGNATURE_MAX_SKEW_SECONDS = "0"')), /REQUEST_SIGNATURE_MAX_SKEW_SECONDS/u],
+    ["order ingest soft", (env) => mutateBackend(env, (source) => source.replace('ORDER_INGEST_MODE = "required"', 'ORDER_INGEST_MODE = "soft"')), /ORDER_INGEST_MODE/u],
+    ["order signer scope off", (env) => mutateBackend(env, (source) => source.replace('ORDER_SIGNER_SCOPE_MODE = "required"', 'ORDER_SIGNER_SCOPE_MODE = "off"')), /ORDER_SIGNER_SCOPE_MODE/u],
+    ["unsafe order skew", (env) => mutateBackend(env, (source) => source.replace('ORDER_MAX_SKEW_SECONDS = "300"', 'ORDER_MAX_SKEW_SECONDS = "0"')), /ORDER_MAX_SKEW_SECONDS/u],
     ["order audience reused", (env) => mutateBackend(env, (source) => source.replace('ORDER_INGEST_AUDIENCE = "licensecc-production"', 'ORDER_INGEST_AUDIENCE = "licensecc-staging"')), /ORDER_INGEST_AUDIENCE/u],
-    ["missing rate limiter", (env) => mutateBackend(env, (source) => source.replace('name = "VERIFY_RATE_LIMITER"', 'name = "OTHER_LIMITER"')), /VERIFY_RATE_LIMITER/u],
+    ["missing registration rate limiter", (env) => mutateBackend(env, (source) => source.replace('name = "BOUND_REGISTRATION_RATE_LIMITER"', 'name = "OTHER_LIMITER"')), /BOUND_REGISTRATION_RATE_LIMITER/u],
     ["backup account placeholder", (env) => mutateJson(env, "LICENSECC_BACKUP_WRANGLER_CONFIG_B64", (config) => { config.vars.ACCOUNT_ID = "replace-with-account-id"; }), /placeholder/u],
     ["invalid backup retention", (env) => mutateJson(env, "LICENSECC_BACKUP_WRANGLER_CONFIG_B64", (config) => { config.vars.BACKUP_RETENTION_DAYS = "0"; }), /BACKUP_RETENTION_DAYS/u],
     ["wrong backup prefix", (env) => mutateJson(env, "LICENSECC_BACKUP_WRANGLER_CONFIG_B64", (config) => { config.vars.BACKUP_PREFIX = "d1/other"; }), /BACKUP_PREFIX/u],

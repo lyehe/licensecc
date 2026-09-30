@@ -59,7 +59,7 @@ test("device lease preserves claims and domain separates exact signing bytes", (
   assert.equal(dec.decode(deviceLeaseSigningInput(payload)), `lccdl1.${dec.decode(payload)}`);
   const token = encodeDeviceLeaseEnvelope(payload, new Uint8Array(384));
   assert.deepEqual(decodeDeviceLeaseEnvelope(token).claims, claims());
-  assert.throws(() => decodeDeviceLeaseEnvelope(token.replace("lccdl1", "lccoa1")));
+  assert.throws(() => decodeDeviceLeaseEnvelope(token.replace("lccdl1", "lcccfg1")));
   assert.throws(() => decodeDeviceLeaseEnvelope(token + ".extra"));
   assert.throws(() => decodeDeviceLeaseEnvelope(token + "="));
 });

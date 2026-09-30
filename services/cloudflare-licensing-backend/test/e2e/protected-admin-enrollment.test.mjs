@@ -36,7 +36,7 @@ for (const [type, basis] of [["node_locked", "from_issue"], ["trial", "from_issu
     assert.equal(grant.data.license_id, license.data.id);
     assert.equal(grant.data.enforcement_mode, "device_bound_v1");
     const env = { DB: portal.DB, BOUND_DEVICE_CONFIG: JSON.stringify(config), BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM: privatePem,
-      BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM: publicPem, DEVICE_PROOF_MODE: "off", ACCOUNT_TOKEN_MODE: "off", REQUEST_SIGNATURE_MODE: "off", D1_RATE_LIMIT_ENABLED: "0" };
+      BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM: publicPem };
     const call = async (path, body) => {
       const response = await backend.fetch(new Request(`https://license.test${path}`, { method: "POST",
         headers: { "content-type": "application/json", "cf-connecting-ip": "127.0.0.2" }, body: JSON.stringify(body) }), env);

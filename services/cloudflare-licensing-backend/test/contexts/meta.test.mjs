@@ -35,26 +35,18 @@ test("health reports protected_device_ready false and 503 without BOUND_DEVICE_C
   }
 });
 
-test("health reports the same readiness body whatever ACCOUNT_TOKEN_MODE is", async () => {
-  for (const ACCOUNT_TOKEN_MODE of ["required", "soft", "off", undefined]) {
-    const result = await health({ ...PROTECTED, ACCOUNT_TOKEN_MODE });
-    assert.equal(result.status, 200);
-    assert.deepEqual(result.body, { ok: true, service: "licensecc-online-verifier", protected_device_ready: true });
-  }
-});
-
 test("an invalid security selector fails health even when protected licensing is ready", async () => {
-  const invalid = await health({ ...PROTECTED, ACCOUNT_TOKEN_MODE: "not-a-mode" });
+  const invalid = await health({ ...PROTECTED, ORDER_SIGNER_SCOPE_MODE: "not-a-mode" });
   assert.equal(invalid.status, 503, "invalid security configuration fails readiness");
   assert.equal(invalid.body.ok, false);
   assert.equal(invalid.body.protected_device_ready, true);
   assert.equal(invalid.body.code, "config_error");
-  assert.deepEqual(invalid.body.invalid_config_modes, ["ACCOUNT_TOKEN_MODE"]);
+  assert.deepEqual(invalid.body.invalid_config_modes, ["ORDER_SIGNER_SCOPE_MODE"]);
   assert.doesNotMatch(JSON.stringify(invalid.body), /not-a-mode/, "health never reflects raw configuration values");
 });
 
 test("/health exposes every invalid security-mode selector without its raw value", async () => {
-  const selectors = ["ACCOUNT_TOKEN_MODE", "REQUEST_SIGNATURE_MODE", "DEVICE_PROOF_MODE", "ORDER_SIGNER_SCOPE_MODE"];
+  const selectors = ["ORDER_SIGNER_SCOPE_MODE"];
   // Treat typos, case changes, and whitespace changes as configuration errors. Each
   // one could otherwise normalize into an unintentionally permissive mode.
   for (const raw of ["typo", "REQUIRED", " required"]) {
@@ -71,14 +63,10 @@ test("/health exposes every invalid security-mode selector without its raw value
 });
 
 test("/health surfaces config-consistency warnings for a half-configured deploy (R2.3)", async () => {
-  // Secrets present but their enforcing modes left off -> a permissive posture the operator likely
+  // A secret present but its enforcing mode left off -> a permissive posture the operator likely
   // did not intend. Marker-free non-empty values (the check only tests presence, never parses).
   const env = {
     ...PROTECTED,
-    ACCOUNT_TOKEN_PEPPERS: "configured",
-    ACCOUNT_TOKEN_MODE: "off",
-    ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM: "present",
-    REQUEST_SIGNATURE_MODE: "off",
     ORDER_SIGNER_SCOPES: "configured",
     ORDER_SIGNER_SCOPE_MODE: "off",
   };
@@ -86,18 +74,14 @@ test("/health surfaces config-consistency warnings for a half-configured deploy 
   const body = await res.json();
   assert.equal(body.ok, true);
   assert.ok(Array.isArray(body.config_warnings));
-  assert.ok(body.config_warnings.some((w) => w.includes("ACCOUNT_TOKEN_MODE")));
-  assert.ok(body.config_warnings.some((w) => w.includes("REQUEST_SIGNATURE_MODE")));
   assert.ok(body.config_warnings.some((w) => w.includes("ORDER_SIGNER_SCOPE_MODE")));
 });
 
 test("/health has no config_warnings when enforcing modes match the configured secrets (R2.3)", async () => {
   const env = {
     ...PROTECTED,
-    ACCOUNT_TOKEN_PEPPERS: "configured",
-    ACCOUNT_TOKEN_MODE: "required",
-    ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM: "present",
-    REQUEST_SIGNATURE_MODE: "required",
+    ORDER_SIGNER_SCOPES: "configured",
+    ORDER_SIGNER_SCOPE_MODE: "required",
   };
   const res = await worker.fetch(new Request("https://example.test/health"), env);
   const body = await res.json();
@@ -106,46 +90,24 @@ test("/health has no config_warnings when enforcing modes match the configured s
 });
 
 test("/health normalizes empty, unset, and off paired-mode values before emitting half-config warnings", async () => {
-  const cases = [
-    {
-      material: "ACCOUNT_TOKEN_PEPPERS",
-      mode: "ACCOUNT_TOKEN_MODE",
-      warning: "ACCOUNT_TOKEN_MODE",
-      value: "configured",
-    },
-    {
-      material: "ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM",
-      mode: "REQUEST_SIGNATURE_MODE",
-      warning: "REQUEST_SIGNATURE_MODE",
-      value: "present",
-    },
-    {
-      material: "ORDER_SIGNER_SCOPES",
-      mode: "ORDER_SIGNER_SCOPE_MODE",
-      warning: "ORDER_SIGNER_SCOPE_MODE",
-      value: "configured",
-    },
-  ];
-  for (const entry of cases) {
-    for (const raw of [undefined, "", "off"]) {
-      const env = { ...PROTECTED, [entry.material]: entry.value };
-      if (raw !== undefined) env[entry.mode] = raw;
-      const response = await worker.fetch(new Request("https://example.test/health"), env);
-      assert.equal(response.status, 200);
-      const body = await response.json();
-      assert.ok(body.config_warnings.some((warning) => warning.includes(entry.warning)));
-    }
+  for (const raw of [undefined, "", "off"]) {
+    const env = { ...PROTECTED, ORDER_SIGNER_SCOPES: "configured" };
+    if (raw !== undefined) env.ORDER_SIGNER_SCOPE_MODE = raw;
+    const response = await worker.fetch(new Request("https://example.test/health"), env);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.ok(body.config_warnings.some((warning) => warning.includes("ORDER_SIGNER_SCOPE_MODE")));
   }
 });
 
 test("/health treats an invalid paired mode as a readiness error rather than a permissive warning", async () => {
   const response = await worker.fetch(new Request("https://example.test/health"), {
-    ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM: "present",
-    REQUEST_SIGNATURE_MODE: "not-a-mode",
+    ORDER_SIGNER_SCOPES: "configured",
+    ORDER_SIGNER_SCOPE_MODE: "not-a-mode",
   });
   assert.equal(response.status, 503);
   const body = await response.json();
-  assert.deepEqual(body.invalid_config_modes, ["REQUEST_SIGNATURE_MODE"]);
+  assert.deepEqual(body.invalid_config_modes, ["ORDER_SIGNER_SCOPE_MODE"]);
   assert.ok(body.config_warnings.some((warning) => warning.includes("invalid value")));
-  assert.equal(body.config_warnings.some((warning) => warning.includes("online signing is configured")), false);
+  assert.equal(body.config_warnings.some((warning) => warning.includes("order signer scoping is not enforced")), false);
 });

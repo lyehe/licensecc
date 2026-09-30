@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "cloudflare-licensing-backend", "migrations");
 
-// --- D1-like adapter over node:sqlite (ported from the backend account_isolation matrix) ---------
+// --- D1-like adapter over node:sqlite -----------------------------------------------------------
 
 class PreparedStatement {
   constructor(db, sql) {
