@@ -13,6 +13,12 @@ test("pathToPattern compiles templates to anchored regexes", () => {
   assert.deepEqual("/api/admin/entitlements/e1/devices/d1/revoke".match(re2)?.slice(1), ["e1", "d1"]);
 });
 
+test("the admin serves no seat, legacy-device, meter or resources route", () => {
+  assert.equal(ALL_ROUTES.length, 68);
+  const legacyOnly = ALL_ROUTES.filter((route) => /release-seats|\/devices\b|\/meter\b|\/resources\b/.test(route.path));
+  assert.deepEqual(legacyOnly, []);
+});
+
 test("route inventory has no duplicate method+path keys", () => {
   const keys = ALL_ROUTES.map((r) => `${r.method} ${r.path}`);
   assert.equal(new Set(keys).size, keys.length);
