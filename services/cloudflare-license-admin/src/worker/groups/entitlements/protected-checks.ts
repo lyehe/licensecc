@@ -27,7 +27,7 @@ const POLICY_FIELDS = ["id", "project", "status", "type", "valid_from_offset_sec
 // The provenance, capacity and trial columns the would-be row models, with the schema default each
 // keeps when a create writes none of them (pinned to schema.sql by the SQL suite). A policy stamp
 // writes policy_id, the device limit and the trial state. A create that updates an existing
-// protected grant keeps that grant's values for every column it does not write.
+// grant keeps that grant's values for every column it does not write.
 export const STAMP_COLUMN_DEFAULTS = {
   policy_id: null, max_active_devices: 1,
   is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0,
@@ -91,7 +91,7 @@ export function protectedCreateAssertion(env: Env, input: CreateInput, policy?: 
   // still observe the claim/stamp. Failure raises inside D1's batch and rolls
   // back the preceding write; it never reports a failure after partial commit.
   return env.DB.prepare(`SELECT CASE WHEN changes()=1 AND EXISTS (
-    SELECT 1 FROM entitlements e WHERE e.project=? AND e.feature=? AND e.license_fingerprint=? AND e.enforcement_mode='device_bound_v1'
+    SELECT 1 FROM entitlements e WHERE e.project=? AND e.feature=? AND e.license_fingerprint=?
       AND ${checks.map((check) => `(${check.sql})`).join("\n      AND ")}
     ) THEN 1 ELSE json('protected_creation_conflict') END`)
     .bind(input.project, input.feature, input.license_fingerprint, ...checks.flatMap((check) => check.binds));
@@ -99,7 +99,7 @@ export function protectedCreateAssertion(env: Env, input: CreateInput, policy?: 
 
 /**
  * The row a create would have written, as a CTE named `e`: its input columns, its policy stamp or
- * its own device limit, and otherwise what an existing protected grant with this key keeps (or the
+ * its own device limit, and otherwise what an existing grant with this key keeps (or the
  * schema default). Values travel as one JSON document so json_extract types numbers the way an
  * INTEGER column stores them.
  * A create that writes another column before the assertion must model it here too; the SQL suite
@@ -116,7 +116,7 @@ export function protectedWouldBeRowQuery(input: CreateInput, policy?: Policy): {
     .map(([column, fallback]) => `${fallback === null ? `x.${column}` : `coalesce(x.${column}, ${fallback})`} AS ${column}`);
   return {
     sql: `WITH w(doc) AS (SELECT ?),
-    x AS (SELECT ${Object.keys(STAMP_COLUMN_DEFAULTS).join(", ")} FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=? AND enforcement_mode='device_bound_v1'),
+    x AS (SELECT ${Object.keys(STAMP_COLUMN_DEFAULTS).join(", ")} FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=?),
     e AS (SELECT ${[...Object.keys(written).map((column) => `json_extract(w.doc,'$.${column}') AS ${column}`), ...kept].join(", ")} FROM w LEFT JOIN x ON 1)`,
     binds: [JSON.stringify(written), input.project, input.feature, input.license_fingerprint],
   };

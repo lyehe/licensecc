@@ -209,7 +209,6 @@ async function createEntitlementFor(env, customerId, fingerprint, licenseId) {
       license_fingerprint: fingerprint,
       customer_id: customerId,
       license_id: license,
-      enforcement_mode: "device_bound_v1",
     }),
   }), env);
   assert.equal(res.status, 200, "seed entitlement");

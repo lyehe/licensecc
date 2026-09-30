@@ -1518,11 +1518,6 @@
                   "minLength": 1,
                   "type": "string"
                 },
-                "enforcement_mode": {
-                  "const": "device_bound_v1",
-                  "description": "Required. Every create is protected; an omitted or any other mode returns 400 invalid_request. A protected grant requires an active customer, that customer's license for this project, and a usable policy. An existing row of another mode is never converted in place (409 enforcement_mode_conflict). Retries must repeat the same tuple.",
-                  "type": "string"
-                },
                 "feature": {
                   "pattern": "^[A-Za-z0-9_.:-]{1,15}(?![\\s\\S])",
                   "type": "string"
@@ -1544,7 +1539,7 @@
                   "type": "integer"
                 },
                 "policy_id": {
-                  "description": "Optional. When present (and non-empty), the entitlement is STAMPED from this policy template instead of validated directly. Requires POLICY_STAMP_MODE=on (else 400 policy_stamping_disabled); the policy must exist and be active (else 404 policy_not_found). The body's grant fields act as per-field overrides on the stamp.",
+                  "description": "Optional. When present (and non-empty), the entitlement is STAMPED from this policy template instead of validated directly. Requires POLICY_STAMP_MODE=on (else 400 policy_stamping_disabled); the policy must exist and be active (else 404 policy_not_found). The body's grant fields act as per-field overrides on the stamp, except status and max_active_devices: the stamp writes an active grant with the policy's device limit, so a policy create naming either returns 400 invalid_request.",
                   "maxLength": 128,
                   "type": "string"
                 },
@@ -1570,7 +1565,6 @@
                 }
               },
               "required": [
-                "enforcement_mode",
                 "customer_id",
                 "license_id"
               ],
@@ -1590,13 +1584,23 @@
               },
               "then": {
                 "not": {
-                  "required": [
-                    "max_active_devices"
+                  "anyOf": [
+                    {
+                      "required": [
+                        "max_active_devices"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "status"
+                      ]
+                    }
                   ]
                 }
               }
             }
           ],
+          "description": "Every create is protected, so the body names no mode. A protected grant requires an active customer, that customer's license for this project, and, when the body selects one, a usable policy. Retries must repeat the same tuple.",
           "unevaluatedProperties": false
         },
         "EntitlementInput": {
@@ -1705,7 +1709,7 @@
               }
             }
           },
-          "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status/enforcement_mode are NOT patchable: a body naming any field other than the properties below and the expected_* precondition returns 400 invalid_request. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the required expected_* precondition may), or the PATCH returns 400 invalid_request.",
+          "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable: a body naming any field other than the properties below and the expected_* precondition returns 400 invalid_request. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the required expected_* precondition may), or the PATCH returns 400 invalid_request.",
           "properties": {
             "customer_id": {
               "maxLength": 128,
@@ -1944,7 +1948,7 @@
               "type": "object"
             }
           ],
-          "description": "Every synced grant is protected. The body names the customer who owns it and that customer's license for the project. A sync that creates a grant, or leaves or makes one active, passes the same protected checks as an admin create (409 protected_creation_conflict names a failed rule). A sync with status disabled or revoked for an existing grant always applies: it is a status-only transition that keeps the stored owner, license, notes and validity, whatever the body names. The body cannot choose the mode, and an existing grant of another mode is 409 enforcement_mode_conflict, even when unchanged.",
+          "description": "Every synced grant is protected. The body names the customer who owns it and that customer's license for the project. A sync that creates a grant, or leaves or makes one active, passes the same protected checks as an admin create (409 protected_creation_conflict names a failed rule). A sync with status disabled or revoked for an existing grant always applies: it is a status-only transition that keeps the stored owner, license, notes and validity, whatever the body names.",
           "unevaluatedProperties": false
         },
         "ErrorEnvelope": {
@@ -8711,7 +8715,7 @@
       },
       "/api/admin/customers/{id}/bindings": {
         "get": {
-          "description": "At most 100 rows ordered by binding ID. Live keyset pages recheck both device and entitlement ownership; refresh to see inserts before a cursor. State is projected using database server_time: active bindings retain capacity after lease expiry; retiring bindings at the hold deadline are released. Last verified contact is not live presence. No private keys or proofs are exposed. The operator object comes from current authentication and supports the retirement precondition. capacity reports device-limit occupancy (the same active-or-held-retiring rule as the lease path) for the customer's device_bound_v1 entitlements honouring the project filter; denied is the 5 most recent device_limit_reached refusals across those entitlements, newest first. Both are read separately from the page on the same database session.",
+          "description": "At most 100 rows ordered by binding ID. Live keyset pages recheck both device and entitlement ownership; refresh to see inserts before a cursor. State is projected using database server_time: active bindings retain capacity after lease expiry; retiring bindings at the hold deadline are released. Last verified contact is not live presence. No private keys or proofs are exposed. The operator object comes from current authentication and supports the retirement precondition. capacity reports device-limit occupancy (the same active-or-held-retiring rule as the lease path) for the customer's entitlements honouring the project filter; denied is the 5 most recent device_limit_reached refusals across those entitlements, newest first. Both are read separately from the page on the same database session.",
           "operationId": "listCustomerBindings",
           "parameters": [
             {
@@ -10851,7 +10855,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / id / idempotency key (including an omitted or non-protected enforcement_mode, a field a create does not read, and max_active_devices outside 1-1,000,000 or sent with a policy_id), or a policy_id was supplied while POLICY_STAMP_MODE is off."
+              "description": "Invalid request / json / id / idempotency key (including a field a create does not read, such as a mode; a status or max_active_devices sent with a policy_id; and max_active_devices outside 1-1,000,000), or a policy_id was supplied while POLICY_STAMP_MODE is off."
             },
             "401": {
               "content": {
@@ -10942,13 +10946,6 @@
               "content": {
                 "application/json": {
                   "examples": {
-                    "enforcement_mode_conflict": {
-                      "value": {
-                        "code": "enforcement_mode_conflict",
-                        "ok": false,
-                        "request_id": "1a2b3c-1"
-                      }
-                    },
                     "idempotency_request_conflict": {
                       "value": {
                         "code": "idempotency_request_conflict",
@@ -10994,7 +10991,6 @@
                                 "enum": [
                                   "revoked_entitlement_is_terminal",
                                   "stale_transition",
-                                  "enforcement_mode_conflict",
                                   "idempotency_request_conflict"
                                 ]
                               }
@@ -11013,7 +11009,7 @@
                   }
                 }
               },
-              "description": "Terminal or concurrent state, enforcement mismatch, protected eligibility failure (data.reason names the failed rule), or an idempotency key already used for another tuple."
+              "description": "Terminal or concurrent state, protected eligibility failure (data.reason names the failed rule), or an idempotency key already used for another tuple."
             },
             "413": {
               "content": {
@@ -13006,7 +13002,7 @@
                   }
                 }
               },
-              "description": "Applied projection with created/updated/disabled entitlement records and assignment row. A created grant is protected (device_bound_v1) with no device hash, seat pool, borrowing or meter; an update writes only the validity window, notes, owner, license, policy, device limit and trial state."
+              "description": "Applied projection with created/updated/disabled entitlement records and assignment row. A created grant is protected; an update writes only the validity window, notes, owner, license, policy, device limit and trial state."
             },
             "400": {
               "content": {
@@ -18017,7 +18013,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / idempotency key (including a body without customer_id or license_id, one naming a field a sync does not read such as enforcement_mode, or an identifier outside the protected rules), or missing reason for a non-active status."
+              "description": "Invalid request / json / idempotency key (including a body without customer_id or license_id, one naming a field a sync does not read such as a mode, or an identifier outside the protected rules), or missing reason for a non-active status."
             },
             "401": {
               "content": {
@@ -18080,13 +18076,6 @@
               "content": {
                 "application/json": {
                   "examples": {
-                    "enforcement_mode_conflict": {
-                      "value": {
-                        "code": "enforcement_mode_conflict",
-                        "ok": false,
-                        "request_id": "1a2b3c-1"
-                      }
-                    },
                     "protected_creation_conflict": {
                       "value": {
                         "code": "protected_creation_conflict",
@@ -18124,8 +18113,7 @@
                               "code": {
                                 "enum": [
                                   "revoked_entitlement_is_terminal",
-                                  "stale_transition",
-                                  "enforcement_mode_conflict"
+                                  "stale_transition"
                                 ]
                               }
                             },
@@ -18143,7 +18131,7 @@
                   }
                 }
               },
-              "description": "Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry); a stored grant of another mode, which sync never converts; or a protected eligibility failure on a create or an active write (data.reason names the failed rule). A disable or revocation of an existing protected grant is never refused for eligibility."
+              "description": "Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry); or a protected eligibility failure on a create or an active write (data.reason names the failed rule). A disable or revocation of an existing protected grant is never refused for eligibility."
             },
             "413": {
               "content": {

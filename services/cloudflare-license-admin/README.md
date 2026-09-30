@@ -78,8 +78,9 @@ Changing the project clears dependent selections. Protected project and feature
 IDs use ASCII letters, numbers, `_`, `.`, `:`, or `-` (127 and 15 characters).
 A create or PATCH body names only the fields its route reads: a body that
 names any other field returns `400 invalid_request`. A selected policy stamps
-its device limit and trial/expiry settings, so it must have at least one device
-slot and usable trial/expiry settings.
+an active grant with its device limit and trial/expiry settings, so it must have
+at least one device slot and usable trial/expiry settings, and a create that
+selects one names no `status` or `max_active_devices`.
 
 To change an existing grant's device limit, open it with **Edit** and use **Save
 device limit**. A protected grant cannot go below the devices already connected;
@@ -109,13 +110,10 @@ during application enrollment. The backend checks key possession and allocates
 the device binding. This setting does not certify hardware attestation or backend
 deployment readiness.
 
-Every admin create is protected. `POST /api/admin/entitlements` requires
-`enforcement_mode: "device_bound_v1"`; an omitted or `"legacy"` mode returns
-`400 invalid_request`. Sync and PATCH reject the field. An existing legacy grant is
-never converted in place (`409 enforcement_mode_conflict`). Retries must use the
-same tuple, and a stored reply that does not show the protected mode cannot
-establish success. The UI preserves the original request/key through **Reconcile
-status**.
+Every admin create is protected, so `POST /api/admin/entitlements` names no
+mode: like sync and PATCH, it returns `400 invalid_request` for a body naming
+one. Retries must use the same tuple. The UI preserves the original request/key
+through **Reconcile status**.
 
 Eligibility and copied policy state are checked in the mutation batch. Conflicts
 leave no partial grant, audit event or replay record. Earlier activity for the same
@@ -562,10 +560,12 @@ Then stamp an entitlement from either policy:
   "license_fingerprint": "<64 hex fingerprint>",
   "policy_id": "<policy id>",
   "customer_id": "cus_123",
-  "license_id": "lic_123",
-  "status": "active"
+  "license_id": "lic_123"
 }
 ```
+
+The stamp always writes an active grant, so a create that selects a policy names
+no `status`; a body naming one returns `400 invalid_request`.
 
 For catalog-driven tiers, create catalog features and plans, attach each plan
 feature to a policy or set a device limit override on the plan feature, then
@@ -574,11 +574,10 @@ A plan feature carries only its policy and that optional device limit; a plan
 feature or imported manifest row that names a seat, borrowing, meter or TTL
 field returns `400 invalid_request`, and a plan export names none. Runtime
 checks read the stamped entitlement rows, not plan or tier names. Plan apply
-writes protected grants: a created grant has no device hash, seat pool,
-borrowing or meter, and keeps the default TTLs. An update writes only the
-validity window, notes, owner, license, policy, device limit and trial state,
-so it never makes a protected grant unusable. A preview item reports each
-grant's mode and device limit.
+writes protected grants. An update writes only the validity window, notes,
+owner, license, policy, device limit and trial state, so it never makes a
+protected grant unusable. A preview item reports each grant's mode and device
+limit.
 
 Applications use the protected v2 integration: a customer enrolls each device,
 and the device limit caps how many are connected at once.
@@ -595,9 +594,9 @@ The shared D1 helper `../cloudflare-licensing-backend/scripts/entitlement.mjs` i
 operator break-glass path that **bypasses Cloudflare Access**. It stamps
 `actor_type='cli'`, `source='cli'`, requires `--actor`, and computes
 `revocation_seq` server-side. `upsert` requires `--customer-id` and
-`--license-id`: every entitlement it creates is a protected `device_bound_v1`
-grant with a named owner, and neither field is cleared or reassigned on a
-later conflict. Like the admin Worker it treats revoked as terminal:
+`--license-id`: every entitlement it creates is a protected grant with a named
+owner, and neither field is cleared or reassigned on a later conflict. Like the
+admin Worker it treats revoked as terminal:
 `upsert`/`disable`/`reenable` will not change a revoked row, and a guarded no-op
 writes no audit event (the helper exits non-zero on `--remote`). To deliberately
 reactivate a revoked entitlement, run `upsert --allow-revoked-override --reason
@@ -634,11 +633,11 @@ Then send a bearer-authenticated projection update:
 }
 ```
 
-Every synced grant is protected (`device_bound_v1`); the body cannot choose the
-mode. It must name `customer_id` and `license_id`: the active customer who owns
-the grant and that customer's license for the project. A body without either,
-or one that names any field a sync does not read (such as `enforcement_mode`),
-returns `400 invalid_request`, as do identifiers outside the protected rules
+Every synced grant is protected, so the body names no mode. It must name
+`customer_id` and `license_id`: the active customer who owns the grant and that
+customer's license for the project. A body without either, or one that names
+any field a sync does not read (such as a mode), returns `400 invalid_request`,
+as do identifiers outside the protected rules
 (see [Create protected application access](#create-protected-application-access)).
 
 A sync that creates a grant, or that leaves or makes one active, runs the same
@@ -657,9 +656,7 @@ enrolled devices from renewing, even if the customer is later restored.
 Reactivating a disabled grant is an active write, so it runs every protected
 check again; a revoked grant stays terminal.
 
-An existing grant of another mode is never converted and is not a no-op either:
-sync returns `409 enforcement_mode_conflict`, whatever the status. Repeated
-identical projections return the current row without advancing
+Repeated identical projections return the current row without advancing
 `revocation_seq`.
 
 CLI smoke example (`--customer-id` and `--license-id` are required;

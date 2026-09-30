@@ -14,7 +14,7 @@ const principal=(actor:Actor)=>({subject:actor.subject,actor_type:actor.actorTyp
 const operatorKey=(actor:Actor)=>encodeURIComponent(JSON.stringify([actor.actorType,actor.subject]));
 const owned=`FROM device_bound_bindings b JOIN device_bound_devices d ON d.id=b.device_id AND d.project=b.project
   JOIN entitlements e ON e.project=b.project AND e.feature=b.feature AND e.license_fingerprint=b.license_fingerprint
-  WHERE d.customer_id=? AND e.customer_id=? AND e.enforcement_mode='device_bound_v1'`;
+  WHERE d.customer_id=? AND e.customer_id=?`;
 
 export async function adminBindings(request:Request,env:Env,actor:Actor,customer:string,rid:string,binding?:string):Promise<Response> {
   try{customer=decodeURIComponent(customer);if(binding!==undefined)binding=decodeURIComponent(binding);}catch{return respond(rid,"invalid_request",400);}
@@ -31,7 +31,7 @@ export async function adminBindings(request:Request,env:Env,actor:Actor,customer
       pageSql=`SELECT a.id,a.event_type,a.actor,a.occurred_at FROM device_bound_events a
         JOIN device_bound_bindings b ON b.id=a.binding_id JOIN device_bound_devices d ON d.id=b.device_id AND d.project=b.project
         JOIN entitlements e ON e.project=b.project AND e.feature=b.feature AND e.license_fingerprint=b.license_fingerprint
-        WHERE a.binding_id=? AND a.customer_id=? AND d.customer_id=? AND e.customer_id=? AND e.enforcement_mode='device_bound_v1'
+        WHERE a.binding_id=? AND a.customer_id=? AND d.customer_id=? AND e.customer_id=?
         AND a.id>? ORDER BY a.id LIMIT 101`;
       parameters=[binding,customer,customer,customer,Number(cursor||0)];
     }else{
@@ -64,7 +64,7 @@ export async function adminBindings(request:Request,env:Env,actor:Actor,customer
       const capacityRows=await db.prepare(`SELECT e.project,e.feature,e.license_fingerprint,e.max_active_devices,
           (SELECT count(*) FROM device_bound_bindings b WHERE b.project=e.project AND b.feature=e.feature AND b.license_fingerprint=e.license_fingerprint
             AND ${boundOccupiedSql("b","unixepoch()")}) AS in_use
-        FROM entitlements e WHERE e.customer_id=? AND e.enforcement_mode='device_bound_v1' ${project===null?"":"AND e.project=?"}
+        FROM entitlements e WHERE e.customer_id=? ${project===null?"":"AND e.project=?"}
         ORDER BY e.project,e.feature,e.license_fingerprint LIMIT 100`)
         .bind(customer,...(project===null?[]:[project])).all<Record<string,unknown>>();
       capacity=capacityRows.results.map(row=>({project:String(row.project),feature:String(row.feature),license_fingerprint:String(row.license_fingerprint),
@@ -76,7 +76,7 @@ export async function adminBindings(request:Request,env:Env,actor:Actor,customer
       const deniedRows=await db.prepare(`SELECT u.project,u.feature,u.license_fingerprint,u.key_id AS device_key_id,u.ts
         FROM entitlements e
         JOIN device_bound_denials u ON u.project=e.project AND u.feature=e.feature AND u.license_fingerprint=e.license_fingerprint
-        WHERE e.customer_id=? AND e.enforcement_mode='device_bound_v1'
+        WHERE e.customer_id=?
           ${project===null?"":"AND e.project=?"}
         ORDER BY u.ts DESC,u.id DESC LIMIT 5`)
         .bind(customer,...(project===null?[]:[project])).all<Record<string,unknown>>();

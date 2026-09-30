@@ -72,10 +72,11 @@ test("break-glass CLI upsert sets customer_id and license_id when provided", () 
     "customer-id": "cus_123",
     "license-id": "lic_123",
   });
-  assert.match(sql, /customer_id, license_id, enforcement_mode, created_at, updated_at/);
+  // The upsert names no mode: the schema default makes every new grant protected.
+  assert.match(sql, /customer_id, license_id, created_at, updated_at\) VALUES/);
+  assert.doesNotMatch(sql, /enforcement_mode|device_bound_v1/);
   assert.match(sql, /'cus_123'/);
   assert.match(sql, /'lic_123'/);
-  assert.match(sql, /'device_bound_v1'/);
   assert.doesNotMatch(sql, /customer_id = excluded\.customer_id/);
   assert.doesNotMatch(sql, /license_id = excluded\.license_id/);
 });

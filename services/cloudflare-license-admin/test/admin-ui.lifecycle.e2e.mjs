@@ -2,30 +2,29 @@ import { expect } from "@playwright/test";
 
 import { fillProtectedOwner, makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
-for (const mode of [undefined, "legacy"]) {
-  test(`protected creation does not accept a ${mode ?? "missing"} response mode`, async ({ page }) => {
-    const api = makeAdminApiFixture();
-    await page.route("**/api/admin/**", api.route);
-    await page.route("**/api/admin/entitlements", async route => {
-      if (route.request().method() !== "POST") return route.fallback();
-      const row = api.seed.entitlement(route.request().postDataJSON());
-      if (mode === undefined) delete row.enforcement_mode; else row.enforcement_mode = mode;
-      return route.fulfill({ contentType: "application/json", body: JSON.stringify(makeEnvelope("entitlement_saved", row)) });
-    });
-    await page.goto("/#/entitlements");
-    await page.getByRole("button", { name: "New entitlement", exact: true }).click();
-    const form = page.getByRole("form", { name: "New entitlement" });
-    await form.getByLabel("License fingerprint", { exact: true }).fill("a".repeat(64));
-    await form.getByText("Enter customer ID manually", { exact: true }).click();
-    await form.getByLabel("Customer ID", { exact: true }).fill("cus_acme");
-    await form.getByText("Enter license ID manually", { exact: true }).click();
-    await form.getByLabel("License ID", { exact: true }).fill("lic_acme");
-    await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Reconcile status", exact: true })).toBeVisible();
-    // The form stays open with its fields locked until the ambiguous create is reconciled.
-    await expect(form.getByLabel("License fingerprint", { exact: true })).toBeDisabled();
+// Every grant is protected, so the console never reads a mode from the saved record: a reply that
+// names none still settles the create.
+test("protected creation settles on a saved record that names no mode", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.route("**/api/admin/entitlements", async route => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const row = api.seed.entitlement(route.request().postDataJSON());
+    delete row.enforcement_mode;
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(makeEnvelope("entitlement_saved", row)) });
   });
-}
+  await page.goto("/#/entitlements");
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  const form = page.getByRole("form", { name: "New entitlement" });
+  await form.getByLabel("License fingerprint", { exact: true }).fill("a".repeat(64));
+  await form.getByText("Enter customer ID manually", { exact: true }).click();
+  await form.getByLabel("Customer ID", { exact: true }).fill("cus_acme");
+  await form.getByText("Enter license ID manually", { exact: true }).click();
+  await form.getByLabel("License ID", { exact: true }).fill("lic_acme");
+  await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
+  await expect(form).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Reconcile status", exact: true })).toHaveCount(0);
+});
 
 test("the create form has no protection choice", async ({ page }) => {
   const api = makeAdminApiFixture();
@@ -37,7 +36,7 @@ test("the create form has no protection choice", async ({ page }) => {
   await expect(form.getByText("Protected devices", { exact: false })).toBeVisible();
 });
 
-test("protected creation requires ownership and preserves mode and key through response recovery", async ({ page }) => {
+test("protected creation requires ownership and preserves its body and key through response recovery", async ({ page }) => {
   const api = makeAdminApiFixture(), attempts = [];
   await page.route("**/api/admin/**", api.route);
   await page.route("**/api/admin/entitlements", async route => {
@@ -63,7 +62,8 @@ test("protected creation requires ownership and preserves mode and key through r
   await page.getByRole("button", { name: "Reconcile status", exact: true }).click();
   await expect.poll(() => attempts.length).toBe(2);
   expect(attempts[1]).toEqual(attempts[0]);
-  expect(attempts[0].body.enforcement_mode).toBe("device_bound_v1");
+  // The body names exactly the fields a create reads, and no mode.
+  expect(Object.keys(attempts[0].body).sort()).toEqual(["customer_id", "feature", "license_fingerprint", "license_id", "notes", "project", "valid_from", "valid_until"]);
   await expect(page.getByRole("status").filter({ hasText: "Status reconciled." })).toBeVisible();
   // The reconciled create opens its record: the form closes, and a new one starts over as protected.
   await expect(form).toHaveCount(0);

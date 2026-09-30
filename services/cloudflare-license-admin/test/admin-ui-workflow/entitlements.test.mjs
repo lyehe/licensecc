@@ -3,11 +3,15 @@ import test from "node:test";
 
 import { loadWorkflowModule } from "./helpers.mjs";
 
-test("protected form carries mode through both creation paths and reports incompatible identifiers", async () => {
+// Every create is protected, so neither creation path sends a mode, and a policy create sends no
+// status: the Worker refuses both.
+test("protected form sends no mode through either creation path and reports incompatible identifiers", async () => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
-  const form = { ...workflow.emptyEntitlementForm, enforcement_mode: "device_bound_v1", license_fingerprint: "a".repeat(64), customer_id: "owner", license_id: "license" };
-  assert.equal(workflow.normalizeEntitlementForm(form).enforcement_mode, "device_bound_v1");
-  assert.equal(workflow.normalizeCreateFromPolicy({ ...form, policy_id: "policy" }).enforcement_mode, "device_bound_v1");
+  const form = { ...workflow.emptyEntitlementForm, license_fingerprint: "a".repeat(64), customer_id: "owner", license_id: "license" };
+  assert.equal(Object.hasOwn(workflow.normalizeEntitlementForm(form), "enforcement_mode"), false);
+  const fromPolicy = workflow.normalizeCreateFromPolicy({ ...form, policy_id: "policy", notes: "n", valid_from: "2024-03-09", valid_until: "2025-03-09" });
+  assert.deepEqual(Object.keys(fromPolicy).sort(), ["customer_id", "feature", "license_fingerprint", "license_id", "notes", "policy_id", "project",
+    "valid_from", "valid_until"]);
   assert.deepEqual(workflow.entitlementFormErrors(form), {});
   for (const [field, value] of [["project", "APP\u2029"], ["feature", "PRO SPACE"], ["license_fingerprint", "A".repeat(64)], ["customer_id", ""], ["license_id", ""]]) {
     assert.ok(workflow.entitlementFormErrors({ ...form, [field]: value })[field]);
@@ -54,9 +58,8 @@ test("admin UI workflow normalizes create form payloads", async () => {
     license_id: "lic_123",
   });
 
-  // The untouched form is protected, so the body carries that mode by default.
+  // Every create is protected, so the body names no mode.
   assert.deepEqual(body, {
-    enforcement_mode: "device_bound_v1",
     project: "DEFAULT",
     feature: "DEFAULT",
     license_fingerprint: "a".repeat(64),
@@ -85,10 +88,10 @@ test("admin UI workflow stamps a create-from-policy payload (attaches policy_id)
   assert.equal(inherited.license_fingerprint, "b".repeat(64));
   assert.equal(inherited.project, "DEFAULT");
   // The forms carry exactly the fields a create or PATCH reads; the Worker refuses any other field.
-  assert.deepEqual(Object.keys(workflow.emptyEntitlementForm).sort(), ["customer_id", "enforcement_mode", "feature", "license_fingerprint",
+  assert.deepEqual(Object.keys(workflow.emptyEntitlementForm).sort(), ["customer_id", "feature", "license_fingerprint",
     "license_id", "max_active_devices", "notes", "policy_id", "project", "valid_from", "valid_until"]);
   assert.deepEqual(Object.keys(workflow.emptyEntitlementEditForm).sort(), ["customer_id", "license_id", "notes", "valid_from", "valid_until"]);
-  assert.deepEqual(Object.keys(inherited).sort(), ["enforcement_mode", "feature", "license_fingerprint", "policy_id", "project"]);
+  assert.deepEqual(Object.keys(inherited).sort(), ["feature", "license_fingerprint", "policy_id", "project"]);
   assert.equal("valid_from" in inherited, false, "blank valid_from inherits from the policy");
   assert.equal("valid_until" in inherited, false, "blank valid_until inherits from the policy");
 

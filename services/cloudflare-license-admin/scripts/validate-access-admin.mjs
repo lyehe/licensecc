@@ -222,7 +222,6 @@ function entitlementPayload(options, customerId, licenseId) {
     feature: options.feature,
     license_fingerprint: options.fingerprint,
     status: "active",
-    enforcement_mode: "device_bound_v1",
     customer_id: customerId,
     license_id: licenseId,
     notes: "Cloudflare Access staging validation scratch row",

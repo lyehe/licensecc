@@ -110,11 +110,6 @@ export async function mutationResponse<T>(
       const racedReplay = await readReplay();
       if (racedReplay !== null) return racedReplay;
     }
-    if (error instanceof Error && ["enforcement_mode_conflict", "protected_creation_conflict"].includes(error.message)) {
-      const racedReplay = await readReplay();
-      if (racedReplay !== null) return racedReplay;
-      return envelope(ctx.requestId, error.message, undefined, 409);
-    }
     if (error instanceof Error && error.message === "idempotency_conflict") {
       // A strict in-batch replay claim lost after our initial lookup. D1 rolled
       // back every loser write, including audit/side effects; publish the exact

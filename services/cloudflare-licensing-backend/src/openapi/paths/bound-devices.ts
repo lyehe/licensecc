@@ -26,7 +26,7 @@ const lease = object({ device_id: recordId, binding_id: recordId, generation: { 
   renew_after: integer, expires_at: integer, accept_until: { ...integer, description: "Server capacity hold deadline (expires_at + 120). Clients stop at expires_at, without this allowance." } });
 const errors: Record<string, string[]> = {
   "400": ["invalid_request", "unsupported_protocol"], "401": ["proof_required", "invalid_proof"],
-  "403": ["access_denied", "device_retired", "legacy_protocol_disabled"],
+  "403": ["access_denied", "device_retired"],
   "404": ["authorization_unavailable", "binding_unavailable"],
   "409": ["device_limit_reached", "revision_conflict", "idempotency_conflict"],
   "410": ["authorization_expired", "challenge_expired"], "429": ["rate_limited"], "503": ["temporarily_unavailable"],

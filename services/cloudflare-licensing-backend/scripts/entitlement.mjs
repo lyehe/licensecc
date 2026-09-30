@@ -24,7 +24,7 @@ notes:
   changes 0 rows, writes no audit event, and exits 3 on --remote). Use
   'upsert --allow-revoked-override --reason <text>' to intentionally reactivate a revoked entitlement;
   it requires --reason and records a distinct 'revoked-override' audit event. Every upsert is a protected
-  device_bound_v1 grant: --customer-id and --license-id are required, and neither is cleared or reassigned
+  grant: --customer-id and --license-id are required, and neither is cleared or reassigned
   on a later conflict. The CLI bypasses Cloudflare Access and stamps actor_type='cli', source='cli'.`);
   process.exit(2);
 }
@@ -157,7 +157,7 @@ function sqlFor(command, options) {
     const conflictGuard = allowRevokedOverride ? "" : " WHERE entitlements.status != 'revoked'";
     const eventType = allowRevokedOverride ? "revoked-override" : "upsert";
     return [
-      `INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, customer_id, license_id, enforcement_mode, created_at, updated_at) VALUES (${sqlString(fields.project)}, ${sqlString(fields.feature)}, ${sqlString(fields.fingerprint)}, ${sqlString(status)}, ${nextInsertedRevocationSeqSql(fields)}, ${sqlNullableInt(validFrom)}, ${sqlNullableInt(validUntil)}, ${sqlString(customerId)}, ${sqlString(licenseId)}, 'device_bound_v1', unixepoch(), unixepoch()) ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET status = excluded.status, revocation_seq = ${nextExistingRevocationSeqSql()}, valid_from = excluded.valid_from, valid_until = excluded.valid_until, updated_at = unixepoch()${conflictGuard}`,
+      `INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, customer_id, license_id, created_at, updated_at) VALUES (${sqlString(fields.project)}, ${sqlString(fields.feature)}, ${sqlString(fields.fingerprint)}, ${sqlString(status)}, ${nextInsertedRevocationSeqSql(fields)}, ${sqlNullableInt(validFrom)}, ${sqlNullableInt(validUntil)}, ${sqlString(customerId)}, ${sqlString(licenseId)}, unixepoch(), unixepoch()) ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET status = excluded.status, revocation_seq = ${nextExistingRevocationSeqSql()}, valid_from = excluded.valid_from, valid_until = excluded.valid_until, updated_at = unixepoch()${conflictGuard}`,
       eventSqlFromCurrent(fields, eventType, status, ctx.actor, ctx.reason),
     ].join(";\n");
   }

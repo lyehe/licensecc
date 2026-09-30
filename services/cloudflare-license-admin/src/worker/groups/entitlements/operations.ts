@@ -186,7 +186,8 @@ export async function createFromPolicy(request: Request, env: Env, ctx: Mutation
     // Optional per-field overrides; each is "absent (undefined) -> fall back to policy" or
     // "present-but-malformed -> 400". valid_from/valid_until are only validated when present
     // (nullableEpoch returns undefined for both absent AND malformed, so gate on presence).
-    // validateEntitlementCreate has already refused any field a create does not read.
+    // validateEntitlementCreate has already refused any field a policy create does not read,
+    // including a status: the stamp always writes an active grant.
     const validFrom = input.valid_from === undefined ? undefined : nullableEpoch(input.valid_from);
     const validUntil = input.valid_until === undefined ? undefined : nullableEpoch(input.valid_until);
     const notes = input.notes === undefined ? undefined : safeNotes(input.notes);
@@ -216,7 +217,7 @@ export async function createFromPolicy(request: Request, env: Env, ctx: Mutation
     if (licenseId !== undefined) overrides.license_id = licenseId;
     const stamp = stampFromPolicy(policy as never, overrides as never, now);
     const key = { project, feature, license_fingerprint: licenseFingerprint };
-    return createWithEnforcement(env, { ...stamp.input, enforcement_mode: selected.enforcement_mode }, ctx, idempotency, [
+    return createWithEnforcement(env, stamp.input, ctx, idempotency, [
         buildPolicyStampStatement(env as never, key, policy.id, stamp.capacity, stamp.trial),
       ], policy);
   }, admitReplay);

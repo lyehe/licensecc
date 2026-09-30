@@ -7,7 +7,7 @@ import * as sharedApi from "../../dist-worker/shared/api.js";
 // Loaded per test so a missing build output fails only these scenarios, not the whole Worker suite.
 const checksModule = () => import("../../dist-worker/worker/groups/entitlements/protected-checks.js");
 
-const input = { project: "APP", feature: "PRO", license_fingerprint: "a".repeat(64), customer_id: "owner", license_id: "license", enforcement_mode: "device_bound_v1" };
+const input = { project: "APP", feature: "PRO", license_fingerprint: "a".repeat(64), customer_id: "owner", license_id: "license" };
 const policy = {
   id: "policy", project: "APP", name: "Policy", type: "trial", status: "active", valid_from_offset_sec: null, duration_sec: null,
   max_active_devices: 3, expiry_strategy: "fixed_window", trial_expiration_basis: "from_first_activation", trial_duration_sec: 600,
@@ -42,7 +42,7 @@ for (const selected of [undefined, policy]) {
     const assertion = capturingEnv();
     const statement = protectedCreateAssertion(assertion.env, input, selected);
     assert.equal(statement.sql, `SELECT CASE WHEN changes()=1 AND EXISTS (
-    SELECT 1 FROM entitlements e WHERE e.project=? AND e.feature=? AND e.license_fingerprint=? AND e.enforcement_mode='device_bound_v1'
+    SELECT 1 FROM entitlements e WHERE e.project=? AND e.feature=? AND e.license_fingerprint=?
       AND ${checks.map((check) => `(${check.sql})`).join("\n      AND ")}
     ) THEN 1 ELSE json('protected_creation_conflict') END`);
     assert.deepEqual(statement.args, [input.project, input.feature, input.license_fingerprint, ...checkBinds]);

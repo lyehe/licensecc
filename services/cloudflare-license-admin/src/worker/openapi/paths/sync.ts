@@ -31,11 +31,11 @@ export const syncPaths: LabeledPathFragment = {
       },
       responses: {
         "200": okResponse("Entitlement synced (created or updated).", "#/components/schemas/EntitlementRecord", "entitlement_synced"),
-        "400": errorResponse("Invalid request / json / idempotency key (including a body without customer_id or license_id, one naming a field a sync does not read such as enforcement_mode, or an identifier outside the protected rules), or missing reason for a non-active status.", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
+        "400": errorResponse("Invalid request / json / idempotency key (including a body without customer_id or license_id, one naming a field a sync does not read such as a mode, or an identifier outside the protected rules), or missing reason for a non-active status.", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
         "401": errorResponse("Sync token not configured on the Worker.", "sync_auth_not_configured"),
         "403": errorResponse("Bearer token did not match SYNC_API_TOKEN.", "invalid_sync_token"),
         "404": errorResponse("Referenced resource not found.", "not_found"),
-        "409": protectedCreationConflictResponse("Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry); a stored grant of another mode, which sync never converts; or a protected eligibility failure on a create or an active write (data.reason names the failed rule). A disable or revocation of an existing protected grant is never refused for eligibility.", "revoked_entitlement_is_terminal", "stale_transition", "enforcement_mode_conflict", "protected_creation_conflict"),
+        "409": protectedCreationConflictResponse("Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry); or a protected eligibility failure on a create or an active write (data.reason names the failed rule). A disable or revocation of an existing protected grant is never refused for eligibility.", "revoked_entitlement_is_terminal", "stale_transition", "protected_creation_conflict"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed.", "mutation_failed"),
       },

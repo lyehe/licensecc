@@ -10,7 +10,7 @@ function makeEnvelope(code, data) {
 function license(feature, fields = {}) {
   return {
     id: `ent_${feature}`, project: "ALPHA", feature, status: "active", license_fingerprint: "c".repeat(64),
-    valid_from: null, valid_until: 4_102_444_800, enforcement_mode: "device_bound_v1", license_mode: "node_locked",
+    valid_from: null, valid_until: 4_102_444_800, license_mode: "node_locked",
     max_active_devices: 1, policy_id: null,
     trial_ends_at: null, trial_starts_on_activation: false,
     ...fields,

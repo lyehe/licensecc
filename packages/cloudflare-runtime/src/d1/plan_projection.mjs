@@ -500,16 +500,16 @@ function desiredSatisfiedSql(alias = "e") {
     AND ${alias}.trial_one_per_device IS ?`;
 }
 
-// A plan-applied grant is protected.
+// A plan-applied grant is protected, like every grant.
 function createEntitlementStatement(env, action, now, previewId, claimToken) {
   const { desired } = action;
   const { input, capacity, trial } = desired;
   return env.DB.prepare(
     `INSERT INTO entitlements
-       (project, feature, license_fingerprint, enforcement_mode, status, revocation_seq,
+       (project, feature, license_fingerprint, status, revocation_seq,
         valid_from, valid_until, notes, customer_id, license_id, policy_id, max_active_devices,
         is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, created_at, updated_at)
-     SELECT ?, ?, ?, 'device_bound_v1', ?,
+     SELECT ?, ?, ?, ?,
        COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1),
        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
      WHERE ${claimGuardSql()}

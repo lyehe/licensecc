@@ -58,10 +58,10 @@ function makeDb(state) {
       if (writeSql.startsWith("INSERT INTO entitlements")) {
         // createEntitlement INSERT...ON CONFLICT param order (see core).
         const a = writeStmt._args;
-        // The mode is a literal in the INSERT, not a bound parameter.
-        const mode = /, '([a-z_0-9]+)'\) ON CONFLICT/.exec(writeSql)?.[1] ?? null;
+        state.writeSql = writeSql;
+        // The INSERT names no mode; the schema default makes every new grant protected.
         const row = {
-          enforcement_mode: mode,
+          enforcement_mode: "device_bound_v1",
           project: a[0],
           feature: a[1],
           license_fingerprint: a[2],
@@ -158,27 +158,21 @@ test("createEntitlement returns a MutationResult with an id and writes an audit 
   assert.equal(result.data.id, entitlementId("DEFAULT", "DEFAULT", "a".repeat(64)));
   assert.equal(result.data.notes, "hello");
   assert.equal(result.data.status, "active");
-  assert.equal(result.data.enforcement_mode, "device_bound_v1", "every grant createEntitlement writes is protected");
   assert.equal(result.data.license_mode, "node_locked");
   // Exactly one audit event was written atomically with the row.
   assert.equal(state.events.length, 1);
   assert.ok(state.events[0].sql.includes("INSERT INTO entitlement_events"));
 });
 
-test("createEntitlement accepts only the protected mode and never converts a legacy row", async () => {
+// Every grant is protected, so the writer names no mode and the schema default applies. The SQL
+// suites run the real schema.
+test("createEntitlement names no mode", async () => {
   const state = {};
   const env = { DB: makeDb(state) };
-  for (const enforcement_mode of ["legacy", "", null]) {
-    await assert.rejects(createEntitlement(env, input({ enforcement_mode }), ctx()), /invalid_patch/);
-  }
-  assert.equal(state.entitlement, undefined);
-  const named = await createEntitlement(env, input({ enforcement_mode: "device_bound_v1" }), ctx());
-  assert.equal(named.data.enforcement_mode, "device_bound_v1");
-  state.entitlement.enforcement_mode = "legacy";
-  state.events = [];
-  await assert.rejects(createEntitlement(env, input({ notes: "convert" }), ctx()), /enforcement_mode_conflict/);
-  assert.equal(state.events.length, 0, "a refused conversion writes nothing");
-  assert.equal(state.entitlement.enforcement_mode, "legacy");
+  await createEntitlement(env, input(), ctx());
+  assert.match(state.writeSql, /^INSERT INTO entitlements \(project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at\) VALUES/);
+  // The RETURNING projection still reads the stored column; the write itself names no mode.
+  assert.doesNotMatch(state.writeSql.slice(0, state.writeSql.indexOf(" RETURNING ")), /enforcement_mode|device_bound_v1/);
 });
 
 test("setEntitlementCapacity updates only provided columns and preserves the rest", async () => {

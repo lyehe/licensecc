@@ -1776,7 +1776,7 @@
       },
       "/api/portal/entitlements": {
         "get": {
-          "description": "Ordered by project, feature.",
+          "description": "Ordered by project, feature. Every grant is protected: devices connect from the application with browser consent.",
           "operationId": "portalEntitlements",
           "responses": {
             "200": {
@@ -1797,13 +1797,6 @@
                           "items": {
                             "items": {
                               "properties": {
-                                "enforcement_mode": {
-                                  "description": "Every grant is protected: devices connect from the application with browser consent.",
-                                  "enum": [
-                                    "device_bound_v1"
-                                  ],
-                                  "type": "string"
-                                },
                                 "feature": {
                                   "type": "string"
                                 },

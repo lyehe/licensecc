@@ -1,6 +1,6 @@
 import type {
   AdminEntitlementCreateInput,
-  EntitlementCreateInput,
+  EntitlementInput,
   EntitlementPatch,
   EntitlementRecord,
   EntitlementStatus,
@@ -22,7 +22,6 @@ export interface EntitlementFilter {
 }
 
 export interface EntitlementFormState {
-  enforcement_mode: "device_bound_v1";
   policy_id: string;
   project: string;
   feature: string;
@@ -49,7 +48,6 @@ export interface EntitlementEditState {
 }
 
 export const emptyEntitlementForm: EntitlementFormState = {
-  enforcement_mode: "device_bound_v1",
   policy_id: "",
   project: "DEFAULT",
   feature: "DEFAULT",
@@ -95,7 +93,6 @@ export function filterAfterShowAll(filter: EntitlementFilter): EntitlementFilter
 
 export function normalizeEntitlementForm(form: EntitlementFormState): AdminEntitlementCreateInput {
   return {
-    enforcement_mode: form.enforcement_mode,
     project: form.project,
     feature: form.feature,
     license_fingerprint: form.license_fingerprint,
@@ -127,9 +124,8 @@ export function policiesForProject<T extends Pick<Policy, "project">>(policies: 
   return policies.filter((policy) => policy.project === project);
 }
 
-export function normalizeCreateFromPolicy(form: EntitlementFormState): EntitlementCreateInput & { policy_id: string } {
-  const body: EntitlementCreateInput & { policy_id: string } = {
-    enforcement_mode: form.enforcement_mode,
+export function normalizeCreateFromPolicy(form: EntitlementFormState): EntitlementInput & { policy_id: string } {
+  const body: EntitlementInput & { policy_id: string } = {
     policy_id: form.policy_id,
     project: form.project,
     feature: form.feature,
@@ -302,8 +298,8 @@ export function entitlementFormErrors(form: EntitlementEditState | EntitlementFo
     try { parseNullableIdentifier(form[field], field); } catch { errors[field] = "Use a complete ID of at most 128 characters with no line breaks."; }
   }
   try { parseNotes(form.notes); } catch { errors.notes = "Use one line of notes, at most 1000 characters."; }
-  if ("enforcement_mode" in form) {
-    // Every create is protected, so these rules always apply.
+  if ("license_fingerprint" in form) {
+    // A create form. Every create is protected, so these rules always apply.
     if (!/^[A-Za-z0-9_.:-]{1,127}(?![\s\S])/.test(form.project)) errors.project = "Protected project IDs use ASCII letters, numbers, _, ., :, or -.";
     if (!/^[A-Za-z0-9_.:-]{1,15}(?![\s\S])/.test(form.feature)) errors.feature = "Protected feature IDs use 1–15 ASCII letters, numbers, _, ., :, or -.";
     if (form.license_fingerprint.length !== 64 || !/^[a-f0-9]{64}$/.test(form.license_fingerprint)) errors.license_fingerprint = "Protected licenses require the exact 64-character lowercase hexadecimal fingerprint.";

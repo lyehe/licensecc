@@ -11,7 +11,7 @@ const bindingWarehouse={binding_id:Buffer.alloc(16,1).toString('base64url'),proj
 const bindingOffice={binding_id:Buffer.alloc(16,2).toString('base64url'),project:'DEFAULT',feature:'pro',revision:0,hold_until:now+3600,state:'active',label:'Office Printer',last_proof_at:now-30,created_at:now-3600,server_time:now};
 const bindingLab={binding_id:Buffer.alloc(16,3).toString('base64url'),project:'SECOND_APP',feature:'pro',revision:0,hold_until:now+3600,state:'active',label:'Lab Tablet',last_proof_at:now-30,created_at:now-3600,server_time:now};
 
-const entitlementDefault={id:'ent_default',project:'DEFAULT',feature:'pro',status:'active',license_fingerprint:'a'.repeat(64),valid_from:now-10000,valid_until:null,enforcement_mode:'device_bound_v1',license_mode:'node_locked',max_active_devices:1,policy_id:'pol_default',trial_ends_at:null,trial_starts_on_activation:false};
+const entitlementDefault={id:'ent_default',project:'DEFAULT',feature:'pro',status:'active',license_fingerprint:'a'.repeat(64),valid_from:now-10000,valid_until:null,license_mode:'node_locked',max_active_devices:1,policy_id:'pol_default',trial_ends_at:null,trial_starts_on_activation:false};
 const entitlementSecond={...entitlementDefault,id:'ent_second',project:'SECOND_APP',license_fingerprint:'b'.repeat(64),policy_id:'pol_second'};
 
 async function setup(page) {

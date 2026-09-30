@@ -10,7 +10,7 @@ const input = `WITH p AS (SELECT ${fields.map(f=>`json_extract(j,'$.${f}') AS ${
 const ownership = `JOIN device_bound_devices d ON d.id=b.device_id AND d.project=b.project
   JOIN entitlements e ON e.project=b.project AND e.feature=b.feature AND e.license_fingerprint=b.license_fingerprint
   JOIN customers c ON c.id=d.customer_id AND c.id=e.customer_id
-  WHERE b.id=p.bindingId AND c.id=p.customerId AND c.status='active' AND e.enforcement_mode='device_bound_v1'`;
+  WHERE b.id=p.bindingId AND c.id=p.customerId AND c.status='active'`;
 const revisions = `c.authority_revision=p.customerRevision AND d.revision=p.deviceRevision
   AND e.authority_revision=p.entitlementRevision`;
 const fresh = `o.invocation_id=p.invocationId AND o.customer_id=p.customerId AND o.binding_id=p.bindingId

@@ -11,7 +11,7 @@ import { worker, baseEnv, authed } from "../worker/fixtures.mjs";
 // behind the create's claim; a PATCH writes it alone through the runtime's capacity chokepoint. A
 // protected grant refuses a limit below its connected devices and says how many there are (ADR 0006).
 const path = "/api/admin/entitlements";
-const protectedGrant = { project: "APP", feature: "PRO", license_fingerprint: "a".repeat(64), customer_id: "owner", license_id: "license", enforcement_mode: "device_bound_v1" };
+const protectedGrant = { project: "APP", feature: "PRO", license_fingerprint: "a".repeat(64), customer_id: "owner", license_id: "license" };
 const HOUR = 3600;
 
 function fixture(t) {
@@ -201,7 +201,7 @@ test("a missing or incorrect device-limit side-write rolls back the preceding up
 test("a console re-create of an existing key keeps its stored device limit", async t => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
   const consoleBody = (grant) => workflow.normalizeEntitlementForm({
-    ...workflow.emptyEntitlementForm, enforcement_mode: grant.enforcement_mode, project: grant.project, feature: grant.feature,
+    ...workflow.emptyEntitlementForm, project: grant.project, feature: grant.feature,
     license_fingerprint: grant.license_fingerprint, customer_id: grant.customer_id ?? "", license_id: grant.license_id ?? "",
   });
   assert.equal(Object.hasOwn(consoleBody(protectedGrant), "max_active_devices"), false);

@@ -6,12 +6,13 @@ import type { Env } from "../../env.js";
 import { authenticateSync } from "../../auth.js";
 import { MAX_NOTES_SIZE, parseJsonBody, safeNotes } from "../../request.js";
 import { clientIp } from "../../support.js";
-import { syncWithEnforcement, validateEntitlementCreate, type ProtectedCreateInput } from "../entitlements/create-enforcement.js";
+import type { AdminEntitlementCreateInput } from "../../../shared/api.js";
+import { syncWithEnforcement, validateEntitlementCreate } from "../entitlements/create-enforcement.js";
 import { ENTITLEMENT_SYNC_FIELDS, namesOnly, validateEntitlementInput } from "../entitlements/validation.js";
 
 // A synced grant is protected: it names the customer who owns it and that customer's license, and
-// it meets the same wire rules as an admin create. The body cannot choose the mode; sync supplies it.
-function validateSyncInput(body: unknown): ProtectedCreateInput | null {
+// it meets the same wire rules as an admin create.
+function validateSyncInput(body: unknown): AdminEntitlementCreateInput | null {
   if (!namesOnly(body, ENTITLEMENT_SYNC_FIELDS)) {
     return null;
   }
@@ -19,7 +20,7 @@ function validateSyncInput(body: unknown): ProtectedCreateInput | null {
   if (fields === null || typeof fields.customer_id !== "string" || typeof fields.license_id !== "string") {
     return null;
   }
-  return validateEntitlementCreate({ ...fields, enforcement_mode: "device_bound_v1" });
+  return validateEntitlementCreate(fields);
 }
 
 function syncReason(value: unknown): string | null {

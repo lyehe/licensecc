@@ -42,7 +42,7 @@ export const selfServicePaths: LabeledPathFragment = {
         tags: ["portal"],
         operationId: "portalEntitlements",
         summary: "List the customer's entitlements (read-only, customer_id bound).",
-        description: "Ordered by project, feature.",
+        description: "Ordered by project, feature. Every grant is protected: devices connect from the application with browser consent.",
         security: [{ sessionCookie: [] }],
         responses: {
           "200": {
@@ -65,7 +65,6 @@ export const selfServicePaths: LabeledPathFragment = {
                               project: { type: "string" },
                               feature: { type: "string" },
                               license_fingerprint: { type: "string" },
-                              enforcement_mode: { type: "string", enum: ["device_bound_v1"], description: "Every grant is protected: devices connect from the application with browser consent." },
                               status: { type: "string" },
                               valid_from: { type: ["integer", "null"] },
                               valid_until: { type: ["integer", "null"] },

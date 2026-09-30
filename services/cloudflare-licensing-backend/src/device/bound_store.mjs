@@ -11,7 +11,7 @@ const fields = ["keyId", "purpose", "operationId", "invocationId", "requestDiges
   "attemptRevision", "codeHash", "pkceChallenge", "redirectUri", "trialStamp"];
 const input = `WITH p AS (SELECT ${fields.map(f => `json_extract(j, '$.${f}') AS ${f}`).join(", ")} FROM (SELECT ? AS j)) `;
 const owned = (revision, allowUnstarted = true) => `e.project=p.project AND e.feature=p.feature AND e.license_fingerprint=p.fingerprint
-  AND e.customer_id=p.customerId AND e.status='active' AND e.enforcement_mode='device_bound_v1'
+  AND e.customer_id=p.customerId AND e.status='active'
   AND e.authority_revision=${revision}
   AND ${boundTrialSql("e", "p.keyId", "unixepoch()", allowUnstarted)}
   AND (e.valid_from IS NULL OR e.valid_from <= unixepoch())

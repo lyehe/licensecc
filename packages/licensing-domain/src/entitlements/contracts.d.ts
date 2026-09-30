@@ -48,11 +48,6 @@ export interface EntitlementInput {
   license_id?: string | null;
 }
 
-/** Admin create only; ordinary sync and PATCH cannot select enforcement. */
-export interface EntitlementCreateInput extends EntitlementInput {
-  enforcement_mode?: "legacy" | "device_bound_v1";
-}
-
 export interface EntitlementPatch {
   valid_from?: number | null;
   valid_until?: number | null;

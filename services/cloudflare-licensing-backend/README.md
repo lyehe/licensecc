@@ -247,9 +247,9 @@ duplicate check as crash-redrive evidence.
   (e.g. a mistaken revoke), run `upsert --allow-revoked-override --reason <text>`:
   it requires a reason and records a distinct `revoked-override` audit event so
   the override is unmistakable in the log. `upsert` requires `--customer-id` and
-  `--license-id`: every entitlement it writes is a protected `device_bound_v1`
-  grant with a named owner, and neither field is cleared or reassigned on a
-  later conflict — ownership is set once, at creation.
+  `--license-id`: every entitlement it writes is a protected grant with a named
+  owner, and neither field is cleared or reassigned on a later conflict —
+  ownership is set once, at creation.
 - This reference service does not prevent local binary patching or API hooking.
 
 ## Order ingest (`POST /v1/orders`)
@@ -292,10 +292,9 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   A billing integration must therefore send the customer id on every event,
   including a revocation or cancellation for which its provider supplies only the
   subscription id.
-- **Grants.** `subscription.active` creates or refreshes a protected
-  (`device_bound_v1`) grant owned by the order's customer, with no pool and a
-  device limit of `quantity.max_active_devices` (default 1); `quantity.changed`
-  changes only that device limit.
+- **Grants.** `subscription.active` creates or refreshes a protected grant owned
+  by the order's customer, with a device limit of `quantity.max_active_devices`
+  (default 1); `quantity.changed` changes only that device limit.
 - **Grant ownership.** An order may act only on a grant its own `customer.id`
   already owns, or create a new one. If a grant already exists for the order's
   project, feature and fingerprint and another customer owns it, or no one does,

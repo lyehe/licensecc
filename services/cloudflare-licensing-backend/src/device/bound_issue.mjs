@@ -55,7 +55,6 @@ async function authority(db, purpose, request, verified, operation) {
   if (!entitlement || entitlement.status !== "active" || entitlement.customer_status !== "active"
       || (entitlement.valid_from !== null && entitlement.valid_from > entitlement.now)
       || (entitlement.valid_until !== null && entitlement.valid_until <= entitlement.now)) deny("access_denied", 403);
-  if (entitlement.enforcement_mode !== "device_bound_v1") deny("legacy_protocol_disabled", 403);
   const trial = boundTrialState(entitlement, subject.key_id, entitlement.now, purpose === "exchange" && !operation);
   if (!trial || (trial.stamp && entitlement.authority_revision >= Number.MAX_SAFE_INTEGER)) deny("access_denied", 403);
   const device = await db.prepare("SELECT * FROM device_bound_devices WHERE key_id=?").bind(subject.key_id).first();

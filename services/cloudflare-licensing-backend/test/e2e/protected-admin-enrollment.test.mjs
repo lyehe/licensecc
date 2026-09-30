@@ -31,7 +31,7 @@ for (const [type, basis] of [["node_locked", "from_issue"], ["trial", "from_issu
     const license = await licensed.json(); assert.equal(licensed.status, 200, JSON.stringify(license));
     assert.equal(license.data.customer_id, "protected-owner"); assert.equal(license.data.project, "APP");
     const created = await adminPost("/api/admin/entitlements", "protected-create", { project: "APP", feature: "PRO", license_fingerprint: "c".repeat(64),
-      customer_id: "protected-owner", license_id: license.data.id, policy_id: "protected-policy", enforcement_mode: "device_bound_v1" });
+      customer_id: "protected-owner", license_id: license.data.id, policy_id: "protected-policy" });
     const grant = await created.json(); assert.equal(created.status, 200, JSON.stringify(grant));
     assert.equal(grant.data.license_id, license.data.id);
     assert.equal(grant.data.enforcement_mode, "device_bound_v1");

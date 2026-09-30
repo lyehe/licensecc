@@ -5,7 +5,7 @@ import test from "node:test";
 import { worker, baseEnv, authed, syncEnv, syncAuthed } from "../worker/fixtures.mjs";
 
 const path = "/api/admin/entitlements";
-const input = { project: "APP", feature: "PRO", license_fingerprint: "a".repeat(64), customer_id: "owner", license_id: "license", enforcement_mode: "device_bound_v1" };
+const input = { project: "APP", feature: "PRO", license_fingerprint: "a".repeat(64), customer_id: "owner", license_id: "license" };
 function fixture(t) {
   const sql = new DatabaseSync(":memory:"); t.after(() => sql.close());
   sql.exec(readFileSync(new URL("../../../cloudflare-licensing-backend/schema.sql", import.meta.url), "utf8"));
@@ -52,33 +52,34 @@ test("admin creates a fresh protected grant and exactly replays it without alloc
   const before = f.snapshot(); assert.deepEqual(before.slice(3), [[], [], []]);
   const retry = await f.send(); assert.equal(retry.status, 200); assert.equal(await retry.text(), text);
   assert.equal(retry.headers.get("x-idempotent-replay"), "1");
-  assert.equal((await f.send({ ...input, enforcement_mode: "legacy" })).status, 400);
+  assert.equal((await f.send({ ...input, enforcement_mode: "device_bound_v1" })).status, 400);
   assert.equal((await f.send({ ...input, feature: "OTHER" })).status, 409);
   assert.deepEqual(f.snapshot(), before);
 });
 
-test("an omitted or legacy mode is refused, a legacy grant is never converted, and a cached reply without the mode is not protected success", async t => {
-  const f = fixture(t), { enforcement_mode, ...omitted } = input;
-  // Only a direct insert can still hold a legacy grant; the admin API never writes one.
-  f.sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,enforcement_mode,created_at,updated_at) VALUES('APP','PRO',?,'active','owner','license','legacy',1,1)").run(input.license_fingerprint);
-  const before = f.snapshot();
-  const convert = await f.send(input, "convert");
-  assert.equal(convert.status, 409); assert.equal((await convert.json()).code, "enforcement_mode_conflict");
-  // A policy create takes the same rule: its stamp never supplies a mode.
-  for (const [body, key] of [[omitted, "omitted"], [{ ...input, enforcement_mode: "legacy" }, "legacy"],
-    [{ ...omitted, policy_id: "policy" }, "policy-omitted"], [{ ...input, policy_id: "policy", enforcement_mode: "legacy" }, "policy-legacy"]]) {
-    const refused = await f.send(body, key);
-    assert.equal(refused.status, 400); assert.equal((await refused.json()).code, "invalid_request");
+// Every grant is protected, so a create, a policy create, a sync or a PATCH naming any mode, even
+// the protected one, is refused before any write.
+test("a create, policy create, sync or PATCH naming a mode is refused before any write", async t => {
+  const f = fixture(t), before = f.snapshot();
+  for (const mode of ["device_bound_v1", "legacy", null, [], "", " device_bound_v1", "floating"]) {
+    for (const [body, key] of [[{ ...input, enforcement_mode: mode }, "direct"], [{ ...input, policy_id: "policy", enforcement_mode: mode }, "policy"]]) {
+      const refused = await f.send(body, `${key}-${JSON.stringify(mode)}`);
+      assert.equal(refused.status, 400, key); assert.equal((await refused.json()).code, "invalid_request", key);
+    }
+    const synced = await worker.fetch(syncAuthed({ ...input, enforcement_mode: mode }), syncEnv(f.db));
+    assert.equal(synced.status, 400); assert.equal((await synced.json()).code, "invalid_request");
   }
   assert.deepEqual(f.snapshot(), before);
-  const other = { ...input, license_fingerprint: "b".repeat(64), license_id: "second" };
-  f.sql.exec("INSERT INTO licenses(id,customer_id,project,created_at,updated_at) VALUES('second','owner','APP',1,1)");
-  assert.equal((await f.send(other, "second")).status, 200);
-  const record = f.sql.prepare("SELECT response_json FROM mutation_idempotency WHERE idempotency_key='second'").get();
-  const historic = JSON.parse(record.response_json); delete historic.data.enforcement_mode;
-  f.sql.prepare("UPDATE mutation_idempotency SET response_json=? WHERE idempotency_key='second'").run(JSON.stringify(historic));
-  const replay = await f.send(other, "second");
-  assert.equal(replay.status, 409); assert.equal((await replay.json()).code, "idempotency_request_conflict");
+  const first = await f.send(), body = await first.json(); assert.equal(first.status, 200);
+  assert.equal(body.data.enforcement_mode, "device_bound_v1");
+  const created = f.snapshot();
+  for (const mode of ["device_bound_v1", "legacy"]) {
+    const patched = await f.send({ enforcement_mode: mode, expected_customer_id: body.data.customer_id, expected_revocation_seq: body.data.revocation_seq },
+      `patch-${mode}`, `${path}/${body.data.id}`, "PATCH");
+    assert.equal(patched.status, 400); assert.equal((await patched.json()).code, "invalid_request");
+  }
+  assert.deepEqual(f.snapshot(), created);
+  assert.deepEqual(f.sql.prepare("PRAGMA foreign_key_check").all(), []);
 });
 
 for (const [change, reason] of [[{ customer_id: "other" }, "license_customer_mismatch"], [{ license_id: null }, "license_missing"]]) {
@@ -178,11 +179,12 @@ test("a missing or incorrect policy side-write rolls back the preceding upsert",
   }
 });
 
-test("a competing legacy insertion cannot become protected", async t => {
+// A create that observed no grant never overwrites one a competing writer inserted meanwhile.
+test("a competing insertion is never taken over by a create that observed no grant", async t => {
   const f = fixture(t);
-  f.race(() => f.sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,enforcement_mode,created_at,updated_at) VALUES('APP','PRO',?,'active','legacy',1,1)").run(input.license_fingerprint));
+  f.race(() => f.sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,created_at,updated_at) VALUES('APP','PRO',?,'active',1,1)").run(input.license_fingerprint));
   await refusedFor(await f.send(), "fingerprint_in_use");
-  assert.equal(f.sql.prepare("SELECT count(*) AS n FROM entitlements WHERE enforcement_mode='device_bound_v1'").get().n, 0);
+  assert.deepEqual({ ...f.sql.prepare("SELECT customer_id, license_id, revocation_seq FROM entitlements").get() }, { customer_id: null, license_id: null, revocation_seq: 0 });
   assert.equal(f.sql.prepare("SELECT count(*) AS n FROM mutation_idempotency").get().n, 0);
 });
 
@@ -196,22 +198,9 @@ test("a protected denial does not block re-creating the same grant", async t => 
   assert.equal(again.status, 200, JSON.stringify(await again.clone().json()));
 });
 
-test("malformed modes and attempts to patch mode are rejected", async t => {
-  const f = fixture(t);
-  for (const mode of [null, [], "", " device_bound_v1", "floating"]) assert.equal((await f.send({ ...input, enforcement_mode: mode })).status, 400);
-  for (const mode of ["legacy", "device_bound_v1"]) {
-    const response = await worker.fetch(syncAuthed({ ...input, enforcement_mode: mode }), syncEnv(f.db));
-    assert.equal(response.status, 400);
-  }
-  const first = await f.send(), body = await first.json(); assert.equal(first.status, 200);
-  assert.equal((await f.send({ enforcement_mode: "legacy", expected_customer_id: body.data.customer_id, expected_revocation_seq: body.data.revocation_seq }, "patch", `${path}/${body.data.id}`, "PATCH")).status, 400);
-  assert.deepEqual(f.sql.prepare("PRAGMA foreign_key_check").all(), []);
-});
-
-// A sync writes the same protected grant as an admin create, under the same checks, and never
-// reports a grant of another mode as synced.
-test("sync runs the protected create checks and never yields a legacy grant", async t => {
-  const f = fixture(t), { enforcement_mode: _mode, ...body } = input;
+// A sync writes the same protected grant as an admin create, under the same checks.
+test("sync runs the protected create checks", async t => {
+  const f = fixture(t), body = input;
   const sync = (payload, key) => worker.fetch(syncAuthed(payload, { headers: { "idempotency-key": key } }), syncEnv(f.db));
   const before = f.snapshot();
   await refusedFor(await sync({ ...body, customer_id: "other" }, "other-owner"), "license_customer_mismatch");
@@ -219,16 +208,6 @@ test("sync runs the protected create checks and never yields a legacy grant", as
   const synced = await sync(body, "owned");
   assert.equal(synced.status, 200, await synced.clone().text());
   assert.equal((await synced.json()).data.enforcement_mode, "device_bound_v1");
-  // A legacy grant is never converted, and even an unchanged one is a conflict rather than a no-op.
-  f.sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,enforcement_mode,created_at,updated_at) VALUES('APP','OLD',?,'active','owner','license','legacy',1,1)")
-    .run(input.license_fingerprint);
-  const legacy = f.snapshot();
-  for (const [payload, key] of [[{ ...body, feature: "OLD" }, "legacy-unchanged"], [{ ...body, feature: "OLD", notes: "changed" }, "legacy-changed"],
-    [{ ...body, feature: "OLD", status: "revoked", reason: "ended" }, "legacy-revoked"]]) {
-    const conflict = await sync(payload, key);
-    assert.equal(conflict.status, 409, key); assert.equal((await conflict.json()).code, "enforcement_mode_conflict");
-  }
-  assert.deepEqual(f.snapshot(), legacy);
 });
 
 // A synced disable or revocation of an existing protected grant always applies, whatever the state
@@ -244,7 +223,7 @@ const KEPT_COLUMNS = "customer_id, license_id, notes, valid_from, valid_until, i
 for (const [name, change] of WITHDRAWAL_CASES) {
   for (const status of ["disabled", "revoked"]) {
     test(`a synced ${status === "revoked" ? "revocation" : "disable"} applies when ${name}`, async t => {
-      const f = fixture(t), { enforcement_mode: _mode, ...body } = input;
+      const f = fixture(t), body = input;
       const sync = (payload, key) => worker.fetch(syncAuthed(payload, { headers: { "idempotency-key": key } }), syncEnv(f.db));
       assert.equal((await sync(body, "create")).status, 200);
       f.sql.exec(change);
@@ -261,7 +240,7 @@ for (const [name, change] of WITHDRAWAL_CASES) {
 }
 
 test("a synced disable or revocation naming another owner keeps the grant's owner and license", async t => {
-  const f = fixture(t), { enforcement_mode: _mode, ...body } = input;
+  const f = fixture(t), body = input;
   const sync = (payload, key) => worker.fetch(syncAuthed(payload, { headers: { "idempotency-key": key } }), syncEnv(f.db));
   f.sql.exec("INSERT INTO licenses(id,customer_id,project,created_at,updated_at) VALUES('license-other','other','APP',1,1)");
   assert.equal((await sync(body, "create")).status, 200);
@@ -278,7 +257,7 @@ test("a synced disable or revocation naming another owner keeps the grant's owne
 // Only a withdrawal skips the checks: a sync that creates a grant, or that leaves or makes one active,
 // still has to meet every protected rule.
 test("a synced create or reactivation still runs the protected checks", async t => {
-  const f = fixture(t), { enforcement_mode: _mode, ...body } = input;
+  const f = fixture(t), body = input;
   const sync = (payload, key) => worker.fetch(syncAuthed(payload, { headers: { "idempotency-key": key } }), syncEnv(f.db));
   assert.equal((await sync(body, "create")).status, 200);
   f.sql.exec("UPDATE customers SET status='disabled' WHERE id='owner'");
@@ -429,7 +408,7 @@ for (const { name, policy, creates } of WOULD_BE_ROW_CASES) {
     const last = { ...input, ...creates.at(-1) };
     const policyRow = last.policy_id === undefined ? undefined : f.sql.prepare("SELECT * FROM entitlement_policies WHERE id=?").get(last.policy_id);
     // The Worker hands the diagnostic what createFromPolicy stamped, or the validated body otherwise.
-    const used = policyRow === undefined ? last : { ...stampFromPolicy(policyRow, last, 0).input, enforcement_mode: last.enforcement_mode };
+    const used = policyRow === undefined ? last : stampFromPolicy(policyRow, last, 0).input;
     const { sql, binds } = protectedWouldBeRowQuery(used, policyRow);
     const wouldBe = f.sql.prepare(`${sql} SELECT * FROM e`).get(...binds);
     assert.equal((await f.send(last, "final")).status, 200);

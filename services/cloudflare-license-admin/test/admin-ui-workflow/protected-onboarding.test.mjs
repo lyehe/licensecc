@@ -23,7 +23,7 @@ test("every protected-create reason reads as one actionable sentence, never its 
   for (const data of [undefined, null, {}, { reason: 7 }, { reason: "brand_new_rule" }, { reason: "toString" }, "customer_inactive"]) {
     assert.equal(onboarding.protectedCreateFailureMessage(failure("protected_creation_conflict", data)), generic, JSON.stringify(data));
   }
-  assert.equal(onboarding.protectedCreateFailureMessage(failure("enforcement_mode_conflict", { reason: "customer_inactive" })), null);
+  assert.equal(onboarding.protectedCreateFailureMessage(failure("stale_transition", { reason: "customer_inactive" })), null);
   const say = (reason) => onboarding.protectedCreateFailureMessage(failure("protected_creation_conflict", { reason }));
   // Its likeliest trigger is another project's policy, which a plain retry repeats; say so first.
   assert.match(say("policy_mismatch"), /^The policy isn't an active policy for this project, or it changed while you were saving; choose an active policy for this project/);

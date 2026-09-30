@@ -62,7 +62,8 @@ test("an operator onboards a protected application from Add user to a protected 
   expect(writes.licenses[0]).toMatchObject({ path: "/api/admin/customers/cust_onboarded/licenses", body: { project: "APP" } });
   expect(writes.licenses[0].key).toMatch(/^[0-9a-f-]{36}$/);
   expect(writes.entitlements).toHaveLength(1);
-  expect(writes.entitlements[0]).toMatchObject({ enforcement_mode: "device_bound_v1", project: "APP", feature: "PRO", customer_id: "cust_onboarded", license_id: "lic_onboarded" });
+  expect(writes.entitlements[0]).toMatchObject({ project: "APP", feature: "PRO", customer_id: "cust_onboarded", license_id: "lic_onboarded" });
+  expect(writes.entitlements[0]).not.toHaveProperty("enforcement_mode");
   expect(writes.entitlements[0].license_fingerprint).toMatch(/^[0-9a-f]{64}$/);
 });
 

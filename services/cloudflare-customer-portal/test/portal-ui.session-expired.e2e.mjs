@@ -25,8 +25,8 @@ function jsonBody(request) {
 }
 
 const ENTITLEMENTS = [
-  { id: "ent_pro", project: "DEFAULT", feature: "pro", status: "active", license_fingerprint: "a".repeat(64), valid_from: 1_710_000_000, valid_until: null, enforcement_mode: "device_bound_v1", license_mode: "trial", max_active_devices: 1, policy_id: "pol_pro", trial_ends_at: null, trial_starts_on_activation: false },
-  { id: "ent_node", project: "DEFAULT", feature: "solo", status: "active", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: 2_100_000_000, enforcement_mode: "device_bound_v1", license_mode: "node_locked", max_active_devices: 1, policy_id: "pol_node", trial_ends_at: null, trial_starts_on_activation: false },
+  { id: "ent_pro", project: "DEFAULT", feature: "pro", status: "active", license_fingerprint: "a".repeat(64), valid_from: 1_710_000_000, valid_until: null, license_mode: "trial", max_active_devices: 1, policy_id: "pol_pro", trial_ends_at: null, trial_starts_on_activation: false },
+  { id: "ent_node", project: "DEFAULT", feature: "solo", status: "active", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: 2_100_000_000, license_mode: "node_locked", max_active_devices: 1, policy_id: "pol_node", trial_ends_at: null, trial_starts_on_activation: false },
 ];
 
 function setup(page) {
@@ -206,8 +206,8 @@ test("consent: a page with a saved mutation survives a 401, then resumes after s
 
 const SWITCH_CODE_A = "80315426";
 const SWITCH_CODE_B = "19283746";
-const SWITCH_ENTITLEMENT_A = { id: "ent_switch_a", project: "ALPHACORP", feature: "widget", status: "active", license_fingerprint: "a".repeat(64), valid_from: null, valid_until: null, enforcement_mode: "device_bound_v1", license_mode: "node_locked", max_active_devices: 1, policy_id: "pol_switch_a", trial_ends_at: null, trial_starts_on_activation: false };
-const SWITCH_ENTITLEMENT_B = { id: "ent_switch_b", project: "BETAWORKS", feature: "gadget", status: "active", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: null, enforcement_mode: "device_bound_v1", license_mode: "node_locked", max_active_devices: 1, policy_id: "pol_switch_b", trial_ends_at: null, trial_starts_on_activation: false };
+const SWITCH_ENTITLEMENT_A = { id: "ent_switch_a", project: "ALPHACORP", feature: "widget", status: "active", license_fingerprint: "a".repeat(64), valid_from: null, valid_until: null, license_mode: "node_locked", max_active_devices: 1, policy_id: "pol_switch_a", trial_ends_at: null, trial_starts_on_activation: false };
+const SWITCH_ENTITLEMENT_B = { id: "ent_switch_b", project: "BETAWORKS", feature: "gadget", status: "active", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: null, license_mode: "node_locked", max_active_devices: 1, policy_id: "pol_switch_b", trial_ends_at: null, trial_starts_on_activation: false };
 
 test("a customer switch after a session-ending 401 never shows the previous customer's data", async ({ page }) => {
   const pageErrors = [];

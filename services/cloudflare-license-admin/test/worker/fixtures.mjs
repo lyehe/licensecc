@@ -10,7 +10,7 @@ const fingerprint = "a".repeat(64);
 const PROTECTED_OWNER = { customer_id: "cus_1", license_id: "lic_1" };
 const PROTECTED_PROJECT = "APP";
 // The body of a create the admin API accepts: every create is protected and names that owner.
-const protectedGrant = { project: PROTECTED_PROJECT, feature: "PRO", license_fingerprint: fingerprint, ...PROTECTED_OWNER, enforcement_mode: "device_bound_v1" };
+const protectedGrant = { project: PROTECTED_PROJECT, feature: "PRO", license_fingerprint: fingerprint, ...PROTECTED_OWNER };
 
 // The exact field set the production json_object emits into entitlement_events.next_json
 // (eventFromCurrentStatement, now in the shared @licensecc/cloudflare-runtime
@@ -278,12 +278,11 @@ class MockD1 {
   }
 
   // Models the core protected-create rules only; the SQL suite runs the real assertion. The written
-  // row is protected, and owned by an active seeded customer through that customer's licence for its
-  // project.
+  // row is owned by an active seeded customer through that customer's licence for its project.
   protectedGrantHolds([project, feature, licenseFingerprint]) {
     const row = this.entitlements.get(keyOf(project, feature, licenseFingerprint));
     const license = row === undefined ? undefined : this.licenses.get(row.license_id);
-    return row !== undefined && row.enforcement_mode === "device_bound_v1" && this.customers.get(row.customer_id)?.status === "active"
+    return row !== undefined && this.customers.get(row.customer_id)?.status === "active"
       && license?.customer_id === row.customer_id && license.project === row.project;
   }
 

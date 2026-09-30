@@ -9,7 +9,7 @@ export interface SyncClientOptions {
 
 /**
  * Sends one protected-grant projection. The body names the grant's customer_id and license_id; the
- * Worker refuses one without them, or with a device hash or an assertion TTL.
+ * Worker refuses one without them, or one naming any field a sync does not read.
  */
 export async function syncEntitlement(
   options: SyncClientOptions,

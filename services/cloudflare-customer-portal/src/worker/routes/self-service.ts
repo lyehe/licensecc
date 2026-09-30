@@ -41,7 +41,7 @@ type EntitlementListRow = Omit<OwnedEntitlement, "id" | "license_mode"> & {
 
 async function apiEntitlements(env: Env, session: { customer_id: string }, reqId: string): Promise<Response> {
   const rows = await env.DB.prepare(
-    "SELECT project, feature, license_fingerprint, enforcement_mode, status, valid_from, valid_until, max_active_devices, is_trial, policy_id, " +
+    "SELECT project, feature, license_fingerprint, status, valid_from, valid_until, max_active_devices, is_trial, policy_id, " +
       `${TRIAL_SQL} FROM entitlements e WHERE customer_id = ? ORDER BY project, feature, license_fingerprint`,
   ).bind(session.customer_id).all<EntitlementListRow>();
   return envelope(reqId, "entitlements", {

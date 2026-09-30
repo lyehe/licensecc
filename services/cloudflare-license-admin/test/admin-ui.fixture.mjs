@@ -73,8 +73,10 @@ function workerEntitlementFields(name, expected) {
 const ENTITLEMENT_INPUT_FIELDS = workerEntitlementFields("ENTITLEMENT_INPUT_FIELDS",
   ["project", "feature", "license_fingerprint", "status", "valid_from", "valid_until", "notes", "customer_id", "license_id"]);
 const ENTITLEMENT_CREATE_FIELDS = workerEntitlementFields("ENTITLEMENT_CREATE_FIELDS",
-  ["...ENTITLEMENT_INPUT_FIELDS", "enforcement_mode", "policy_id", "max_active_devices"])
+  ["...ENTITLEMENT_INPUT_FIELDS", "policy_id", "max_active_devices"])
   .flatMap((field) => field === "...ENTITLEMENT_INPUT_FIELDS" ? ENTITLEMENT_INPUT_FIELDS : [field]);
+const ENTITLEMENT_POLICY_CREATE_FIELDS = workerEntitlementFields("ENTITLEMENT_POLICY_CREATE_FIELDS",
+  ["project", "feature", "license_fingerprint", "valid_from", "valid_until", "notes", "customer_id", "license_id", "policy_id"]);
 const ENTITLEMENT_PATCH_FIELDS = workerEntitlementFields("ENTITLEMENT_PATCH_FIELDS",
   ["valid_from", "valid_until", "notes", "customer_id", "license_id", "max_active_devices", "expected_customer_id", "expected_revocation_seq"]);
 const namesOnly = (body, allowed) => Object.keys(body).every((field) => allowed.includes(field));
@@ -1760,13 +1762,14 @@ export function makeAdminApiFixture() {
       requests.creates += 1;
       await new Promise((resolve) => setTimeout(resolve, 100));
       const body = await jsonBody(request);
-      if (!namesOnly(body, ENTITLEMENT_CREATE_FIELDS)) {
+      const selectsPolicy = body.policy_id !== undefined && body.policy_id !== null && body.policy_id !== "";
+      if (!namesOnly(body, ENTITLEMENT_CREATE_FIELDS) || (selectsPolicy && !namesOnly(body, ENTITLEMENT_POLICY_CREATE_FIELDS))) {
         return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-entitlement-refused-field" });
       }
       now += 1;
       const row = {
         id: `ent-${nextEntitlementId}`,
-        enforcement_mode: body.enforcement_mode ?? "device_bound_v1",
+        enforcement_mode: "device_bound_v1",
         project: body.project,
         feature: body.feature,
         license_fingerprint: body.license_fingerprint,
@@ -1813,7 +1816,7 @@ export function makeAdminApiFixture() {
           if (Object.keys(body).some((field) => !["max_active_devices", "expected_customer_id", "expected_revocation_seq"].includes(field))) {
             return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-limit-combined" });
           }
-          if (row.enforcement_mode === "device_bound_v1" && body.max_active_devices < behavior.devicesInUse) {
+          if (body.max_active_devices < behavior.devicesInUse) {
             return fulfill(409, { ok: false, code: "capacity_in_use", request_id: "ui-e2e-capacity-in-use", data: { devices_in_use: behavior.devicesInUse } });
           }
           now += 1;

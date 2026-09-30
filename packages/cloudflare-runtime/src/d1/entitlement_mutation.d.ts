@@ -110,13 +110,10 @@ export function writeEntitlementWithAudit(
   options?: { allowNoWrite?: boolean },
 ): Promise<MutationResult<EntitlementRecord> | null>;
 
-/**
- * Writes only protected grants; a caller may name that mode and no other (`invalid_patch`). The
- * grant never carries a device hash, whatever the input names.
- */
+/** Creates or updates a grant; every grant is protected, so the input names no mode. */
 export function createEntitlement(
   env: MutationEnv,
-  input: EntitlementInput & { enforcement_mode?: "device_bound_v1" },
+  input: EntitlementInput,
   ctx: MutationContext,
   reason?: string,
   eventTypeOverride?: EntitlementEventType,
@@ -124,7 +121,6 @@ export function createEntitlement(
   extraStatements?: D1PreparedStatementLike[],
 ): Promise<MutationResult<EntitlementRecord> | null>;
 
-/** A non-empty device hash on a protected grant is `invalid_patch`: its device key proves the device. */
 export function patchEntitlement(
   env: MutationEnv,
   key: EntitlementKey,
@@ -145,14 +141,13 @@ export function transitionEntitlement(
 
 /**
  * Creates or updates a protected grant from an external projection; an unchanged grant is a no-op.
- * A stored grant of another mode is `enforcement_mode_conflict`, even when unchanged. A disable or
- * revocation of an existing grant is a status-only transition that always applies and keeps the
- * stored owner, license, notes and validity. `extraStatements` ride only a write that creates the
- * grant or leaves it active.
+ * A disable or revocation of an existing grant is a status-only transition that always applies and
+ * keeps the stored owner, license, notes and validity. `extraStatements` ride only a write that
+ * creates the grant or leaves it active.
  */
 export function syncEntitlement(
   env: MutationEnv,
-  input: EntitlementInput & { enforcement_mode?: "device_bound_v1" },
+  input: EntitlementInput,
   reason: string,
   ctx: MutationContext,
   idempotency: IdempotencyCommit | null,

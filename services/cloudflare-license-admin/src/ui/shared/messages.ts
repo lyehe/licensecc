@@ -65,7 +65,6 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   stale_transition: failed(`This record changed after you loaded it. ${REFRESH_AND_RETRY}`),
   revoked_entitlement_is_terminal: failed("Revocation is permanent; this license (entitlement) can no longer change."),
   invalid_entitlement_id: failed("That entitlement ID is not valid."),
-  enforcement_mode_conflict: failed("A license (entitlement) for this project, feature and fingerprint already uses a different protection."),
   protected_creation_conflict: failed("This protected license (entitlement) can't be created with these settings."),
   policy_stamping_disabled: failed("Creating a license (entitlement) from a policy is turned off for this console."),
   capacity_in_use: failed("More devices are connected than this device limit allows; disconnect one first."),

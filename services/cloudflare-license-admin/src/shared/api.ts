@@ -2,14 +2,13 @@
 // shared mutation core's .d.ts so the admin Worker and the licensing backend
 // share ONE shape. Re-exported here so existing `../shared/api` import sites are
 // unchanged.
-import type { EntitlementStatus, EntitlementInput, EntitlementEventType, EntitlementCreateInput, EntitlementPatch } from "@licensecc/licensing-domain/entitlements/contracts";
+import type { EntitlementStatus, EntitlementInput, EntitlementEventType, EntitlementPatch } from "@licensecc/licensing-domain/entitlements/contracts";
 import type { WebhookTestStatusClass } from "@licensecc/cloudflare-runtime/webhooks/webhook_endpoint";
 
 export type {
   EntitlementStatus,
   EntitlementRecord,
   EntitlementInput,
-  EntitlementCreateInput,
   EntitlementPatch,
 } from "@licensecc/licensing-domain/entitlements/contracts";
 
@@ -262,8 +261,8 @@ export type ProtectedCreateReason = typeof PROTECTED_CREATE_REASONS[number];
 // PATCH. A protected grant refuses a limit below its connected devices (409 capacity_in_use).
 export const MAX_DEVICE_LIMIT = 1_000_000;
 
-/** Admin create body: the shared create input plus its own device limit, accepted only without a policy. */
-export type AdminEntitlementCreateInput = EntitlementCreateInput & { max_active_devices?: number };
+/** Admin create body: the shared grant input plus its own device limit, accepted only without a policy. */
+export type AdminEntitlementCreateInput = EntitlementInput & { max_active_devices?: number };
 
 /** Admin PATCH body: the shared patch fields, or the device limit alone. */
 export type AdminEntitlementPatch = EntitlementPatch & { max_active_devices?: number };

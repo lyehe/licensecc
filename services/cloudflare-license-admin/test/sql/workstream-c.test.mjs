@@ -285,7 +285,7 @@ function grantBody(db, fingerprint, extra = {}) {
   const license = `lic_grant_${fingerprint.slice(0, 8)}`;
   db.prepare("INSERT OR IGNORE INTO customers (id, name, created_at, updated_at) VALUES ('cus_grants', 'Grant owner', ?, ?)").run(NOW, NOW);
   db.prepare("INSERT OR IGNORE INTO licenses (id, customer_id, project, label, created_at, updated_at) VALUES (?, 'cus_grants', 'DEFAULT', '', ?, ?)").run(license, NOW, NOW);
-  return { project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint, customer_id: "cus_grants", license_id: license, enforcement_mode: "device_bound_v1", ...extra };
+  return { project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint, customer_id: "cus_grants", license_id: license, ...extra };
 }
 
 // Seed an entitlement through the worker so createEntitlement owns the full column set (no drift).

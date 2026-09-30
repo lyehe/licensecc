@@ -71,10 +71,10 @@ export const entitlementPaths: LabeledPathFragment = {
       },
       responses: {
         "200": okResponse("Entitlement created (directly, or stamped from a policy).", "#/components/schemas/EntitlementRecord", "entitlement_saved"),
-        "400": errorResponse("Invalid request / json / id / idempotency key (including an omitted or non-protected enforcement_mode, a field a create does not read, and max_active_devices outside 1-1,000,000 or sent with a policy_id), or a policy_id was supplied while POLICY_STAMP_MODE is off.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request", "policy_stamping_disabled"),
+        "400": errorResponse("Invalid request / json / id / idempotency key (including a field a create does not read, such as a mode; a status or max_active_devices sent with a policy_id; and max_active_devices outside 1-1,000,000), or a policy_id was supplied while POLICY_STAMP_MODE is off.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request", "policy_stamping_disabled"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("Referenced resource not found, or the policy_id is unknown/disabled.", "not_found", "policy_not_found"),
-        "409": protectedCreationConflictResponse("Terminal or concurrent state, enforcement mismatch, protected eligibility failure (data.reason names the failed rule), or an idempotency key already used for another tuple.", "revoked_entitlement_is_terminal", "stale_transition", "enforcement_mode_conflict", "protected_creation_conflict", "idempotency_request_conflict"),
+        "409": protectedCreationConflictResponse("Terminal or concurrent state, protected eligibility failure (data.reason names the failed rule), or an idempotency key already used for another tuple.", "revoked_entitlement_is_terminal", "stale_transition", "protected_creation_conflict", "idempotency_request_conflict"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },

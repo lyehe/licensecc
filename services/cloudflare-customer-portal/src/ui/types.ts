@@ -11,7 +11,6 @@ export interface EntitlementRow {
   license_fingerprint?: string;
   valid_from: number | null;
   valid_until: number | null;
-  enforcement_mode: "device_bound_v1";
   license_mode: "trial" | "node_locked";
   max_active_devices: number;
   policy_id: string | null;

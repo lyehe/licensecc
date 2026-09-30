@@ -373,7 +373,7 @@ export const catalogPaths: LabeledPathFragment = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/PlanProjectionApplyInput" } } },
       },
       responses: {
-        "200": okResponse("Applied projection with created/updated/disabled entitlement records and assignment row. A created grant is protected (device_bound_v1) with no device hash, seat pool, borrowing or meter; an update writes only the validity window, notes, owner, license, policy, device limit and trial state.", "#/components/schemas/PlanProjectionApplyResult", "license_plan_projection_applied"),
+        "200": okResponse("Applied projection with created/updated/disabled entitlement records and assignment row. A created grant is protected; an update writes only the validity window, notes, owner, license, policy, device limit and trial state.", "#/components/schemas/PlanProjectionApplyResult", "license_plan_projection_applied"),
         "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "409": errorResponse("Preview expired, was consumed, belongs to a different actor, its source generation changed, its derived grant has expired, or an assignment-or-entitlement identity now has a different license fingerprint; re-preview before Apply. A fingerprint transfer needs a separate deliberate protocol.", "stale_projection_preview", "projection_preview_grant_expired", "license_fingerprint_conflict", "plan_projection_blocked"),

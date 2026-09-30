@@ -286,10 +286,9 @@ test("access validator builds a safe active entitlement payload", () => {
   }, "cust_1", "lic_1");
   assert.equal(payload.status, "active");
   assert.equal(payload.license_fingerprint, fingerprint);
-  assert.equal(payload.enforcement_mode, "device_bound_v1");
   assert.equal(payload.customer_id, "cust_1");
   assert.equal(payload.license_id, "lic_1");
-  assert.deepEqual(Object.keys(payload).sort(), ["customer_id", "enforcement_mode", "feature", "license_fingerprint", "license_id", "notes", "project", "status"]);
+  assert.deepEqual(Object.keys(payload).sort(), ["customer_id", "feature", "license_fingerprint", "license_id", "notes", "project", "status"]);
 });
 
 test("access validator sends Access token as origin header and edge cookie", () => {

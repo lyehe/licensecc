@@ -140,7 +140,6 @@ function policyCreate(env, fingerprint, key, requestId, notes = "before-commit")
       license_fingerprint: fingerprint,
       customer_id: "cus_race",
       license_id: LICENSE_FOR[fingerprint],
-      enforcement_mode: "device_bound_v1",
       policy_id: POLICY_ID,
       notes,
     },

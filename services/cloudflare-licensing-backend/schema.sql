@@ -314,7 +314,7 @@ CREATE TABLE IF NOT EXISTS entitlements (
   trial_one_per_device INTEGER NOT NULL DEFAULT 0,
   trial_started_at INTEGER NULL,
   trial_device_hash TEXT NULL,
-  enforcement_mode TEXT NOT NULL DEFAULT 'legacy' CHECK (enforcement_mode IN ('legacy', 'device_bound_v1')),
+  enforcement_mode TEXT NOT NULL DEFAULT 'device_bound_v1' CHECK (enforcement_mode IN ('legacy', 'device_bound_v1')),
   authority_revision INTEGER NOT NULL DEFAULT 0
     CHECK (authority_revision = CAST(authority_revision AS BIGINT) AND authority_revision BETWEEN 0 AND 9007199254740991),
   PRIMARY KEY (project, feature, license_fingerprint)

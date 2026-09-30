@@ -9,7 +9,8 @@ test("A's /api/portal/entitlements returns ONLY A's entitlements", async () => {
     assert.equal(r.body.data.items.length, 1);
     assert.equal(r.body.data.items[0].project, "DEFAULT");
     assert.equal(r.body.data.items[0].license_mode, "node_locked");
-    assert.equal(r.body.data.items[0].enforcement_mode, "device_bound_v1");
+    // Every grant is protected, so a row names no mode.
+    assert.equal(Object.hasOwn(r.body.data.items[0], "enforcement_mode"), false);
     assert.equal(typeof r.body.data.items[0].id, "string");
   // The response carries no fingerprint/foreign id.
   assert.ok(!JSON.stringify(r.body).includes(FP_B), "B's data never appears in A's response");
@@ -145,7 +146,8 @@ test("portal entitlement projection lists each owned protected grant without exp
     db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,enforcement_mode,status,max_active_devices,created_at,updated_at) VALUES ('PROTECTED','DEFAULT',?,'A','device_bound_v1','active',1,?,?)").run("c".repeat(64), NOW, NOW);
     const result = await call(env, "GET", "/api/portal/entitlements", { cookie: await cookieFor(env, "A") });
     assert.equal(result.status, 200);
-    assert.equal(result.body.data.items.find(row => row.project === "PROTECTED").enforcement_mode, "device_bound_v1");
+    const listed = result.body.data.items.find(row => row.project === "PROTECTED");
+    assert.ok(listed); assert.equal(Object.hasOwn(listed, "enforcement_mode"), false);
     assert.ok(!JSON.stringify(result.body).includes(FP_B));
   } finally { db.close(); }
 });

@@ -21,7 +21,7 @@ export async function listBindings(request:Request,env:Env,session:SessionRow,re
       FROM device_bound_bindings b JOIN device_bound_devices d ON d.id=b.device_id AND d.project=b.project
       JOIN entitlements e ON e.project=b.project AND e.feature=b.feature AND e.license_fingerprint=b.license_fingerprint
       JOIN customers c ON c.id=d.customer_id AND c.id=e.customer_id
-      WHERE c.id=? AND c.status='active' AND e.enforcement_mode='device_bound_v1' AND b.id>?
+      WHERE c.id=? AND c.status='active' AND b.id>?
       ${binding===null?"":"AND b.id=?"} ORDER BY b.id LIMIT 101`).bind(session.customer_id,cursor,...(binding===null?[]:[binding])).all<Record<string,unknown>>();
     const more=rows.results.length>100,items=rows.results.slice(0,100);
     return respond("device_bindings",200,{customer_id:session.customer_id,items,has_more:more,next_cursor:more?items.at(-1)!.binding_id:null});

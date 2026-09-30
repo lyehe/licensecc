@@ -24,13 +24,13 @@ import {
   ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE,
 } from "../dist-worker/shared/api.js";
 import * as sharedApi from "../dist-worker/shared/api.js";
-import { ENTITLEMENT_CREATE_FIELDS, ENTITLEMENT_PATCH_FIELDS, ENTITLEMENT_SYNC_FIELDS } from "../dist-worker/worker/groups/entitlements/validation.js";
+import { ENTITLEMENT_CREATE_FIELDS, ENTITLEMENT_PATCH_FIELDS, ENTITLEMENT_POLICY_CREATE_FIELDS, ENTITLEMENT_SYNC_FIELDS } from "../dist-worker/worker/groups/entitlements/validation.js";
 import { POLICY_TYPES } from "@licensecc/licensing-domain/entitlements/policy";
 import { MAX_SUPPORT_UNTIL_EPOCH_SECONDS } from "@licensecc/licensing-domain/catalog/plan_projection";
 
 // Collect every `enum` array in the spec that describes the policy `type` field. The policy-type
-// enum is the only one carrying BOTH "node_locked" and "subscription" (the 3-value license-mode
-// enum trial/floating/node_locked is a distinct concept and deliberately excluded). These
+// enum is the only one carrying BOTH "node_locked" and "subscription" (the 2-value license-mode
+// enum trial/node_locked is a distinct concept and deliberately excluded). These
 // hand-written literals must stay deep-equal to the ONE runtime source, POLICY_TYPES, so the spec
 // cannot silently drift from the validators.
 function policyTypeEnums(node, out = []) {
@@ -129,9 +129,19 @@ test("entitlement create, sync and PATCH bodies are closed to exactly the fields
   const documented = (...parts) => [...new Set(parts.flatMap((part) => Object.keys(part.properties ?? {})))].sort();
   const create = schemas.EntitlementCreateInput;
   assert.equal(create.unevaluatedProperties, false);
+  assert.deepEqual(create.allOf[0], { $ref: "#/components/schemas/EntitlementInput" });
   assert.deepEqual(documented(schemas.EntitlementInput, ...create.allOf.slice(1)), [...ENTITLEMENT_CREATE_FIELDS].sort());
+  // A create that selects a policy refuses exactly the create fields the policy stamps.
+  const stamped = [...ENTITLEMENT_CREATE_FIELDS].filter((field) => !ENTITLEMENT_POLICY_CREATE_FIELDS.has(field)).sort();
+  assert.deepEqual(stamped, ["max_active_devices", "status"]);
+  assert.ok([...ENTITLEMENT_POLICY_CREATE_FIELDS].every((field) => ENTITLEMENT_CREATE_FIELDS.has(field)));
+  assert.ok(create.allOf.some((part) => isDeepStrictEqual(part, {
+    if: { required: ["policy_id"], properties: { policy_id: { type: "string", minLength: 1 } } },
+    then: { not: { anyOf: stamped.map((field) => ({ required: [field] })) } },
+  })), "create documents the fields a policy create refuses");
   const sync = schemas.EntitlementSyncInput;
   assert.equal(sync.unevaluatedProperties, false);
+  assert.deepEqual(sync.allOf[0], { $ref: "#/components/schemas/EntitlementInput" });
   assert.deepEqual(documented(schemas.EntitlementInput, ...sync.allOf.slice(1)), [...ENTITLEMENT_SYNC_FIELDS].sort());
   const patch = openApiDocument.paths["/api/admin/entitlements/{id}"].patch.requestBody.content["application/json"].schema;
   assert.equal(patch.unevaluatedProperties, false);
@@ -226,7 +236,7 @@ test("a protected creation conflict documents data.reason from the single runtim
         {
           type: "object",
           required: ["code"],
-          properties: { code: { enum: ["revoked_entitlement_is_terminal", "stale_transition", "enforcement_mode_conflict", "idempotency_request_conflict"] } },
+          properties: { code: { enum: ["revoked_entitlement_is_terminal", "stale_transition", "idempotency_request_conflict"] } },
         },
       ],
     },
@@ -249,10 +259,9 @@ test("the device limit is documented on create and PATCH, with the capacity conf
   const create = schemas.EntitlementCreateInput.allOf;
   assert.ok(inRange(create[1].properties.max_active_devices), "create documents the device limit range");
   // A selected policy owns the device limit, so a create cannot send both.
-  assert.ok(create.some((part) => isDeepStrictEqual(part, {
-    if: { required: ["policy_id"], properties: { policy_id: { type: "string", minLength: 1 } } },
-    then: { not: { required: ["max_active_devices"] } },
-  })), "create documents that a policy excludes max_active_devices");
+  assert.ok(create.some((part) => part.if?.required?.[0] === "policy_id"
+    && part.then.not.anyOf.some((clause) => isDeepStrictEqual(clause, { required: ["max_active_devices"] }))),
+  "create documents that a policy excludes max_active_devices");
   const patch = schemas.EntitlementPatch;
   assert.ok(inRange(patch.properties.max_active_devices), "PATCH documents the device limit range");
   // Exactly what the Worker enforces: no other PATCH field beside the limit. The PATCH request schema

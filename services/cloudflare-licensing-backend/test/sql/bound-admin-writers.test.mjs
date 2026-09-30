@@ -72,8 +72,7 @@ for (const state of ["active", "retiring"]) {
     assert.deepEqual(f.snapshot()[1], before[1]);
     assert.equal(f.snapshot()[2].length, 1);
     assert.equal(f.snapshot()[3].length, 1);
-    // The admin sync names the protected mode it writes.
-    await syncEntitlement(f.env, { ...input, valid_until: 4102445100, enforcement_mode: "device_bound_v1" }, "extend",
+    await syncEntitlement(f.env, { ...input, valid_until: 4102445100 }, "extend",
       { ...ctx, source: "sync", idempotencyKey: "sync-operation" }, idempotency);
     await setEntitlementCapacity(f.env, key, { max_active_devices: 2 },
       { ...ctx, idempotencyKey: "capacity-operation", expectedEntitlement: observed(f) }, idempotency);
@@ -83,12 +82,14 @@ for (const state of ["active", "retiring"]) {
     assert.deepEqual(f.snapshot()[1], before[1]);
     assert.equal(f.snapshot()[2].length, 3);
     assert.equal(f.snapshot()[3].length, 3);
-    // Sync yields only protected grants: an unchanged grant of another mode is a conflict, not a no-op.
+    // A grant inserted without naming its mode is protected by default, so an identical sync is a no-op.
     f.sql.exec("INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,created_at,updated_at) VALUES('APP','OLD','fingerprint','active','owner',1,1)");
-    const legacy = f.snapshot();
-    await assert.rejects(syncEntitlement(f.env, { ...key, feature: "OLD", customer_id: "owner", status: "active" }, "",
-      { ...ctx, source: "sync", idempotencyKey: "legacy-operation" }, idempotency), /enforcement_mode_conflict/);
-    assert.deepEqual(f.snapshot(), legacy);
+    const defaulted = f.snapshot();
+    const unchanged = await syncEntitlement(f.env, { ...key, feature: "OLD", customer_id: "owner", status: "active" }, "",
+      { ...ctx, source: "sync", idempotencyKey: "defaulted-operation" }, idempotency);
+    assert.equal(unchanged.idempotencyRecorded, false);
+    assert.equal(unchanged.data.enforcement_mode, "device_bound_v1");
+    assert.deepEqual(f.snapshot(), defaulted);
     assert.deepEqual(f.sql.prepare("PRAGMA foreign_key_check").all(), []);
   });
 }

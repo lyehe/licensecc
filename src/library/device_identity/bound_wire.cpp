@@ -48,7 +48,7 @@ bool classify_error(BoundWireOperation operation, unsigned status, const std::st
 		kind = BoundWireKind::authorization_unavailable;
 		return true;
 	}
-	if (status == 403 && (code == "access_denied" || code == "device_retired" || code == "legacy_protocol_disabled")) {
+	if (status == 403 && (code == "access_denied" || code == "device_retired")) {
 		kind = BoundWireKind::authority_denied;
 		return true;
 	}

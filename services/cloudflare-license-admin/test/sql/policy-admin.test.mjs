@@ -103,7 +103,7 @@ function seedOwner(db) {
 
 function grantBody(fingerprint, fields = {}) {
   return JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint, customer_id: "cus_x",
-    license_id: LICENSE_FOR[fingerprint], enforcement_mode: "device_bound_v1", ...fields });
+    license_id: LICENSE_FOR[fingerprint], ...fields });
 }
 
 // --- Cloudflare Access fixture (reader vs admin RBAC) ------------------------

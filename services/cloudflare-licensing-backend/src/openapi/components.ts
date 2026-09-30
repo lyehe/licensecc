@@ -99,7 +99,7 @@ export const openApiComponents: LabeledComponentFragment = {
         type: "object",
         required: ["event_id", "subscription_id", "project", "intent", "seq", "customer"],
         description:
-          "Signed subscription order event (raw wire body <= 16384 bytes), strictly UTF-8 decoded only after raw-byte HMAC verification and normalized/validated per order_event.mjs. Every intent, revocations included, names customer.id. subscription.active creates or refreshes a protected (device_bound_v1) grant owned by that customer.",
+          "Signed subscription order event (raw wire body <= 16384 bytes), strictly UTF-8 decoded only after raw-byte HMAC verification and normalized/validated per order_event.mjs. Every intent, revocations included, names customer.id. subscription.active creates or refreshes a protected grant owned by that customer.",
         properties: {
           event_id: { type: "string", minLength: 1, maxLength: 255 },
           subscription_id: { type: "string", minLength: 1, maxLength: 255 },

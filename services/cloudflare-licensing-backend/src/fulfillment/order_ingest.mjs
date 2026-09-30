@@ -303,14 +303,14 @@ const FLOOR_PREDICATE_UPDATE =
  * Floor-guarded CREATE upsert for subscription.active. Mirrors createEntitlement's
  * INSERT...ON CONFLICT body columns, adds the floor columns + floor predicate, and
  * also writes max_active_devices from the order's quantity. A new row is a protected
- * device_bound_v1 grant owned by the order's customer; an existing row is updated only
+ * grant owned by the order's customer; an existing row is updated only
  * when that customer already owns it. RETURNING yields the row iff the insert OR a
  * floor-advancing update landed.
  */
 function buildCreateStatement(env, key, fields, order, floor, now) {
   return env.DB.prepare(
-    `INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, max_active_devices, enforcement_mode, last_applied_order_epoch, last_applied_order_seq, created_at, updated_at) ` +
-      `VALUES (?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, 'device_bound_v1', ?, ?, ?, ?) ` +
+    `INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, max_active_devices, last_applied_order_epoch, last_applied_order_seq, created_at, updated_at) ` +
+      `VALUES (?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
       `ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET ` +
       `status = excluded.status, ` +
       `revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, ` +

@@ -285,7 +285,6 @@ BOOST_AUTO_TEST_CASE(status_code_and_operation_must_agree_before_classification)
 								  {401, "proof_required", BoundWireKind::retry},
 								  {403, "access_denied", BoundWireKind::authority_denied},
 								  {403, "device_retired", BoundWireKind::authority_denied},
-								  {403, "legacy_protocol_disabled", BoundWireKind::authority_denied},
 								  {404, "binding_unavailable", BoundWireKind::authority_denied},
 								  {409, "revision_conflict", BoundWireKind::authority_denied},
 								  {409, "idempotency_conflict", BoundWireKind::conflict},

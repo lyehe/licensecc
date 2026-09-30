@@ -412,7 +412,7 @@ test("renewal cannot commit if its verified-contact write is omitted", async () 
 
 test("a legacy entitlement never authorizes automatic protected conversion", () => {
   const f=fixture();
-  f.sql.exec("INSERT INTO entitlements(project,feature,license_fingerprint,status,created_at,updated_at,customer_id) VALUES('OLD','DEFAULT','legacy','active',1000,1000,'customer')");
+  f.sql.exec("INSERT INTO entitlements(project,feature,license_fingerprint,status,created_at,updated_at,customer_id,enforcement_mode) VALUES('OLD','DEFAULT','legacy','active',1000,1000,'customer','legacy')");
   const convert=()=>f.sql.exec("UPDATE entitlements SET enforcement_mode='device_bound_v1' WHERE project='OLD'");
   assert.throws(convert,/protected_mode_migration_required/);
   assert.equal(f.sql.prepare("SELECT enforcement_mode FROM entitlements WHERE project='OLD'").get().enforcement_mode,'legacy');

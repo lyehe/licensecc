@@ -17,7 +17,7 @@ const authority=`FROM p
   JOIN device_bound_bindings b ON b.id=o.binding_id AND b.device_id=d.id AND b.project=p.project
     AND b.feature=p.feature AND b.license_fingerprint=p.fingerprint AND b.state='active' AND b.generation=p.generation
   JOIN entitlements e ON e.project=b.project AND e.feature=b.feature AND e.license_fingerprint=b.license_fingerprint
-    AND e.customer_id=p.customerId AND e.status='active' AND e.enforcement_mode='device_bound_v1'
+    AND e.customer_id=p.customerId AND e.status='active'
     AND e.authority_revision=p.entitlementRevision
     AND ${boundTrialSql("e", "p.keyId", "unixepoch()", false)}
     AND (e.valid_from IS NULL OR e.valid_from<=unixepoch())

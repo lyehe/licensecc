@@ -224,7 +224,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       parse: (result, phase) => parseMutationResponse(result, "entitlement_saved", (value): value is EntitlementRecord => {
         if (!hasEntitlementRecordData(value)) return false;
         const row = value as EntitlementRecord;
-        return row.project === body.project && row.feature === body.feature && row.license_fingerprint === body.license_fingerprint && row.status === expectedStatus && row.enforcement_mode === body.enforcement_mode
+        return row.project === body.project && row.feature === body.feature && row.license_fingerprint === body.license_fingerprint && row.status === expectedStatus
           && (expectedLimit === undefined || row.max_active_devices === expectedLimit);
       }, mutationFailurePolicies.entitlementCreate, phase),
       onApplied: async (parsed) => {

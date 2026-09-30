@@ -21,7 +21,6 @@ export interface OwnedEntitlement {
   max_active_devices: number;
   is_trial: number;
   policy_id: string | null;
-  enforcement_mode: "device_bound_v1";
   license_mode: LicenseMode;
 }
 

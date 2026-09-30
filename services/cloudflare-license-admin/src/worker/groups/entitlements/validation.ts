@@ -71,13 +71,15 @@ export function nullableEpoch(value: unknown): number | null | undefined {
   return value;
 }
 
-// Each entitlement route accepts exactly the fields it reads. A body naming any other field (a mode
-// on sync or PATCH, a column no request writes, or anything else) is refused whole, so a caller
-// never believes a field it sent took effect.
+// Each entitlement route accepts exactly the fields it reads. A body naming any other field (a mode,
+// a column no request writes, or anything else) is refused whole, so a caller never believes a field
+// it sent took effect.
 const ENTITLEMENT_INPUT_FIELDS = ["project", "feature", "license_fingerprint", "status", "valid_from", "valid_until", "notes", "customer_id", "license_id"] as const;
-/** A create: the grant's fields, its mode, and either a policy to stamp from or its own device limit. */
-export const ENTITLEMENT_CREATE_FIELDS: ReadonlySet<string> = new Set([...ENTITLEMENT_INPUT_FIELDS, "enforcement_mode", "policy_id", "max_active_devices"]);
-/** A sync: the grant's fields and the audit reason. The Worker supplies the mode. */
+/** A create: the grant's fields, and either a policy to stamp from or its own device limit. */
+export const ENTITLEMENT_CREATE_FIELDS: ReadonlySet<string> = new Set([...ENTITLEMENT_INPUT_FIELDS, "policy_id", "max_active_devices"]);
+/** A policy create: the policy, and the grant's fields except the status and device limit the policy stamps. */
+export const ENTITLEMENT_POLICY_CREATE_FIELDS: ReadonlySet<string> = new Set(["project", "feature", "license_fingerprint", "valid_from", "valid_until", "notes", "customer_id", "license_id", "policy_id"]);
+/** A sync: the grant's fields and the audit reason. */
 export const ENTITLEMENT_SYNC_FIELDS: ReadonlySet<string> = new Set([...ENTITLEMENT_INPUT_FIELDS, "reason"]);
 /** A PATCH: the patchable fields, the device limit, and the observed-state precondition. */
 export const ENTITLEMENT_PATCH_FIELDS: ReadonlySet<string> = new Set(["valid_from", "valid_until", "notes", "customer_id", "license_id",
