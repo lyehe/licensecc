@@ -33,7 +33,7 @@ test("admin browser coverage stays partitioned by operator concern", () => {
     assert.ok(localTitles.length > 0, `${path} must own browser scenarios`);
     titles.push(...localTitles);
   }
-  assert.equal(titles.length, 190);
+  assert.equal(titles.length, 191);
   assert.equal(new Set(titles).size, titles.length, "browser scenario titles must be unique");
 
   const fixture = readFileSync(join(directory, "admin-ui.fixture.mjs"), "utf8");

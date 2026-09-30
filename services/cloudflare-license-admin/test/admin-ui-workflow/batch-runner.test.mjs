@@ -83,6 +83,21 @@ test("a chunk is done only on its exact proof; a 5xx, lost transport or malforme
   assert.equal(classify(batchDone(ids), "replay").kind, "done");
 });
 
+test("a stale row inside an otherwise-successful chunk settles as done, not unknown, in both the initial and replay phase", async () => {
+  const runner = await loadRunner();
+  const ids = ["ent-1", "ent-2"];
+  const mixed = envelope(200, {
+    ok: true,
+    code: "batch_done",
+    request_id: "ui-unit-stale-row",
+    data: { results: [{ id: "ent-1", ok: true, code: "entitlement_disabled" }, { id: "ent-2", ok: false, code: "stale_transition" }] },
+  });
+  const initial = runner.classifyBatchChunk(mixed, "disable", ids, "initial");
+  assert.equal(initial.kind, "done");
+  assert.deepEqual(initial.results, [{ id: "ent-1", ok: true, code: "entitlement_disabled" }, { id: "ent-2", ok: false, code: "stale_transition" }]);
+  assert.equal(runner.classifyBatchChunk(mixed, "disable", ids, "replay").kind, "done");
+});
+
 test("chunk 3 of 5 returning 500 stops the run with 8 done, 4 outcome unknown and 8 not attempted after exactly 3 requests", async () => {
   const runner = await loadRunner();
   const chunks = runner.planBatchChunks("disable", rowsFor(twenty), "audit", "run");

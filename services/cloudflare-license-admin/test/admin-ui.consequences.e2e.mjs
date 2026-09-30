@@ -702,6 +702,32 @@ test("admin UI reports a known partial batch outcome when every row identity and
   await expect(page.locator(".activityMessage")).toHaveAttribute("data-tone", "info");
 });
 
+test("admin UI settles a batch row staled by a concurrent change as done, not unknown", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const [, staled] = api.seed.entitlements(2);
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("link", { name: "License access", exact: true }).click();
+  await expect(page.locator("tbody input[type=checkbox]")).toHaveCount(2);
+
+  // A concurrent change advances one row's revocation_seq after the list has already loaded (and
+  // the selection has already captured its now-stale value): the fixture computes a genuine
+  // per-row stale_transition for it, the same way the real Worker would.
+  staled.revocation_seq += 1;
+
+  await page.getByLabel(/^Select all \d+ loaded$/).check();
+  await expect(page.locator(".bulkBar")).toContainText("2 selected");
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel(/Reason/).fill("operator review");
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+
+  await expect.poll(() => api.requests.batches.length).toBe(1);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText("Disable finished: 1 done, 1 changed meanwhile.")).toBeVisible();
+  await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(1);
+});
+
 test("admin UI rejects an unknown per-row batch failure code as ambiguous", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
