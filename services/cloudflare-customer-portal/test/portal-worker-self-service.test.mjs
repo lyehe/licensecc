@@ -17,7 +17,6 @@ test("A's /api/portal/entitlements returns ONLY A's entitlements", async () => {
   db.close();
 });
 
-
 test("/api/portal/me reports the SESSION customer, never a client value", async () => {
   const { db, env } = baseFixture();
   const cookie = await cookieFor(env, "A");
@@ -218,4 +217,24 @@ test("each row's trial end follows the protected trial rule and never outlives t
       }
     }
   } finally { db.close(); }
+});
+
+// The Worker-wide catch-all (app.ts's default export): any unhandled exception, from any route,
+// becomes a 500 "portal_error" envelope that never leaks the exception's own text to the browser.
+// This is the only test exercising that path, on a kept session route.
+test("an unhandled DB exception on a kept route becomes a 500 portal_error envelope with no exception text", async () => {
+  const { db, env } = baseFixture();
+  const cookie = await cookieFor(env, "A");
+  const failure = "boom-db-unavailable-9f3c";
+  env.DB.prepare = () => {
+    throw new Error(failure);
+  };
+  const r = await call(env, "GET", "/api/portal/me", { cookie });
+  assert.equal(r.status, 500);
+  assert.equal(r.body.ok, false);
+  assert.equal(r.body.code, "portal_error");
+  const raw = JSON.stringify(r.body);
+  assert.ok(!raw.includes(failure), "the response body must not leak the exception message");
+  assert.ok(!raw.includes("Error"), "the response body must not leak the exception name/stack");
+  db.close();
 });

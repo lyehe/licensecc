@@ -9,7 +9,7 @@ import { AUTH_DISPATCH, authSession } from "./routes/auth.js";
 import { SESSION_DISPATCH as SELF_SERVICE_DISPATCH } from "./routes/self-service.js";
 import { CONSENT_DISPATCH } from "./routes/device-consent.js";
 import { BINDING_DISPATCH } from "./routes/device-bindings.js";
-import { envelope, isCrossSite, constantTimeEqual, decodeEntitlementId, entitlementId } from "./support.js";
+import { envelope, isCrossSite, constantTimeEqual, entitlementId } from "./support.js";
 import type { Env, ExecutionContextLike, TopRoute } from "./env.js";
 
 export type { Env } from "./env.js";
@@ -81,4 +81,4 @@ export default {
   },
 };
 
-export const portalInternalsForTests = { isCrossSite, constantTimeEqual, entitlementId, decodeEntitlementId };
+export const portalInternalsForTests = { isCrossSite, constantTimeEqual, entitlementId };
