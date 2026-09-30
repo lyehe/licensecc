@@ -33,7 +33,7 @@ const ordersPath: Record<string, unknown> = {
       ),
       "404": errorResponse("not_found: ORDER_INGEST_MODE=off.", "not_found"),
       "409": errorResponse(
-        "Conflict: event_id_conflict (same event_id, different digest), seq_conflict (same subscription epoch/sequence with a different payload), fingerprint_owned (fingerprint belongs to a different subscription), entitlement_owner_mismatch (an entitlement already exists for the fingerprint and is owned by another customer or by no one; refused for every intent, withdrawals included, and nothing is written), entitlement_revoked (targets a revoked terminal entitlement), or the original stored conflict result for a freshly signed matching replay of a rejected event.",
+        "Conflict: event_id_conflict (same event_id, different digest), seq_conflict (same subscription epoch/sequence with a different payload), fingerprint_owned (fingerprint belongs to a different subscription), entitlement_owner_mismatch (an entitlement already exists for the fingerprint and is owned by another customer or by no one; refused for every intent, withdrawals included. A refusal before admission writes nothing; one at apply records the event as rejected and advances the subscription cursor, without touching the entitlement), entitlement_revoked (targets a revoked terminal entitlement), or the original stored conflict result for a freshly signed matching replay of a rejected event.",
         ["event_id_conflict", "seq_conflict", "fingerprint_owned", "entitlement_owner_mismatch", "entitlement_revoked"],
       ),
       "413": errorResponse(

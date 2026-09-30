@@ -426,20 +426,12 @@ function buildTransitionStatement(env, key, status, owner, floor, now) {
  * (a non-negative integer) + revocation_seq + floor, on the order customer's own grant.
  */
 function buildCapacityStatement(env, key, capacity, owner, floor, now) {
-  const assignments = [];
-  const values = [];
-  const allowed = ["max_active_devices"];
-  for (const column of allowed) {
-    const value = capacity?.[column];
-    if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
-      assignments.push(`${column} = ?`);
-      values.push(value);
-    }
-  }
+  const limit = capacity?.max_active_devices;
+  const values = Number.isSafeInteger(limit) && limit >= 0 ? [limit] : [];
   // If nothing valid to change, still advance the floor + bump revocation_seq so the
   // event is exactly-once accounted (it is a real, accepted order). updated_at moves.
   const setClause = [
-    ...assignments,
+    ...(values.length === 0 ? [] : ["max_active_devices = ?"]),
     REVOCATION_SEQ_BUMP,
     "last_applied_order_epoch = ?",
     "last_applied_order_seq = ?",
@@ -472,9 +464,10 @@ const ORDER_ACTOR_TYPE = "sync";
 /**
  * The order-ingest audit event (mirrors eventFromCurrentStatement, but reads the row
  * state AFTER the mutation has been queued — D1 batch runs statements in order so the
- * event captures the post-mutation row. The applied-floor equality suppresses audits
- * for superseded mutations, preventing false state-change webhooks. source='sync',
- * actor_type='sync'.
+ * event captures the post-mutation row. It must follow the entitlement write directly:
+ * `changes() = 1` (that write landed), the owner and the applied-floor equality keep
+ * a superseded or refused order from writing a false state-change audit or webhook.
+ * source='sync', actor_type='sync'.
  */
 function buildOrderEventStatement(env, key, eventType, order, now, requireNonRevoked) {
   const terminalGuard = requireNonRevoked ? "AND entitlements.status <> 'revoked' " : "";
@@ -483,7 +476,7 @@ function buildOrderEventStatement(env, key, eventType, order, now, requireNonRev
       `SELECT project, feature, license_fingerprint, device_hash, ?, status, revocation_seq, ?, ?, ?, '${ORDER_CTX_SOURCE}', ?, ?, '', ` +
       `json_object('project', project, 'feature', feature, 'license_fingerprint', license_fingerprint, 'status', status, 'revocation_seq', revocation_seq, 'valid_from', valid_from, 'valid_until', valid_until, 'max_active_devices', max_active_devices, 'id', ?), ` +
       `?, ?, ? ` +
-      `FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? ${terminalGuard}` +
+      `FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? AND customer_id = ? AND changes() = 1 ${terminalGuard}` +
       `AND last_applied_order_epoch = ? AND last_applied_order_seq = ? ` +
       `AND EXISTS (SELECT 1 FROM order_events AS oe WHERE oe.event_id = ? AND oe.status = 'accepted')`,
   ).bind(
@@ -500,6 +493,7 @@ function buildOrderEventStatement(env, key, eventType, order, now, requireNonRev
     key.project,
     key.feature,
     key.license_fingerprint,
+    order.customer.id,
     order.order_epoch,
     order.seq,
     order.event_id,

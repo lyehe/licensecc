@@ -532,23 +532,30 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   already owns, or create a new one. If a grant already exists for the order's
   project, feature and fingerprint and another customer owns it, or no one does,
   the order is refused with `409 entitlement_owner_mismatch` for every intent,
-  withdrawals included, and writes nothing. A customer-scoped signer therefore
-  cannot reach another customer's grant by supplying its fingerprint, and after an
-  operator reassigns a grant, orders naming the old customer are refused rather
-  than moving it back. Orders never change a grant's owner. The apply batch
-  re-checks the owner, so a reassignment racing an accepted order also refuses it.
+  withdrawals included. A refusal before admission writes nothing. An order
+  already admitted when the grant changed hands is refused at apply instead: its
+  event is recorded as rejected and the subscription cursor has advanced, but the
+  grant is untouched and no audit or webhook row is written. A customer-scoped
+  signer therefore cannot reach another customer's grant by supplying its
+  fingerprint. Orders never change a grant's owner, and a subscription's customer
+  is fixed, so after an operator reassigns a grant to another customer, orders can
+  no longer reach it.
 - **Withdrawals always apply** for the grant's own customer. The withdrawals
   (`subscription.past_due`, `subscription.paused`,
   `subscription.payment_failed`, `subscription.canceled_at_period_end`,
   `fraud.confirmed`, `chargeback`) are never refused because that customer is
   disabled or the period they concern ended long ago, and they never change the
   grant's license. A withdrawal for a subscription with no grant returns `200
-  no_entitlement` and creates nothing.
+  no_entitlement` and creates no grant. It still records the subscription's order
+  identity and the order event, and upserts the named customer and license rows.
 - **Exactly-once.** Accept-then-apply: a durable cursor advance on
   `orders(order_epoch, last_seq)` + an event claim into `order_events` commit in
   one atomic batch (Step 3); the entitlement mutation and the `order_events`
   `status='processed'` mark commit in the *same* batch (Step 4), guarded by the
-  per-entitlement monotonic floor `last_applied_order_{epoch,seq}`. A stale order
+  per-entitlement monotonic floor `last_applied_order_{epoch,seq}`. A grant no
+  order has applied yet (for example an operator-made one) has floor `(0, -1)`, so
+  a first order at `(0, 0)` applies. The entitlement audit row, which webhooks fan
+  out, is written only when the order's entitlement write lands. A stale order
   is observably `stale_ignored`; a crashed `accepted` row re-drives idempotently
   (the floor makes re-apply self-superseding). A fingerprint belongs to exactly
   one subscription (`409 fingerprint_owned`), and its grant to exactly one
