@@ -130,6 +130,27 @@ test("pepper-unset -> config_error on mint and resolve", async () => {
   assert.equal((await resolveSession(e, "lccp_whatever", NOW)).code, "config_error");
 });
 
+test("mintSession without an auth method is refused", async () => {
+  const db = freshDb();
+  seedCustomer(db, "A", "a@x.com");
+  const e = portalEnv(db);
+  const minted = await mintSession(e, { customerId: "A", now: NOW });
+  assert.equal(minted.ok, false);
+  assert.equal(minted.code, "invalid_session_method");
+});
+
+test("a portal session with auth_method legacy is refused by the schema", () => {
+  const db = freshDb();
+  seedCustomer(db, "A", "a@x.com");
+  assert.throws(
+    () => db.prepare(
+      "INSERT INTO portal_sessions (id, customer_id, session_hmac, pepper_key_id, status, user_agent, created_at, last_used_at, expires_at, auth_method) " +
+      "VALUES ('psess_legacy', 'A', 'h', 'k1', 'active', '', ?, ?, ?, 'legacy')",
+    ).run(NOW, NOW, NOW + 86400),
+    /CHECK constraint failed/,
+  );
+});
+
 test("the cookie is HttpOnly; Secure; SameSite=Lax and round-trips through cookieFromRequest", () => {
   const setCookie = setSessionCookie("lccp_abc");
   assert.match(setCookie, /HttpOnly/);
