@@ -334,7 +334,11 @@ for (const state of ["active", "retiring"]) {
     assert.equal(protectedRow.max_active_devices, 2);
     assert.ok(protectedRow.authority_revision > before[0][0].authority_revision);
     assert.deepEqual(snapshot()[1], before[1]);
-    assert.equal(db.prepare("SELECT count(*) AS n FROM entitlements").get().n, 2);
+    // Both the updated grant with connected devices and the created one stay protected and issuable.
+    assert.deepEqual(db.prepare("SELECT feature,enforcement_mode,pool_size,device_hash FROM entitlements ORDER BY feature").all().map((row) => ({ ...row })), [
+      { feature: "core", enforcement_mode: "device_bound_v1", pool_size: 0, device_hash: "" },
+      { feature: "export", enforcement_mode: "device_bound_v1", pool_size: 0, device_hash: "" },
+    ]);
     assert.equal(db.prepare("SELECT count(*) AS n FROM mutation_idempotency").get().n, 1);
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   });
@@ -410,7 +414,8 @@ test("previewPlanProjection is non-mutating and classifies plan + add-on creates
   assert.equal(preview.summary.update, 0);
   assert.equal(preview.summary.disable, 0);
   assert.deepEqual(preview.will_create.map((row) => row.feature), ["core", "export", "team"]);
-  assert.equal(preview.will_create.find((row) => row.feature === "team").license_mode, "floating");
+  // The team add-on's policy is floating, but a projected grant is protected: it never has a seat pool.
+  assert.equal(preview.will_create.find((row) => row.feature === "team").license_mode, "node_locked");
   assert.match(preview.preview_id, /^ppv_/);
   assert.equal(preview.effective_at, NOW);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
@@ -447,11 +452,12 @@ test("applyPlanProjection creates stamped concrete entitlements and records assi
   assert.equal(rows.find((row) => row.feature === "core").policy_id, "pol_node");
   const team = rows.find((row) => row.feature === "team");
   assert.equal(team.policy_id, "pol_float");
-  assert.equal(team.pool_size, 7);
+  // The plan row's device limit applies; its seat, borrow and meter overrides do not.
+  assert.equal(team.pool_size, 0);
   assert.equal(team.max_active_devices, 7);
-  assert.equal(team.max_borrow_sec, 172800);
-  assert.equal(team.meter_quota, 2500);
-  assert.equal(team.meter_period_sec, 7200);
+  assert.equal(team.max_borrow_sec, 0);
+  assert.equal(team.meter_quota, 0);
+  assert.equal(team.meter_period_sec, 2592000);
   assert.equal(team.valid_until, SUPPORT_UNTIL);
 
   const assignment = db.prepare("SELECT plan_id, customer_id, support_until, addons_json FROM license_plan_assignments WHERE license_id = ? AND project = 'DEFAULT'").get("lic_1");
@@ -462,29 +468,34 @@ test("applyPlanProjection creates stamped concrete entitlements and records assi
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events WHERE license_fingerprint = ?").get(FP).c, 3);
 });
 
-test("a private persisted cache TTL drift becomes an update, is corrected, and is fully audited", async () => {
+test("a grant's own TTLs never make a plan change, and an update leaves them and the cache policy private", async () => {
   const db = freshDb();
   seedCatalog(db);
-  db.prepare("UPDATE entitlement_policies SET assertion_ttl_seconds = 300 WHERE id = 'pol_node'").run();
   const env = { DB: new D1Like(db) };
   const initial = await previewPlanProjection(env, projectionInput({ addons: [] }), "admin", NOW);
   await applyPlanProjection(env, initial.preview_id, ctx(), null, NOW);
-  db.prepare("UPDATE entitlements SET cache_ttl_seconds = 86400 WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").run(FP);
+  db.prepare("UPDATE entitlements SET assertion_ttl_seconds = 900, cache_ttl_seconds = 86400 WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").run(FP);
 
-  const preview = await previewPlanProjection(env, projectionInput({ addons: [] }), "admin", NOW + 1);
-  assert.equal(preview.summary.update, 1);
-  assert.deepEqual(preview.will_update.map((row) => row.feature), ["core"]);
+  // Plan apply never writes a TTL, so a TTL alone is no change.
+  const unchanged = await previewPlanProjection(env, projectionInput({ addons: [] }), "admin", NOW + 1);
+  assert.deepEqual(unchanged.summary, { create: 0, update: 0, disable: 0, blocked: 0, unchanged: 2 });
+
+  db.prepare("UPDATE entitlement_policies SET max_active_devices = 2 WHERE id = 'pol_node'").run();
+  const preview = await previewPlanProjection(env, projectionInput({ addons: [] }), "admin", NOW + 2);
+  assert.deepEqual(preview.will_update.map((row) => row.feature), ["core", "export"]);
   assert.equal("cache_ttl_seconds" in preview.will_update[0], false, "cache policy stays out of the public preview");
   const actions = JSON.parse(db.prepare("SELECT actions_json FROM license_plan_projection_previews WHERE id = ?").get(preview.preview_id).actions_json);
-  assert.equal(actions.updated[0].cache_ttl_seconds, 300, "the internal action carries the exact desired cache policy");
+  assert.equal("cache_ttl_seconds" in actions.updated[0], false, "an action carries no cache policy: apply never writes one");
 
-  const applied = await applyPlanProjection(env, preview.preview_id, ctx(), null, NOW + 1);
-  assert.equal(applied.applied.updated.length, 1);
+  const applied = await applyPlanProjection(env, preview.preview_id, ctx(), null, NOW + 2);
+  assert.equal(applied.applied.updated.length, 2);
   assert.equal("cache_ttl_seconds" in applied.applied.updated[0], false, "cache policy stays out of the public Apply response");
-  assert.equal(db.prepare("SELECT cache_ttl_seconds FROM entitlements WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").get(FP).cache_ttl_seconds, 300);
+  const core = db.prepare("SELECT assertion_ttl_seconds, cache_ttl_seconds, max_active_devices FROM entitlements WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").get(FP);
+  assert.deepEqual({ ...core }, { assertion_ttl_seconds: 900, cache_ttl_seconds: 86400, max_active_devices: 2 });
   const audit = db.prepare("SELECT prev_json, next_json FROM entitlement_events WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ? ORDER BY id DESC LIMIT 1").get(FP);
   assert.equal(JSON.parse(audit.prev_json).cache_ttl_seconds, 86400);
-  assert.equal(JSON.parse(audit.next_json).cache_ttl_seconds, 300);
+  assert.equal(JSON.parse(audit.next_json).cache_ttl_seconds, 86400);
+  assert.equal(JSON.parse(audit.next_json).max_active_devices, 2);
 });
 
 test("current-version projection snapshots persist and apply normally", async () => {
@@ -493,29 +504,30 @@ test("current-version projection snapshots persist and apply normally", async ()
   const env = { DB: new D1Like(db) };
   const preview = await previewPlanProjection(env, projectionInput({ plan_key: "basic", addons: [] }), "admin", NOW);
   const stored = JSON.parse(db.prepare("SELECT actions_json FROM license_plan_projection_previews WHERE id = ?").get(preview.preview_id).actions_json);
-  assert.equal(stored.projection_snapshot_version, 2);
+  assert.equal(stored.projection_snapshot_version, 3);
 
   const applied = await applyPlanProjection(env, preview.preview_id, ctx(), null, NOW);
   assert.equal(applied.applied.created.length, 1);
-  assert.equal(db.prepare("SELECT cache_ttl_seconds FROM entitlements WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").get(FP).cache_ttl_seconds, 600);
+  // The policy's assertion TTL does not apply: a created grant keeps the column defaults.
+  const core = db.prepare("SELECT assertion_ttl_seconds, cache_ttl_seconds FROM entitlements WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").get(FP);
+  assert.deepEqual({ ...core }, { assertion_ttl_seconds: 300, cache_ttl_seconds: 3600 });
 });
 
-test("a parent-format unchanged cache-drift preview fails closed before any projection write", async () => {
+test("a parent-format unchanged preview fails closed before any projection write", async () => {
   const db = freshDb();
   seedCatalog(db);
-  db.prepare("UPDATE entitlement_policies SET assertion_ttl_seconds = 300 WHERE id = 'pol_node'").run();
   const env = { DB: new D1Like(db) };
   const input = projectionInput({ plan_key: "basic", addons: [] });
   const initial = await previewPlanProjection(env, input, "admin", NOW);
   await applyPlanProjection(env, initial.preview_id, ctx(), null, NOW);
-  db.prepare("UPDATE entitlements SET cache_ttl_seconds = 86400 WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").run(FP);
+  db.prepare("UPDATE entitlement_policies SET max_active_devices = 2 WHERE id = 'pol_node'").run();
 
-  // Model a live parent-version preview: before the cache-TTL projection fix,
-  // this row was classified unchanged and carried no version discriminator.
+  // Model a live parent-version preview: it carried no version discriminator and
+  // classified this row as unchanged.
   const legacy = await previewPlanProjection(env, input, "admin", NOW + 1);
   const row = db.prepare("SELECT projection_json, actions_json FROM license_plan_projection_previews WHERE id = ?").get(legacy.preview_id);
   const actions = JSON.parse(row.actions_json);
-  assert.equal(actions.updated.length, 1, "the current implementation sees cache drift");
+  assert.equal(actions.updated.length, 1, "the current implementation sees the device limit change");
   actions.updated = [];
   delete actions.projection_snapshot_version;
   const projection = JSON.parse(row.projection_json);
@@ -528,7 +540,7 @@ test("a parent-format unchanged cache-drift preview fails closed before any proj
     legacy.preview_id,
   );
 
-  const idempotencyKey = "parent-format-cache-drift";
+  const idempotencyKey = "parent-format-unchanged";
   const before = projectionApplyState(db, legacy.preview_id, idempotencyKey);
   const batchCount = env.DB.batchSizes.length;
   await assert.rejects(
@@ -540,11 +552,12 @@ test("a parent-format unchanged cache-drift preview fails closed before any proj
   );
   assert.equal(env.DB.batchSizes.length, batchCount, "version rejection happens before the claim batch");
   assert.deepEqual(projectionApplyState(db, legacy.preview_id, idempotencyKey), before);
-  assert.equal(before.cache_ttl_seconds, 86400, "the unsafe parent preview must leave cache policy untouched");
+  assert.equal(db.prepare("SELECT max_active_devices FROM entitlements WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").get(FP).max_active_devices, 1,
+    "the unsafe parent preview must leave the grant untouched");
 });
 
 test("malformed, old, and future projection snapshot versions fail closed before any projection write", async () => {
-  for (const [label, version] of [["malformed", "2"], ["old", 1], ["future", 3]]) {
+  for (const [label, version] of [["malformed", "3"], ["old", 2], ["future", 4]]) {
     const db = freshDb();
     seedCatalog(db);
     const env = { DB: new D1Like(db) };

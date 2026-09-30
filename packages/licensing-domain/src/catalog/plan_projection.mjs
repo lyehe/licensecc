@@ -1,8 +1,15 @@
 import { stampFromPolicy } from "../entitlements/policy.mjs";
 
-const DEFAULT_CAPACITY = Object.freeze({
+// A plan-projected grant is protected. It takes only its device limit from the plan feature or its
+// policy: it never carries a seat pool, borrowing or a meter, and apply leaves its TTLs and meter
+// window at the column defaults.
+const DEFAULT_CAPACITY = Object.freeze({ max_active_devices: 1 });
+
+// The preview still reports the seat, borrow, meter and TTL columns the console reads, at the
+// values a protected grant holds: apply creates a grant with them and never changes them later.
+const PROTECTED_GRANT_COLUMNS = Object.freeze({
+  assertion_ttl_seconds: 300,
   pool_size: 0,
-  max_active_devices: 1,
   max_borrow_sec: 0,
   meter_quota: 0,
   meter_period_sec: 2592000,
@@ -120,13 +127,10 @@ function policyFromCatalogRow(row) {
   };
 }
 
-function capacityOverrides(row) {
-  const overrides = {};
-  for (const field of ["pool_size", "max_active_devices", "max_borrow_sec", "meter_quota", "meter_period_sec"]) {
-    const value = rowInteger(row, field);
-    if (value !== undefined) overrides[field] = value;
-  }
-  return overrides;
+// The plan feature's device limit override; its seat, borrow, meter and TTL overrides do not apply.
+function deviceLimitOverride(row) {
+  const maxActiveDevices = rowInteger(row, "max_active_devices");
+  return maxActiveDevices === undefined ? {} : { max_active_devices: maxActiveDevices };
 }
 
 export function desiredPlanProjectionRow(row, input, now) {
@@ -134,35 +138,33 @@ export function desiredPlanProjectionRow(row, input, now) {
     project: input.project,
     feature: row.feature_key,
     license_fingerprint: input.license_fingerprint,
-    device_hash: "",
     status: "active",
     notes: input.notes,
     customer_id: input.customer_id,
     license_id: input.license_id,
   };
   if (input.support_until_provided) base.valid_until = input.support_until;
-  const assertionTtl = rowInteger(row, "assertion_ttl_seconds");
-  if (assertionTtl !== undefined) base.assertion_ttl_seconds = assertionTtl;
 
-  const overrides = { ...base, ...capacityOverrides(row) };
   const policy = policyFromCatalogRow(row);
   const stamp = policy === null
     ? {
         input: {
           ...base,
-          assertion_ttl_seconds: base.assertion_ttl_seconds ?? 300,
           valid_from: null,
           valid_until: input.support_until_provided ? input.support_until : null,
         },
-        capacity: { ...DEFAULT_CAPACITY, ...capacityOverrides(row) },
+        capacity: { ...DEFAULT_CAPACITY, ...deviceLimitOverride(row) },
         trial: { ...ZERO_TRIAL },
       }
-    : stampFromPolicy(policy, overrides, now);
+    : stampFromPolicy(policy, { ...base, ...deviceLimitOverride(row) }, now);
+  // A policy stamp also names a device hash, an assertion TTL and the policy's seat, borrow and
+  // meter values. A protected grant takes none of them.
+  const { project, feature, license_fingerprint, status, valid_from, valid_until, notes, customer_id, license_id } = stamp.input;
 
   return {
-    input: stamp.input,
+    input: { project, feature, license_fingerprint, status, valid_from, valid_until, notes, customer_id, license_id },
     policy_id: policy?.id ?? null,
-    capacity: stamp.capacity,
+    capacity: { max_active_devices: stamp.capacity.max_active_devices },
     trial: stamp.trial,
     source: row.feature_inclusion,
     addon_key: row.feature_inclusion === "addon" ? row.addon_key ?? row.feature_key : null,
@@ -170,9 +172,9 @@ export function desiredPlanProjectionRow(row, input, now) {
   };
 }
 
-function capabilityMode(capacity, trial) {
-  if (Number(trial.is_trial) === 1) return "trial";
-  return Number(capacity.pool_size) > 0 ? "floating" : "node_locked";
+// A projected grant is protected, so it is a trial or node-locked, never floating.
+function capabilityMode(trial) {
+  return Number(trial.is_trial) === 1 ? "trial" : "node_locked";
 }
 
 function summarizeDesired(desired) {
@@ -183,16 +185,12 @@ function summarizeDesired(desired) {
     policy_id: desired.policy_id,
     source: desired.source,
     addon_key: desired.addon_key,
-    license_mode: capabilityMode(desired.capacity, desired.trial),
+    license_mode: capabilityMode(desired.trial),
     status: desired.input.status,
     valid_from: desired.input.valid_from,
     valid_until: desired.input.valid_until,
-    assertion_ttl_seconds: desired.input.assertion_ttl_seconds,
-    pool_size: desired.capacity.pool_size,
+    ...PROTECTED_GRANT_COLUMNS,
     max_active_devices: desired.capacity.max_active_devices,
-    max_borrow_sec: desired.capacity.max_borrow_sec,
-    meter_quota: desired.capacity.meter_quota,
-    meter_period_sec: desired.capacity.meter_period_sec,
   };
 }
 
@@ -222,25 +220,19 @@ function valuesEqual(left, right) {
   return (left ?? null) === (right ?? null);
 }
 
+// Only the columns plan apply writes decide whether an existing grant changes. Its device hash,
+// TTLs, seat pool, borrowing and meter are its own, and apply never touches them.
 export function planProjectionMatchesDesired(existing, desired) {
   const input = desired.input;
-  const capacity = desired.capacity;
   const trial = desired.trial;
   return existing.status === "active" &&
-    valuesEqual(existing.device_hash, input.device_hash ?? "") &&
-    Number(existing.assertion_ttl_seconds) === Number(input.assertion_ttl_seconds) &&
-    Number(existing.cache_ttl_seconds) === Number(input.assertion_ttl_seconds) &&
     valuesEqual(existing.valid_from, input.valid_from) &&
     valuesEqual(existing.valid_until, input.valid_until) &&
     valuesEqual(existing.notes, input.notes ?? "") &&
     valuesEqual(existing.customer_id, input.customer_id) &&
     valuesEqual(existing.license_id, input.license_id) &&
     valuesEqual(existing.policy_id, desired.policy_id) &&
-    Number(existing.pool_size) === Number(capacity.pool_size) &&
-    Number(existing.max_active_devices) === Number(capacity.max_active_devices) &&
-    Number(existing.max_borrow_sec) === Number(capacity.max_borrow_sec) &&
-    Number(existing.meter_quota) === Number(capacity.meter_quota) &&
-    Number(existing.meter_period_sec) === Number(capacity.meter_period_sec) &&
+    Number(existing.max_active_devices) === Number(desired.capacity.max_active_devices) &&
     Number(existing.is_trial) === Number(trial.is_trial) &&
     valuesEqual(existing.trial_expiration_basis, trial.trial_expiration_basis) &&
     Number(existing.trial_duration_sec) === Number(trial.trial_duration_sec) &&

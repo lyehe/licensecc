@@ -81,13 +81,25 @@ test("an omitted or legacy mode is refused, a legacy grant is never converted, a
   assert.equal(replay.status, 409); assert.equal((await replay.json()).code, "idempotency_request_conflict");
 });
 
-for (const [change, reason] of [[{ customer_id: "other" }, "license_customer_mismatch"], [{ license_id: null }, "license_missing"], [{ device_hash: "d".repeat(64) }, "unknown"]]) {
+for (const [change, reason] of [[{ customer_id: "other" }, "license_customer_mismatch"], [{ license_id: null }, "license_missing"]]) {
   test(`protected creation rejects ineligible input ${JSON.stringify(change)} without residue`, async t => {
     const f = fixture(t), before = f.snapshot();
     await refusedFor(await f.send({ ...input, ...change }), reason);
     assert.deepEqual(f.snapshot(), before);
   });
 }
+
+// A protected grant carries no device hash and no assertion TTL, on a direct or a policy create.
+test("a create naming a device hash or an assertion TTL is refused before any write", async t => {
+  const f = fixture(t), before = f.snapshot();
+  for (const policy of [{}, { policy_id: "policy" }]) {
+    for (const field of [{ device_hash: "" }, { device_hash: "d".repeat(64) }, { assertion_ttl_seconds: 300 }]) {
+      const refused = await f.send({ ...input, ...policy, ...field }, JSON.stringify({ ...policy, ...field }));
+      assert.equal(refused.status, 400, JSON.stringify(field)); assert.equal((await refused.json()).code, "invalid_request");
+    }
+  }
+  assert.deepEqual(f.snapshot(), before);
+});
 
 test("policy creation copies standard and trial settings and retries after policy disable", async t => {
   for (const type of ["node_locked", "trial"]) {
@@ -129,12 +141,22 @@ test("a committed creation is recoverable even when the winner's grant is subseq
   assert.deepEqual(f.snapshot(), afterRevoke);
 });
 
-test("floating or unusable trial policy cannot leave a partial protected grant", async t => {
-  for (const [update, reason] of [["type='floating',pool_size=2", "unknown"], ["type='trial',trial_expiration_basis='from_first_use',trial_duration_sec=0", "invalid_trial"]]) {
-    const f = fixture(t), before = f.snapshot(); f.sql.exec(`UPDATE entitlement_policies SET ${update}`);
-    await refusedFor(await f.send({ ...input, policy_id: "policy" }), reason);
-    assert.deepEqual(f.snapshot(), before);
-  }
+test("an unusable trial policy cannot leave a partial protected grant", async t => {
+  const f = fixture(t), before = f.snapshot();
+  f.sql.exec("UPDATE entitlement_policies SET type='trial',trial_expiration_basis='from_first_use',trial_duration_sec=0");
+  await refusedFor(await f.send({ ...input, policy_id: "policy" }), "invalid_trial");
+  assert.deepEqual(f.snapshot(), before);
+});
+
+// The stamp writes provenance, the device limit and the trial state only, so a policy that still
+// carries a seat pool, borrowing or a meter yields an issuable protected grant without any of them.
+test("a policy with a seat pool, borrowing or a meter stamps a protected grant without them", async t => {
+  const f = fixture(t);
+  f.sql.exec("UPDATE entitlement_policies SET type='floating',pool_size=2,max_active_devices=2,max_borrow_sec=60,meter_quota=10,meter_period_sec=3600,assertion_ttl_seconds=900");
+  const created = await f.send({ ...input, policy_id: "policy" }); assert.equal(created.status, 200, await created.clone().text());
+  const row = f.sql.prepare("SELECT enforcement_mode,policy_id,pool_size,max_active_devices,max_borrow_sec,meter_quota,meter_period_sec,assertion_ttl_seconds,device_hash FROM entitlements").get();
+  assert.deepEqual({ ...row }, { enforcement_mode: "device_bound_v1", policy_id: "policy", pool_size: 0, max_active_devices: 2, max_borrow_sec: 0,
+    meter_quota: 0, meter_period_sec: 2592000, assertion_ttl_seconds: 300, device_hash: "" });
 });
 
 test("a missing or incorrect policy side-write rolls back the preceding upsert", async t => {
@@ -180,6 +202,28 @@ test("malformed modes and attempts to patch mode are rejected", async t => {
   const first = await f.send(), body = await first.json(); assert.equal(first.status, 200);
   assert.equal((await f.send({ enforcement_mode: "legacy" }, "patch", `${path}/${body.data.id}`, "PATCH")).status, 400);
   assert.deepEqual(f.sql.prepare("PRAGMA foreign_key_check").all(), []);
+});
+
+// A sync writes the same protected grant as an admin create, under the same checks, and never
+// reports a grant of another mode as synced.
+test("sync runs the protected create checks and never yields a legacy grant", async t => {
+  const f = fixture(t), { enforcement_mode: _mode, ...body } = input;
+  const sync = (payload, key) => worker.fetch(syncAuthed(payload, { headers: { "idempotency-key": key } }), syncEnv(f.db));
+  const before = f.snapshot();
+  await refusedFor(await sync({ ...body, customer_id: "other" }, "other-owner"), "license_customer_mismatch");
+  assert.deepEqual(f.snapshot(), before, "a refused sync leaves no grant, audit event or replay record");
+  const synced = await sync(body, "owned");
+  assert.equal(synced.status, 200, await synced.clone().text());
+  assert.equal((await synced.json()).data.enforcement_mode, "device_bound_v1");
+  // A legacy grant is never converted, and even an unchanged one is a conflict rather than a no-op.
+  f.sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,enforcement_mode,created_at,updated_at) VALUES('APP','OLD',?,'active','owner','license','legacy',1,1)")
+    .run(input.license_fingerprint);
+  const legacy = f.snapshot();
+  for (const [payload, key] of [[{ ...body, feature: "OLD" }, "legacy-unchanged"], [{ ...body, feature: "OLD", notes: "changed" }, "legacy-changed"]]) {
+    const conflict = await sync(payload, key);
+    assert.equal(conflict.status, 409, key); assert.equal((await conflict.json()).code, "enforcement_mode_conflict");
+  }
+  assert.deepEqual(f.snapshot(), legacy);
 });
 
 test("protected identifiers and policy dates must fit the v2 wire contract", async t => {
@@ -257,7 +301,9 @@ const REASON_CASES = [
       INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,hold_until,created_at,updated_at)
         VALUES('binding','APP','PRO','${fp}','device','active',0,1,1)`,
     body: { customer_id: "other", license_id: "license-other" }, fix: "UPDATE device_bound_bindings SET state='retiring'" },
-  { reason: "unknown", body: { device_hash: "d".repeat(64) }, fixedBody: {} },
+  // A policy window pushed past the largest safe time breaks only the integrity rule.
+  { reason: "unknown", setup: "UPDATE entitlement_policies SET duration_sec=100", body: { policy_id: "policy", valid_from: Number.MAX_SAFE_INTEGER - 1 },
+    fixedBody: { policy_id: "policy" } },
 ];
 
 for (const { reason, name = reason, setup, race, body = {}, fix, fixedBody = body } of REASON_CASES) {

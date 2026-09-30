@@ -76,8 +76,11 @@ The whole path runs in the console; no SQL is needed.
 
 Changing the project clears dependent selections. Protected project and feature
 IDs use ASCII letters, numbers, `_`, `.`, `:`, or `-` (127 and 15 characters).
-Leave the legacy device hash empty. A selected policy must have zero floating
-pool, at least one device slot, and usable trial/expiry settings.
+A protected grant has no device hash and no assertion TTL: a create or PATCH
+that names `device_hash` or `assertion_ttl_seconds` returns `400
+invalid_request`. A selected policy stamps only its device limit and
+trial/expiry settings, never a seat pool, borrowing or a meter, so it must have
+at least one device slot and usable trial/expiry settings.
 
 To change an existing grant's device limit, open it with **Edit** and use **Save
 device limit**. A protected grant cannot go below the devices already connected;
@@ -99,7 +102,7 @@ as a sentence with the request reference:
 | `invalid_trial` | The trial settings cannot start a protected trial. |
 | `devices_connected` | The create would move the grant to another customer while devices are still connected; disconnect them first. |
 | `invalid_capacity` | The device limit is outside 1–1,000,000, or below the devices already connected. |
-| `unknown` | Any other integrity rule, such as a device hash or a floating pool. |
+| `unknown` | Any other integrity rule, such as a validity window beyond the largest supported time. |
 
 The application must already use the protected v2 integration. Creating access
 does not enroll a machine or allocate a slot; the customer signs in and consents
@@ -564,9 +567,14 @@ Then stamp an entitlement from either policy:
 ```
 
 For catalog-driven tiers, create catalog features and plans, attach each plan
-feature to a policy or set explicit capacity overrides on the plan feature, then
+feature to a policy or set a device limit override on the plan feature, then
 use `/api/admin/license-plans/preview` and `/api/admin/license-plans/apply`.
-Runtime checks read the stamped entitlement rows, not plan or tier names.
+Runtime checks read the stamped entitlement rows, not plan or tier names. Plan
+apply writes protected grants: a created grant has no device hash, seat pool,
+borrowing or meter, and keeps the default TTLs. An update writes only the
+validity window, notes, owner, license, policy, device limit and trial state,
+so it never makes a protected grant unusable. A plan feature's seat, borrowing,
+meter and TTL overrides do not apply.
 
 Client behavior differs by mode:
 
@@ -576,10 +584,11 @@ Client behavior differs by mode:
   `pool_size` is the live seat pool, and `max_borrow_sec > 0` enables bounded
   borrowed/offline seats.
 
-The `/api/sync/entitlements` helper creates the base entitlement projection but
-does not expose seat capacity fields. Use policies, catalog plan projection, or
-the admin API paths that stamp capacity when setting up floating licenses. An
-admin create without a policy, or a PATCH, can set the device limit directly
+The `/api/sync/entitlements` endpoint creates or updates a protected grant for a
+named customer and license ([User database sync](#user-database-sync)); it sets
+no device limit. Policies and catalog plan projection stamp the device limit and
+trial state, never a seat pool, borrowing or a meter. An admin create without a
+policy, or a PATCH, can set the device limit directly
 ([Device limit](#device-limit)).
 
 ### Break-glass CLI
@@ -615,9 +624,8 @@ Then send a bearer-authenticated projection update:
 {
   "project": "DEFAULT",
   "feature": "DEFAULT",
-  "license_fingerprint": "<64 hex fingerprint>",
+  "license_fingerprint": "<64 lowercase hex fingerprint>",
   "status": "active",
-  "assertion_ttl_seconds": 300,
   "customer_id": "cus_123",
   "license_id": "lic_123",
   "valid_until": 1767225600,
@@ -625,12 +633,25 @@ Then send a bearer-authenticated projection update:
 }
 ```
 
-The endpoint uses the same validation, D1 batch write, audit event, idempotency,
-and revoked-terminal rules as the admin console. Repeated identical projections
-return the current row without advancing `revocation_seq`. Disabled and revoked
-sync payloads require `reason`.
+Every synced grant is protected (`device_bound_v1`); the body cannot choose the
+mode. It must name `customer_id` and `license_id`: the active customer who owns
+the grant and that customer's license for the project. A body without either,
+or one that names `enforcement_mode`, `device_hash` or `assertion_ttl_seconds`,
+returns `400 invalid_request`, as do identifiers outside the protected rules
+(see [Create protected application access](#create-protected-application-access)).
 
-CLI smoke example:
+The endpoint runs the same protected checks, D1 batch write, audit event,
+idempotency and revoked-terminal rules as an admin create. A refused check
+returns `409 protected_creation_conflict` with `data.reason` naming the rule, as
+in the create reason table, and writes nothing. An existing grant of another
+mode is never converted and is not a no-op either: sync returns `409
+enforcement_mode_conflict`. Repeated identical projections return the current
+row without advancing `revocation_seq`. Disabled and revoked sync payloads
+require `reason`; a synced revocation stops the grant's enrolled devices from
+renewing.
+
+CLI smoke example (`--customer-id` and `--license-id` are required;
+`--device-hash` and `--assertion-ttl` are refused):
 
 ```sh
 LICENSECC_SYNC_TOKEN=<secret> npm run sync:entitlement -- \

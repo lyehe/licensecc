@@ -42,8 +42,17 @@ test("sync endpoint requires its dedicated bearer secret", async () => {
   assert.equal((await json(invalid)).code, "invalid_sync_token");
 });
 
-// Every synced grant is protected, so it names the customer who owns it and that customer's licence.
+// Every synced grant is protected, so it names the customer who owns it and that customer's license.
 const ownedSync = { project: "APP", feature: "PRO", license_fingerprint: fingerprint, status: "active", customer_id: "cus_1", license_id: "lic_1" };
+
+// A MockD1 that also holds the active customer and that customer's license for the project, so a
+// sync naming them passes the protected create checks.
+function ownedDb(customerId, licenseId, project = "DEFAULT") {
+  const db = new MockD1();
+  db.customers.set(customerId, { id: customerId, status: "active" });
+  db.licenses.set(licenseId, { id: licenseId, customer_id: customerId, project });
+  return db;
+}
 
 test("sync without customer_id is refused", async () => {
   const db = new MockD1();
@@ -80,14 +89,13 @@ test("sync refuses device_hash and assertion_ttl_seconds", async () => {
 });
 
 test("sync endpoint upserts user database projection and no-ops identical state", async () => {
-  const db = new MockD1();
+  const db = ownedDb("cus_123", "lic_123");
   const env = syncEnv(db);
   const payload = {
     project: "DEFAULT",
     feature: "DEFAULT",
     license_fingerprint: fingerprint,
     status: "active",
-    assertion_ttl_seconds: 300,
     customer_id: "cus_123",
     license_id: "lic_123",
     notes: "paid account",
@@ -111,7 +119,7 @@ test("sync endpoint upserts user database projection and no-ops identical state"
 });
 
 test("sync endpoint revokes with reason and keeps revoked terminal", async () => {
-  const db = new MockD1();
+  const db = ownedDb("cus_456", "lic_456");
   const env = syncEnv(db);
   const active = {
     project: "DEFAULT",
@@ -144,7 +152,7 @@ test("sync endpoint revokes with reason and keeps revoked terminal", async () =>
 });
 
 test("sync endpoint records status transition event types while updating projection", async () => {
-  const db = new MockD1();
+  const db = ownedDb("cus_789", "lic_789");
   const env = syncEnv(db);
   const base = {
     project: "DEFAULT",

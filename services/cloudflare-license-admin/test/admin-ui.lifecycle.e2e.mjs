@@ -114,7 +114,6 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await createForm.getByLabel("Feature").fill("pro");
   await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
   await createForm.getByText("Advanced settings", { exact: true }).click();
-  await createForm.getByLabel("Assertion TTL (seconds)").fill("120");
   // Valid from / until are <input type="date"> (YYYY-MM-DD -> UTC-midnight epoch).
   await createForm.getByLabel("Valid from").fill("2024-03-09");
   await createForm.getByLabel("Valid until").fill("");
@@ -133,14 +132,14 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await expect.poll(() => api.requests.creates).toBe(1);
   const createdRow = page.locator(".desktopRecords tbody tr").filter({ hasText: "cus_e2e" });
   await createdRow.getByText("Technical details", { exact: true }).click();
-  await expect(createdRow).toContainText("120 seconds");
+  // A protected grant takes no assertion TTL from the console, so it keeps the default.
+  await expect(createdRow).toContainText("300 seconds");
   await expect(createdRow).toContainText("cus_e2e");
   await expect(createdRow).toContainText("lic_e2e");
 
   await page.getByRole("button", { name: "Edit" }).click();
   const editForm = page.locator("section.editorLayout form");
   await editForm.getByText("Advanced settings", { exact: true }).click();
-  await editForm.getByLabel("Assertion TTL (seconds)").fill("900");
   await editForm.getByLabel("Valid until").fill("2024-07-03");
   await editForm.getByText("Enter customer ID manually", { exact: true }).click();
   await editForm.getByLabel("Customer ID").fill("");
@@ -149,8 +148,10 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
 
   await expect(page.getByText("Entitlement changes saved.")).toBeVisible();
   await expect.poll(() => api.requests.patches.length).toBe(1);
+  // The Worker refuses a PATCH naming a device hash or an assertion TTL, so the console sends neither.
+  expect(api.requests.patches[0]).not.toHaveProperty("assertion_ttl_seconds");
+  expect(api.requests.patches[0]).not.toHaveProperty("device_hash");
   expect(api.requests.patches[0]).toMatchObject({
-    assertion_ttl_seconds: 900,
     valid_from: 1709942400,
     valid_until: 1719964800,
     notes: "",
@@ -159,7 +160,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   });
   const patchedRow = page.locator(".desktopRecords tbody tr").filter({ hasText: "DEFAULT" });
   await patchedRow.getByText("Technical details", { exact: true }).click();
-  await expect(patchedRow).toContainText("900 seconds");
+  await expect(patchedRow).toContainText("300 seconds");
   await expect(patchedRow).toContainText("ent-1");
 
   const entitlementActions = page.locator(".desktopRecords tbody tr").first();

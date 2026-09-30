@@ -130,7 +130,6 @@ test("admin create is audited and idempotent", async () => {
   const env = baseEnv(db);
   const body = {
     ...protectedGrant,
-    assertion_ttl_seconds: 300,
     cache_ttl_seconds: 3600,
     notes: "first",
   };
@@ -375,7 +374,6 @@ test("audit next_json carries the full production json_object field set", async 
     method: "POST",
     body: JSON.stringify({
       ...protectedGrant,
-      assertion_ttl_seconds: 321,
       valid_from: 1000,
       valid_until: 2000,
       notes: "shape probe",

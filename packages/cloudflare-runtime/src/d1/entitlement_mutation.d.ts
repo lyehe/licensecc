@@ -106,7 +106,10 @@ export function writeEntitlementWithAudit(
   options?: { allowNoWrite?: boolean },
 ): Promise<MutationResult<EntitlementRecord> | null>;
 
-/** Writes only protected grants; a caller may name that mode and no other (`invalid_patch`). */
+/**
+ * Writes only protected grants; a caller may name that mode and no other (`invalid_patch`). The
+ * grant never carries a device hash, whatever the input names.
+ */
 export function createEntitlement(
   env: MutationEnv,
   input: EntitlementInput & { enforcement_mode?: "device_bound_v1" },
@@ -145,12 +148,17 @@ export function transitionEntitlementDevice(
   ctx: MutationContext,
   idempotency: IdempotencyCommit | null,
 ): Promise<MutationResult<EntitlementRecord> | null>;
+/**
+ * Creates or updates a protected grant from an external projection; an unchanged grant is a no-op.
+ * A stored grant of another mode is `enforcement_mode_conflict`, even when unchanged.
+ */
 export function syncEntitlement(
   env: MutationEnv,
-  input: EntitlementInput,
+  input: EntitlementInput & { enforcement_mode?: "device_bound_v1" },
   reason: string,
   ctx: MutationContext,
   idempotency: IdempotencyCommit | null,
+  extraStatements?: D1PreparedStatementLike[],
 ): Promise<MutationResult<EntitlementRecord> | null>;
 export function setEntitlementCapacity(
   env: MutationEnv,

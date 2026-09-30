@@ -1,13 +1,24 @@
 import { INVALID_IDEMPOTENCY_KEY, mutationResponse, readIdempotencyKey } from "../../idempotency.js";
 import { envelope } from "../../responses.js";
-import { syncEntitlement } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type { MutationContext } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import { requestId, safeString } from "@licensecc/cloudflare-runtime/http/kit";
 import type { Env } from "../../env.js";
 import { authenticateSync } from "../../auth.js";
 import { MAX_NOTES_SIZE, parseJsonBody, safeNotes } from "../../request.js";
 import { clientIp } from "../../support.js";
+import { syncWithEnforcement, validateEntitlementCreate, type ProtectedCreateInput } from "../entitlements/create-enforcement.js";
 import { validateEntitlementInput } from "../entitlements/validation.js";
+
+// A synced grant is protected: it names the customer who owns it and that customer's license, and
+// it meets the same wire rules as an admin create. The body cannot choose the mode; sync supplies it.
+function validateSyncInput(body: unknown): ProtectedCreateInput | null {
+  const fields = validateEntitlementInput(body);
+  if (fields === null || typeof fields.customer_id !== "string" || typeof fields.license_id !== "string") {
+    return null;
+  }
+  return validateEntitlementCreate({ ...fields, enforcement_mode: "device_bound_v1" });
+}
+
 function syncReason(value: unknown): string | null {
   if (value === undefined || value === "") {
     return "";
@@ -33,7 +44,7 @@ export async function handleSync(request: Request, env: Env): Promise<Response> 
     return body;
   }
   const bodyRecord = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
-  const input = validateEntitlementInput(body);
+  const input = validateSyncInput(body);
   const reason = syncReason(bodyRecord.reason);
   if (input === null || reason === null) {
     return envelope(id, "invalid_request", undefined, 400);
@@ -49,5 +60,5 @@ export async function handleSync(request: Request, env: Env): Promise<Response> 
     source: "sync",
   };
   return mutationResponse(request, env, ctx, "entitlement_synced", (idempotency) =>
-    syncEntitlement(env, input, reason, ctx, idempotency));
+    syncWithEnforcement(env, input, reason, ctx, idempotency));
 }

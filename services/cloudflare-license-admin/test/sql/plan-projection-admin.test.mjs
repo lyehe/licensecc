@@ -276,7 +276,8 @@ test("license-plan preview is non-mutating and returns the concrete entitlement 
   assert.equal(json.code, "license_plan_projection_previewed");
   assert.equal(json.data.summary.create, 3);
   assert.deepEqual(json.data.will_create.map((row) => row.feature), ["core", "export", "team"]);
-  assert.equal(json.data.will_create.find((row) => row.feature === "team").license_mode, "floating");
+  // The team add-on's policy is floating, but a projected grant is protected: it never has a seat pool.
+  assert.equal(json.data.will_create.find((row) => row.feature === "team").license_mode, "node_locked");
   assert.match(json.data.preview_id, /^ppv_/);
   assert.equal(typeof json.data.effective_at, "number");
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
@@ -656,12 +657,14 @@ test("license-plan apply creates stamped entitlements, assignment row, and is re
   assert.equal(firstBody.code, "license_plan_projection_applied");
   assert.equal(firstBody.data.applied.created.length, 3);
 
-  const team = db.prepare("SELECT status, policy_id, pool_size, max_active_devices, max_borrow_sec, valid_until FROM entitlements WHERE feature = 'team' AND license_fingerprint = ?").get(FP);
+  const team = db.prepare("SELECT status, enforcement_mode, policy_id, pool_size, max_active_devices, max_borrow_sec, valid_until FROM entitlements WHERE feature = 'team' AND license_fingerprint = ?").get(FP);
   assert.equal(team.status, "active");
+  assert.equal(team.enforcement_mode, "device_bound_v1");
   assert.equal(team.policy_id, "pol_float");
-  assert.equal(team.pool_size, 6);
+  // The plan row's device limit applies; its seat pool and borrowing do not.
+  assert.equal(team.pool_size, 0);
   assert.equal(team.max_active_devices, 6);
-  assert.equal(team.max_borrow_sec, 172800);
+  assert.equal(team.max_borrow_sec, 0);
   assert.equal(team.valid_until, SUPPORT_UNTIL);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events WHERE license_fingerprint = ?").get(FP).c, 3);
   assert.equal(db.prepare("SELECT plan_id FROM license_plan_assignments WHERE license_id = 'lic_plan' AND project = 'DEFAULT'").get().plan_id, "plan_pro");
@@ -743,8 +746,9 @@ test("license-plan Preview rejects a legacy entitlement identity conflict withou
   seedCatalog(db);
   const env = devEnv(db);
   const oldFingerprint = "1".repeat(64);
+  // The conflicting grant is protected, as every writer now creates it; the fence does not depend on mode.
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', 'legacy_unmanaged', ?, 'active', 'lic_plan', ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, enforcement_mode, created_at, updated_at) VALUES ('DEFAULT', 'legacy_unmanaged', ?, 'active', 'lic_plan', 'device_bound_v1', ?, ?)",
   ).run(oldFingerprint, NOW, NOW);
 
   const preview = await worker.fetch(
@@ -803,8 +807,9 @@ test("license-plan Apply reports a post-Preview legacy entitlement identity conf
   );
   const previewId = (await body(preview)).data.preview_id;
   const oldFingerprint = "2".repeat(64);
+  // The racing grant is protected, as every writer now creates it; the fence does not depend on mode.
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', 'legacy_race', ?, 'active', 'lic_plan', ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, enforcement_mode, created_at, updated_at) VALUES ('DEFAULT', 'legacy_race', ?, 'active', 'lic_plan', 'device_bound_v1', ?, ?)",
   ).run(oldFingerprint, NOW, NOW);
 
   const apply = await worker.fetch(

@@ -9,7 +9,7 @@
 // Covers: create + audit row; UNIQUE(project, lower(name)) -> 409 policy_name_conflict; patch
 // (and the not-patchable project/name/type/status rejection); disable/reenable guard + audit + the
 // reason gate; list filters + cursor; detail 404. create-from-policy: POLICY_STAMP_MODE off rejects
-// (400 policy_stamping_disabled); on stamps the policy window/ttl + capacity/trial columns onto the row;
+// (400 policy_stamping_disabled); on stamps the policy window + device limit/trial columns onto the row;
 // an unknown/disabled policy -> 404 policy_not_found. RBAC: a reader can read policies but cannot run any
 // policy write nor the policy-stamp create.
 //
@@ -460,7 +460,7 @@ test("stamp: POLICY_STAMP_MODE off rejects a policy_id create (400 policy_stampi
   assert.equal(plain.status, 200);
 });
 
-test("stamp: POLICY_STAMP_MODE on stamps the policy window/ttl + capacity/trial columns", async () => {
+test("stamp: POLICY_STAMP_MODE on stamps the policy window + device limit/trial columns", async () => {
   const db = freshDb(); seedOwner(db);
   const env = devEnv(db, { POLICY_STAMP_MODE: "on" });
   const policy = await createPolicy(env, {
@@ -480,7 +480,7 @@ test("stamp: POLICY_STAMP_MODE on stamps the policy window/ttl + capacity/trial 
   }), env);
   assert.equal(res.status, 200, await res.clone().text());
   const data = (await body(res)).data;
-  assert.equal(data.assertion_ttl_seconds, 900, "ttl came from the policy");
+  assert.equal(data.assertion_ttl_seconds, 300, "a protected grant takes no assertion TTL from its policy");
   assert.equal(data.customer_id, "cus_x", "override flowed through");
   // from_issue trial, no valid_from_offset_sec -> open start (null), valid_until = now + trial_duration.
   assert.equal(data.valid_from, null);
@@ -497,7 +497,7 @@ test("stamp: POLICY_STAMP_MODE on stamps the policy window/ttl + capacity/trial 
   assert.equal(row.trial_require_device_proof, 1);
   assert.equal(row.pool_size, 0);
   assert.equal(row.max_active_devices, 2);
-  assert.equal(row.assertion_ttl_seconds, 900);
+  assert.equal(row.assertion_ttl_seconds, 300);
 
   // The stamp produced exactly one entitlement audit event (create), proving the side-write rode the same batch.
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events WHERE license_fingerprint=?").get(FP_A).c, 1);

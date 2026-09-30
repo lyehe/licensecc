@@ -1649,12 +1649,9 @@
                   "minLength": 1,
                   "type": "string"
                 },
-                "device_hash": {
-                  "const": ""
-                },
                 "enforcement_mode": {
                   "const": "device_bound_v1",
-                  "description": "Required. Every create is protected; an omitted or any other mode returns 400 invalid_request. A protected grant requires an active customer, that customer's license for this project, zero pool, an empty device hash, and a usable policy. An existing row of another mode is never converted in place (409 enforcement_mode_conflict). Retries must repeat the same tuple.",
+                  "description": "Required. Every create is protected; an omitted or any other mode returns 400 invalid_request. A protected grant requires an active customer, that customer's license for this project, no seat pool, and a usable policy; it carries no device hash or assertion TTL. An existing row of another mode is never converted in place (409 enforcement_mode_conflict). Retries must repeat the same tuple.",
                   "type": "string"
                 },
                 "feature": {
@@ -1780,13 +1777,22 @@
           "type": "object"
         },
         "EntitlementInput": {
+          "description": "A protected grant carries no device hash (its device key proves the device) and no assertion TTL; a body naming device_hash or assertion_ttl_seconds returns 400 invalid_request.",
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "device_hash"
+                ]
+              },
+              {
+                "required": [
+                  "assertion_ttl_seconds"
+                ]
+              }
+            ]
+          },
           "properties": {
-            "assertion_ttl_seconds": {
-              "default": 300,
-              "maximum": 3600,
-              "minimum": 1,
-              "type": "integer"
-            },
             "customer_id": {
               "default": null,
               "maxLength": 128,
@@ -1794,18 +1800,6 @@
                 "string",
                 "null"
               ]
-            },
-            "device_hash": {
-              "description": "64-char hex, or empty string for unbound.",
-              "oneOf": [
-                {
-                  "pattern": "^[0-9a-fA-F]{64}$"
-                },
-                {
-                  "const": ""
-                }
-              ],
-              "type": "string"
             },
             "feature": {
               "maxLength": 15,
@@ -1880,16 +1874,6 @@
                 "anyOf": [
                   {
                     "required": [
-                      "device_hash"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "assertion_ttl_seconds"
-                    ]
-                  },
-                  {
-                    "required": [
                       "valid_from"
                     ]
                   },
@@ -1917,28 +1901,33 @@
               }
             }
           },
-          "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the optional expected_* precondition may), or the PATCH returns 400 invalid_request.",
+          "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable. device_hash and assertion_ttl_seconds are refused with 400 invalid_request: a protected grant carries neither. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the optional expected_* precondition may), or the PATCH returns 400 invalid_request.",
           "not": {
-            "required": [
-              "enforcement_mode"
+            "anyOf": [
+              {
+                "required": [
+                  "enforcement_mode"
+                ]
+              },
+              {
+                "required": [
+                  "device_hash"
+                ]
+              },
+              {
+                "required": [
+                  "assertion_ttl_seconds"
+                ]
+              }
             ]
           },
           "properties": {
-            "assertion_ttl_seconds": {
-              "maximum": 3600,
-              "minimum": 1,
-              "type": "integer"
-            },
             "customer_id": {
               "maxLength": 128,
               "type": [
                 "string",
                 "null"
               ]
-            },
-            "device_hash": {
-              "description": "64-char hex, or empty string.",
-              "type": "string"
             },
             "license_id": {
               "maxLength": 128,
@@ -2132,15 +2121,58 @@
             },
             {
               "properties": {
+                "customer_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "feature": {
+                  "pattern": "^[A-Za-z0-9_.:-]{1,15}(?![\\s\\S])",
+                  "type": "string"
+                },
+                "license_fingerprint": {
+                  "maxLength": 64,
+                  "minLength": 64,
+                  "pattern": "^[a-f0-9]{64}$",
+                  "type": "string"
+                },
+                "license_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "project": {
+                  "pattern": "^[A-Za-z0-9_.:-]{1,127}(?![\\s\\S])",
+                  "type": "string"
+                },
                 "reason": {
                   "description": "Optional; required (non-empty) when status is disabled or revoked.",
                   "maxLength": 1000,
                   "type": "string"
+                },
+                "valid_from": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "valid_until": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
                 }
               },
+              "required": [
+                "customer_id",
+                "license_id"
+              ],
               "type": "object"
             }
           ],
+          "description": "Every synced grant is protected. The body names the customer who owns it and that customer's license for the project; the grant passes the same protected checks as an admin create (409 protected_creation_conflict names a failed rule). The body cannot choose the mode, and an existing grant of another mode is 409 enforcement_mode_conflict, even when unchanged.",
           "not": {
             "required": [
               "enforcement_mode"
@@ -11549,7 +11581,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / id / idempotency key (including an omitted or non-protected enforcement_mode, and max_active_devices outside 1-1,000,000 or sent with a policy_id), or a policy_id was supplied while POLICY_STAMP_MODE is off."
+              "description": "Invalid request / json / id / idempotency key (including an omitted or non-protected enforcement_mode, a device_hash or assertion_ttl_seconds, and max_active_devices outside 1-1,000,000 or sent with a policy_id), or a policy_id was supplied while POLICY_STAMP_MODE is off."
             },
             "401": {
               "content": {
@@ -12050,7 +12082,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / id / idempotency key, or max_active_devices outside 1-1,000,000 or sent with another patch field."
+              "description": "Invalid request / json / id / idempotency key, a device_hash or assertion_ttl_seconds, or max_active_devices outside 1-1,000,000 or sent with another patch field."
             },
             "401": {
               "content": {
@@ -15120,7 +15152,7 @@
                   }
                 }
               },
-              "description": "Applied projection with created/updated/disabled entitlement records and assignment row."
+              "description": "Applied projection with created/updated/disabled entitlement records and assignment row. A created grant is protected (device_bound_v1) with no device hash, seat pool, borrowing or meter; an update writes only the validity window, notes, owner, license, policy, device limit and trial state."
             },
             "400": {
               "content": {
@@ -20132,7 +20164,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / idempotency key, or missing reason for a non-active status."
+              "description": "Invalid request / json / idempotency key (including a body without customer_id or license_id, one naming enforcement_mode, device_hash or assertion_ttl_seconds, or an identifier outside the protected rules), or missing reason for a non-active status."
             },
             "401": {
               "content": {
@@ -20195,6 +20227,23 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "enforcement_mode_conflict": {
+                      "value": {
+                        "code": "enforcement_mode_conflict",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "protected_creation_conflict": {
+                      "value": {
+                        "code": "protected_creation_conflict",
+                        "data": {
+                          "reason": "customer_inactive"
+                        },
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
                     "revoked_entitlement_is_terminal": {
                       "value": {
                         "code": "revoked_entitlement_is_terminal",
@@ -20211,11 +20260,37 @@
                     }
                   },
                   "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
+                    "oneOf": [
+                      {
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/ErrorEnvelope"
+                          },
+                          {
+                            "properties": {
+                              "code": {
+                                "enum": [
+                                  "revoked_entitlement_is_terminal",
+                                  "stale_transition",
+                                  "enforcement_mode_conflict"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "code"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      {
+                        "$ref": "#/components/schemas/ProtectedCreationConflictError"
+                      }
+                    ]
                   }
                 }
               },
-              "description": "Target entitlement is revoked (terminal), or it changed after this request observed it; refetch and retry the latter."
+              "description": "Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry); a stored grant of another mode, which sync never converts; or a protected eligibility failure (data.reason names the failed rule)."
             },
             "413": {
               "content": {

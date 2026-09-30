@@ -98,9 +98,7 @@ function projectionProbe() {
       project: "DEFAULT",
       feature: "core",
       license_fingerprint: fingerprint,
-      device_hash: "",
       status: "active",
-      assertion_ttl_seconds: 600,
       valid_from: null,
       valid_until: null,
       notes: "probe",
@@ -108,26 +106,26 @@ function projectionProbe() {
       license_id: "lic_probe",
     },
     policy_id: "pol_probe",
-    capacity: { pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000 },
+    capacity: { max_active_devices: 1 },
     trial: { is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0, trial_require_device_proof: 0 },
     source: "included",
     addon_key: null,
     feature_name: "Core",
   };
-  const action = { id: entitlementId("DEFAULT", "core", fingerprint), desired, cache_ttl_seconds: 600 };
+  const action = { id: entitlementId("DEFAULT", "core", fingerprint), desired };
   const projection = {
     plan: { id: "plan_probe", project: "DEFAULT", plan_key: "probe", name: "Probe", status: "active", version: 1 },
     assignment,
     desired: [{
       project: "DEFAULT", feature: "core", license_fingerprint: fingerprint, policy_id: "pol_probe", source: "included", addon_key: null,
-      license_mode: "node_locked", status: "active", valid_from: null, valid_until: null, assertion_ttl_seconds: 600,
+      license_mode: "node_locked", status: "active", valid_from: null, valid_until: null, assertion_ttl_seconds: 300,
       pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000,
     }],
     will_create: [], will_update: [], will_disable: [], blocked: [], unchanged: [],
     summary: { create: 1, update: 0, disable: 0, blocked: 0, unchanged: 0 },
     preview_id: previewId, effective_at: now, expires_at: now + 300, source_generation: 1,
   };
-  const actions = { projection_snapshot_version: 2, created: [action], updated: [], disabled: [], assignment, assignment_snapshot: null };
+  const actions = { projection_snapshot_version: 3, created: [action], updated: [], disabled: [], assignment, assignment_snapshot: null };
   const entitlement = {
     enforcement_mode: "legacy",
     project: "DEFAULT", feature: "core", license_fingerprint: fingerprint, device_hash: "", status: "active",

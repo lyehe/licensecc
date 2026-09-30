@@ -59,7 +59,13 @@ export interface ApiEnvelope<T> {
   data?: T;
 }
 
-export interface EntitlementSyncInput extends EntitlementInput {
+/**
+ * A sync body. Every synced grant is protected, so it names the customer who owns it and that
+ * customer's license, and it carries no device hash or assertion TTL.
+ */
+export interface EntitlementSyncInput extends Omit<EntitlementInput, "device_hash" | "assertion_ttl_seconds" | "customer_id" | "license_id"> {
+  customer_id: string;
+  license_id: string;
   reason?: string;
 }
 

@@ -55,14 +55,13 @@ test("admin UI workflow normalizes create form payloads", async () => {
     license_id: "lic_123",
   });
 
-  // The untouched form is protected, so the body carries that mode by default.
+  // The untouched form is protected, so the body carries that mode by default, and never a device
+  // hash or an assertion TTL: the Worker refuses a create naming either.
   assert.deepEqual(body, {
     enforcement_mode: "device_bound_v1",
     project: "DEFAULT",
     feature: "DEFAULT",
     license_fingerprint: "a".repeat(64),
-    device_hash: "",
-    assertion_ttl_seconds: 120,
     valid_from: 1709942400,
     valid_until: null,
     notes: "operator note",
@@ -71,10 +70,6 @@ test("admin UI workflow normalizes create form payloads", async () => {
   });
   // An untouched device limit is not sent, so an upsert never overwrites a stored limit the operator did not set.
   assert.equal(Object.hasOwn(body, "max_active_devices"), false);
-  assert.throws(() => workflow.normalizeEntitlementForm({
-    ...workflow.emptyEntitlementForm,
-    assertion_ttl_seconds: 0,
-  }), /assertion_ttl_seconds_must_be_between_1_and_3600/);
   assert.throws(() => workflow.normalizeEntitlementForm({
     ...workflow.emptyEntitlementForm,
     valid_from: "not-a-date",
@@ -91,7 +86,10 @@ test("admin UI workflow stamps a create-from-policy payload (attaches policy_id)
   assert.equal(inherited.policy_id, "pol_123");
   assert.equal(inherited.license_fingerprint, "b".repeat(64));
   assert.equal(inherited.project, "DEFAULT");
-  assert.equal("assertion_ttl_seconds" in inherited, false, "blank/default TTL inherits from the policy");
+  assert.equal("assertion_ttl_seconds" in inherited, false, "a protected grant takes no assertion TTL");
+  assert.equal("assertion_ttl_seconds" in workflow.normalizeCreateFromPolicy({
+    ...workflow.emptyEntitlementForm, policy_id: "pol_123", license_fingerprint: "b".repeat(64), assertion_ttl_seconds: 120,
+  }), false, "a TTL typed into the form is not sent either");
   assert.equal("valid_from" in inherited, false, "blank valid_from inherits from the policy");
   assert.equal("valid_until" in inherited, false, "blank valid_until inherits from the policy");
 
@@ -155,9 +153,8 @@ test("admin UI workflow prepares entitlement edit patch payloads", async () => {
     customer_id: "",
     license_id: "lic_123",
   });
+  // A PATCH never sends a device hash or an assertion TTL: the Worker refuses either.
   assert.deepEqual(patch, {
-    device_hash: "b".repeat(64),
-    assertion_ttl_seconds: 900,
     valid_from: 1709942400,
     valid_until: 1719964800,
     notes: "",
@@ -165,10 +162,6 @@ test("admin UI workflow prepares entitlement edit patch payloads", async () => {
     license_id: "lic_123",
   });
   assert.equal(workflow.patchPath(item), "/api/admin/entitlements/ent-123");
-  assert.throws(() => workflow.normalizeEntitlementPatch({
-    ...workflow.emptyEntitlementEditForm,
-    assertion_ttl_seconds: 3601,
-  }), /assertion_ttl_seconds_must_be_between_1_and_3600/);
 });
 
 test("admin UI workflow action rules match entitlement lifecycle invariants", async () => {

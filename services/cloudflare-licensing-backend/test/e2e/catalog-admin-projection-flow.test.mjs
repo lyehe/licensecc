@@ -1,13 +1,24 @@
 import assert from "node:assert/strict";
+import { createPublicKey, verify } from "node:crypto";
 import { test } from "node:test";
 
 import adminWorker from "../../../cloudflare-license-admin/dist-worker/worker/index.js";
 import { createLocalSqliteDb } from "../../local-host/db-sqlite.mjs";
-import verifierWorker from "../../dist/app.js";
+import backend from "../../dist/app.js";
+import { inspectBoundAuthorization, approveBoundAuthorization } from "../../src/device/bound_consent.mjs";
+import { boundRandomId } from "../../src/device/bound_enrollment.mjs";
+import { importBoundDeviceKey, normalizeDeviceSignature, sha256Hex } from "../../src/device/bound_crypto.mjs";
+import { encodeBase64url, deviceOperationBody, deviceProofSigningInput, decodeDeviceLeaseEnvelope, deviceLeaseSigningInput } from "@licensecc/licensing-domain/lease/device_protocol";
 
 const NOW = 1_700_000_000;
 const SUPPORT_UNTIL = 1_900_000_000;
 const FP = "d".repeat(64);
+const signer = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 3072, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
+const pem = (label, bytes) => `-----BEGIN ${label}-----\n${Buffer.from(bytes).toString("base64")}\n-----END ${label}-----`;
+const privatePem = pem("PRIVATE KEY", await crypto.subtle.exportKey("pkcs8", signer.privateKey));
+const publicPem = pem("PUBLIC KEY", await crypto.subtle.exportKey("spki", signer.publicKey));
+const config = { issuer: "https://license.test/", audience: "desktop", authorization_url: "https://portal.test/connect",
+  clients: [{ client_id: "desktop", project: "DEFAULT", display_name: "Application", callbacks: [{ host: "127.0.0.1", path: "/callback" }] }] };
 
 function adminEnv(DB) {
   return {
@@ -25,39 +36,37 @@ function adminReq(path, options = {}) {
   });
 }
 
-function bytesToPem(bytes, label) {
-  const b64 = Buffer.from(bytes).toString("base64");
-  const lines = b64.match(/.{1,64}/g).join("\n");
-  return `-----BEGIN ${label}-----\n${lines}\n-----END ${label}-----`;
-}
-
-async function verifierEnv(DB) {
-  const keyPair = await crypto.subtle.generateKey(
-    { name: "RSASSA-PKCS1-v1_5", modulusLength: 3072, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
-    true,
-    ["sign", "verify"],
-  );
-  const pkcs8 = await crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
-  return {
-    ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM: bytesToPem(new Uint8Array(pkcs8), "PRIVATE KEY"),
-    ONLINE_SIGNING_KEY_ID: "sha256:e2e-catalog",
-    MAX_ASSERTION_TTL_SECONDS: "300",
-    DB,
+// The consent and signed-exchange flow a protected application runs: a new device key asks for the
+// named grant, the customer approves it, and the key proves possession to receive a signed lease.
+async function signedExchange(adapter, env, customerId, entitlementId) {
+  const call = async (path, body) => {
+    const response = await backend.fetch(new Request(`https://license.test${path}`, { method: "POST",
+      headers: { "content-type": "application/json", "cf-connecting-ip": "127.0.0.2" }, body: JSON.stringify(body) }), env);
+    const result = await response.json(); assert.equal(response.status, 200, JSON.stringify(result)); return result.data;
   };
-}
-
-function verifyReq(feature) {
-  return new Request("https://verifier.example/v1/verify", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      project: "DEFAULT",
-      feature,
-      license_fingerprint: FP,
-      device_hash: "",
-      nonce: "e".repeat(64),
-    }),
-  });
+  const keys = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const spki = encodeBase64url(new Uint8Array(await crypto.subtle.exportKey("spki", keys.publicKey)));
+  const verifier = boundRandomId(32), redirect = "http://127.0.0.1:45678/callback";
+  const challenge = encodeBase64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+  const attempt = await call("/v2/device-authorizations", { client_id: "desktop", project: "DEFAULT", public_key_spki: spki,
+    device_label: "Workstation", redirect_uri: redirect, state: boundRandomId(32), code_challenge: challenge, code_challenge_method: "S256" });
+  const page = await inspectBoundAuthorization(adapter, customerId, attempt.attempt_handle, config);
+  assert.ok(page.entitlements.some((offered) => offered.id === entitlementId), "the plan-applied grant is offered for consent");
+  const consent = await approveBoundAuthorization(adapter, customerId, { attempt_handle: attempt.attempt_handle,
+    entitlement_id: entitlementId, expected_attempt_revision: 0, operation_id: boundRandomId(32) }, config,
+  JSON.stringify({ active: "approval", keys: { approval: boundRandomId(32) } }));
+  const body = { attempt_handle: attempt.attempt_handle, code: new URL(consent.callback_url).searchParams.get("code"),
+    code_verifier: verifier, redirect_uri: redirect, operation_id: boundRandomId(32) };
+  const proofChallenge = await call("/v2/device-challenges", { purpose: "exchange", attempt_handle: body.attempt_handle, operation_id: body.operation_id });
+  const keyId = (await importBoundDeviceKey(spki)).keyId;
+  const intent = { audience: config.audience, method: "POST", path: "/v2/device-authorizations/exchange", key_id: keyId,
+    operation_id: body.operation_id, body_sha256: await sha256Hex(deviceOperationBody("exchange", body)), ...proofChallenge };
+  const signature = encodeBase64url(normalizeDeviceSignature(new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, keys.privateKey, deviceProofSigningInput(intent)))));
+  const result = await call("/v2/device-authorizations/exchange", { ...body, proof: { key_id: keyId, challenge_id: proofChallenge.challenge_id,
+    nonce: proofChallenge.nonce, expires_at: proofChallenge.expires_at, signature } });
+  const lease = decodeDeviceLeaseEnvelope(result.lease);
+  assert.equal(verify("RSA-SHA256", deviceLeaseSigningInput(lease.payload), createPublicKey(publicPem), lease.signature), true);
+  return lease.claims;
 }
 
 async function responseBody(response) {
@@ -155,9 +164,13 @@ function projectionBody() {
   };
 }
 
-test("admin catalog import and plan projection feed public verifier through worker boundaries", async () => {
+test("admin catalog import and plan projection yield protected grants that support a signed exchange", async () => {
   const { db, adapter } = createLocalSqliteDb({ path: ":memory:" });
   try {
+    const now = Math.floor(Date.now() / 1000); db.function("unixepoch", () => now);
+    // Plan apply names the customer and license; the protected issuer requires both to exist and be active.
+    db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_catalog_e2e','Owner',1,1);
+      INSERT INTO licenses(id,customer_id,project,created_at,updated_at) VALUES('lic_catalog_e2e','cus_catalog_e2e','DEFAULT',1,1);`);
     seedPolicy(db, "pol_node", { assertion_ttl_seconds: 300 });
     seedPolicy(db, "pol_float", { type: "floating", pool_size: 6, max_active_devices: 6, max_borrow_sec: 172_800 });
     const env = adminEnv(adapter);
@@ -204,7 +217,8 @@ test("admin catalog import and plan projection feed public verifier through work
     assert.equal(previewBody.code, "license_plan_projection_previewed");
     assert.equal(previewBody.data.summary.create, 2);
     assert.deepEqual(previewBody.data.will_create.map((row) => row.feature), ["core", "team"]);
-    assert.equal(previewBody.data.will_create.find((row) => row.feature === "team").license_mode, "floating");
+    // The team add-on's policy and plan row carry a seat pool, but a projected grant is protected.
+    assert.equal(previewBody.data.will_create.find((row) => row.feature === "team").license_mode, "node_locked");
     assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
 
     const appliedProjection = await adminWorker.fetch(adminReq("/api/admin/license-plans/apply", {
@@ -218,32 +232,22 @@ test("admin catalog import and plan projection feed public verifier through work
     assert.equal(appliedBody.data.applied.created.length, 2);
 
     assert.equal("cache_ttl_seconds" in appliedBody.data.applied.created[0], false, "private cache policy must not change the public Apply response shape");
-    const core = db.prepare("SELECT assertion_ttl_seconds, cache_ttl_seconds FROM entitlements WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").get(FP);
-    assert.equal(core.assertion_ttl_seconds, 300);
-    assert.equal(core.cache_ttl_seconds, 300, "plan projection must not retain a legacy long cache window");
-    const team = db.prepare("SELECT license_id, customer_id, pool_size, max_active_devices, max_borrow_sec FROM entitlements WHERE project = 'DEFAULT' AND feature = 'team' AND license_fingerprint = ?").get(FP);
-    assert.equal(team.license_id, "lic_catalog_e2e");
-    assert.equal(team.customer_id, "cus_catalog_e2e");
-    assert.equal(team.pool_size, 6);
-    assert.equal(team.max_active_devices, 6);
-    assert.equal(team.max_borrow_sec, 172_800);
+    const rows = db.prepare(`SELECT feature, enforcement_mode, device_hash, license_id, customer_id, pool_size, max_active_devices, max_borrow_sec
+      FROM entitlements WHERE project = 'DEFAULT' AND license_fingerprint = ? ORDER BY feature`).all(FP).map((row) => ({ ...row }));
+    const protectedGrant = (feature, maxActiveDevices) => ({ feature, enforcement_mode: "device_bound_v1", device_hash: "", license_id: "lic_catalog_e2e",
+      customer_id: "cus_catalog_e2e", pool_size: 0, max_active_devices: maxActiveDevices, max_borrow_sec: 0 });
+    // The plan row's device limit applies to the team grant; its seat pool and borrowing do not.
+    assert.deepEqual(rows, [protectedGrant("core", 1), protectedGrant("team", 6)]);
 
-    const verifier = await verifierEnv(adapter);
-    const allowedCore = await verifierWorker.fetch(verifyReq("core"), verifier);
-    assert.equal(allowedCore.status, 200);
-    const allowedCoreBody = await responseBody(allowedCore);
-    assert.equal(allowedCoreBody.ok, true);
-    assert.match(allowedCoreBody.assertion, /^lccoa1\./);
-    const corePayload = Buffer.from(allowedCoreBody.assertion.split(".")[1], "base64").toString("utf8");
-    const issuedAt = Number(corePayload.match(/issued-at=(\d+)\n/)[1]);
-    const cacheUntil = Number(corePayload.match(/cache-until=(\d+)\n/)[1]);
-    assert.equal(cacheUntil - issuedAt, 300, "the signed C++-consumed cache authorization must not outlive the intended projection TTL");
-
-    const allowedTeam = await verifierWorker.fetch(verifyReq("team"), verifier);
-    assert.equal(allowedTeam.status, 200);
-    const allowedTeamBody = await responseBody(allowedTeam);
-    assert.equal(allowedTeamBody.ok, true);
-    assert.match(allowedTeamBody.assertion, /^lccoa1\./);
+    // Each plan-applied grant supports the protected consent and signed exchange.
+    const backendEnv = { DB: adapter, BOUND_DEVICE_CONFIG: JSON.stringify(config), BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM: privatePem,
+      BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM: publicPem, DEVICE_PROOF_MODE: "off", ACCOUNT_TOKEN_MODE: "off", REQUEST_SIGNATURE_MODE: "off", D1_RATE_LIMIT_ENABLED: "0" };
+    for (const created of appliedBody.data.applied.created) {
+      const claims = await signedExchange(adapter, backendEnv, "cus_catalog_e2e", created.id);
+      assert.equal(claims.project, "DEFAULT"); assert.equal(claims.feature, created.feature); assert.equal(claims["license-fingerprint"], FP);
+    }
+    assert.equal(db.prepare("SELECT count(*) AS n FROM device_bound_bindings WHERE state = 'active'").get().n, 2);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   } finally {
     db.close();
   }

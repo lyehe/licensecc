@@ -239,7 +239,10 @@ test("the device limit is documented on create and PATCH, with the capacity conf
   // Exactly what the Worker enforces: no other PATCH field beside the limit. Like every PATCH, keys
   // the Worker does not patch are ignored, so the schema does not forbid them.
   const otherFields = Object.keys(patch.properties).filter((field) => field !== "max_active_devices");
-  assert.ok(otherFields.length >= 7);
+  assert.ok(otherFields.length >= 5);
+  // A protected grant carries no device hash or assertion TTL, so PATCH documents neither and refuses both.
+  assert.deepEqual(otherFields.filter((field) => field === "device_hash" || field === "assertion_ttl_seconds"), []);
+  assert.deepEqual(patch.not, { anyOf: ["enforcement_mode", "device_hash", "assertion_ttl_seconds"].map((field) => ({ required: [field] })) });
   assert.deepEqual(patch.dependentSchemas.max_active_devices, { not: { anyOf: otherFields.map((field) => ({ required: [field] })) } });
   assert.equal(schemas.EntitlementRecord.properties.max_active_devices.type, "integer");
 

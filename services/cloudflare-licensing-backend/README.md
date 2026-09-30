@@ -109,16 +109,16 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
      --url https://licensecc-admin.example.workers.dev `
      --project DEFAULT --feature DEFAULT `
      --fingerprint <64-hex-fingerprint> `
-     --status active --assertion-ttl 300 `
+     --status active `
      --customer-id cus_123 --license-id lic_123 `
      --reason "initial entitlement"
    Remove-Item Env:LICENSECC_SYNC_TOKEN
    ```
 
-   The sync helper writes the base entitlement projection and is appropriate for
-   simple node-locked access. Floating seats require capacity fields
-   (`pool_size > 0`) and should be created through the admin policy or
-   catalog-plan flows documented in `../cloudflare-license-admin/README.md`.
+   The sync helper writes a protected grant for the named customer and that
+   customer's license; both are required. Policies and catalog plans stamp the
+   device limit and trial state, never a seat pool, as documented in
+   `../cloudflare-license-admin/README.md`.
 
 7. Optional: enroll a device signing key for request proof-of-possession.
    Generate the key on the client/device side, keep the private key in that

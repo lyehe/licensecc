@@ -26,7 +26,7 @@ const PREVIEW_CLEANUP_BATCH_SIZE = 25;
 // A persisted preview is an executable server-side capability. Any semantic
 // change to its action payload must advance this number so mixed deployments
 // fail closed instead of applying a stale action grammar.
-const PROJECTION_SNAPSHOT_VERSION = 2;
+const PROJECTION_SNAPSHOT_VERSION = 3;
 // A desired action needs exactly three D1 statements during Apply (one complete
 // mutation, audit, and assertion). Nine actions plus claim classification,
 // assignment mutation/audit assertions, response, idempotency, and consumption
@@ -233,9 +233,9 @@ async function buildProjectionSnapshot(env, input, effectiveAt) {
   if (plan.status !== "active") throw new Error("plan_disabled");
   const rows = selectedPlanRows(resultsOf(results[2]), plan, normalized.addons);
   const desired = rows.map((row) => desiredPlanProjectionRow(row, normalized, effectiveAt));
-  // Public records intentionally omit cache_ttl_seconds. Projection matching,
-  // actions, and audit are internal state, so restore it only on this private
-  // snapshot instead of leaking it into the preview or Apply response.
+  // Public records intentionally omit cache_ttl_seconds. The audit's previous row
+  // is internal state, so restore it only on this private snapshot instead of
+  // leaking it into the preview or Apply response.
   const existingRows = resultsOf(results[3]).map((row) => ({ ...withId(row), cache_ttl_seconds: row.cache_ttl_seconds }));
   const entitlementConflict = firstResult(results[4]);
   const assignmentSnapshot = firstResult(results[5]);
@@ -259,9 +259,9 @@ function deriveActions(projection) {
   for (const desired of projection.desired) {
     const existing = existingByFeature.get(desired.input.feature) ?? null;
     if (existing === null) {
-      created.push({ id: actionId(desired), desired, cache_ttl_seconds: desired.input.assertion_ttl_seconds });
+      created.push({ id: actionId(desired), desired });
     } else if (existing.status !== "revoked" && !planProjectionMatchesDesired(existing, desired)) {
-      updated.push({ id: actionId(desired), desired, previous: existing, cache_ttl_seconds: desired.input.assertion_ttl_seconds });
+      updated.push({ id: actionId(desired), desired, previous: existing });
     }
   }
   for (const existing of projection.existingRows) {
@@ -363,14 +363,8 @@ async function storedPreview(env, previewId) {
   if (!Array.isArray(actions.created) || !Array.isArray(actions.updated) || !Array.isArray(actions.disabled) || typeof actions.assignment !== "object" || actions.assignment === null || !Object.prototype.hasOwnProperty.call(actions, "assignment_snapshot")) {
     throw new Error("projection_preview_invalid");
   }
-  // New snapshots carry the private cache policy explicitly. Do not normalize
-  // parent-version actions: doing so could let an old "unchanged" action leave
-  // an overlong persisted cache window intact.
   for (const action of [...actions.created, ...actions.updated]) {
     if (typeof action !== "object" || action === null) throw new Error("projection_preview_invalid");
-    const assertionTtl = action?.desired?.input?.assertion_ttl_seconds;
-    const cacheTtl = action?.cache_ttl_seconds;
-    if (!Number.isSafeInteger(assertionTtl) || assertionTtl < 0 || cacheTtl !== assertionTtl) throw new Error("projection_preview_invalid");
   }
   return { preview, actions };
 }
@@ -481,6 +475,9 @@ function claimFailureStatement(env, previewId, actorSubject, now) {
   ).bind(previewId, actorSubject, previewId, actorSubject, now);
 }
 
+// Plan apply writes only the columns a protected grant takes from its plan, and this comparison
+// covers exactly those. A grant's device hash, TTLs, seat pool, borrowing and meter are never
+// written after create, so apply cannot make a protected grant unissuable.
 function valuesForDesired(action) {
   const desired = action.desired;
   const input = desired.input;
@@ -488,21 +485,14 @@ function valuesForDesired(action) {
     input.project,
     input.feature,
     input.license_fingerprint,
-    input.device_hash ?? "",
     input.status,
-    input.assertion_ttl_seconds,
-    action.cache_ttl_seconds,
     input.valid_from ?? null,
     input.valid_until ?? null,
     input.notes ?? "",
     input.customer_id ?? null,
     input.license_id ?? null,
     desired.policy_id,
-    desired.capacity.pool_size,
     desired.capacity.max_active_devices,
-    desired.capacity.max_borrow_sec,
-    desired.capacity.meter_quota,
-    desired.capacity.meter_period_sec,
     desired.trial.is_trial,
     desired.trial.trial_expiration_basis,
     desired.trial.trial_duration_sec,
@@ -512,21 +502,14 @@ function valuesForDesired(action) {
 }
 
 function desiredSatisfiedSql(alias = "e") {
-  return `${alias}.device_hash IS ?
-    AND ${alias}.status IS ?
-    AND ${alias}.assertion_ttl_seconds IS ?
-    AND ${alias}.cache_ttl_seconds IS ?
+  return `${alias}.status IS ?
     AND ${alias}.valid_from IS ?
     AND ${alias}.valid_until IS ?
     AND ${alias}.notes IS ?
     AND ${alias}.customer_id IS ?
     AND ${alias}.license_id IS ?
     AND ${alias}.policy_id IS ?
-    AND ${alias}.pool_size IS ?
     AND ${alias}.max_active_devices IS ?
-    AND ${alias}.max_borrow_sec IS ?
-    AND ${alias}.meter_quota IS ?
-    AND ${alias}.meter_period_sec IS ?
     AND ${alias}.is_trial IS ?
     AND ${alias}.trial_expiration_basis IS ?
     AND ${alias}.trial_duration_sec IS ?
@@ -534,28 +517,27 @@ function desiredSatisfiedSql(alias = "e") {
     AND ${alias}.trial_require_device_proof IS ?`;
 }
 
+// A plan-applied grant is protected: no device hash, no seat pool, no borrowing and no meter. Its
+// TTLs and meter window keep the column defaults.
 function createEntitlementStatement(env, action, now, previewId, claimToken) {
   const { desired } = action;
   const { input, capacity, trial } = desired;
   return env.DB.prepare(
     `INSERT INTO entitlements
-       (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq,
+       (project, feature, license_fingerprint, enforcement_mode, device_hash, status, revocation_seq,
         valid_from, valid_until, notes, customer_id, license_id, policy_id, pool_size, max_active_devices, max_borrow_sec,
-        meter_quota, meter_period_sec, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device,
+        meter_quota, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device,
         trial_require_device_proof, created_at, updated_at)
-     SELECT ?, ?, ?, ?, ?, ?, ?,
+     SELECT ?, ?, ?, 'device_bound_v1', '', ?,
        COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1),
-       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+       ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?
      WHERE ${claimGuardSql()}
      RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     input.project,
     input.feature,
     input.license_fingerprint,
-    input.device_hash ?? "",
     input.status,
-    input.assertion_ttl_seconds,
-    action.cache_ttl_seconds,
     input.project,
     input.feature,
     input.license_fingerprint,
@@ -565,11 +547,7 @@ function createEntitlementStatement(env, action, now, previewId, claimToken) {
     input.customer_id ?? null,
     input.license_id ?? null,
     desired.policy_id,
-    capacity.pool_size,
     capacity.max_active_devices,
-    capacity.max_borrow_sec,
-    capacity.meter_quota,
-    capacity.meter_period_sec,
     trial.is_trial,
     trial.trial_expiration_basis,
     trial.trial_duration_sec,
@@ -587,30 +565,22 @@ function updateEntitlementStatement(env, action, now, previewId, claimToken) {
   const { input, capacity, trial } = desired;
   return env.DB.prepare(
     `UPDATE entitlements
-     SET device_hash = ?, status = ?, assertion_ttl_seconds = ?, cache_ttl_seconds = ?, ${REVOCATION_SEQ_BUMP},
-         valid_from = ?, valid_until = ?, notes = ?, customer_id = ?, license_id = ?, policy_id = ?, pool_size = ?,
-         max_active_devices = ?, max_borrow_sec = ?, meter_quota = ?, meter_period_sec = ?, is_trial = ?,
-         trial_expiration_basis = ?, trial_duration_sec = ?, trial_one_per_device = ?, trial_require_device_proof = ?,
-         updated_at = ?
+     SET status = ?, ${REVOCATION_SEQ_BUMP},
+         valid_from = ?, valid_until = ?, notes = ?, customer_id = ?, license_id = ?, policy_id = ?,
+         max_active_devices = ?, is_trial = ?, trial_expiration_basis = ?, trial_duration_sec = ?,
+         trial_one_per_device = ?, trial_require_device_proof = ?, updated_at = ?
      WHERE project = ? AND feature = ? AND license_fingerprint = ?
        AND ${claimGuardSql()}
      RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
-    input.device_hash ?? "",
     input.status,
-    input.assertion_ttl_seconds,
-    action.cache_ttl_seconds,
     input.valid_from ?? null,
     input.valid_until ?? null,
     input.notes ?? "",
     input.customer_id ?? null,
     input.license_id ?? null,
     desired.policy_id,
-    capacity.pool_size,
     capacity.max_active_devices,
-    capacity.max_borrow_sec,
-    capacity.meter_quota,
-    capacity.meter_period_sec,
     trial.is_trial,
     trial.trial_expiration_basis,
     trial.trial_duration_sec,
@@ -646,7 +616,7 @@ function entitlementAuditStatement(env, action, eventType, reason, ctx, now, pre
     : desiredSatisfiedSql("e");
   const expectedValues = desired === undefined ? [] : valuesForDesired(action).slice(3);
   // valuesForDesired starts with the key values; the current-row predicate needs
-  // only the 20 persisted target fields that follow them.
+  // only the 13 persisted target fields that follow them.
   return env.DB.prepare(
     `INSERT INTO entitlement_events
        (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at)

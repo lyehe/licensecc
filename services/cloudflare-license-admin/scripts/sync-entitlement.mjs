@@ -6,8 +6,9 @@ const STATUS = new Set(["active", "disabled", "revoked"]);
 
 function usage() {
   console.error(`usage:
-  node scripts/sync-entitlement.mjs --url <admin-worker-url> --fingerprint <64-hex> [--token <secret>] [--project DEFAULT] [--feature DEFAULT] [--device-hash <64-hex>] [--status active] [--assertion-ttl 300] [--valid-from <epoch>] [--valid-until <epoch>] [--customer-id <id>] [--license-id <id>] [--reason <text>] [--idempotency-key <key>]
+  node scripts/sync-entitlement.mjs --url <admin-worker-url> --fingerprint <64-hex> --customer-id <id> --license-id <id> [--token <secret>] [--project DEFAULT] [--feature DEFAULT] [--status active] [--valid-from <epoch>] [--valid-until <epoch>] [--notes <text>] [--reason <text>] [--idempotency-key <key>]
 
+Every synced grant is protected: it names the customer who owns it and that customer's license.
 Token defaults to the LICENSECC_SYNC_TOKEN environment variable.`);
   process.exit(2);
 }
@@ -46,10 +47,7 @@ function optionalString(value, label, maxLength) {
   return value;
 }
 
-function validatedHex(value, label, required = true) {
-  if (!required && (value === undefined || value === "")) {
-    return "";
-  }
+function validatedHex(value, label) {
   if (typeof value !== "string" || !HEX_64.test(value)) {
     throw new Error(`${label} must be exactly 64 hex characters`);
   }
@@ -67,15 +65,15 @@ function optionalEpoch(value, label) {
   return parsed;
 }
 
-function optionalInt(value, label, fallback, min, max) {
-  const parsed = value === undefined ? fallback : Number(value);
-  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
-    throw new Error(`${label} must be an integer in [${min}, ${max}]`);
-  }
-  return parsed;
-}
+// A protected grant carries no device hash (its device key proves the device) and no assertion TTL.
+const REFUSED_OPTIONS = ["device-hash", "assertion-ttl"];
 
 export function buildSyncPayload(options) {
+  for (const option of REFUSED_OPTIONS) {
+    if (options[option] !== undefined) {
+      throw new Error(`--${option} is not a sync field: a protected grant carries no device hash or assertion TTL`);
+    }
+  }
   const status = options.status ?? "active";
   if (!STATUS.has(status)) {
     throw new Error("status must be active, disabled, or revoked");
@@ -89,13 +87,11 @@ export function buildSyncPayload(options) {
     project: options.project ?? "DEFAULT",
     feature: options.feature ?? "DEFAULT",
     license_fingerprint: validatedHex(options.fingerprint, "fingerprint"),
-    device_hash: validatedHex(options["device-hash"], "device-hash", false),
     status,
-    assertion_ttl_seconds: optionalInt(options["assertion-ttl"], "assertion-ttl", 300, 1, 3600),
     valid_from: validFrom,
     valid_until: validUntil,
-    customer_id: optionalString(options["customer-id"], "customer-id", 128) ?? null,
-    license_id: optionalString(options["license-id"], "license-id", 128) ?? null,
+    customer_id: requiredString(optionalString(options["customer-id"], "customer-id", 128), "customer-id"),
+    license_id: requiredString(optionalString(options["license-id"], "license-id", 128), "license-id"),
     notes: optionalString(options.notes, "notes", 1000) ?? "",
     reason: optionalString(options.reason, "reason", 1000) ?? "",
   };

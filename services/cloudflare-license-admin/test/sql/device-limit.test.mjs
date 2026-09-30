@@ -227,7 +227,7 @@ test("a device-limit PATCH refuses every other patchable field that OpenAPI name
   const f = fixture(t);
   const grant = await created(await f.send(protectedGrant));
   const excluded = openApiDocument.components.schemas.EntitlementPatch.dependentSchemas.max_active_devices.not.anyOf.map((rule) => rule.required[0]);
-  const samples = { device_hash: "", assertion_ttl_seconds: 300, valid_from: null, valid_until: null, notes: "kept", customer_id: "owner", license_id: "license" };
+  const samples = { valid_from: null, valid_until: null, notes: "kept", customer_id: "owner", license_id: "license" };
   assert.deepEqual([...excluded].sort(), Object.keys(samples).sort(), "every patchable field is excluded beside the limit");
   const before = f.snapshot();
   for (const field of excluded) {

@@ -106,14 +106,14 @@ export function filterAfterShowAll(filter: EntitlementFilter): EntitlementFilter
   return { project: filter.project, feature: filter.feature, status: filter.status };
 }
 
+// A protected grant carries no device hash or assertion TTL, and the Worker refuses a create or
+// PATCH body naming either, so no body below sends them.
 export function normalizeEntitlementForm(form: EntitlementFormState): AdminEntitlementCreateInput {
   return {
     enforcement_mode: form.enforcement_mode,
     project: form.project,
     feature: form.feature,
     license_fingerprint: form.license_fingerprint,
-    device_hash: form.device_hash,
-    assertion_ttl_seconds: parseBoundedInteger(form.assertion_ttl_seconds, "assertion_ttl_seconds", 1, 3600),
     valid_from: dateInputToEpoch(form.valid_from, "valid_from"),
     valid_until: dateInputToEpoch(form.valid_until, "valid_until"),
     notes: parseNotes(form.notes),
@@ -157,10 +157,6 @@ export function normalizeCreateFromPolicy(form: EntitlementFormState): Entitleme
     feature: form.feature,
     license_fingerprint: form.license_fingerprint,
   };
-  if (form.device_hash !== "") body.device_hash = form.device_hash;
-  if (form.assertion_ttl_seconds !== emptyEntitlementForm.assertion_ttl_seconds) {
-    body.assertion_ttl_seconds = parseBoundedInteger(form.assertion_ttl_seconds, "assertion_ttl_seconds", 1, 3600);
-  }
   if (form.valid_from !== "") body.valid_from = dateInputToEpoch(form.valid_from, "valid_from");
   if (form.valid_until !== "") body.valid_until = dateInputToEpoch(form.valid_until, "valid_until");
   if (form.notes !== "") body.notes = parseNotes(form.notes);
@@ -183,8 +179,6 @@ export function editFormFromEntitlement(item: EntitlementRecord): EntitlementEdi
 
 export function normalizeEntitlementPatch(form: EntitlementEditState, original?: Pick<EntitlementRecord, "valid_from" | "valid_until">): EntitlementPatch {
   return {
-    device_hash: form.device_hash,
-    assertion_ttl_seconds: parseBoundedInteger(form.assertion_ttl_seconds, "assertion_ttl_seconds", 1, 3600),
     valid_from: original && form.valid_from === epochToDateInput(original.valid_from) ? original.valid_from : dateInputToEpoch(form.valid_from, "valid_from"),
     valid_until: original && form.valid_until === epochToDateInput(original.valid_until) ? original.valid_until : dateInputToEpoch(form.valid_until, "valid_until"),
     notes: parseNotes(form.notes),

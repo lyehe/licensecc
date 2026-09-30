@@ -31,28 +31,26 @@ export interface NormalizedPlanProjectionInput {
   notes: string;
 }
 
-/** The complete entitlement payload derived from one catalog feature row. */
+/**
+ * The complete protected-grant payload derived from one catalog feature row. A projected grant
+ * takes only its device limit from the catalog; it carries no device hash, TTL, seat pool,
+ * borrowing or meter.
+ */
 export interface PlanProjectionDesiredRow {
   input: {
     project: string;
     feature: string;
     license_fingerprint: string;
-    device_hash: string;
     status: "active";
     notes: string;
     customer_id: string | null;
     license_id: string;
-    assertion_ttl_seconds?: number;
-    valid_from?: number | null;
-    valid_until?: number | null;
+    valid_from: number | null;
+    valid_until: number | null;
   };
   policy_id: string | null;
   capacity: {
-    pool_size: number;
     max_active_devices: number;
-    max_borrow_sec: number;
-    meter_quota: number;
-    meter_period_sec: number;
   };
   trial: {
     is_trial: number;
@@ -92,6 +90,7 @@ export interface PlanProjectionItem {
   policy_id: string | null;
   source: "included" | "addon";
   addon_key: string | null;
+  /** A projected grant is `trial` or `node_locked`; an item for an existing row reports its stored mode. */
   license_mode: "trial" | "floating" | "node_locked";
   status: "active" | "disabled" | "revoked";
   valid_from: number | null;

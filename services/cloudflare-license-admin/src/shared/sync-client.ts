@@ -7,6 +7,10 @@ export interface SyncClientOptions {
   fetchImpl?: typeof fetch;
 }
 
+/**
+ * Sends one protected-grant projection. The body names the grant's customer_id and license_id; the
+ * Worker refuses one without them, or with a device hash or an assertion TTL.
+ */
 export async function syncEntitlement(
   options: SyncClientOptions,
   input: EntitlementSyncInput,

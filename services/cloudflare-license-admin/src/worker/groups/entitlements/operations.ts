@@ -26,7 +26,7 @@ import type { Env } from "../../env.js";
 import { requireAdmin } from "../../auth.js";
 import { parseJsonBody, safeNotes } from "../../request.js";
 import { safeString } from "@licensecc/cloudflare-runtime/http/kit";
-import { MAX_FEATURE_SIZE, MAX_PROJECT_SIZE, boundedInt, nullableEpoch, nullableSafeString, validateEntitlementPatch } from "./validation.js";
+import { MAX_FEATURE_SIZE, MAX_PROJECT_SIZE, nullableEpoch, nullableSafeString, validateEntitlementPatch } from "./validation.js";
 import { clientIp } from "../../support.js";
 import { CSV_ROW_CAP, boundedCursor, boundedEventsCursor, csvResponse, encodeEventsCursor, epochQueryParam, wantsCsv } from "../../query.js";
 
@@ -174,20 +174,13 @@ export async function createFromPolicy(request: Request, env: Env, ctx: Mutation
     // Optional per-field overrides; each is "absent (undefined) -> fall back to policy" or
     // "present-but-malformed -> 400". valid_from/valid_until are only validated when present
     // (nullableEpoch returns undefined for both absent AND malformed, so gate on presence).
-    const deviceHash = input.device_hash === undefined || input.device_hash === ""
-      ? undefined
-      : typeof input.device_hash === "string" && HEX_64.test(input.device_hash)
-        ? input.device_hash
-        : null;
-    const assertionTtl = input.assertion_ttl_seconds === undefined ? undefined : boundedInt(input.assertion_ttl_seconds, 1, 3600);
+    // validateEntitlementCreate has already refused a device hash or an assertion TTL.
     const validFrom = input.valid_from === undefined ? undefined : nullableEpoch(input.valid_from);
     const validUntil = input.valid_until === undefined ? undefined : nullableEpoch(input.valid_until);
     const notes = input.notes === undefined ? undefined : safeNotes(input.notes);
     const customerId = input.customer_id === undefined ? undefined : nullableSafeString(input.customer_id, 128);
     const licenseId = input.license_id === undefined ? undefined : nullableSafeString(input.license_id, 128);
     if (
-      deviceHash === null ||
-      (input.assertion_ttl_seconds !== undefined && assertionTtl === undefined) ||
       (input.valid_from !== undefined && validFrom === undefined) ||
       (input.valid_until !== undefined && validUntil === undefined) ||
       (typeof validFrom === "number" && typeof validUntil === "number" && validFrom >= validUntil) ||
@@ -204,16 +197,17 @@ export async function createFromPolicy(request: Request, env: Env, ctx: Mutation
     const now = Math.floor(Date.now() / 1000);
     // Build the override set; undefined fields fall back to the policy default inside stampFromPolicy.
     const overrides: Record<string, unknown> = { project, feature, license_fingerprint: licenseFingerprint };
-    if (deviceHash !== undefined) overrides.device_hash = deviceHash;
-    if (assertionTtl !== undefined) overrides.assertion_ttl_seconds = assertionTtl;
     if (input.valid_from !== undefined) overrides.valid_from = validFrom;
     if (input.valid_until !== undefined) overrides.valid_until = validUntil;
     if (notes !== undefined) overrides.notes = notes;
     if (customerId !== undefined) overrides.customer_id = customerId;
     if (licenseId !== undefined) overrides.license_id = licenseId;
     const stamp = stampFromPolicy(policy as never, overrides as never, now);
+    // The stamp's input also names a device hash and the policy's assertion TTL; a protected grant
+    // takes neither, so the create keeps the empty hash and the default TTL.
+    const { device_hash: _deviceHash, assertion_ttl_seconds: _assertionTtl, ...stamped } = stamp.input;
     const key = { project, feature, license_fingerprint: licenseFingerprint };
-    return createWithEnforcement(env, { ...stamp.input, enforcement_mode: selected.enforcement_mode }, ctx, idempotency, [
+    return createWithEnforcement(env, { ...stamped, enforcement_mode: selected.enforcement_mode }, ctx, idempotency, [
         buildPolicyStampStatement(env as never, key, policy.id, stamp.capacity, stamp.trial),
       ], policy);
   }, admitReplay);

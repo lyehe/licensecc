@@ -25,9 +25,11 @@ const POLICY_FIELDS = ["id", "project", "status", "type", "valid_from_offset_sec
   "pool_size", "max_active_devices", "max_borrow_sec", "expiry_strategy", "trial_expiration_basis", "trial_duration_sec",
   "trial_one_per_device", "trial_require_device_proof", "meter_quota", "meter_period_sec"] as const;
 
-// The columns the policy stamp writes after the upsert, with the schema default each keeps when a
-// create stamps nothing (pinned to schema.sql by the SQL suite). A create that updates an existing
-// protected grant without a policy keeps that grant's values instead.
+// The provenance, capacity and trial columns the would-be row models, with the schema default each
+// keeps when a create writes none of them (pinned to schema.sql by the SQL suite). A policy stamp
+// writes policy_id, the device limit and the trial state; nothing a create writes sets the seat
+// pool, borrowing or meter. A create that updates an existing protected grant keeps that grant's
+// values for every column it does not write.
 export const STAMP_COLUMN_DEFAULTS = {
   policy_id: null, pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000,
   is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0, trial_require_device_proof: 0,
@@ -37,13 +39,14 @@ type StampColumn = keyof typeof STAMP_COLUMN_DEFAULTS;
 const sameKey = (alias: string): string => `${alias}.project=e.project AND ${alias}.feature=e.feature AND ${alias}.license_fingerprint=e.license_fingerprint`;
 
 /**
- * The stamp columns this create writes after its upsert: a policy's whole stamp, or, without a
- * policy, only the device limit it sets on its own (createWithEnforcement's side-write).
+ * The stamp columns this create writes after its upsert: a policy's stamp (provenance, device limit
+ * and trial state, as buildPolicyStampStatement writes them), or, without a policy, only the device
+ * limit it sets on its own (createWithEnforcement's side-write).
  */
 function stampColumns(input: CreateInput, policy?: Policy): Partial<Record<StampColumn, unknown>> {
   if (policy === undefined) return input.max_active_devices === undefined ? {} : { max_active_devices: input.max_active_devices };
   const stamp = stampFromPolicy(policy, input, 0);
-  return { policy_id: policy.id, ...stamp.capacity, ...stamp.trial };
+  return { policy_id: policy.id, max_active_devices: stamp.capacity.max_active_devices, ...stamp.trial };
 }
 
 export function protectedCreateChecks(input: CreateInput, policy?: Policy): readonly ProtectedCheck[] {

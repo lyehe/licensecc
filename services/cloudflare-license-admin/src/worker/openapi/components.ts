@@ -1,4 +1,4 @@
-import { entitlementRecordSchema, entitlementCreateSchema, entitlementPatchSchema } from "./entitlement-schema.js";
+import { entitlementRecordSchema, entitlementCreateSchema, entitlementPatchSchema, entitlementSyncSchema } from "./entitlement-schema.js";
 import { customerRowSchema } from "./customer-schema.js";
 import type { LabeledComponentFragment } from "./assemble.js";
 import {
@@ -338,13 +338,13 @@ export const openApiComponents: LabeledComponentFragment = {
       ["EntitlementInput", {
         type: "object",
         required: ["project", "feature", "license_fingerprint"],
+        description: "A protected grant carries no device hash (its device key proves the device) and no assertion TTL; a body naming device_hash or assertion_ttl_seconds returns 400 invalid_request.",
+        not: { anyOf: [{ required: ["device_hash"] }, { required: ["assertion_ttl_seconds"] }] },
         properties: {
           project: { type: "string", maxLength: 127 },
           feature: { type: "string", maxLength: 15 },
           license_fingerprint: { type: "string", pattern: "^[0-9a-fA-F]{64}$", description: "64-char hex." },
-          device_hash: { type: "string", description: "64-char hex, or empty string for unbound.", oneOf: [{ pattern: "^[0-9a-fA-F]{64}$" }, { const: "" }] },
           status: { type: "string", enum: ["active", "disabled", "revoked"], default: "active" },
-          assertion_ttl_seconds: { type: "integer", minimum: 1, maximum: 3600, default: 300 },
           valid_from: { type: ["integer", "null"], minimum: 0, default: null, description: "Epoch seconds; must be < valid_until when both set." },
           valid_until: { type: ["integer", "null"], minimum: 0, default: null, description: "Epoch seconds; must be > valid_from when both set." },
           notes: { type: "string", maxLength: 1000, default: "" },
@@ -359,13 +359,7 @@ export const openApiComponents: LabeledComponentFragment = {
         },
       }],
       ["EntitlementPatch", entitlementPatchSchema],
-      ["EntitlementSyncInput", {
-        not: { required: ["enforcement_mode"] },
-        allOf: [
-          { $ref: "#/components/schemas/EntitlementInput" },
-          { type: "object", properties: { reason: { type: "string", maxLength: 1000, description: "Optional; required (non-empty) when status is disabled or revoked." } } },
-        ],
-      }],
+      ["EntitlementSyncInput", entitlementSyncSchema],
       ["PlanProjectionInput", {
         type: "object",
         required: ["project", "license_id", "license_fingerprint"],

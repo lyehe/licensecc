@@ -49,8 +49,7 @@ for (const state of ["active", "retiring"]) {
       await assert.rejects(action(), /capacity_in_use/);
       assert.deepEqual(f.snapshot(), before);
     }
-    const stamp = buildPolicyStampStatement(f.env, key, null,
-      { pool_size: 0, max_active_devices: 0, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 0 },
+    const stamp = buildPolicyStampStatement(f.env, key, null, { max_active_devices: 0 },
       { is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0, trial_require_device_proof: 0 });
     await assert.rejects(createEntitlement(f.env, input, ctx, "", undefined, idempotency, [stamp]), /capacity_in_use/);
     assert.deepEqual(f.snapshot(), before, "failed policy stamp rolls back the preceding upsert and all evidence");
@@ -65,7 +64,8 @@ for (const state of ["active", "retiring"]) {
     assert.deepEqual(f.snapshot()[1], before[1]);
     assert.equal(f.snapshot()[2].length, 1);
     assert.equal(f.snapshot()[3].length, 1);
-    await syncEntitlement(f.env, { ...input, valid_until: 4102445100 }, "extend",
+    // The admin sync names the protected mode it writes.
+    await syncEntitlement(f.env, { ...input, valid_until: 4102445100, enforcement_mode: "device_bound_v1" }, "extend",
       { ...ctx, source: "sync", idempotencyKey: "sync-operation" }, idempotency);
     await setEntitlementCapacity(f.env, key, { max_active_devices: 2 },
       { ...ctx, idempotencyKey: "capacity-operation" }, idempotency);
@@ -75,6 +75,12 @@ for (const state of ["active", "retiring"]) {
     assert.deepEqual(f.snapshot()[1], before[1]);
     assert.equal(f.snapshot()[2].length, 3);
     assert.equal(f.snapshot()[3].length, 3);
+    // Sync yields only protected grants: an unchanged grant of another mode is a conflict, not a no-op.
+    f.sql.exec("INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,created_at,updated_at) VALUES('APP','OLD','fingerprint','active','owner',1,1)");
+    const legacy = f.snapshot();
+    await assert.rejects(syncEntitlement(f.env, { ...key, feature: "OLD", customer_id: "owner", status: "active" }, "",
+      { ...ctx, source: "sync", idempotencyKey: "legacy-operation" }, idempotency), /enforcement_mode_conflict/);
+    assert.deepEqual(f.snapshot(), legacy);
     assert.deepEqual(f.sql.prepare("PRAGMA foreign_key_check").all(), []);
   });
 }

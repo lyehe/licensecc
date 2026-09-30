@@ -354,12 +354,14 @@ export async function createEntitlement(
     // landed between findEntitlement() and this batch.  When the observation was
     // "missing", a concurrent insert instead returns no row (never an implicit
     // update of an unknown newer entitlement).
-    `INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at, enforcement_mode) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?, 'device_bound_v1') ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, updated_at = excluded.updated_at WHERE ? IS NOT NULL AND entitlements.status = ? AND entitlements.revocation_seq = ? AND entitlements.enforcement_mode = 'device_bound_v1' RETURNING ${ENTITLEMENT_COLUMNS}`,
+    `INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at, enforcement_mode) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?, 'device_bound_v1') ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, updated_at = excluded.updated_at WHERE ? IS NOT NULL AND entitlements.status = ? AND entitlements.revocation_seq = ? AND entitlements.enforcement_mode = 'device_bound_v1' RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     input.project,
     input.feature,
     input.license_fingerprint,
-    input.device_hash ?? "",
+    // A protected grant carries no device hash: its device key proves the device. An update keeps
+    // the stored (empty) value.
+    "",
     input.status ?? "active",
     input.assertion_ttl_seconds ?? DEFAULT_ASSERTION_TTL_SECONDS,
     input.assertion_ttl_seconds ?? DEFAULT_ASSERTION_TTL_SECONDS,
@@ -530,13 +532,17 @@ export async function transitionEntitlementDevice(env, key, deviceKeyId, deviceS
   return classifyDeviceTransitionGuardMiss(env, key, deviceKeyId, deviceStatus);
 }
 
-export async function syncEntitlement(env, input, reason, ctx, idempotency) {
+// Sync yields only protected grants, so even an unchanged grant of another mode is a conflict, not a
+// no-op. extraStatements ride the write's batch (the admin sync adds its protected assertion); a
+// no-op writes nothing, so it runs none of them.
+export async function syncEntitlement(env, input, reason, ctx, idempotency, extraStatements = []) {
   const key = {
     project: input.project,
     feature: input.feature,
     license_fingerprint: input.license_fingerprint,
   };
   const prev = await findEntitlement(env, key);
+  if (prev !== null && prev.enforcement_mode !== "device_bound_v1") throw new Error("enforcement_mode_conflict");
   if (prev !== null && entitlementMatchesInput(prev, input)) {
     return { data: prev, idempotencyRecorded: false };
   }
@@ -544,7 +550,7 @@ export async function syncEntitlement(env, input, reason, ctx, idempotency) {
   if (prev?.status === "revoked" && targetStatus === "revoked") {
     return { data: prev, idempotencyRecorded: false };
   }
-  return createEntitlement(env, input, ctx, reason, syncEventType(prev, targetStatus), idempotency);
+  return createEntitlement(env, input, ctx, reason, syncEventType(prev, targetStatus), idempotency, extraStatements);
 }
 
 // The seat/device capacity + metering-quota columns this module is allowed to write.
