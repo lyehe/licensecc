@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 
 import {
+  handleOrderIngest,
   runExactlyOnce,
   applyOrderEvent,
   buildAcceptBatch,
@@ -177,6 +178,53 @@ async function submit(env, order, { now = NOW } = {}) {
   return { status: response.status, body };
 }
 
+// The full signed HTTP path (HMAC, normalization, nonce, then the same SQL pipeline), for
+// cases whose body must be refused before it ever becomes a normalized order.
+const HMAC_KEY_ID = "order-key";
+const HMAC_AUDIENCE = "order-test";
+const HMAC_SECRET = new Uint8Array(32).fill(7);
+
+function base64(bytes) {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+async function ingest(env, body) {
+  const bodyText = JSON.stringify(body);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const key = await crypto.subtle.importKey("raw", HMAC_SECRET, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signed = new TextEncoder().encode(`POST\n/v1/orders\n${HMAC_AUDIENCE}\n${timestamp}\n${bodyText}`);
+  const signature = base64(new Uint8Array(await crypto.subtle.sign("HMAC", key, signed)));
+  const request = new Request("https://backend.test/v1/orders", {
+    method: "POST",
+    headers: { "X-LCC-Key-Id": HMAC_KEY_ID, "X-LCC-Timestamp": timestamp, "X-LCC-Signature": signature },
+    body: bodyText,
+  });
+  const response = await handleOrderIngest(request, {
+    ...env,
+    ORDER_HMAC_SECRETS: JSON.stringify({ [HMAC_KEY_ID]: base64(HMAC_SECRET) }),
+    ORDER_INGEST_AUDIENCE: HMAC_AUDIENCE,
+    ORDER_INGEST_MODE: "required",
+  });
+  return { status: response.status, body: await response.json() };
+}
+
+function wireOrder(overrides = {}) {
+  return {
+    event_id: "evt_wire",
+    subscription_id: "sub_A",
+    project: PROJECT,
+    feature: FEATURE,
+    intent: "subscription.active",
+    seq: 1,
+    current_period_end: Math.floor(Date.now() / 1000) + 30 * 86400,
+    ...overrides,
+  };
+}
+
+function countRows(db, table) {
+  return db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get().c;
+}
+
 function entRow(db, fingerprint) {
   return db
     .prepare("SELECT * FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ?")
@@ -273,6 +321,72 @@ test("case 1: fresh subscription.active apply (active, clamp, fingerprint, floor
   assert.equal(row.last_applied_order_epoch, 0);
   assert.equal(eventRow(db, order.event_id).status, "processed");
   db.close();
+});
+
+// =============================================================================
+// Protected grants: every order names its customer, and an active order creates or
+// refreshes a device_bound_v1 grant owned by that customer.
+// =============================================================================
+test("an order creates a protected grant owned by its customer", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  const order = makeOrder({ seq: 1, customer: { id: "cus_order" }, quantity: { max_active_devices: 3 } });
+  const fp = await fpOf(order);
+  const { status, body } = await submit(env, order);
+  assert.equal(status, 200);
+  assert.equal(body.code, "applied");
+  const row = entRow(db, fp);
+  assert.equal(row.enforcement_mode, "device_bound_v1");
+  assert.equal(row.customer_id, "cus_order");
+  assert.equal(row.pool_size, 0);
+  assert.equal(row.device_hash, "");
+  assert.equal(row.max_active_devices, 3);
+  assert.equal(row.status, "active");
+
+  const refresh = makeOrder({ seq: 2, event_id: "evt_refresh", customer: { id: "cus_order" } });
+  assert.equal((await submit(env, refresh)).body.code, "applied");
+  const refreshed = entRow(db, fp);
+  assert.equal(refreshed.enforcement_mode, "device_bound_v1");
+  assert.equal(refreshed.customer_id, "cus_order");
+  assert.equal(refreshed.pool_size, 0);
+  assert.equal(refreshed.max_active_devices, 3, "a refresh without quantity keeps the device limit");
+});
+
+test("an order without a customer is refused", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  for (const [label, body] of [
+    ["no customer", wireOrder({ event_id: "evt_no_customer" })],
+    ["a customer without an id", wireOrder({ event_id: "evt_no_customer_id", customer: { email: "buyer@example.test" } })],
+    ["a revocation without a customer", wireOrder({ event_id: "evt_revoke_no_customer", intent: "fraud.confirmed" })],
+  ]) {
+    const refused = await ingest(env, body);
+    assert.equal(refused.status, 400, label);
+    assert.equal(refused.body.code, "invalid_order", label);
+  }
+  assert.equal(countRows(db, "entitlements"), 0);
+  assert.equal(countRows(db, "orders"), 0);
+  assert.equal(countRows(db, "order_events"), 0);
+
+  // The same signed path applies once the order names its customer.
+  const applied = await ingest(env, wireOrder({ event_id: "evt_with_customer", customer: { id: "cus_order" } }));
+  assert.equal(applied.status, 200);
+  assert.equal(applied.body.code, "applied");
+  assert.equal(countRows(db, "entitlements"), 1);
+});
+
+test("quantity.pool_size is refused", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  const customer = { id: "cus_order" };
+  for (const [label, body] of [
+    ["an active order", wireOrder({ event_id: "evt_pool_active", customer, quantity: { pool_size: 5 } })],
+    ["a quantity change", wireOrder({ event_id: "evt_pool_change", customer, intent: "quantity.changed", quantity: { pool_size: 5 } })],
+    ["a pool beside a device limit", wireOrder({ event_id: "evt_pool_mixed", customer, quantity: { pool_size: 5, max_active_devices: 2 } })],
+  ]) {
+    const refused = await ingest(env, body);
+    assert.equal(refused.status, 400, label);
+    assert.equal(refused.body.code, "invalid_order", label);
+  }
+  assert.equal(countRows(db, "entitlements"), 0);
+  assert.equal(countRows(db, "order_events"), 0);
 });
 
 // =============================================================================
@@ -1323,4 +1437,91 @@ test("case 16: intent coverage (disable reversible, resume, quantity-only, fraud
   assert.equal(afterRevoke.body.code, "entitlement_revoked");
   assert.equal(entRow(db, fp).status, "revoked", "revoked stays terminal even after a resume");
   db.close();
+});
+
+// =============================================================================
+// Withdrawals (disable, revoke and cancel-at-period-end) always apply. They still name
+// the customer, but no customer status, owner or elapsed period refuses them, and they
+// never write the grant's owner or license.
+// =============================================================================
+const WITHDRAWALS = [
+  ["subscription.past_due", "disabled"],
+  ["subscription.paused", "disabled"],
+  ["subscription.payment_failed", "disabled"],
+  ["subscription.canceled_at_period_end", "active"],
+  ["fraud.confirmed", "revoked"],
+  ["chargeback", "revoked"],
+];
+
+for (const [intent, status] of WITHDRAWALS) {
+  test(`${intent} applies to a grant whose owner is disabled or moved, and keeps the stored owner`, async (t) => {
+    const { db, env } = freshEnv(); t.after(() => db.close());
+    const identity = { customer: { id: "cus_order" }, license_id: "lic_order" };
+    const active = makeOrder({ seq: 1, event_id: "evt_active", ...identity });
+    const fp = await fpOf(active);
+    assert.equal((await submit(env, active)).body.code, "applied");
+    // An operator moved the grant to another customer, a device is bound to it, and both
+    // customers are now disabled. Writing the owner back would also trip the bound-owner guard.
+    db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_moved','Moved',1,1);
+      UPDATE entitlements SET customer_id='cus_moved' WHERE license_fingerprint='${fp}';
+      INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
+        VALUES('device','cus_moved','${PROJECT}','key','synthetic-public',1,1);
+      INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,generation,revision,hold_until,created_at,updated_at)
+        VALUES('binding','${PROJECT}','${FEATURE}','${fp}','device','active',1,1,0,1,1);
+      UPDATE customers SET status='disabled' WHERE id IN ('cus_order','cus_moved');`);
+
+    const withdrawal = makeOrder({ seq: 2, event_id: "evt_withdrawal", intent, ...identity });
+    const outcome = await submit(env, withdrawal);
+    assert.equal(outcome.status, 200);
+    assert.equal(outcome.body.code, "applied");
+    const row = entRow(db, fp);
+    assert.equal(row.status, status);
+    assert.equal(row.customer_id, "cus_moved", "a withdrawal never moves the owner");
+    assert.equal(row.license_id, "lic_order");
+    assert.equal(row.last_applied_order_seq, 2);
+    assert.equal(eventRow(db, withdrawal.event_id).status, "processed");
+  });
+
+  test(`${intent} applies even when its period ended long ago`, async (t) => {
+    const { db, env } = freshEnv(); t.after(() => db.close());
+    const customer = { id: "cus_order" };
+    assert.equal((await ingest(env, wireOrder({ event_id: "evt_active", customer }))).body.code, "applied");
+    // A chargeback or dunning notice routinely arrives weeks after the period it concerns.
+    const periodEnd = Math.floor(Date.now() / 1000) - 60 * 86400;
+    const late = await ingest(env, wireOrder({ event_id: "evt_late", seq: 2, intent, current_period_end: periodEnd, customer }));
+    assert.equal(late.status, 200);
+    assert.equal(late.body.code, "applied");
+    assert.equal(db.prepare("SELECT status FROM entitlements").get().status, status);
+  });
+}
+
+test("an order that grants access with a long-past period end is still refused", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  const customer = { id: "cus_order" };
+  assert.equal((await ingest(env, wireOrder({ event_id: "evt_active", customer }))).body.code, "applied");
+  const periodEnd = Math.floor(Date.now() / 1000) - 60 * 86400;
+  for (const [seq, intent, extra] of [
+    [2, "subscription.active", {}],
+    [3, "subscription.renewed", {}],
+    [4, "subscription.resumed", {}],
+    [5, "quantity.changed", { quantity: { max_active_devices: 2 } }],
+  ]) {
+    const refused = await ingest(env, wireOrder({ event_id: `evt_${intent}`, seq, intent, current_period_end: periodEnd, customer, ...extra }));
+    assert.equal(refused.status, 400, intent);
+    assert.equal(refused.body.code, "invalid_order", intent);
+  }
+  assert.equal(countRows(db, "order_events"), 1);
+});
+
+test("a withdrawal for a subscription with no grant creates nothing", async () => {
+  for (const [intent] of WITHDRAWALS) {
+    const { db, env } = freshEnv();
+    const order = makeOrder({ seq: 1, event_id: `evt_${intent}`, intent, customer: { id: "cus_order" } });
+    const outcome = await submit(env, order);
+    assert.equal(outcome.status, 200, intent);
+    assert.equal(outcome.body.code, "no_entitlement", intent);
+    assert.equal(countRows(db, "entitlements"), 0, intent);
+    assert.equal(eventRow(db, order.event_id).status, "processed", intent);
+    db.close();
+  }
 });

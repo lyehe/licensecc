@@ -168,6 +168,52 @@ test("normalizeOrderEvent rejects an empty customer object", () => {
   assert.equal(normalizeOrderEvent(baseBody({ customer: {} }), NOW).error, "invalid_order");
 });
 
+const EVERY_INTENT = [
+  "subscription.active", "subscription.renewed", "subscription.past_due", "subscription.paused",
+  "subscription.payment_failed", "subscription.canceled_at_period_end", "subscription.resumed",
+  "quantity.changed", "fraud.confirmed", "chargeback",
+];
+
+test("normalizeOrderEvent requires a customer id on every intent, revocations included", () => {
+  for (const intent of EVERY_INTENT) {
+    const quantity = intent === "quantity.changed" ? { quantity: { max_active_devices: 1 } } : {};
+    for (const customer of [undefined, null, { email: "buyer@example.test" }, { id: "" }, { id: 7 }]) {
+      const body = { ...baseBody({ intent, ...quantity }), customer };
+      assert.equal(normalizeOrderEvent(body, NOW).error, "invalid_order", `${intent} ${JSON.stringify(customer)}`);
+      assert.equal(normalizeOrderEventForReplay(body, NOW).error, "invalid_order", `${intent} replay`);
+    }
+    const named = normalizeOrderEvent(baseBody({ intent, ...quantity, customer: { id: "cus_1" } }), NOW);
+    assert.equal(named.error, undefined, intent);
+    assert.deepEqual(named.customer, { id: "cus_1" });
+  }
+});
+
+test("normalizeOrderEvent refuses quantity.pool_size", () => {
+  const customer = { id: "cus_1" };
+  for (const quantity of [{ pool_size: 5 }, { pool_size: 0 }, { pool_size: 5, max_active_devices: 2 }]) {
+    for (const intent of ["subscription.active", "quantity.changed"]) {
+      assert.equal(normalizeOrderEvent(baseBody({ intent, customer, quantity }), NOW).error, "invalid_order", JSON.stringify(quantity));
+    }
+  }
+  const limit = normalizeOrderEvent(baseBody({ intent: "quantity.changed", customer, quantity: { max_active_devices: 2 } }), NOW);
+  assert.deepEqual(limit.quantity, { max_active_devices: 2 });
+});
+
+test("a withdrawal may carry a long-past period end; an order that grants access may not", () => {
+  const customer = { id: "cus_1" };
+  const current_period_end = NOW - 60 * 86400;
+  for (const intent of [
+    "subscription.past_due", "subscription.paused", "subscription.payment_failed",
+    "subscription.canceled_at_period_end", "fraud.confirmed", "chargeback",
+  ]) {
+    assert.equal(normalizeOrderEvent(baseBody({ intent, customer, current_period_end }), NOW).error, undefined, intent);
+  }
+  for (const intent of ["subscription.active", "subscription.renewed", "subscription.resumed", "quantity.changed"]) {
+    const body = baseBody({ intent, customer, current_period_end, quantity: { max_active_devices: 1 } });
+    assert.equal(normalizeOrderEvent(body, NOW).error, "invalid_order", intent);
+  }
+});
+
 test("normalizeOrderEvent rejects current_period_end well in the past for a non-cancel intent", () => {
   // > GRACE (1 day) in the past -> invalid_order.
   const out = normalizeOrderEvent(baseBody({ current_period_end: NOW - 2 * 86400 }), NOW);
