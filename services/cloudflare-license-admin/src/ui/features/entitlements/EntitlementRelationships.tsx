@@ -84,5 +84,5 @@ export function EntitlementRelationships({ customerId, licenseId, onCustomerChan
   const createLicense = protectedProject !== "" && customerId !== ""
     ? (selectCreated: (id: string) => void) => <CreateLicenseButton customerId={customerId} project={protectedProject} onCreated={selectCreated} />
     : undefined;
-  return <><RelationshipLookup kind="customer" required={required} value={customerId} onChange={onCustomerChange} /><RelationshipLookup kind="license" required={required} value={licenseId} onChange={onLicenseChange} scope={customerId} project={protectedProject} emptyAction={createLicense} /></>;
+  return <><RelationshipLookup kind="customer" required value={customerId} onChange={onCustomerChange} /><RelationshipLookup kind="license" required={required} value={licenseId} onChange={onLicenseChange} scope={customerId} project={protectedProject} emptyAction={createLicense} /></>;
 }

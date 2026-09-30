@@ -428,11 +428,10 @@
                 "description": "One entitlement to transition, with the precondition observed for it.",
                 "properties": {
                   "expected_customer_id": {
+                    "description": "The owner observed on the grant. Every grant has one, so null or an empty string returns 400 invalid_request.",
                     "maxLength": 128,
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "minLength": 1,
+                    "type": "string"
                   },
                   "expected_revocation_seq": {
                     "maximum": 9007199254740991,
@@ -1515,6 +1514,7 @@
             {
               "properties": {
                 "customer_id": {
+                  "maxLength": 128,
                   "minLength": 1,
                   "type": "string"
                 },
@@ -1607,12 +1607,10 @@
           "description": "The grant fields a create and a sync share. Each route refuses a body naming any field it does not read with 400 invalid_request.",
           "properties": {
             "customer_id": {
-              "default": null,
+              "description": "The customer who owns the grant. Every grant has one; a body naming none, null or an empty string returns 400 invalid_request.",
               "maxLength": 128,
-              "type": [
-                "string",
-                "null"
-              ]
+              "minLength": 1,
+              "type": "string"
             },
             "feature": {
               "maxLength": 15,
@@ -1712,11 +1710,10 @@
           "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable: a body naming any field other than the properties below and the expected_* precondition returns 400 invalid_request. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the required expected_* precondition may), or the PATCH returns 400 invalid_request.",
           "properties": {
             "customer_id": {
+              "description": "Moves the grant to another customer. Every grant has an owner, so null or an empty string returns 400 invalid_request.",
               "maxLength": 128,
-              "type": [
-                "string",
-                "null"
-              ]
+              "minLength": 1,
+              "type": "string"
             },
             "license_id": {
               "maxLength": 128,
@@ -1758,10 +1755,8 @@
               "type": "integer"
             },
             "customer_id": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "description": "The customer who owns the grant. Every grant has one.",
+              "type": "string"
             },
             "feature": {
               "type": "string"
@@ -1890,6 +1885,7 @@
             {
               "properties": {
                 "customer_id": {
+                  "maxLength": 128,
                   "minLength": 1,
                   "type": "string"
                 },
@@ -2034,10 +2030,7 @@
               "items": {
                 "properties": {
                   "customer_id": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "customer_name": {
                     "type": [
@@ -2333,6 +2326,7 @@
               "type": "array"
             },
             "customer_id": {
+              "description": "The license's owner. Every grant needs one: without it, Preview blocks each grant it would write (reason owner_required) and Apply returns 400 invalid_request.",
               "maxLength": 128,
               "type": [
                 "string",
@@ -2428,6 +2422,7 @@
               "type": "string"
             },
             "reason": {
+              "description": "A blocked item's reason: revoked_entitlement (a revoked grant is terminal; Apply returns 409 plan_projection_blocked) or owner_required (the input names no customer; Apply returns 400 invalid_request). A disabled item names not_in_plan.",
               "type": "string"
             },
             "source": {
@@ -10847,7 +10842,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / id / idempotency key (including a field a create does not read, such as a mode; a status or max_active_devices sent with a policy_id; and max_active_devices outside 1-1,000,000), or a policy_id was supplied while POLICY_STAMP_MODE is off."
+              "description": "Invalid request / json / id / idempotency key (including a body naming no owner, or a null or empty customer_id; a field a create does not read, such as a mode; a status or max_active_devices sent with a policy_id; and max_active_devices outside 1-1,000,000), or a policy_id was supplied while POLICY_STAMP_MODE is off."
             },
             "401": {
               "content": {
@@ -11242,14 +11237,13 @@
                       "$ref": "#/components/schemas/EntitlementPatch"
                     },
                     {
-                      "description": "Required precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+                      "description": "Required precondition. Supply the customer_id (never null: every grant has an owner) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
                       "properties": {
                         "expected_customer_id": {
+                          "description": "The owner observed on the grant. Every grant has one, so null or an empty string returns 400 invalid_request.",
                           "maxLength": 128,
-                          "type": [
-                            "string",
-                            "null"
-                          ]
+                          "minLength": 1,
+                          "type": "string"
                         },
                         "expected_revocation_seq": {
                           "maximum": 9007199254740991,
@@ -11337,7 +11331,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / id / idempotency key, a field a PATCH does not read, or max_active_devices outside 1-1,000,000 or sent with another patch field."
+              "description": "Invalid request / json / id / idempotency key, a null or empty customer_id or expected_customer_id (every grant has an owner), a field a PATCH does not read, or max_active_devices outside 1-1,000,000 or sent with another patch field."
             },
             "401": {
               "content": {
@@ -11571,14 +11565,13 @@
                       "$ref": "#/components/schemas/ReasonRequiredBody"
                     },
                     {
-                      "description": "Required precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+                      "description": "Required precondition. Supply the customer_id (never null: every grant has an owner) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
                       "properties": {
                         "expected_customer_id": {
+                          "description": "The owner observed on the grant. Every grant has one, so null or an empty string returns 400 invalid_request.",
                           "maxLength": 128,
-                          "type": [
-                            "string",
-                            "null"
-                          ]
+                          "minLength": 1,
+                          "type": "string"
                         },
                         "expected_revocation_seq": {
                           "maximum": 9007199254740991,
@@ -11883,14 +11876,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "Required precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+                  "description": "Required precondition. Supply the customer_id (never null: every grant has an owner) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
                   "properties": {
                     "expected_customer_id": {
+                      "description": "The owner observed on the grant. Every grant has one, so null or an empty string returns 400 invalid_request.",
                       "maxLength": 128,
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "minLength": 1,
+                      "type": "string"
                     },
                     "expected_revocation_seq": {
                       "maximum": 9007199254740991,
@@ -12191,14 +12183,13 @@
                       "$ref": "#/components/schemas/ReasonRequiredBody"
                     },
                     {
-                      "description": "Required precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+                      "description": "Required precondition. Supply the customer_id (never null: every grant has an owner) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
                       "properties": {
                         "expected_customer_id": {
+                          "description": "The owner observed on the grant. Every grant has one, so null or an empty string returns 400 invalid_request.",
                           "maxLength": 128,
-                          "type": [
-                            "string",
-                            "null"
-                          ]
+                          "minLength": 1,
+                          "type": "string"
                         },
                         "expected_revocation_seq": {
                           "maximum": 9007199254740991,
@@ -13027,7 +13018,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / idempotency key."
+              "description": "Invalid request / json / idempotency key, or the preview blocks a grant because the projection names no owner (reason owner_required)."
             },
             "401": {
               "content": {

@@ -144,6 +144,11 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await editForm.getByText("Enter customer ID manually", { exact: true }).click();
   await editForm.getByLabel("Customer ID").fill("");
   await editForm.getByLabel("Notes").fill("");
+  // Every grant has an owner: clearing the customer is refused in the form, and nothing is sent.
+  await editForm.getByRole("button", { name: "Save changes" }).click();
+  await expect(editForm.getByRole("alert").filter({ hasText: "Choose the customer who owns this license." }).first()).toBeVisible();
+  expect(api.requests.patches.length).toBe(0);
+  await editForm.getByLabel("Customer ID").fill("cus_e2e_moved");
   await editForm.getByRole("button", { name: "Save changes" }).click();
 
   await expect(page.getByText("Entitlement changes saved.")).toBeVisible();
@@ -156,7 +161,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
     valid_from: 1709942400,
     valid_until: 1719964800,
     notes: "",
-    customer_id: null,
+    customer_id: "cus_e2e_moved",
     license_id: "lic_e2e",
   });
   const patchedRow = page.locator(".desktopRecords tbody tr").filter({ hasText: "DEFAULT" });

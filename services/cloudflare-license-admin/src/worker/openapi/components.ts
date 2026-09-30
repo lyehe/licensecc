@@ -271,7 +271,7 @@ export const ADMIN_MUTATION_AUTH_ERRORS = {
 } as const;
 
 // The precondition every grant mutation requires, shared by paths/entitlements.ts and BatchTransitionInput below.
-export const EXPECTED_ENTITLEMENT_PROPERTIES = { expected_customer_id: { type: ["string", "null"], maxLength: 128 }, expected_revocation_seq: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER } };
+export const EXPECTED_ENTITLEMENT_PROPERTIES = { expected_customer_id: { type: "string", minLength: 1, maxLength: 128, description: "The owner observed on the grant. Every grant has one, so null or an empty string returns 400 invalid_request." }, expected_revocation_seq: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER } };
 
 export const openApiComponents: LabeledComponentFragment = {
   label: "admin-components",
@@ -338,7 +338,7 @@ export const openApiComponents: LabeledComponentFragment = {
           valid_from: { type: ["integer", "null"], minimum: 0, default: null, description: "Epoch seconds; must be < valid_until when both set." },
           valid_until: { type: ["integer", "null"], minimum: 0, default: null, description: "Epoch seconds; must be > valid_from when both set." },
           notes: { type: "string", maxLength: 1000, default: "" },
-          customer_id: { type: ["string", "null"], maxLength: 128, default: null },
+          customer_id: { type: "string", minLength: 1, maxLength: 128, description: "The customer who owns the grant. Every grant has one; a body naming none, null or an empty string returns 400 invalid_request." },
           license_id: { type: ["string", "null"], maxLength: 128, default: null },
         },
       }],
@@ -353,7 +353,7 @@ export const openApiComponents: LabeledComponentFragment = {
           project: { type: "string", maxLength: 127 },
           license_id: { type: "string", maxLength: 128 },
           license_fingerprint: { type: "string", pattern: "^[0-9a-fA-F]{64}$" },
-          customer_id: { type: ["string", "null"], maxLength: 128 },
+          customer_id: { type: ["string", "null"], maxLength: 128, description: "The license's owner. Every grant needs one: without it, Preview blocks each grant it would write (reason owner_required) and Apply returns 400 invalid_request." },
           plan_id: { type: ["string", "null"], maxLength: 128, description: "Catalog plan id. Required when plan_key is omitted." },
           plan_key: { type: ["string", "null"], maxLength: 128, description: "Catalog plan key. Required when plan_id is omitted." },
           support_until: { type: ["integer", "null"], minimum: 0, maximum: 253_402_300_799, description: "Optional support/subscription window override stamped onto desired entitlements. Must be a safe epoch second no later than 9999-12-31T23:59:59Z." },
@@ -375,7 +375,7 @@ export const openApiComponents: LabeledComponentFragment = {
           valid_from: { type: ["integer", "null"] },
           valid_until: { type: ["integer", "null"] },
           max_active_devices: { type: "integer", description: "Device limit: a protected grant's only capacity." },
-          reason: { type: "string" },
+          reason: { type: "string", description: "A blocked item's reason: revoked_entitlement (a revoked grant is terminal; Apply returns 409 plan_projection_blocked) or owner_required (the input names no customer; Apply returns 400 invalid_request). A disabled item names not_in_plan." },
           previous_status: { type: "string" },
         },
       }],
@@ -1142,7 +1142,7 @@ export const openApiComponents: LabeledComponentFragment = {
                 project: { type: "string" },
                 feature: { type: "string" },
                 license_fingerprint: { type: "string" },
-                customer_id: { type: ["string", "null"] },
+                customer_id: { type: "string" },
                 customer_name: { type: ["string", "null"] },
                 valid_until: { type: "integer", description: "Epoch seconds the entitlement expires at (an activated activation-basis trial reports its trial deadline here instead)." },
                 days_left: { type: "integer", description: "ceil((valid_until - now)/86400); >=1 for a still-future expiry." },

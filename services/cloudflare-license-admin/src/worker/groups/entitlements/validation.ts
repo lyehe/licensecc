@@ -105,14 +105,15 @@ export function validateEntitlementInput(value: unknown): EntitlementInput | nul
   const validFrom = input.valid_from === undefined ? null : nullableEpoch(input.valid_from);
   const validUntil = input.valid_until === undefined ? null : nullableEpoch(input.valid_until);
   const notes = input.notes === undefined ? "" : safeNotes(input.notes);
-  const customerId = input.customer_id === undefined ? null : nullableSafeString(input.customer_id, 128);
+  // Every grant has an owner (customer_id is NOT NULL): a body naming none, null or "" is refused here.
+  const customerId = safeString(input.customer_id, 128);
   const licenseId = input.license_id === undefined ? null : nullableSafeString(input.license_id, 128);
   if (
     project === null || feature === null || licenseFingerprint === null ||
     !["active", "disabled", "revoked"].includes(String(status)) ||
     validFrom === undefined || validUntil === undefined ||
     (validFrom !== null && validUntil !== null && validFrom >= validUntil) || notes === null ||
-    customerId === undefined || licenseId === undefined
+    customerId === null || licenseId === undefined
   ) {
     return null;
   }
@@ -164,8 +165,9 @@ export function validateEntitlementPatch(value: unknown): AdminEntitlementPatch 
     patch.notes = notes;
   }
   if (input.customer_id !== undefined) {
-    const customerId = nullableSafeString(input.customer_id, 128);
-    if (customerId === undefined) {
+    // A PATCH can move a grant to another customer but never clear its owner.
+    const customerId = safeString(input.customer_id, 128);
+    if (customerId === null) {
       return null;
     }
     patch.customer_id = customerId;

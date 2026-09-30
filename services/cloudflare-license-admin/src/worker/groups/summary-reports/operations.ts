@@ -208,13 +208,13 @@ export async function reportExpiring(request: Request, env: Env, requestIdValue:
       ORDER BY effective_until ASC, project, feature, license_fingerprint
       LIMIT ? OFFSET ?`,
   ).bind(now, horizon, now, horizon, now, horizon, limit + 1, cursor)
-    .all<{ project: string; feature: string; license_fingerprint: string; customer_id: string | null; customer_name: string | null; effective_until: number }>();
+    .all<{ project: string; feature: string; license_fingerprint: string; customer_id: string; customer_name: string | null; effective_until: number }>();
   const items: ExpiringEntitlement[] = rows.results.slice(0, limit).map((row) => ({
     id: entitlementId(row.project, row.feature, row.license_fingerprint),
     project: row.project,
     feature: row.feature,
     license_fingerprint: row.license_fingerprint,
-    customer_id: row.customer_id ?? null,
+    customer_id: row.customer_id,
     customer_name: row.customer_name ?? null,
     valid_until: row.effective_until,
     days_left: Math.max(1, Math.ceil((row.effective_until - now) / SECONDS_PER_DAY)),

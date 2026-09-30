@@ -608,7 +608,8 @@ export function makeAdminApiFixture() {
       valid_from: null,
       valid_until: null,
       notes: "",
-      customer_id: null,
+      // Every grant has an owner, as the Worker's records guarantee.
+      customer_id: "cus_owner",
       license_id: null,
       policy_id: null,
       is_trial: 0,
@@ -852,7 +853,7 @@ export function makeAdminApiFixture() {
       };
       const items = [
         linkToRealEntitlement({ id: "exp-1", project: "DEFAULT", feature: `pro-${withinDays}`, license_fingerprint: "a".repeat(64), customer_id: "cus_acme", customer_name: "Acme Corp", valid_until: 1_760_500_000, days_left: 3 }),
-        linkToRealEntitlement({ id: "exp-2", project: "DEFAULT", feature: "ent", license_fingerprint: "b".repeat(64), customer_id: null, customer_name: null, valid_until: 1_762_000_000, days_left: 21 }),
+        linkToRealEntitlement({ id: "exp-2", project: "DEFAULT", feature: "ent", license_fingerprint: "b".repeat(64), customer_id: "cus_unnamed", customer_name: null, valid_until: 1_762_000_000, days_left: 21 }),
       ];
       const page = behavior.expiringPagination ? (cursor === null ? items.slice(0, 1) : items.slice(1)) : items;
       return fulfill(200, makeEnvelope("report_expiring", {

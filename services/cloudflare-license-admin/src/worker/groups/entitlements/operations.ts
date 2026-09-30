@@ -37,15 +37,15 @@ function policyStampOn(env: Env): boolean {
 }
 
 // The owner and revocation-sequence precondition every grant mutation now requires: the
-// customer_id (including null) and revocation_seq the caller observed before it decided to
-// write. A missing or malformed field is refused before any row is read.
-function parseExpectedEntitlement(candidate: Record<string, unknown>): { customer_id: string | null; revocation_seq: number } | null {
+// customer_id and revocation_seq the caller observed before it decided to write. Every grant has
+// an owner, so a missing, null, empty or malformed field is refused before any row is read.
+function parseExpectedEntitlement(candidate: Record<string, unknown>): { customer_id: string; revocation_seq: number } | null {
   const { expected_customer_id: customerId, expected_revocation_seq: revocationSeq } = candidate;
-  if ((customerId !== null && (typeof customerId !== "string" || customerId.length > 128)) ||
+  if (typeof customerId !== "string" || customerId === "" || customerId.length > 128 ||
     !Number.isSafeInteger(revocationSeq) || Number(revocationSeq) < 0) {
     return null;
   }
-  return { customer_id: customerId as string | null, revocation_seq: revocationSeq as number };
+  return { customer_id: customerId, revocation_seq: revocationSeq as number };
 }
 
 // The stored policy row, as the stamp reads it.
@@ -191,14 +191,14 @@ export async function createFromPolicy(request: Request, env: Env, ctx: Mutation
     const validFrom = input.valid_from === undefined ? undefined : nullableEpoch(input.valid_from);
     const validUntil = input.valid_until === undefined ? undefined : nullableEpoch(input.valid_until);
     const notes = input.notes === undefined ? undefined : safeNotes(input.notes);
-    const customerId = input.customer_id === undefined ? undefined : nullableSafeString(input.customer_id, 128);
+    // validateEntitlementCreate has already required the owner: every grant has one.
+    const customerId = selected.customer_id;
     const licenseId = input.license_id === undefined ? undefined : nullableSafeString(input.license_id, 128);
     if (
       (input.valid_from !== undefined && validFrom === undefined) ||
       (input.valid_until !== undefined && validUntil === undefined) ||
       (typeof validFrom === "number" && typeof validUntil === "number" && validFrom >= validUntil) ||
       (input.notes !== undefined && notes === null) ||
-      (input.customer_id !== undefined && customerId === undefined) ||
       (input.license_id !== undefined && licenseId === undefined)
     ) {
       return envelope(requestIdValue, "invalid_request", undefined, 400);
@@ -213,7 +213,7 @@ export async function createFromPolicy(request: Request, env: Env, ctx: Mutation
     if (input.valid_from !== undefined) overrides.valid_from = validFrom;
     if (input.valid_until !== undefined) overrides.valid_until = validUntil;
     if (notes !== undefined) overrides.notes = notes;
-    if (customerId !== undefined) overrides.customer_id = customerId;
+    overrides.customer_id = customerId;
     if (licenseId !== undefined) overrides.license_id = licenseId;
     const stamp = stampFromPolicy(policy as never, overrides as never, now);
     const key = { project, feature, license_fingerprint: licenseFingerprint };
@@ -345,7 +345,7 @@ export async function handleBatchTransition(request: Request, env: Env, actor: A
   // caller observed for it — the same mandatory precondition the single-row routes require.
   // A malformed row refuses the whole batch before any D1 query, exactly like a non-string
   // id did before per-row expectations existed.
-  const parsedRows: Array<{ id: string; expected: { customer_id: string | null; revocation_seq: number } }> = [];
+  const parsedRows: Array<{ id: string; expected: { customer_id: string; revocation_seq: number } }> = [];
   for (const row of rows) {
     if (row === null || typeof row !== "object" || Array.isArray(row)) {
       return envelope(requestIdValue, "invalid_request", undefined, 400);

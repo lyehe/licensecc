@@ -176,6 +176,7 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   addon_key_required: failed("Enter an add-on key."),
   plan_id_or_plan_key_required: failed("Enter a plan key or a plan ID."),
   license_id_required: failed("Enter a license ID."),
+  customer_id_required: failed("Choose the customer who owns this license."),
   invalid_date: failed("Enter a valid date."),
   notes_must_be_at_most_1000_chars: failed("Use one line of at most 1000 characters."),
   url_must_be_a_single_https_url: failed("Enter a single https:// URL without spaces."),

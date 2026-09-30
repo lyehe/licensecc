@@ -99,7 +99,7 @@ export function normalizeEntitlementForm(form: EntitlementFormState): AdminEntit
     valid_from: dateInputToEpoch(form.valid_from, "valid_from"),
     valid_until: dateInputToEpoch(form.valid_until, "valid_until"),
     notes: parseNotes(form.notes),
-    customer_id: parseNullableIdentifier(form.customer_id, "customer_id"),
+    customer_id: requiredOwner(form.customer_id),
     license_id: parseNullableIdentifier(form.license_id, "license_id"),
     // An upsert never writes capacity unless asked: blank keeps an existing grant's stored limit.
     ...(form.max_active_devices === "" ? {} : { max_active_devices: parseBoundedInteger(form.max_active_devices, "max_active_devices", 1, MAX_DEVICE_LIMIT) }),
@@ -130,11 +130,11 @@ export function normalizeCreateFromPolicy(form: EntitlementFormState): Entitleme
     project: form.project,
     feature: form.feature,
     license_fingerprint: form.license_fingerprint,
+    customer_id: requiredOwner(form.customer_id),
   };
   if (form.valid_from !== "") body.valid_from = dateInputToEpoch(form.valid_from, "valid_from");
   if (form.valid_until !== "") body.valid_until = dateInputToEpoch(form.valid_until, "valid_until");
   if (form.notes !== "") body.notes = parseNotes(form.notes);
-  if (form.customer_id !== "") body.customer_id = parseNullableIdentifier(form.customer_id, "customer_id");
   if (form.license_id !== "") body.license_id = parseNullableIdentifier(form.license_id, "license_id");
   return body;
 }
@@ -154,7 +154,8 @@ export function normalizeEntitlementPatch(form: EntitlementEditState, original?:
     valid_from: original && form.valid_from === epochToDateInput(original.valid_from) ? original.valid_from : dateInputToEpoch(form.valid_from, "valid_from"),
     valid_until: original && form.valid_until === epochToDateInput(original.valid_until) ? original.valid_until : dateInputToEpoch(form.valid_until, "valid_until"),
     notes: parseNotes(form.notes),
-    customer_id: parseNullableIdentifier(form.customer_id, "customer_id"),
+    // Every grant has an owner: an edit can move it to another customer but never clears it.
+    customer_id: requiredOwner(form.customer_id),
     license_id: parseNullableIdentifier(form.license_id, "license_id"),
   };
 }
@@ -220,14 +221,14 @@ export interface BatchRowResult {
  * routes require), read from the loaded row the operator selected. */
 export interface BatchTargetRow {
   id: string;
-  customer_id: string | null;
+  customer_id: string;
   revocation_seq: number;
 }
 
 export function batchBody(action: EntitlementAction, rows: ReadonlyArray<BatchTargetRow>, reason: string): {
   action: EntitlementAction;
   reason: string;
-  rows: Array<{ id: string; expected_customer_id: string | null; expected_revocation_seq: number }>;
+  rows: Array<{ id: string; expected_customer_id: string; expected_revocation_seq: number }>;
 } {
   return { action, reason, rows: rows.map((row) => ({ id: row.id, expected_customer_id: row.customer_id, expected_revocation_seq: row.revocation_seq })) };
 }
@@ -297,13 +298,14 @@ export function entitlementFormErrors(form: EntitlementEditState | EntitlementFo
   for (const field of ["customer_id", "license_id"] as const) {
     try { parseNullableIdentifier(form[field], field); } catch { errors[field] = "Use a complete ID of at most 128 characters with no line breaks."; }
   }
+  // Every grant has an owner, so a create and an edit both name the customer.
+  if (!form.customer_id.trim()) errors.customer_id = "Choose the customer who owns this license.";
   try { parseNotes(form.notes); } catch { errors.notes = "Use one line of notes, at most 1000 characters."; }
   if ("license_fingerprint" in form) {
     // A create form. Every create is protected, so these rules always apply.
     if (!/^[A-Za-z0-9_.:-]{1,127}(?![\s\S])/.test(form.project)) errors.project = "Protected project IDs use ASCII letters, numbers, _, ., :, or -.";
     if (!/^[A-Za-z0-9_.:-]{1,15}(?![\s\S])/.test(form.feature)) errors.feature = "Protected feature IDs use 1–15 ASCII letters, numbers, _, ., :, or -.";
     if (form.license_fingerprint.length !== 64 || !/^[a-f0-9]{64}$/.test(form.license_fingerprint)) errors.license_fingerprint = "Protected licenses require the exact 64-character lowercase hexadecimal fingerprint.";
-    if (!form.customer_id.trim()) errors.customer_id = "Choose the customer who owns this license.";
     if (!form.license_id.trim()) errors.license_id = "Choose a license for this customer and project.";
   }
   return errors;
@@ -322,6 +324,13 @@ function parseNotes(value: string): string {
     throw new Error("notes_must_be_at_most_1000_chars");
   }
   return value;
+}
+
+/** The grant's owner. Every grant has one, so a create or an edit never sends an empty or null customer. */
+function requiredOwner(value: string): string {
+  const parsed = parseNullableIdentifier(value, "customer_id");
+  if (parsed === null) throw new Error("customer_id_required");
+  return parsed;
 }
 
 function parseNullableIdentifier(value: string, label: string): string | null {

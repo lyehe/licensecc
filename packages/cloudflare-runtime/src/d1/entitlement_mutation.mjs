@@ -10,7 +10,7 @@ import {
   entitlementMatchesInput,
   syncEventType,
 } from "@licensecc/licensing-domain/entitlements/contracts";
-import { assertExpectedEntitlement, observedExpectation, CAPACITY_COLUMNS, isNonNegativeInteger } from "./entitlement_guards.mjs";
+import { assertExpectedEntitlement, observedExpectation, requiredOwner, CAPACITY_COLUMNS, isNonNegativeInteger } from "./entitlement_guards.mjs";
 import { entitlementCurrentJsonSql } from "./entitlement_json.mjs";
 
 export {
@@ -333,7 +333,7 @@ export async function createEntitlement(
     input.valid_from ?? null,
     input.valid_until ?? null,
     input.notes ?? "",
-    input.customer_id ?? null,
+    requiredOwner(input.customer_id),
     input.license_id ?? null,
     prev?.created_at ?? now,
     now,
@@ -383,7 +383,7 @@ export async function patchEntitlement(env, key, patch, ctx, idempotency) {
     validFrom,
     validUntil,
     patch.notes ?? prev.notes,
-    patch.customer_id !== undefined ? patch.customer_id : prev.customer_id,
+    requiredOwner(patch.customer_id !== undefined ? patch.customer_id : prev.customer_id),
     patch.license_id !== undefined ? patch.license_id : prev.license_id,
     now,
     key.project,

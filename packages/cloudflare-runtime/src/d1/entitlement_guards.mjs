@@ -14,6 +14,15 @@ export function assertExpectedEntitlement(row, ctx) {
   }
 }
 
+/** The owner a grant write stores. Every grant has one (entitlements.customer_id is NOT NULL), so a
+ * write naming none, or an empty one, is refused as invalid_patch before it reaches the database. */
+export function requiredOwner(customerId) {
+  if (typeof customerId !== "string" || customerId === "") {
+    throw new Error("invalid_patch");
+  }
+  return customerId;
+}
+
 /** The precondition a caller who already holds `row` can pass as its own observed expectation:
  * it always matches, so the mandatory guard above is satisfied without weakening it. */
 export function observedExpectation(row) {

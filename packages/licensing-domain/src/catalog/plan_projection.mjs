@@ -215,6 +215,9 @@ export function planProjectionMatchesDesired(existing, desired) {
 }
 
 export function classifyPlanProjection({ input, plan, desired, existingRows }) {
+  // Every grant has an owner, so an input naming none cannot write any grant: each one it would
+  // create or update is blocked, as Apply refuses it (invalid_patch).
+  const owned = typeof input.customer_id === "string" && input.customer_id !== "";
   const existingByFeature = new Map(existingRows.map((row) => [row.feature, row]));
   const desiredByFeature = new Map(desired.map((row) => [row.input.feature, row]));
   const willCreate = [];
@@ -225,10 +228,12 @@ export function classifyPlanProjection({ input, plan, desired, existingRows }) {
 
   for (const target of desired) {
     const existing = existingByFeature.get(target.input.feature) ?? null;
-    if (existing === null) {
-      willCreate.push(summarizeDesired(target));
-    } else if (existing.status === "revoked") {
+    if (existing?.status === "revoked") {
       blocked.push({ ...summarizeDesired(target), reason: "revoked_entitlement" });
+    } else if (!owned) {
+      blocked.push({ ...summarizeDesired(target), reason: "owner_required" });
+    } else if (existing === null) {
+      willCreate.push(summarizeDesired(target));
     } else if (planProjectionMatchesDesired(existing, target)) {
       unchanged.push(summarizeDesired(target));
     } else {

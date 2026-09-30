@@ -27,7 +27,7 @@ import { capacityConflictResponse } from "../device-limit.js";
 
 const expectedState = {
   type: "object",
-  description: "Required precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+  description: "Required precondition. Supply the customer_id (never null: every grant has an owner) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
   required: ["expected_customer_id", "expected_revocation_seq"],
   properties: EXPECTED_ENTITLEMENT_PROPERTIES,
 };
@@ -71,7 +71,7 @@ export const entitlementPaths: LabeledPathFragment = {
       },
       responses: {
         "200": okResponse("Entitlement created (directly, or stamped from a policy).", "#/components/schemas/EntitlementRecord", "entitlement_saved"),
-        "400": errorResponse("Invalid request / json / id / idempotency key (including a field a create does not read, such as a mode; a status or max_active_devices sent with a policy_id; and max_active_devices outside 1-1,000,000), or a policy_id was supplied while POLICY_STAMP_MODE is off.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request", "policy_stamping_disabled"),
+        "400": errorResponse("Invalid request / json / id / idempotency key (including a body naming no owner, or a null or empty customer_id; a field a create does not read, such as a mode; a status or max_active_devices sent with a policy_id; and max_active_devices outside 1-1,000,000), or a policy_id was supplied while POLICY_STAMP_MODE is off.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request", "policy_stamping_disabled"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("Referenced resource not found, or the policy_id is unknown/disabled.", "not_found", "policy_not_found"),
         "409": protectedCreationConflictResponse("Terminal or concurrent state, protected eligibility failure (data.reason names the failed rule), or an idempotency key already used for another tuple.", "revoked_entitlement_is_terminal", "stale_transition", "protected_creation_conflict", "idempotency_request_conflict"),
@@ -107,7 +107,7 @@ export const entitlementPaths: LabeledPathFragment = {
       responses: {
         "200": okResponse("Entitlement updated.", "#/components/schemas/EntitlementRecord", "entitlement_patched"),
 
-        "400": errorResponse("Invalid request / json / id / idempotency key, a field a PATCH does not read, or max_active_devices outside 1-1,000,000 or sent with another patch field.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request"),
+        "400": errorResponse("Invalid request / json / id / idempotency key, a null or empty customer_id or expected_customer_id (every grant has an owner), a field a PATCH does not read, or max_active_devices outside 1-1,000,000 or sent with another patch field.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No entitlement with that id.", "not_found"),
         "409": capacityConflictResponse("Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry), or a protected grant has more connected devices than the requested device limit (data.devices_in_use; disconnect devices first).", "revoked_entitlement_is_terminal", "stale_transition", "capacity_in_use"),

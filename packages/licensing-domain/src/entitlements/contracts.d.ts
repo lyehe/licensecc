@@ -19,7 +19,8 @@ export interface EntitlementRecord {
   valid_from: number | null;
   valid_until: number | null;
   notes: string;
-  customer_id: string | null;
+  /** Every grant has an owner: entitlements.customer_id is NOT NULL. */
+  customer_id: string;
   license_id: string | null;
   policy_id: string | null;
   is_trial: number;
@@ -43,7 +44,8 @@ export interface EntitlementInput {
   valid_from?: number | null;
   valid_until?: number | null;
   notes?: string;
-  customer_id?: string | null;
+  /** The owning customer. A write naming none is refused (invalid_patch). */
+  customer_id: string;
   license_id?: string | null;
 }
 
@@ -51,7 +53,8 @@ export interface EntitlementPatch {
   valid_from?: number | null;
   valid_until?: number | null;
   notes?: string;
-  customer_id?: string | null;
+  /** Moves the grant to another customer; the owner can never be cleared. */
+  customer_id?: string;
   license_id?: string | null;
 }
 

@@ -341,7 +341,7 @@ test("batch: per-row results — mixed success / revoked-terminal / missing / ba
       reason: "bulk pause",
       // Keep this accepted request at the public maximum. Put the successful
       // row last so the proof also shows earlier isolated errors do not abort it.
-      rows: [expectedRow(revokedB), { id: missingId, expected_customer_id: null, expected_revocation_seq: 0 }, { id: "!!!not-base64!!!", expected_customer_id: null, expected_revocation_seq: 0 }, expectedRow(a)],
+      rows: [expectedRow(revokedB), { id: missingId, expected_customer_id: "cus_unknown", expected_revocation_seq: 0 }, { id: "!!!not-base64!!!", expected_customer_id: "cus_unknown", expected_revocation_seq: 0 }, expectedRow(a)],
     }),
   }), env);
   assert.equal(res.status, 200);

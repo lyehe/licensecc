@@ -324,7 +324,7 @@ export function hasEntitlementRecordData(value: unknown): boolean {
     enumField(row, "status", ENTITLEMENT_STATUSES) && enumField(row, "license_mode", LICENSE_MODES) &&
     nonNegativeIntegerField(row, "revocation_seq") &&
     nullableIntegerInRangeField(row, "valid_from", 0, Number.MAX_SAFE_INTEGER) && nullableIntegerInRangeField(row, "valid_until", 0, Number.MAX_SAFE_INTEGER) && typeof row.notes === "string" &&
-    nullableStringField(row, "customer_id") && nullableStringField(row, "license_id") && nullableStringField(row, "policy_id") &&
+    stringField(row, "customer_id") && nullableStringField(row, "license_id") && nullableStringField(row, "policy_id") &&
     binaryFlagField(row, "is_trial") && nullableEnumField(row, "trial_expiration_basis", ["from_issue", "from_first_activation", "from_first_use"] as const) && integerInRangeField(row, "trial_duration_sec", 0, MAX_DURATION_SECONDS) &&
     binaryFlagField(row, "trial_one_per_device") && nullableIntegerInRangeField(row, "trial_started_at", 0, Number.MAX_SAFE_INTEGER) &&
     nullableStringField(row, "trial_device_key_id") && integerInRangeField(row, "max_active_devices", 0, MAX_CAPACITY) && integerInRangeField(row, "lease_seconds", 0, MAX_DURATION_SECONDS) &&
@@ -751,7 +751,7 @@ export function hasExpiringListData(value: unknown): boolean {
   return data !== null && cursorField(data) && Array.isArray(data.items) && data.items.every((item) => {
     const row = record(item);
     return row !== null && stringField(row, "id") && stringField(row, "project") && stringField(row, "feature") && stringField(row, "license_fingerprint") &&
-      nullableStringField(row, "customer_id") && nullableStringField(row, "customer_name") && nonNegativeIntegerField(row, "valid_until") && integerInRangeField(row, "days_left", 1, 365_250);
+      stringField(row, "customer_id") && nullableStringField(row, "customer_name") && nonNegativeIntegerField(row, "valid_until") && integerInRangeField(row, "days_left", 1, 365_250);
   });
 }
 

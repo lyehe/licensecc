@@ -374,7 +374,7 @@ export const catalogPaths: LabeledPathFragment = {
       },
       responses: {
         "200": okResponse("Applied projection with created/updated/disabled entitlement records and assignment row. A created grant is protected; an update writes only the validity window, notes, owner, license, policy, device limit and trial state.", "#/components/schemas/PlanProjectionApplyResult", "license_plan_projection_applied"),
-        "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
+        "400": errorResponse("Invalid request / json / idempotency key, or the preview blocks a grant because the projection names no owner (reason owner_required).", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "409": errorResponse("Preview expired, was consumed, belongs to a different actor, its source generation changed, its derived grant has expired, or an assignment-or-entitlement identity now has a different license fingerprint; re-preview before Apply. A fingerprint transfer needs a separate deliberate protocol.", "stale_projection_preview", "projection_preview_grant_expired", "license_fingerprint_conflict", "plan_projection_blocked"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),

@@ -402,7 +402,7 @@ export interface ExpiringEntitlement {
   project: string;
   feature: string;
   license_fingerprint: string;
-  customer_id: string | null;
+  customer_id: string;
   customer_name: string | null;
   valid_until: number;
   days_left: number;

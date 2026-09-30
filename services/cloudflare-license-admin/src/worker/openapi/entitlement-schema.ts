@@ -12,7 +12,7 @@ export const entitlementRecordSchema = {
     valid_from: { type: ["integer", "null"] },
     valid_until: { type: ["integer", "null"] },
     notes: { type: "string" },
-    customer_id: { type: ["string", "null"] },
+    customer_id: { type: "string", description: "The customer who owns the grant. Every grant has one." },
     license_id: { type: ["string", "null"] },
     created_at: { type: "integer" },
     updated_at: { type: "integer" },
@@ -33,7 +33,7 @@ const protectedGrantFields = {
   project: { type: "string", pattern: "^[A-Za-z0-9_.:-]{1,127}(?![\\s\\S])" },
   feature: { type: "string", pattern: "^[A-Za-z0-9_.:-]{1,15}(?![\\s\\S])" },
   license_fingerprint: { type: "string", minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$" },
-  customer_id: { type: "string", minLength: 1 },
+  customer_id: { type: "string", minLength: 1, maxLength: 128 },
   license_id: { type: "string", minLength: 1 },
   valid_from: { type: ["integer", "null"], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
   valid_until: { type: ["integer", "null"], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
@@ -88,7 +88,7 @@ const patchFields = {
   valid_from: { type: ["integer", "null"], minimum: 0 },
   valid_until: { type: ["integer", "null"], minimum: 0 },
   notes: { type: "string", maxLength: 1000 },
-  customer_id: { type: ["string", "null"], maxLength: 128 },
+  customer_id: { type: "string", minLength: 1, maxLength: 128, description: "Moves the grant to another customer. Every grant has an owner, so null or an empty string returns 400 invalid_request." },
   license_id: { type: ["string", "null"], maxLength: 128 },
 };
 

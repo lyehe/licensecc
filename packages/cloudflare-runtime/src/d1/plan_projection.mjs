@@ -462,8 +462,8 @@ function claimFailureStatement(env, previewId, actorSubject, now) {
 }
 
 // Plan apply writes exactly these values, the columns a protected grant takes from its plan, and its
-// audit and assertion compare exactly these. Every grant has an owner (customer_id is NOT NULL), so an
-// entitlement input without one is refused while the Apply batch is built: nothing is claimed or written.
+// audit and assertion compare exactly these. Every grant has an owner (customer_id is NOT NULL): Preview
+// blocks an owner-less input (owner_required), and Apply refuses one here too before anything is written.
 function valuesForDesired(action) {
   const desired = action.desired;
   const input = desired.input;
@@ -902,7 +902,7 @@ export async function applyPlanProjection(env, previewId, ctx, idempotency, now 
   if (!isPlanProjectionPreviewId(previewId)) throw new Error("invalid_preview_id");
   const { preview, actions } = await storedPreview(env, previewId);
   if (Array.isArray(preview.blocked) && preview.blocked.length > 0) {
-    throw new Error("projection_blocked_revoked_entitlement");
+    throw new Error(preview.blocked.some((row) => row?.reason === "owner_required") ? "invalid_patch" : "projection_blocked_revoked_entitlement");
   }
   const claimToken = crypto.randomUUID();
   const statements = [

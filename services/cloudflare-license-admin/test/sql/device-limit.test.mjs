@@ -142,7 +142,7 @@ test("a PATCH sets only the device limit, audits it, and honors the expected sta
 
   const revoked = await created(await f.send({ reason: "done", expected_customer_id: "owner", expected_revocation_seq: body.data.revocation_seq }, "revoke", `${url}/revoke`, "POST"));
   await refused(await f.patch(grant.id, { max_active_devices: 6, expected_customer_id: "owner", expected_revocation_seq: revoked.revocation_seq }), 409, "revoked_entitlement_is_terminal", undefined);
-  await refused(await f.patch(entitlementId("APP", "MISSING", "9".repeat(64)), { max_active_devices: 6, expected_customer_id: null, expected_revocation_seq: 0 }), 404, "not_found", undefined);
+  await refused(await f.patch(entitlementId("APP", "MISSING", "9".repeat(64)), { max_active_devices: 6, expected_customer_id: "owner", expected_revocation_seq: 0 }), 404, "not_found", undefined);
 });
 
 test("a PATCH below the connected devices is refused with their count and changes nothing", async t => {

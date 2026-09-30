@@ -94,6 +94,11 @@ export interface PlanProjectionItem {
   valid_from: number | null;
   valid_until: number | null;
   max_active_devices: number;
+  /**
+   * Why a blocked grant cannot apply: revoked_entitlement (a revoked grant is terminal) or
+   * owner_required (the input names no customer, and every grant needs an owner). A disable names
+   * not_in_plan.
+   */
   reason?: string;
   previous_status?: string;
 }

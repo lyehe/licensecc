@@ -359,7 +359,6 @@ test("admin create and patch accept explicit empty notes from UI payloads", asyn
     method: "PATCH",
     body: JSON.stringify({
       notes: "",
-      customer_id: "",
       license_id: "",
       expected_customer_id: created.data.customer_id,
       expected_revocation_seq: created.data.revocation_seq,
@@ -368,7 +367,8 @@ test("admin create and patch accept explicit empty notes from UI payloads", asyn
   assert.equal(patched.status, 200);
   const patchedBody = await json(patched);
   assert.equal(patchedBody.data.notes, "");
-  assert.equal(patchedBody.data.customer_id, null);
+  // The owner is kept: every grant has one, so a PATCH never clears it.
+  assert.equal(patchedBody.data.customer_id, "cus_1");
   assert.equal(patchedBody.data.license_id, null);
 });
 

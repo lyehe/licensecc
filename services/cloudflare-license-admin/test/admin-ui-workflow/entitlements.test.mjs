@@ -84,6 +84,7 @@ test("admin UI workflow stamps a create-from-policy payload (attaches policy_id)
     ...workflow.emptyEntitlementForm,
     policy_id: "pol_123",
     license_fingerprint: "b".repeat(64),
+    customer_id: "cus_1",
   });
   assert.equal(inherited.policy_id, "pol_123");
   assert.equal(inherited.license_fingerprint, "b".repeat(64));
@@ -92,7 +93,10 @@ test("admin UI workflow stamps a create-from-policy payload (attaches policy_id)
   assert.deepEqual(Object.keys(workflow.emptyEntitlementForm).sort(), ["customer_id", "feature", "license_fingerprint",
     "license_id", "max_active_devices", "notes", "policy_id", "project", "valid_from", "valid_until"]);
   assert.deepEqual(Object.keys(workflow.emptyEntitlementEditForm).sort(), ["customer_id", "license_id", "notes", "valid_from", "valid_until"]);
-  assert.deepEqual(Object.keys(inherited).sort(), ["feature", "license_fingerprint", "policy_id", "project"]);
+  // Every grant has an owner, so a policy create always names the customer.
+  assert.deepEqual(Object.keys(inherited).sort(), ["customer_id", "feature", "license_fingerprint", "policy_id", "project"]);
+  assert.throws(() => workflow.normalizeCreateFromPolicy({ ...workflow.emptyEntitlementForm, policy_id: "pol_123", license_fingerprint: "b".repeat(64) }),
+    /^Error: customer_id_required$/);
   assert.equal("valid_from" in inherited, false, "blank valid_from inherits from the policy");
   assert.equal("valid_until" in inherited, false, "blank valid_until inherits from the policy");
 
@@ -100,6 +104,7 @@ test("admin UI workflow stamps a create-from-policy payload (attaches policy_id)
     ...workflow.emptyEntitlementForm,
     policy_id: "pol_123",
     license_fingerprint: "b".repeat(64),
+    customer_id: "cus_1",
     valid_from: "2024-03-09",
   });
   assert.equal(body.policy_id, "pol_123");
@@ -211,12 +216,12 @@ test("admin UI workflow builds the bulk transition path and body", async () => {
   // Selection is no longer capped at four; the batch runner splits a larger run into chunks.
   assert.equal(workflow.boundedBatchSelection, undefined);
   assert.equal(workflow.entitlementBatchSelectionNotice, undefined);
-  assert.deepEqual(workflow.batchBody("disable", [{ id: "a", customer_id: "cus_a", revocation_seq: 1 }, { id: "b", customer_id: null, revocation_seq: 2 }], "audit"), {
+  assert.deepEqual(workflow.batchBody("disable", [{ id: "a", customer_id: "cus_a", revocation_seq: 1 }, { id: "b", customer_id: "cus_b", revocation_seq: 2 }], "audit"), {
     action: "disable",
     reason: "audit",
     rows: [
       { id: "a", expected_customer_id: "cus_a", expected_revocation_seq: 1 },
-      { id: "b", expected_customer_id: null, expected_revocation_seq: 2 },
+      { id: "b", expected_customer_id: "cus_b", expected_revocation_seq: 2 },
     ],
   });
   const rows = [{ id: "x", customer_id: "cus_x", revocation_seq: 1 }];

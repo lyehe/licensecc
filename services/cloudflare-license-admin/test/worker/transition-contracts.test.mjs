@@ -268,7 +268,7 @@ function entitlementRecord(status, revocationSeq = 7) {
     valid_from: null,
     valid_until: null,
     notes: "",
-    customer_id: null,
+    customer_id: "cus_1",
     license_id: null,
     created_at: 1,
     updated_at: 2,
@@ -585,7 +585,7 @@ test("compiled entitlement transition state matrix distinguishes changes, no-ops
 test("compiled entitlement handler maps a guarded CAS loser to the documented stale_transition conflict", async () => {
   const db = new CasLoserFixtureDb(entitlementRecord("active", 7), entitlementRecord("active", 8));
   const response = await handleMutation(
-    post(entitlementTransitionPath("disable"), { reason: "support", expected_customer_id: null, expected_revocation_seq: 7 }),
+    post(entitlementTransitionPath("disable"), { reason: "support", expected_customer_id: "cus_1", expected_revocation_seq: 7 }),
     { DB: db },
     ACTOR,
     REQUEST_ID,
@@ -609,7 +609,7 @@ test("compiled entitlement handler serves the winner cache for a same-key guarde
     JSON.stringify(winnerBody),
   );
   const response = await handleMutation(
-    post(entitlementTransitionPath("disable"), { reason: "support", expected_customer_id: null, expected_revocation_seq: 7 }, { "idempotency-key": "same-key-race" }),
+    post(entitlementTransitionPath("disable"), { reason: "support", expected_customer_id: "cus_1", expected_revocation_seq: 7 }, { "idempotency-key": "same-key-race" }),
     { DB: db },
     ACTOR,
     REQUEST_ID,
