@@ -41,7 +41,6 @@ import {
 } from "./groups/catalog/import-operations.js";
 import { listCustomers, getCustomer, handleCustomerTransition, listLicenses, listOrders, globalSearch } from "./groups/customers/operations.js";
 import { listPolicies, getPolicy, handlePolicyMutation } from "./groups/policies/operations.js";
-import { handleReleaseSeats, handleDeviceList, handleMeterStatus, handleDeviceTransition } from "./groups/devices/operations.js";
 import {
   getWebhook,
   handleWebhookMutation,
@@ -67,8 +66,7 @@ const HANDLERS: Record<string, BoundRun> = {
   "GET /api/admin/customers/{id}/bindings": (r,e,g,id,a)=>adminBindings(r,e,a,g[0]??"",id),
   "GET /api/admin/customers/{id}/bindings/{bindingId}/events": (r,e,g,id,a)=>adminBindings(r,e,a,g[0]??"",id,g[1]??""),
   "POST /api/admin/customers/{id}/bindings/{bindingId}/retire": (r,e,g,id,a)=>adminRetireBinding(r,e,a,g[0]??"",g[1]??"",id),
-  "GET /api/admin/customers/{id}/apps": (request, env, g, rid) => customerWorkspace(request, env, decodeURIComponent(g[0] ?? ""), rid, "apps"),
-  "GET /api/admin/customers/{id}/resources": (request, env, g, rid) => customerWorkspace(request, env, decodeURIComponent(g[0] ?? ""), rid, "resources"),
+  "GET /api/admin/customers/{id}/apps": (request, env, g, rid) => customerWorkspace(request, env, decodeURIComponent(g[0] ?? ""), rid),
   "GET /api/admin/summary": (_r, env, _g, rid) => summary(env, rid),
   "GET /api/admin/report": (_r, env, _g, rid) => report(env, rid),
   "GET /api/admin/report/timeseries": (request, env, _g, rid) => reportTimeseries(request, env, rid),
@@ -124,17 +122,11 @@ const HANDLERS: Record<string, BoundRun> = {
   "GET /api/admin/entitlements": (request, env, _g, rid) => listEntitlements(request, env, rid),
   "POST /api/admin/entitlements": (request, env, _g, rid, actor) => handleMutation(request, env, actor, rid),
   "POST /api/admin/entitlements/batch": (request, env, _g, rid, actor) => handleBatchTransition(request, env, actor, rid),
-  "POST /api/admin/entitlements/{id}/release-seats": (request, env, g, rid, actor) => handleReleaseSeats(request, env, actor, g[0] ?? "", rid),
   "GET /api/admin/entitlements/{id}": (_r, env, g, rid) => entitlementDetail(env, g[0] ?? "", rid),
   "PATCH /api/admin/entitlements/{id}": (request, env, _g, rid, actor) => handleMutation(request, env, actor, rid),
   "POST /api/admin/entitlements/{id}/disable": (request, env, _g, rid, actor) => handleMutation(request, env, actor, rid),
   "POST /api/admin/entitlements/{id}/reenable": (request, env, _g, rid, actor) => handleMutation(request, env, actor, rid),
   "POST /api/admin/entitlements/{id}/revoke": (request, env, _g, rid, actor) => handleMutation(request, env, actor, rid),
-  "GET /api/admin/entitlements/{id}/devices": (_r, env, g, rid) => handleDeviceList(env, g[0] ?? "", rid),
-  "GET /api/admin/entitlements/{id}/meter": (_r, env, g, rid) => handleMeterStatus(env, g[0] ?? "", rid),
-  "POST /api/admin/entitlements/{id}/devices/{deviceKeyId}/revoke": (request, env, g, rid, actor) => handleDeviceTransition(request, env, actor, g[0] ?? "", g[1] ?? "", "revoke", rid),
-  "POST /api/admin/entitlements/{id}/devices/{deviceKeyId}/disable": (request, env, g, rid, actor) => handleDeviceTransition(request, env, actor, g[0] ?? "", g[1] ?? "", "disable", rid),
-  "POST /api/admin/entitlements/{id}/devices/{deviceKeyId}/reenable": (request, env, g, rid, actor) => handleDeviceTransition(request, env, actor, g[0] ?? "", g[1] ?? "", "reenable", rid),
   "GET /api/admin/events": (request, env, _g, rid) => listEvents(request, env, rid),
   // Served from the fetch handler via handleSync (its own auth); listed here so the binding
   // inventory equals the canonical route table. Never dispatched through handleApi's loop

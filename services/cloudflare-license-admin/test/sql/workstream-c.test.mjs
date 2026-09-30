@@ -1,7 +1,7 @@
 // Workstream C BACKEND — bulk transitions, global search, CSV export (real SQLite,
 // end-to-end through worker.fetch).
 //
-// The hermetic unit MockD1 (admin-worker.test.mjs) is hand-specialized to the entitlement SQL and
+// The hermetic unit MockD1 (test/worker/fixtures.mjs) is hand-specialized to the entitlement SQL and
 // THROWS on the customers/licenses/orders/search/entitlement_events SQL these features touch, so
 // this suite drives the REAL compiled worker over an in-memory SQLite built from the shared
 // migrations/*.sql wrapped in a D1-like adapter — nothing about the new SQL is mocked.

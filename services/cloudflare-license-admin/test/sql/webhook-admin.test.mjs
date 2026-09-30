@@ -1,6 +1,6 @@
 // Webhook endpoint CRUD + delivery status/redrive (real SQLite, end-to-end through worker.fetch).
 //
-// The hermetic unit MockD1 (admin-worker.test.mjs) only knows the entitlement SQL and throws on
+// The hermetic unit MockD1 (test/worker/fixtures.mjs) only knows the entitlement SQL and throws on
 // anything else, so webhook CRUD (webhook_endpoints / webhook_deliveries) cannot run
 // there. This suite drives the REAL compiled worker over an in-memory SQLite built from the shared
 // baseline migration wrapped in a D1-like adapter — nothing about the webhook SQL

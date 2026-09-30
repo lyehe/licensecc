@@ -6,7 +6,6 @@ import { customerRoutes } from "./groups/customers.js";
 import { catalogRoutes } from "./groups/catalog.js";
 import { policyRoutes } from "./groups/policies.js";
 import { entitlementRoutes } from "./groups/entitlements.js";
-import { deviceRoutes } from "./groups/devices.js";
 import { webhookRoutes } from "./groups/webhooks.js";
 import { syncRoutes } from "./groups/sync.js";
 
@@ -17,7 +16,6 @@ export const ROUTE_DESCRIPTORS: readonly RouteDescriptor[] = [
   ...catalogRoutes,
   ...policyRoutes,
   ...entitlementRoutes,
-  ...deviceRoutes,
   ...webhookRoutes,
   ...syncRoutes,
 ];

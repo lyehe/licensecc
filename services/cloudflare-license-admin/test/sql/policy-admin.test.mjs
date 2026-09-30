@@ -1,6 +1,6 @@
 // Stage 3 — license-policy CRUD + create-from-policy stamp (real SQLite, end-to-end through worker.fetch).
 //
-// The hermetic unit MockD1 (admin-worker.test.mjs) only knows the entitlement SQL and throws on anything
+// The hermetic unit MockD1 (test/worker/fixtures.mjs) only knows the entitlement SQL and throws on anything
 // else, so policy CRUD (entitlement_policies / policy_events) + the atomic policy-stamp side-write cannot
 // run there. This suite drives the REAL compiled worker over an in-memory SQLite built from the shared
 // baseline migration (which includes entitlement_policies + policy_events) wrapped in a D1-like

@@ -5,7 +5,6 @@ import {
   ADMIN_MUTATION_AUTH_ERRORS,
   ADMIN_SECURITY,
   csvExportResponse,
-  deviceKeyIdParam,
   errorResponse,
   featureKeyParam,
   formatCsvParam,

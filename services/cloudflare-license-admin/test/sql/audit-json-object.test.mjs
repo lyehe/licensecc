@@ -1,4 +1,4 @@
-// Real-SQLite coverage for the audit payload (TEST-3). The unit suite (admin-worker.test.mjs) and the
+// Real-SQLite coverage for the audit payload (TEST-3). The unit suite (test/worker/*.test.mjs) and the
 // cross-worker e2e both use JS MockD1s that build next_json with JSON.stringify, so the actual SQLite
 // json_object() expression in src/worker/index.ts is never executed and its shape/type fidelity is unverified.
 // This suite executes the REAL json_object expression (extracted from the worker source) against a database

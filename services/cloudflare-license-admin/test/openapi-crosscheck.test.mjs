@@ -15,7 +15,6 @@ import { test } from "node:test";
 import { isDeepStrictEqual } from "node:util";
 import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "../dist-worker/worker/openapi/assemble.js";
 import { openApiDocument } from "../dist-worker/worker/openapi/document.js";
-import "./worker/transition-contracts.test.mjs";
 import { PAGINATION_ROUTE_OPTIONS } from "../dist-worker/worker/query.js";
 import { API_ROUTES, ALL_ROUTES, META_ROUTES } from "../dist-worker/worker/routes.js";
 import { API_BINDING_KEYS } from "../dist-worker/worker/index.js";

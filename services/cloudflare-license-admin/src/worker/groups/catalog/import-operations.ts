@@ -163,8 +163,8 @@ export async function exportCatalogPlan(env: Env, planId: string, requestIdValue
 }
 
 // ── Slice 4: operator console ────────────────────────────────────────────────
-// Read surface over the already-isolated tables (customers / licenses / orders /
-// account_tokens) + the customer kill-switch. All reads are reader+admin; the only
+// Read surface over the already-isolated tables (customers / licenses / orders)
+// + the customer kill-switch. All reads are reader+admin; the only
 // write (customer disable/reenable) is gated by requireAdmin so reader RBAC blocks it.
 // Design: docs/superpowers/plans/2026-06-24-slice4-operator-console-blueprint.md.
 

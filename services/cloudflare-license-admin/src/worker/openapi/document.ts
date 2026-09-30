@@ -9,7 +9,6 @@ import { protectedOnboardingComponents } from "./protected-onboarding.js";
 import { deviceLimitComponents } from "./device-limit.js";
 import { catalogPaths } from "./paths/catalog.js";
 import { customerPaths, searchPaths } from "./paths/customers.js";
-import { devicePaths } from "./paths/devices.js";
 import { entitlementPaths } from "./paths/entitlements.js";
 import { metaPaths } from "./paths/meta.js";
 import { policyPaths } from "./paths/policies.js";
@@ -43,7 +42,6 @@ const paths = assemblePaths(
   catalogPaths,
   webhookPaths,
   entitlementPaths,
-  devicePaths,
   searchPaths,
   syncPaths,
 );

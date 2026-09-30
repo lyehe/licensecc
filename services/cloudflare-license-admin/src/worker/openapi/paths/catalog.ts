@@ -5,7 +5,6 @@ import {
   ADMIN_SECURITY,
   catalogImportConflictResponse,
   csvExportResponse,
-  deviceKeyIdParam,
   errorResponse,
   featureKeyParam,
   formatCsvParam,

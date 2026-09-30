@@ -193,14 +193,6 @@ export const idParam = {
   schema: { type: "string" },
 } as const;
 
-export const deviceKeyIdParam = {
-  name: "deviceKeyId",
-  in: "path",
-  required: true,
-  description: "The relay-resistance device key id, form `sha256:<64-hex>` (URL-encoded in the path).",
-  schema: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
-} as const;
-
 export const featureKeyParam = {
   name: "featureKey",
   in: "path",
@@ -881,7 +873,6 @@ export const openApiComponents: LabeledComponentFragment = {
           generated_at: { type: "integer" },
           entitlements: { type: "object", properties: { total: { type: "integer" }, active: { type: "integer" }, revoked: { type: "integer" }, disabled: { type: "integer" } } },
           customers: { type: "object", properties: { total: { type: "integer" }, active: { type: "integer" }, disabled: { type: "integer" } } },
-          account_tokens: { type: "object", properties: { active: { type: "integer" } } },
           licenses: { type: "object", properties: { total: { type: "integer" } } },
           fulfillment: {
             type: "object",
@@ -927,17 +918,6 @@ export const openApiComponents: LabeledComponentFragment = {
               properties: {
                 project: { type: "string" }, feature: { type: "string" }, license_fingerprint: { type: "string" }, status: { type: "string" },
                 valid_from: { type: ["integer", "null"] }, valid_until: { type: ["integer", "null"] }, revocation_seq: { type: "integer" }, updated_at: { type: "integer" },
-              },
-            },
-          },
-          account_tokens: {
-            type: "array",
-            description: "token_hmac and pepper_key_id are deliberately never returned.",
-            items: {
-              type: "object",
-              properties: {
-                id: { type: "string" }, token_prefix: { type: "string" }, name: { type: "string" }, status: { type: "string" },
-                scopes_json: { type: ["string", "null"] }, expires_at: { type: ["integer", "null"] }, last_used_at: { type: ["integer", "null"] }, created_at: { type: "integer" },
               },
             },
           },
@@ -1210,49 +1190,6 @@ export const openApiComponents: LabeledComponentFragment = {
             },
           },
           next_cursor: { type: ["string", "null"] },
-        },
-      }],
-      ["ReleaseSeatsData", {
-        type: "object",
-        required: ["released", "seat_ids"],
-        properties: {
-          released: { type: "integer", minimum: 0, description: "Count of LIVE seats reclaimed (0 is a valid idempotent success)." },
-          seat_ids: { type: "array", uniqueItems: true, items: { type: "string" }, description: "The reclaimed seat_ids (sorted; exactly one per released seat)." },
-        },
-      }],
-      ["EntitlementDevice", {
-        type: "object",
-        description: "A registered relay-resistance device key (entitlement_devices). The public key is not surfaced here.",
-        required: ["project", "feature", "license_fingerprint", "device_key_id", "status", "created_at", "updated_at"],
-        properties: {
-          project: { type: "string" },
-          feature: { type: "string" },
-          license_fingerprint: { type: "string" },
-          device_key_id: { type: "string", description: "sha256:<64-hex>." },
-          status: { type: "string", enum: ["active", "revoked", "disabled"] },
-          created_at: { type: "integer" },
-          updated_at: { type: "integer" },
-          last_seen_at: { type: ["integer", "null"], description: "Last time this device presented a valid request proof (null if never)." },
-          notes: { type: "string" },
-        },
-      }],
-      ["DevicesListData", {
-        type: "object",
-        required: ["items"],
-        properties: {
-          items: { type: "array", items: { $ref: "#/components/schemas/EntitlementDevice" }, description: "The entitlement's device keys, newest-touched first (max 200)." },
-        },
-      }],
-      ["MeterStatusData", {
-        type: "object",
-        required: ["meter_quota", "meter_period_sec", "period_start", "period_end", "units_consumed", "server_time"],
-        properties: {
-          meter_quota: { type: "integer", description: "Per-period quota (0 = unlimited/count-only)." },
-          meter_period_sec: { type: "integer", description: "Rolling period length in seconds." },
-          period_start: { type: "integer", description: "Unix seconds; start of the current period." },
-          period_end: { type: "integer", description: "Unix seconds; period_start + meter_period_sec." },
-          units_consumed: { type: "integer", description: "Units consumed in the current period (0 if none yet). Reading this does NOT increment it." },
-          server_time: { type: "integer" },
         },
       }],
     ]],

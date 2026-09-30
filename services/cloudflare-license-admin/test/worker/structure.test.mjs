@@ -23,7 +23,7 @@ test("entrypoint, app, and registry contain no context SQL or transitions", () =
   for (const relativePath of ["index.ts", "app.ts", "operations.ts"]) {
     const contents = source(relativePath);
     assert.doesNotMatch(contents, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b/);
-    assert.doesNotMatch(contents, /transitionWithGuard|transitionEntitlement|forceReleaseLiveSeats/);
+    assert.doesNotMatch(contents, /transitionWithGuard|transitionEntitlement/);
   }
 });
 
@@ -40,7 +40,7 @@ test("entrypoint has one module-worker edge and the adapter contains no business
   assert.match(adapter, /export\s+type\s+\{\s*Env\s*\}/);
   assert.match(adapter, /export\s+default\s+adminApp/);
   assert.doesNotMatch(adapter, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b/);
-  assert.doesNotMatch(adapter, /transitionWithGuard|transitionEntitlement|forceReleaseLiveSeats/);
+  assert.doesNotMatch(adapter, /transitionWithGuard|transitionEntitlement/);
   assert.doesNotMatch(adapter, /\b(?:async\s+function|function\s+\w+|=>)\b/);
 });
 
@@ -51,7 +51,6 @@ test("every bounded context has a local operation implementation", () => {
     "catalog",
     "policies",
     "entitlements",
-    "devices",
     "sync",
   ]) {
     const contents = source(`groups/${group}/operations.ts`);

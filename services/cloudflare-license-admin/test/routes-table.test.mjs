@@ -9,8 +9,8 @@ test("pathToPattern compiles templates to anchored regexes", () => {
   const re = pathToPattern("/api/admin/policies/{id}");
   assert.deepEqual("/api/admin/policies/p-1".match(re)?.slice(1), ["p-1"]);
   assert.equal("/api/admin/policies/p-1/disable".match(re), null);
-  const re2 = pathToPattern("/api/admin/entitlements/{id}/devices/{deviceKeyId}/revoke");
-  assert.deepEqual("/api/admin/entitlements/e1/devices/d1/revoke".match(re2)?.slice(1), ["e1", "d1"]);
+  const re2 = pathToPattern("/api/admin/customers/{id}/bindings/{bindingId}/retire");
+  assert.deepEqual("/api/admin/customers/c1/bindings/b1/retire".match(re2)?.slice(1), ["c1", "b1"]);
 });
 
 test("the admin serves no seat, legacy-device, meter or resources route", () => {
@@ -51,7 +51,7 @@ test("every canonical route has one bounded-context owner and preserves raw temp
     const matched = matchRoute(route.method, concretePath);
     assert.ok(matched, `${route.method} ${route.path} did not resolve`);
     assert.equal(matched.descriptor.path, route.path);
-    assert.match(matched.descriptor.group, /^(meta|summary-reports|customers|catalog|policies|entitlements|devices|webhooks|sync)$/);
+    assert.match(matched.descriptor.group, /^(meta|summary-reports|customers|catalog|policies|entitlements|webhooks|sync)$/);
     assert.deepEqual(matched.params, expectedParams, `${route.method} ${route.path} decoded or lost a path capture`);
   }
 });

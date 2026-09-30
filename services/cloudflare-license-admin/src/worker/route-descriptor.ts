@@ -9,7 +9,6 @@ export type RouteGroup =
   | "catalog"
   | "policies"
   | "entitlements"
-  | "devices"
   | "webhooks"
   | "sync";
 

@@ -1,4 +1,4 @@
-// Workstream F — usage-analytics reports + the stuck-seat force-release lever
+// Workstream F — usage-analytics reports
 // (real SQLite, end-to-end through worker.fetch). Mirrors policy-admin.test.mjs: the
 // REAL compiled worker is driven over an in-memory SQLite built from the shared
 // migrations/*.sql wrapped in a D1-like adapter — nothing about the analytics SQL is mocked.
@@ -8,9 +8,7 @@
 //                 an empty window returns zero-filled buckets; from >= to is 400.
 //   expiring    — in-window vs out-of-window vs non-active vs no-valid_until; valid_until ASC
 //                 ordering; days_left = ceil((valid_until-now)/86400); cursor pagination.
-//   force-release — reclaims ONLY live seats (heartbeat_deadline > now); writes one 'reclaim'
-//                 usage_events row per seat (reason='force_release'); idempotent 0-release;
-//                 reader RBAC is blocked (admin-only); reason is required.
+//   RBAC        — a reader can read both reports.
 //
 // Requires node:sqlite (Node >= 22 with --experimental-sqlite). Run via `npm run test:sql`.
 
@@ -25,7 +23,6 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 
 import worker from "../../dist-worker/worker/index.js";
 import { entitlementId } from "@licensecc/licensing-domain/entitlements/contracts";
-import { forceReleaseLiveSeats } from "@licensecc/cloudflare-runtime/lease/seat_reclaim";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "..", "cloudflare-licensing-backend", "migrations");
@@ -198,12 +195,6 @@ function insertEntitlement(db, fp, {
 
 function insertCustomer(db, id, name, now = 1000) {
   db.prepare("INSERT INTO customers (id, name, email, created_at, updated_at) VALUES (?,?,?,?,?)").run(id, name, "", now, now);
-}
-
-function insertSeat(db, fp, seatId, heartbeatDeadline, { mode = "live", now = 1000 } = {}) {
-  db.prepare(
-    "INSERT INTO seat_checkouts (project, feature, license_fingerprint, seat_id, client_instance_id, mode, checked_out_at, heartbeat_deadline) VALUES ('DEFAULT','DEFAULT',?,?,?,?,?,?)",
-  ).run(fp, seatId, `inst_${seatId}`, mode, now, heartbeatDeadline);
 }
 
 // ── Time-series ───────────────────────────────────────────────────────────────
@@ -513,169 +504,18 @@ test("expiring: an activated trial clamps to an EARLIER valid_until, exactly lik
   assert.equal(boundClamped.days_left, 3);
 });
 
-// ── Force-release ───────────────────────────────────────────────────────────────
+// ── Reader access ─────────────────────────────────────────────────────────────
 
-test("force-release helper: reclaims live seats and emits balanced reclaim events", async () => {
-  const db = freshDb();
-  const env = devEnv(db);
-  const now = Math.floor(Date.now() / 1000);
-  insertEntitlement(db, FP_A, { now, enforcementMode: "legacy" });
-  insertSeat(db, FP_A, "seat_live_2", now + 1200, { now });
-  insertSeat(db, FP_A, "seat_live_1", now + 600, { now });
-  insertSeat(db, FP_A, "seat_dead", now - 60, { now });
-
-  const result = await forceReleaseLiveSeats(
-    env,
-    { project: "DEFAULT", feature: "DEFAULT", license_fingerprint: FP_A },
-    now,
-  );
-  assert.deepEqual(result, { released: 2, seat_ids: ["seat_live_1", "seat_live_2"] });
-  assert.deepEqual(
-    db.prepare("SELECT seat_id FROM seat_checkouts WHERE license_fingerprint=? ORDER BY seat_id").all(FP_A).map((row) => row.seat_id),
-    ["seat_dead"],
-  );
-  assert.deepEqual(
-    db.prepare("SELECT seat_id, event_type, reason FROM usage_events WHERE license_fingerprint=? ORDER BY seat_id")
-      .all(FP_A)
-      .map((row) => ({ seat_id: row.seat_id, event_type: row.event_type, reason: row.reason })),
-    [
-      { seat_id: "seat_live_1", event_type: "reclaim", reason: "force_release" },
-      { seat_id: "seat_live_2", event_type: "reclaim", reason: "force_release" },
-    ],
-  );
-});
-
-test("force-release: reclaims ONLY live seats and writes a 'reclaim' usage_events row per seat", async () => {
-  const db = freshDb();
-  const env = devEnv(db);
-  const now = Math.floor(Date.now() / 1000);
-  insertEntitlement(db, FP_A, { now, enforcementMode: "legacy" });
-  // Two LIVE seats (deadline in the future) + one DEAD seat (deadline in the past).
-  insertSeat(db, FP_A, "seat_live_1", now + 600, { now });
-  insertSeat(db, FP_A, "seat_live_2", now + 1200, { now });
-  insertSeat(db, FP_A, "seat_dead", now - 60, { now });
-  // A seat on a DIFFERENT entitlement must be untouched.
-  insertEntitlement(db, FP_B, { now, enforcementMode: "legacy" });
-  insertSeat(db, FP_B, "other_live", now + 600, { now });
-
-  const id = entitlementId("DEFAULT", "DEFAULT", FP_A);
-  const res = await worker.fetch(devReq(`/api/admin/entitlements/${id}/release-seats`, {
-    method: "POST",
-    body: JSON.stringify({ reason: "dead machine" }),
-  }), env);
-  assert.equal(res.status, 200, await res.clone().text());
-  const data = (await body(res)).data;
-  assert.equal(data.released, 2);
-  assert.deepEqual(data.seat_ids, ["seat_live_1", "seat_live_2"]);
-
-  // The two live seats were deleted; the dead seat row remains (only LIVE seats are swept).
-  const remaining = db.prepare("SELECT seat_id FROM seat_checkouts WHERE license_fingerprint=? ORDER BY seat_id").all(FP_A);
-  assert.deepEqual(remaining.map((r) => r.seat_id), ["seat_dead"]);
-  // The other entitlement's seat is untouched.
-  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM seat_checkouts WHERE license_fingerprint=?").get(FP_B).c, 1);
-
-  // One 'reclaim' usage_events row per reclaimed seat, reason='force_release', device_key_id NULL.
-  const reclaims = db.prepare(
-    "SELECT seat_id, event_type, reason, device_key_id FROM usage_events WHERE license_fingerprint=? ORDER BY seat_id",
-  ).all(FP_A);
-  assert.equal(reclaims.length, 2);
-  for (const row of reclaims) {
-    assert.equal(row.event_type, "reclaim");
-    assert.equal(row.reason, "force_release");
-    assert.equal(row.device_key_id, null);
-  }
-  assert.deepEqual(reclaims.map((r) => r.seat_id), ["seat_live_1", "seat_live_2"]);
-});
-
-test("force-release: 0 released is a valid idempotent {ok:true}", async () => {
-  const db = freshDb();
-  const env = devEnv(db);
-  const now = Math.floor(Date.now() / 1000);
-  insertEntitlement(db, FP_A, { now, enforcementMode: "legacy" });
-  // Only a DEAD seat exists -> nothing live to reclaim.
-  insertSeat(db, FP_A, "seat_dead", now - 60, { now });
-
-  const id = entitlementId("DEFAULT", "DEFAULT", FP_A);
-  const res = await worker.fetch(devReq(`/api/admin/entitlements/${id}/release-seats`, {
-    method: "POST",
-    body: JSON.stringify({ reason: "sweep" }),
-  }), env);
-  assert.equal(res.status, 200);
-  const data = (await body(res)).data;
-  assert.equal(data.released, 0);
-  assert.deepEqual(data.seat_ids, []);
-  // No reclaim rows written when nothing was live.
-  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM usage_events WHERE license_fingerprint=?").get(FP_A).c, 0);
-});
-
-test("force-release: replaying the same Idempotency-Key returns the cached result, no double reclaim", async () => {
-  const db = freshDb();
-  const env = devEnv(db);
-  const now = Math.floor(Date.now() / 1000);
-  insertEntitlement(db, FP_A, { now, enforcementMode: "legacy" });
-  insertSeat(db, FP_A, "seat_live_1", now + 600, { now });
-
-  const id = entitlementId("DEFAULT", "DEFAULT", FP_A);
-  const headers = { "idempotency-key": "force-1" };
-  const first = await worker.fetch(devReq(`/api/admin/entitlements/${id}/release-seats`, { method: "POST", headers, body: JSON.stringify({ reason: "x" }) }), env);
-  assert.equal((await body(first)).data.released, 1);
-
-  const second = await worker.fetch(devReq(`/api/admin/entitlements/${id}/release-seats`, { method: "POST", headers, body: JSON.stringify({ reason: "x" }) }), env);
-  assert.equal(second.headers.get("x-idempotent-replay"), "1");
-  assert.equal((await body(second)).data.released, 1, "replayed cached result, not a fresh 0-release");
-  // Exactly one reclaim row — the replay never re-ran the mutation.
-  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM usage_events WHERE license_fingerprint=?").get(FP_A).c, 1);
-});
-
-test("force-release: reason is required (400 reason_required)", async () => {
-  const db = freshDb();
-  const env = devEnv(db);
-  const now = Math.floor(Date.now() / 1000);
-  insertEntitlement(db, FP_A, { now, enforcementMode: "legacy" });
-  insertSeat(db, FP_A, "seat_live_1", now + 600, { now });
-  const id = entitlementId("DEFAULT", "DEFAULT", FP_A);
-  for (const payload of ["{}", JSON.stringify({ reason: "" })]) {
-    const res = await worker.fetch(devReq(`/api/admin/entitlements/${id}/release-seats`, { method: "POST", body: payload }), env);
-    assert.equal(res.status, 400, payload);
-    assert.equal((await body(res)).code, "reason_required");
-  }
-  // No seat was reclaimed by a rejected request.
-  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM seat_checkouts WHERE license_fingerprint=?").get(FP_A).c, 1);
-});
-
-test("force-release: a malformed entitlement id is 400 invalid_entitlement_id", async () => {
-  const db = freshDb();
-  const env = devEnv(db);
-  const res = await worker.fetch(devReq("/api/admin/entitlements/!!!notbase64!!!/release-seats", { method: "POST", body: JSON.stringify({ reason: "x" }) }), env);
-  assert.equal(res.status, 400);
-  assert.equal((await body(res)).code, "invalid_entitlement_id");
-});
-
-test("force-release: reader RBAC is blocked; reports + reads stay reader+admin", async (t) => {
+test("reports: a reader can read the timeseries and expiring reports", async (t) => {
   const db = freshDb();
   const fixture = await accessFixture(t);
   const env = accessEnv(db, fixture);
-  const admin = await accessToken(fixture, "admin@example.com");
   const reader = await accessToken(fixture, "reader@example.com");
   const now = Math.floor(Date.now() / 1000);
-  insertEntitlement(db, FP_A, { validUntil: now + 5 * 86400, now, enforcementMode: "legacy" });
-  insertSeat(db, FP_A, "seat_live_1", now + 600, { now });
-  const id = entitlementId("DEFAULT", "DEFAULT", FP_A);
+  insertEntitlement(db, FP_A, { validUntil: now + 5 * 86400, now });
 
-  // Reader CAN read both reports.
   assert.equal((await worker.fetch(accessReq("/api/admin/report/timeseries", reader), env)).status, 200);
-  assert.equal((await worker.fetch(accessReq("/api/admin/report/expiring", reader), env)).status, 200);
-
-  // Reader CANNOT force-release (admin-only WRITE).
-  const denied = await worker.fetch(accessReq(`/api/admin/entitlements/${id}/release-seats`, reader, { method: "POST", body: JSON.stringify({ reason: "x" }) }), env);
-  assert.equal(denied.status, 403);
-  assert.equal((await body(denied)).code, "admin_role_required");
-  // The reader's denied write changed nothing.
-  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM seat_checkouts WHERE license_fingerprint=?").get(FP_A).c, 1);
-  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM usage_events WHERE license_fingerprint=?").get(FP_A).c, 0);
-
-  // Admin CAN force-release.
-  const allowed = await worker.fetch(accessReq(`/api/admin/entitlements/${id}/release-seats`, admin, { method: "POST", body: JSON.stringify({ reason: "ok" }) }), env);
-  assert.equal(allowed.status, 200);
-  assert.equal((await body(allowed)).data.released, 1);
+  const expiring = await worker.fetch(accessReq("/api/admin/report/expiring", reader), env);
+  assert.equal(expiring.status, 200);
+  assert.deepEqual((await body(expiring)).data.items.map((item) => item.license_fingerprint), [FP_A]);
 });

@@ -7,7 +7,6 @@ export const customerRoutes = [
   operationDescriptor("customers", "admin", "POST", "/api/admin/customers"),
   operationDescriptor("customers", "admin", "POST", "/api/admin/customers/{id}/licenses", ["id"]),
   operationDescriptor("customers", "reader", "GET", "/api/admin/customers/{id}/apps", ["id"]),
-  operationDescriptor("customers", "reader", "GET", "/api/admin/customers/{id}/resources", ["id"]),
   operationDescriptor("customers", "reader", "GET", "/api/admin/customers/{id}/access", ["id"]),
   operationDescriptor("customers", "reader", "GET", "/api/admin/customers"),
   operationDescriptor("customers", "reader", "GET", "/api/admin/customers/{id}", ["id"]),

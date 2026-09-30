@@ -12,7 +12,6 @@ import { worker, baseEnv, authed } from "../worker/fixtures.mjs";
 // protected grant refuses a limit below its connected devices and says how many there are (ADR 0006).
 const path = "/api/admin/entitlements";
 const protectedGrant = { project: "APP", feature: "PRO", license_fingerprint: "a".repeat(64), customer_id: "owner", license_id: "license", enforcement_mode: "device_bound_v1" };
-const legacyGrant = { project: "APP", feature: "LEGACY", license_fingerprint: "b".repeat(64) };
 const HOUR = 3600;
 
 function fixture(t) {
@@ -43,12 +42,6 @@ function fixture(t) {
     clock(value) { now = value; },
     race(fn) { beforeBatch = fn; },
     snapshot: () => ["entitlements", "entitlement_events", "mutation_idempotency"].map((table) => sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()),
-    // The admin API creates only protected grants; a legacy grant is inserted directly.
-    seedLegacy(grant = legacyGrant) {
-      sql.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,status,enforcement_mode,created_at,updated_at) VALUES(?,?,?,'active','legacy',1,1)")
-        .run(grant.project, grant.feature, grant.license_fingerprint);
-      return entitlementId(grant.project, grant.feature, grant.license_fingerprint);
-    },
     send(body, key = crypto.randomUUID(), url = path, method = "POST") {
       const headers = key === null ? {} : { "idempotency-key": key };
       return worker.fetch(authed(url, { method, headers, body: JSON.stringify(body) }), env);
@@ -109,7 +102,7 @@ test("a create that selects a policy cannot also set a device limit; the policy 
 
 test("a device limit outside 1 to 1,000,000 is refused before any write", async t => {
   const f = fixture(t);
-  const id = f.seedLegacy();
+  const { id } = await created(await f.send(protectedGrant));
   const before = f.snapshot();
   for (const value of [0, -1, 1_000_001, 2.5, "3", null, true, [3], 1e21]) {
     await refused(await f.send({ ...protectedGrant, max_active_devices: value }), 400, "invalid_request", undefined);

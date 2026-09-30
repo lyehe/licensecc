@@ -12,7 +12,6 @@ import {
   transitionCatalogPlan,
   transitionCatalogPlanFeature,
 } from "../../dist-worker/worker/groups/catalog/plan-operations.js";
-import { handleDeviceTransition, handleReleaseSeats } from "../../dist-worker/worker/groups/devices/operations.js";
 import { handleBatchTransition, handleMutation } from "../../dist-worker/worker/groups/entitlements/operations.js";
 import { handleWebhookMutation } from "../../dist-worker/worker/webhooks.js";
 import { MockD1, fingerprint, protectedGrant } from "./fixtures.mjs";
@@ -23,7 +22,6 @@ const REQUEST_ID = "transition-contract-request";
 const PROJECT = protectedGrant.project;
 const FEATURE = protectedGrant.feature;
 const ENTITLEMENT_ID = entitlementId(PROJECT, FEATURE, fingerprint);
-const DEVICE_KEY_ID = `sha256:${"d".repeat(64)}`;
 
 function post(path, body = {}, headers = {}) {
   return new Request(`https://admin.example${path}`, {
@@ -196,12 +194,10 @@ class StatementFixture {
 // services/cloudflare-licensing-backend/test/sql/device-transition.test.mjs so this
 // contract test cannot be mistaken for storage-semantics coverage.
 class TransitionFixtureDb {
-  constructor(before, after, { view = after, seats = [], deviceStatus = "active" } = {}) {
+  constructor(before, after, { view = after } = {}) {
     this.before = before;
     this.after = after;
     this.view = view;
-    this.seats = seats;
-    this.deviceStatus = deviceStatus;
     this.committed = false;
   }
 
@@ -212,7 +208,6 @@ class TransitionFixtureDb {
   first(sql) {
     if (sql.includes("mutation_idempotency")) return null;
     if (sql.includes("JOIN catalog_plans")) return this.view;
-    if (sql.includes("FROM entitlement_devices") && sql.includes("SELECT status")) return { status: this.deviceStatus };
     if (sql.startsWith("UPDATE webhook_deliveries")) return this.after;
     if (sql.startsWith("SELECT") && sql.includes("FROM entitlements")) return this.committed ? this.after : this.before;
     if (sql.startsWith("SELECT")) return this.before;
@@ -222,9 +217,6 @@ class TransitionFixtureDb {
 
   async batch(statements) {
     this.committed = true;
-    if (statements[0]?.sql.includes("FROM seat_checkouts")) {
-      return [{ results: [] }, { results: this.seats.map((seat_id) => ({ seat_id })) }];
-    }
     return statements.map((statement, index) => {
       if (index === 0) return { results: [this.after] };
       // Extra-statement entitlement mutations finish with a read-only snapshot
@@ -287,23 +279,6 @@ function entitlementRecord(status, revocationSeq = 7) {
 
 function guardedHandler(handler, path, body, before, after, ...args) {
   return handler(post(path, body), { DB: new TransitionFixtureDb(before, after) }, ACTOR, ...args, REQUEST_ID);
-}
-
-function deviceTransitionPath(action) {
-  return `/api/admin/entitlements/${ENTITLEMENT_ID}/devices/${encodeURIComponent(DEVICE_KEY_ID)}/${action}`;
-}
-
-function invokeDeviceTransition(action, deviceStatus, beforeSeq, returnedSeq) {
-  const body = action === "reenable" ? {} : { reason: "support" };
-  return handleDeviceTransition(
-    post(deviceTransitionPath(action), body),
-    { DB: new TransitionFixtureDb(entitlementRecord("active", beforeSeq), entitlementRecord("active", returnedSeq), { deviceStatus }) },
-    ACTOR,
-    ENTITLEMENT_ID,
-    encodeURIComponent(DEVICE_KEY_ID),
-    action,
-    REQUEST_ID,
-  );
 }
 
 function entitlementTransitionPath(action) {
@@ -499,42 +474,6 @@ const TRANSITION_CONTRACTS = [
     invoke: () => handleWebhookMutation(post("/api/admin/webhooks/deliveries/7/redrive"), { DB: new TransitionFixtureDb({ id: 7, status: "failed" }, { id: 7, status: "pending", next_attempt_at: 10 }) }, ACTOR, REQUEST_ID),
   },
   {
-    name: "device revoke",
-    path: "/api/admin/entitlements/{id}/devices/{deviceKeyId}/revoke",
-    code: "device_revoked",
-    data: { id: ENTITLEMENT_ID, status: "active", revocation_seq: 8 },
-    identity: ["id", "revocation_seq"],
-    invoke: () => invokeDeviceTransition("revoke", "active", 7, 8),
-  },
-  {
-    name: "device disable",
-    path: "/api/admin/entitlements/{id}/devices/{deviceKeyId}/disable",
-    code: "device_disabled",
-    data: { id: ENTITLEMENT_ID, status: "active", revocation_seq: 8 },
-    identity: ["id", "revocation_seq"],
-    invoke: () => invokeDeviceTransition("disable", "active", 7, 8),
-  },
-  {
-    name: "device re-enable",
-    path: "/api/admin/entitlements/{id}/devices/{deviceKeyId}/reenable",
-    code: "device_reenabled",
-    data: { id: ENTITLEMENT_ID, status: "active", revocation_seq: 8 },
-    identity: ["id", "revocation_seq"],
-    invoke: () => invokeDeviceTransition("reenable", "disabled", 7, 8),
-  },
-  {
-    name: "release seats",
-    path: "/api/admin/entitlements/{id}/release-seats",
-    code: "seats_released",
-    data: { released: 2, seat_ids: ["seat-a", "seat-z"] },
-    releasedMatchesSeatIds: true,
-    invalidData: [
-      { label: "negative released count", data: { released: -1, seat_ids: [] } },
-      { label: "duplicate seat ids", data: { released: 2, seat_ids: ["seat-a", "seat-a"] } },
-    ],
-    invoke: () => handleReleaseSeats(post(`/api/admin/entitlements/${ENTITLEMENT_ID}/release-seats`, { reason: "support" }), { DB: new TransitionFixtureDb({}, {}, { seats: ["seat-z", "seat-a"] }) }, ACTOR, ENTITLEMENT_ID, REQUEST_ID),
-  },
-  {
     name: "batch entitlement transition",
     path: "/api/admin/entitlements/batch",
     code: "batch_done",
@@ -555,18 +494,6 @@ const TRANSITION_CONTRACTS = [
   },
 ];
 
-const DEVICE_STATE_CASES = [
-  { action: "revoke", sourceStatus: "active", status: 200, code: "device_revoked", returnedSeq: 8 },
-  { action: "revoke", sourceStatus: "disabled", status: 200, code: "device_revoked", returnedSeq: 8 },
-  { action: "revoke", sourceStatus: "revoked", status: 200, code: "device_revoked", returnedSeq: 7 },
-  { action: "disable", sourceStatus: "active", status: 200, code: "device_disabled", returnedSeq: 8 },
-  { action: "disable", sourceStatus: "disabled", status: 200, code: "device_disabled", returnedSeq: 7 },
-  { action: "disable", sourceStatus: "revoked", status: 409, code: "device_is_terminal" },
-  { action: "reenable", sourceStatus: "active", status: 200, code: "device_reenabled", returnedSeq: 7 },
-  { action: "reenable", sourceStatus: "disabled", status: 200, code: "device_reenabled", returnedSeq: 8 },
-  { action: "reenable", sourceStatus: "revoked", status: 409, code: "device_is_terminal" },
-];
-
 const ENTITLEMENT_STATE_CASES = [
   { action: "revoke", sourceStatus: "active", status: 200, code: "entitlement_revoked", returnedStatus: "revoked", returnedSeq: 2 },
   { action: "revoke", sourceStatus: "disabled", status: 200, code: "entitlement_revoked", returnedStatus: "revoked", returnedSeq: 2 },
@@ -578,10 +505,6 @@ const ENTITLEMENT_STATE_CASES = [
   { action: "reenable", sourceStatus: "disabled", status: 200, code: "entitlement_reenabled", returnedStatus: "active", returnedSeq: 2 },
   { action: "reenable", sourceStatus: "revoked", status: 409, code: "revoked_entitlement_is_terminal" },
 ];
-
-function deviceOperationPath(action) {
-  return `/api/admin/entitlements/{id}/devices/{deviceKeyId}/${action}`;
-}
 
 function entitlementOperationPath(action) {
   return `/api/admin/entitlements/{id}/${action}`;
@@ -629,32 +552,7 @@ test("every assembled Worker API 2xx response has a JSON schema that requires da
       }
     }
   }
-  assert.equal(checked, 73, "the assembled Worker contract currently has 73 JSON 2xx responses; add a schema when adding one");
-});
-
-test("compiled device transition state matrix distinguishes changes, no-ops, and terminal conflicts", async () => {
-  for (const transition of DEVICE_STATE_CASES) {
-    const response = await invokeDeviceTransition(transition.action, transition.sourceStatus, 7, transition.returnedSeq ?? 7);
-    assert.equal(response.status, transition.status, `${transition.action} from ${transition.sourceStatus} runtime status`);
-    const body = await response.json();
-    assert.equal(body.ok, transition.status === 200, `${transition.action} from ${transition.sourceStatus} runtime ok`);
-    assert.equal(body.code, transition.code, `${transition.action} from ${transition.sourceStatus} runtime code`);
-    if (transition.status === 200) {
-      assertEvidence(body.data, { id: ENTITLEMENT_ID, status: "active", revocation_seq: transition.returnedSeq }, `${transition.action} from ${transition.sourceStatus} returned parent evidence`);
-    }
-    assertSchemaMatches(body, operationResponseSchema(deviceOperationPath(transition.action), String(transition.status)), `${transition.action} from ${transition.sourceStatus} runtime body`);
-  }
-
-  assert.ok(operation(deviceOperationPath("revoke")).responses?.["409"], "revoke documents a genuine stale-transition conflict while preserving already-revoked 200 no-op semantics");
-  for (const action of ["revoke", "disable", "reenable"]) {
-    const success = operation(deviceOperationPath(action)).responses?.["200"];
-    assert.match(success?.description ?? "", /authoritative revocation_seq/i, `${action} must describe the returned parent sequence`);
-    assert.match(success?.description ?? "", /unchanged/i, `${action} must describe its already-target no-op`);
-  }
-  for (const action of ["revoke", "disable", "reenable"]) {
-    const conflict = operation(deviceOperationPath(action)).responses?.["409"];
-    assert.match(conflict?.description ?? "", /concurrent/i, `${action} must document the guarded stale-transition conflict`);
-  }
+  assert.equal(checked, 66, "the assembled Worker contract currently has 66 JSON 2xx responses; add a schema when adding one");
 });
 
 test("compiled entitlement transition state matrix distinguishes changes, no-ops, and terminal conflicts", async () => {
@@ -756,10 +654,6 @@ test("real compiled transition handlers emit their table-driven identity and tra
     assert.equal(body.ok, true, `${contract.name} runtime ok`);
     assert.equal(body.code, contract.code, `${contract.name} runtime code`);
     assertEvidence(body.data, contract.data, `${contract.name} runtime data`);
-    if (contract.releasedMatchesSeatIds) {
-      assert.equal(body.data.released, body.data.seat_ids.length, `${contract.name} released must equal the exact returned seat_ids count`);
-      assert.deepEqual(body.data.seat_ids, [...body.data.seat_ids].sort(), `${contract.name} seat_ids must retain runtime sorted order`);
-    }
     assertSchemaMatches(body, operationSuccessSchema(contract.path), `${contract.name} runtime body`);
   }
 });

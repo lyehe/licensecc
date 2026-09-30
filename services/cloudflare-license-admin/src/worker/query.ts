@@ -42,7 +42,6 @@ export const SEARCH_PAGINATION_OPTIONS = Object.freeze({
 // Worker call sites, OpenAPI cross-check, and focused route tests consume one support matrix.
 export const PAGINATION_ROUTE_OPTIONS = {
   "GET /api/admin/customers/{id}/apps": DEFAULT_PAGINATION_OPTIONS,
-  "GET /api/admin/customers/{id}/resources": DEFAULT_PAGINATION_OPTIONS,
   "GET /api/admin/customers/{id}/access": DEFAULT_PAGINATION_OPTIONS,
   "GET /api/admin/catalog/projects": DEFAULT_PAGINATION_OPTIONS,
   "GET /api/admin/customers": DEFAULT_PAGINATION_OPTIONS,

@@ -4,7 +4,7 @@ import { authed, baseEnv, worker } from "./fixtures.mjs";
 import { assertRouteGroup, assertRouteGroupRejectsUnauthenticated } from "./route-group-assertions.mjs";
 
 test("customer routes have direct owners and reject anonymous access", async () => {
-  assertRouteGroup("customers", 15);
+  assertRouteGroup("customers", 14);
   await assertRouteGroupRejectsUnauthenticated("customers");
 });
 

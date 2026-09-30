@@ -13,7 +13,7 @@ const HTTP_METHODS = new Set(["get", "put", "post", "delete", "options", "head",
 
 const DEPLOYABLES = Object.freeze([
   { id: "backend", directory: "services/cloudflare-licensing-backend", expectedRoutes: 23 },
-  { id: "admin", directory: "services/cloudflare-license-admin", expectedRoutes: 75 },
+  { id: "admin", directory: "services/cloudflare-license-admin", expectedRoutes: 68 },
   { id: "portal", directory: "services/cloudflare-customer-portal", expectedRoutes: 29 },
   { id: "backup", directory: "services/cloudflare-d1-backup" },
 ]);
@@ -426,7 +426,7 @@ async function captureContracts(repoRoot) {
       routeKeysField: "API_BINDING_KEYS",
       openApi: adminOpenApi.openApiDocument,
       openApiField: "openApiDocument",
-      expectedRoutes: 75,
+      expectedRoutes: 68,
     }),
     portal: makeRouteContract({
       service: "cloudflare-customer-portal",

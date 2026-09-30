@@ -63,14 +63,9 @@ export async function getCustomer(env: Env, customerId: string, requestIdValue: 
   if (customer === null) {
     return envelope(requestIdValue, "not_found", undefined, 404);
   }
-  // NOTE: token_hmac / pepper_key_id are deliberately NEVER selected — operators see the
-  // display prefix and scope/status only, never the keyed secret material.
-  const [entitlements, tokens, licenses, orders, events] = await Promise.all([
+  const [entitlements, licenses, orders, events] = await Promise.all([
     env.DB.prepare(
       "SELECT project, feature, license_fingerprint, status, valid_from, valid_until, revocation_seq, updated_at FROM entitlements WHERE customer_id = ? ORDER BY updated_at DESC LIMIT 200",
-    ).bind(customerId).all(),
-    env.DB.prepare(
-      "SELECT id, token_prefix, name, status, scopes_json, expires_at, last_used_at, created_at FROM account_tokens WHERE customer_id = ? ORDER BY created_at DESC LIMIT 100",
     ).bind(customerId).all(),
     env.DB.prepare(
       "SELECT id, project, label, created_at, updated_at FROM licenses WHERE customer_id = ? ORDER BY created_at DESC LIMIT 100",
@@ -85,7 +80,6 @@ export async function getCustomer(env: Env, customerId: string, requestIdValue: 
   return envelope(requestIdValue, "customer", {
     customer,
     entitlements: entitlements.results,
-    account_tokens: tokens.results,
     licenses: licenses.results,
     orders: orders.results,
     events: events.results,

@@ -116,9 +116,8 @@ export async function listEvents(request: Request, env: Env, requestIdValue: str
   if (pagination === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
-  // `detail` carries the device-transition attribution ("device-revoke <keyId>: <reason>") that a
-  // device revoke/disable writes on an event_type='update' row (audit R6.5); surface it so the console
-  // + CSV distinguish a device revocation from a plain entitlement edit.
+  // `detail` carries the writer's attribution (for example "order:<intent>" on an order-driven row);
+  // surface it so the console and CSV say what caused each change.
   const eventColumns = "id, project, feature, license_fingerprint, event_type, status, revocation_seq, actor, actor_type, source, request_id, reason, detail, created_at";
   const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
   if (wantsCsv(url)) {

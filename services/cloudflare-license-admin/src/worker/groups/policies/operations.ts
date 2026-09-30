@@ -252,24 +252,3 @@ export async function handlePolicyMutation(request: Request, env: Env, actor: Ac
   }
   return envelope(requestIdValue, "not_found", undefined, 404);
 }
-
-// ── Workstream F: usage-analytics reports + stuck-seat force-release ───────────
-// Three routes over the SAME backend-owned D1. The two reports are reader+admin reads
-// (GET /api/admin/report/timeseries, /api/admin/report/expiring); the force-release WRITE
-// (POST /api/admin/entitlements/:id/release-seats) is admin-only + reason-required + audited.
-// Design: the existing GET /api/admin/report (point-in-time counts) is the closest pattern.
-// The sweep-line peak_concurrent stays the point-in-time card — the time-series is a separate,
-// single-pass GROUP-BY aggregation and deliberately does NOT re-derive concurrency.
-
-// Default time-series window when ?from/?to are omitted: the last 7 days.
-const TIMESERIES_DEFAULT_WINDOW_SECS = 604800;
-// Bucket count bounds: default 24 (an hour each over a day), hard ceiling 200 (keeps the
-// computed GROUP BY index small and the response bounded).
-const TIMESERIES_DEFAULT_BUCKETS = 24;
-const TIMESERIES_MAX_BUCKETS = 200;
-// within_days bounds for the expiring report (default 30, hard ceiling 365).
-const EXPIRING_DEFAULT_WITHIN_DAYS = 30;
-const EXPIRING_MAX_WITHIN_DAYS = 365;
-const SECONDS_PER_DAY = 86400;
-
-// Parse a non-negative epoch-seconds query param, or null when absent/blank/malformed.

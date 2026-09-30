@@ -141,12 +141,6 @@ export async function mutationResponse<T>(
     if (error instanceof Error && error.message === "invalid_patch") {
       return envelope(ctx.requestId, "invalid_request", undefined, 400);
     }
-    if (error instanceof Error && error.message === "device_not_found") {
-      return envelope(ctx.requestId, "device_not_found", undefined, 404);
-    }
-    if (error instanceof Error && error.message === "device_revoked_terminal") {
-      return envelope(ctx.requestId, "device_is_terminal", undefined, 409);
-    }
     return envelope(ctx.requestId, "mutation_failed", undefined, 500);
   }
 }

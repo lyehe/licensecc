@@ -45,9 +45,6 @@ export async function report(env: Env, requestIdValue: string): Promise<Response
       active: await count("SELECT COUNT(*) AS count FROM customers WHERE status = 'active'"),
       disabled: await count("SELECT COUNT(*) AS count FROM customers WHERE status = 'disabled'"),
     },
-    account_tokens: {
-      active: await count("SELECT COUNT(*) AS count FROM account_tokens WHERE status = 'active' AND expires_at > ?", now),
-    },
     licenses: { total: await count("SELECT COUNT(*) AS count FROM licenses") },
     fulfillment: {
       ...orders,
@@ -235,8 +232,3 @@ export async function reportExpiring(request: Request, env: Env, requestIdValue:
     next_cursor: rows.results.length > limit ? String(cursor + limit) : null,
   });
 }
-
-// POST /api/admin/entitlements/:id/release-seats (ADMIN-ONLY, reason REQUIRED). The operator lever
-// for "a seat is stuck on a dead machine": delegates the live-seat reclaim mutation to the backend's
-// seat lifecycle helper, which writes one usage_events('reclaim') row per released seat so
-// peak_concurrent stays accurate. 0 released is a valid idempotent {ok:true}. Idempotency-Key supported.
