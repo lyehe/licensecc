@@ -41,3 +41,30 @@ test("cloudflare access jwt admin can read admin summary", async (t) => {
   assert.equal(response.status, 200);
   assert.equal((await json(response)).code, "summary");
 });
+
+test("timeseries reports protected denials and no checkout series", async () => {
+  // D1 answers the usage query with every column the old checkout-series query named; the report
+  // must read only the protected refusal count and fulfillment events from it.
+  const queries = [];
+  const db = {
+    prepare(sql) {
+      queries.push(sql);
+      const rows = sql.includes("FROM usage_events")
+        ? [{ bucket: 0, checkouts: 3, releases: 2, denials: 1 }]
+        : [{ bucket: 1, fulfillment_events: 4 }];
+      const statement = { bind: () => statement, all: async () => ({ results: rows }) };
+      return statement;
+    },
+  };
+  const response = await worker.fetch(authed("/api/admin/report/timeseries?from=0&to=200&buckets=2"), baseEnv(db));
+  assert.equal(response.status, 200);
+  const data = (await json(response)).data;
+  assert.deepEqual(data.buckets, [
+    { start: 0, denials: 1, fulfillment_events: 0 },
+    { start: 100, denials: 0, fulfillment_events: 4 },
+  ]);
+  const usage = queries.find((sql) => sql.includes("FROM usage_events"));
+  assert.ok(usage, "the report reads the refusal audit");
+  assert.doesNotMatch(usage, /checkout|release|reclaim/, "no checkout or release series is read");
+  assert.match(usage, /event_type = 'denied' AND reason = 'device_limit_reached'/, "only protected device-limit refusals count");
+});

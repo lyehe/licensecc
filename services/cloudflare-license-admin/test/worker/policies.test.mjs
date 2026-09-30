@@ -104,3 +104,56 @@ test("validatePolicyPatch updates mutable fields and rejects identity fields", (
     assert.equal(validatePolicyPatch(bad), null, `expected null for ${JSON.stringify(bad)}`);
   }
 });
+
+// A D1 stand-in that records every statement and finds nothing, so a request that reaches D1 shows.
+function recordingDb() {
+  const statements = [];
+  const statement = (sql) => ({
+    bind: () => statement(sql),
+    first: async () => null,
+    all: async () => ({ results: [] }),
+    run: async () => ({}),
+    sql,
+  });
+  return {
+    statements,
+    prepare(sql) { statements.push(sql); return statement(sql); },
+    async batch(list) { statements.push(...list.map((item) => item.sql)); return list.map(() => ({ results: [], meta: { changes: 0 } })); },
+  };
+}
+
+test("a floating policy is refused", async () => {
+  for (const body of [
+    { project: "APP", name: "Float", type: "floating", pool_size: 2 },
+    { project: "APP", name: "Float", type: "floating" },
+  ]) {
+    const db = recordingDb();
+    const response = await worker.fetch(authed("/api/admin/policies", { method: "POST", body: JSON.stringify(body) }), baseEnv(db));
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.equal((await json(response)).code, "invalid_request");
+    assert.deepEqual(db.statements, [], "a refused policy never reaches D1");
+  }
+});
+
+test("policy create and PATCH refuse seat, borrow, meter, TTL and device-proof fields", async () => {
+  for (const field of [
+    { pool_size: 0 },
+    { max_borrow_sec: 0 },
+    { meter_quota: 0 },
+    { meter_period_sec: 2592000 },
+    { assertion_ttl_seconds: 300 },
+    { trial_require_device_proof: 0 },
+  ]) {
+    const db = recordingDb();
+    const created = await worker.fetch(authed("/api/admin/policies", {
+      method: "POST",
+      body: JSON.stringify({ project: "APP", name: "Locked", type: "node_locked", ...field }),
+    }), baseEnv(db));
+    assert.equal(created.status, 400, `create ${JSON.stringify(field)}`);
+    assert.equal((await json(created)).code, "invalid_request");
+    const patched = await worker.fetch(authed("/api/admin/policies/pol_1", { method: "PATCH", body: JSON.stringify(field) }), baseEnv(db));
+    assert.equal(patched.status, 400, `patch ${JSON.stringify(field)}`);
+    assert.equal((await json(patched)).code, "invalid_request");
+    assert.deepEqual(db.statements, [], `${JSON.stringify(field)} never reaches D1`);
+  }
+});

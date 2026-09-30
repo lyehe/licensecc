@@ -42,3 +42,44 @@ test("plan projection worker validation uses the documented safe epoch ceiling",
     assert.equal(validatePlanProjectionInput(projectionInput({ support_until })), null, String(support_until));
   }
 });
+
+// A D1 stand-in that records every statement and finds nothing, so a request that reaches D1 shows.
+function recordingDb() {
+  const statements = [];
+  const statement = (sql) => ({
+    bind: () => statement(sql),
+    first: async () => null,
+    all: async () => ({ results: [] }),
+    run: async () => ({}),
+    sql,
+  });
+  return {
+    statements,
+    prepare(sql) { statements.push(sql); return statement(sql); },
+    async batch(list) { statements.push(...list.map((item) => item.sql)); return list.map(() => ({ results: [], meta: { changes: 0 } })); },
+  };
+}
+
+test("a plan feature with pool_size is refused", async () => {
+  // A plan feature names only its device limit and policy; seat, borrow, meter and TTL fields are refused.
+  for (const field of [{ pool_size: 5 }, { max_borrow_sec: 60 }, { meter_quota: 10 }, { meter_period_sec: 60 }, { assertion_ttl_seconds: 120 }]) {
+    const db = recordingDb();
+    const response = await worker.fetch(authed("/api/admin/catalog/plans/plan_1/features", {
+      method: "POST",
+      body: JSON.stringify({ project: "APP", feature_key: "PRO", max_active_devices: 2, ...field }),
+    }), baseEnv(db));
+    assert.equal(response.status, 400, JSON.stringify(field));
+    assert.equal((await json(response)).code, "invalid_request");
+    assert.deepEqual(db.statements, [], `${JSON.stringify(field)} never reaches D1`);
+
+    const manifest = {
+      format_version: 1,
+      features: [{ project: "APP", feature_key: "PRO", name: "Pro" }],
+      plans: [{ project: "APP", plan_key: "basic", name: "Basic", features: [{ project: "APP", feature_key: "PRO", ...field }] }],
+    };
+    const preview = await worker.fetch(authed("/api/admin/catalog/import?dry_run=1", { method: "POST", body: JSON.stringify(manifest) }), baseEnv(db));
+    assert.equal(preview.status, 400, `import ${JSON.stringify(field)}`);
+    assert.equal((await json(preview)).code, "invalid_request");
+    assert.deepEqual(db.statements, [], `an imported ${JSON.stringify(field)} never reaches D1`);
+  }
+});
