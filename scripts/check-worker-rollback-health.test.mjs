@@ -157,6 +157,31 @@ test("rollback health accepts protected_device_ready and rejects account_token_m
   }
 });
 
+test("rollback health fails readiness on any non-empty backend config_warnings", async () => {
+  const withHealth = (hostname, body) => async (url, init) => {
+    if (url.hostname === hostname && url.pathname === "/health") return json(body);
+    return successfulFetch()(url, init);
+  };
+  const accepted = await checkWorkerRollbackHealth(optionsFor(), {
+    fetchImpl: withHealth("backend.licensecc.net", {
+      ok: true, service: "licensecc-online-verifier", protected_device_ready: true, config_warnings: [],
+    }),
+  });
+  assert.equal(accepted.services.backend.health.code, "backend_ready");
+
+  await assert.rejects(
+    checkWorkerRollbackHealth(optionsFor(), {
+      fetchImpl: withHealth("backend.licensecc.net", {
+        ok: true,
+        service: "licensecc-online-verifier",
+        protected_device_ready: true,
+        config_warnings: ["BOUND_REGISTRATION_RATE_LIMITER is not bound — registration has no edge rate limit"],
+      }),
+    }),
+    (error) => error instanceof SafeRollbackHealthError && error.code === "READINESS_CONTRACT_FAILED" && error.service === "backend",
+  );
+});
+
 test("arguments require four distinct canonical HTTPS origins, exact commit identity, and an environment-only admin credential", () => {
   assert.equal(optionsFor({ environment: "staging" }).environment, "staging");
   for (const backend of [

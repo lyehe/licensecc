@@ -99,10 +99,8 @@ routes = [{ pattern = "${values.backendHost}", custom_domain = true }]
 crons = ["*/5 * * * *"]
 
 [vars]
-ORDER_INGEST_MODE = "required"
 ORDER_INGEST_AUDIENCE = "${values.audience}"
 ORDER_MAX_SKEW_SECONDS = "300"
-ORDER_SIGNER_SCOPE_MODE = "required"
 BOUND_DEVICE_CONFIG = '${boundDeviceConfig(values)}'
 BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM = ${tomlString(boundLeasePublicKeyPem)}
 
@@ -402,8 +400,6 @@ test("rejects D1 split-brain and unsafe backend or backup operations", () => {
     ["backup export account mismatch", (env) => mutateJson(env, "LICENSECC_BACKUP_WRANGLER_CONFIG_B64", (config) => { config.vars.ACCOUNT_ID = "11111111111111111111111111111111"; }), /vars\.ACCOUNT_ID must match/u],
     ["preview database", (env) => mutateJson(env, "LICENSECC_ADMIN_WRANGLER_CONFIG_B64", (config) => { config.d1_databases[0].preview_database_id = config.d1_databases[0].database_id; }), /preview D1 identity/u],
     ["wrong migrations owner", (env) => mutateJson(env, "LICENSECC_PORTAL_WRANGLER_CONFIG_B64", (config) => { config.d1_databases[0].migrations_dir = "migrations"; }), /migrations_dir/u],
-    ["order ingest soft", (env) => mutateBackend(env, (source) => source.replace('ORDER_INGEST_MODE = "required"', 'ORDER_INGEST_MODE = "soft"')), /ORDER_INGEST_MODE/u],
-    ["order signer scope off", (env) => mutateBackend(env, (source) => source.replace('ORDER_SIGNER_SCOPE_MODE = "required"', 'ORDER_SIGNER_SCOPE_MODE = "off"')), /ORDER_SIGNER_SCOPE_MODE/u],
     ["unsafe order skew", (env) => mutateBackend(env, (source) => source.replace('ORDER_MAX_SKEW_SECONDS = "300"', 'ORDER_MAX_SKEW_SECONDS = "0"')), /ORDER_MAX_SKEW_SECONDS/u],
     ["order audience reused", (env) => mutateBackend(env, (source) => source.replace('ORDER_INGEST_AUDIENCE = "licensecc-production"', 'ORDER_INGEST_AUDIENCE = "licensecc-staging"')), /ORDER_INGEST_AUDIENCE/u],
     ["missing registration rate limiter", (env) => mutateBackend(env, (source) => source.replace('name = "BOUND_REGISTRATION_RATE_LIMITER"', 'name = "OTHER_LIMITER"')), /BOUND_REGISTRATION_RATE_LIMITER/u],

@@ -385,7 +385,6 @@ function dependencyDeclared(manifest, dependencyName) {
 }
 
 const DETERMINISTIC_VECTOR_SUFFIXES = Object.freeze([
-  ".assertion",
   ".b64",
   ".config",
   ".der.hex",
@@ -397,7 +396,6 @@ const DETERMINISTIC_VECTOR_SUFFIXES = Object.freeze([
   ".lic",
   ".md",
   ".mjs",
-  ".payload",
   ".pem",
   ".token",
   ".txt",

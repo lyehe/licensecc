@@ -186,7 +186,7 @@ test("app dispatches the live orders route before its handler-specific guards", 
       headers: { "content-type": "application/json" },
       body: "{}",
     }),
-    { DB: recordingDb(), ORDER_INGEST_MODE: "required" },
+    { DB: recordingDb() },
   );
   assert.equal(orders.status, 503);
   assert.deepEqual(await responseBody(orders), { ok: false, code: "config_error" });

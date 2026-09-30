@@ -102,7 +102,7 @@ repository-owned third-party `src/library/ini/` sources are excluded.
 | --- | ---: | --- |
 | `src/library/licensecc.cpp` | 916 | C++ public API orchestration; changes pair with public ABI tests and CMake packaging. |
 | `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 1,164 | Admin contract components; API-contract ownership stays with the admin deployable. |
-| `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,069 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
+| `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,018 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
 | `services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx` | 733 | Catalog list/mutation coordinator; consequence-heavy import/projection workflows and presentation stay in sibling catalog modules. |
 | `services/cloudflare-d1-backup/src/core.ts` | 506 | D1 export/R2 backup orchestration; backup remains independently deployable. |
 
@@ -110,13 +110,13 @@ Composition roots remain intentionally small. Current counts are:
 
 | Deployable | Entry lines | App lines |
 | --- | ---: | ---: |
-| Backend `src/index.ts` / `src/app.ts` | 4 | 86 |
+| Backend `src/index.ts` / `src/app.ts` | 4 | 63 |
 | Admin Worker `src/worker/index.ts` / `src/worker/app.ts` | 1 | 56 |
 | Admin UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 9 | 102 |
 | Portal Worker `src/worker/index.ts` / `src/worker/app.ts` | 2 | 84 |
 | Portal UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 6 | 199 |
 
-Current production-source totals are 22,337 lines for license-admin, 5,109 lines for licensing-backend, 5,753 lines for customer-portal, and 1,348 lines for D1-backup. These counts include tracked and non-ignored, untracked
+Current production-source totals are 22,337 lines for license-admin, 4,961 lines for licensing-backend, 5,753 lines for customer-portal, and 1,348 lines for D1-backup. These counts include tracked and non-ignored, untracked
 TypeScript, TSX, JavaScript, and MJS under each service's `src` tree. They are
 evidence for responsibility review, not a reason
 to move code without a behavioral or ownership boundary.

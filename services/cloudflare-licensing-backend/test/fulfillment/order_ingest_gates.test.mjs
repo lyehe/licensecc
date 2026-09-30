@@ -1,10 +1,10 @@
 // Handler-gate coverage for handleOrderIngest (Slice 1 order-ingest, POST /v1/orders).
 // These are the Step-0 branches that resolve BEFORE any entitlement mutation: the
-// ORDER_INGEST_MODE gate (off/soft/required), the body-size ceiling, the HMAC
-// fail-closed family (config/unknown-key/stale/bad-signature), invalid_order, and the
-// replay-nonce spend. They need no real SQLite — a tiny stub DB suffices (and a stub
-// whose .batch THROWS proves a rejected request never reaches the mutator). The full
-// guarded accept/apply matrix lives in order_ingest_exactly_once.test.mjs (SQL-backed).
+// body-size ceiling, the HMAC fail-closed family (config/unknown-key/stale/bad-signature),
+// the always-enforced signer-scope authz, invalid_order, and the replay-nonce spend. They
+// need no real SQLite — a tiny stub DB suffices (and a stub whose .batch THROWS proves a
+// rejected request never reaches the mutator). The full guarded accept/apply matrix lives
+// in order_ingest_exactly_once.test.mjs (SQL-backed).
 //
 // Runs in the default `test` glob (no --experimental-sqlite needed).
 
@@ -35,8 +35,8 @@ function baseEnv(overrides = {}) {
   return {
     ORDER_HMAC_SECRETS: JSON.stringify({ [KEY_ID]: SECRET_B64 }),
     ORDER_INGEST_AUDIENCE: AUDIENCE,
-    ORDER_INGEST_MODE: "required",
     ORDER_MAX_SKEW_SECONDS: "300",
+    ORDER_SIGNER_SCOPES: JSON.stringify({ [KEY_ID]: { project: "DEFAULT" } }),
     ...overrides,
   };
 }
@@ -182,13 +182,6 @@ async function signedRequest(env, bodyText, { ts = Math.floor(Date.now() / 1000)
   return makeRequest({ ts: String(ts), signature, body: bodyText });
 }
 
-test("mode=off -> 404 (endpoint does not exist in dev-only off mode)", async () => {
-  const { db } = stubDb();
-  const env = baseEnv({ ORDER_INGEST_MODE: "off", DB: db });
-  const res = await handleOrderIngest(makeRequest({ body: validBody() }), env);
-  assert.equal(res.status, 404);
-});
-
 test("oversize Content-Length -> 413 and cancels the body before reading it", async () => {
   const { db, calls } = stubDb();
   const env = baseEnv({ DB: db });
@@ -205,9 +198,12 @@ test("oversize Content-Length -> 413 and cancels the body before reading it", as
   assert.equal(calls.prepare, 0);
 });
 
-test("chunked body is assembled as raw bytes and accepts the canonical signer", async () => {
+test("chunked body is assembled as raw bytes and the signature over it verifies", async () => {
+  // An out-of-scope signer stops the pipeline at the (always-enforced) scope gate, right
+  // after HMAC verify + normalize, with no persistence — proving the assembled raw bytes
+  // authenticated (a bad signature would be 401, not 403) without simulating a full apply.
   const { db, calls } = stubDb();
-  const env = baseEnv({ DB: db, ORDER_INGEST_MODE: "soft" });
+  const env = baseEnv({ DB: db, ORDER_SIGNER_SCOPES: JSON.stringify({ [KEY_ID]: { project: "OTHER" } }) });
   const bodyText = validBody();
   const bodyBytes = textEncoder.encode(bodyText);
   const ts = String(Math.floor(Date.now() / 1000));
@@ -219,14 +215,14 @@ test("chunked body is assembled as raw bytes and accepts the canonical signer", 
   });
 
   const res = await handleOrderIngest(streamed.request, env);
-  assert.equal(res.status, 200);
-  assert.equal((await res.json()).code, "observed");
-  assert.equal(calls.prepare, 0, "soft mode remains non-mutating after raw-byte authentication");
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).code, "signer_scope_forbidden");
+  assert.equal(calls.prepare, 0, "an out-of-scope signer is refused before any persistence work");
 });
 
 test("a UTF-8 code point split across chunks remains raw-byte authenticated and decodes only after assembly", async () => {
   const { db, calls } = stubDb();
-  const env = baseEnv({ DB: db, ORDER_INGEST_MODE: "soft" });
+  const env = baseEnv({ DB: db, ORDER_SIGNER_SCOPES: JSON.stringify({ [KEY_ID]: { project: "OTHER" } }) });
   const bodyBytes = textEncoder.encode(validBody({ customer: { id: "cus_order", name: "€" } }));
   const euroStart = bodyBytes.indexOf(0xe2);
   assert.ok(euroStart >= 0);
@@ -238,8 +234,8 @@ test("a UTF-8 code point split across chunks remains raw-byte authenticated and 
     chunks: [bodyBytes.slice(0, euroStart + 1), bodyBytes.slice(euroStart + 1, euroStart + 2), bodyBytes.slice(euroStart + 2)],
   });
   const response = await handleOrderIngest(streamed.request, env);
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).code, "observed");
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).code, "signer_scope_forbidden");
   assert.equal(calls.prepare, 0);
 });
 
@@ -306,7 +302,7 @@ test("missing Content-Length still cancels an actual raw-byte overflow", async (
 
 test("an exact-limit chunked body is accepted even when Content-Length lies low", async () => {
   const { db, calls } = stubDb();
-  const env = baseEnv({ DB: db, ORDER_INGEST_MODE: "soft" });
+  const env = baseEnv({ DB: db, ORDER_SIGNER_SCOPES: JSON.stringify({ [KEY_ID]: { project: "OTHER" } }) });
   const unpadded = validBody();
   const bodyText = `${unpadded.slice(0, -1)}${" ".repeat(16384 - textEncoder.encode(unpadded).byteLength)}}`;
   const bodyBytes = textEncoder.encode(bodyText);
@@ -321,8 +317,8 @@ test("an exact-limit chunked body is accepted even when Content-Length lies low"
   });
 
   const res = await handleOrderIngest(streamed.request, env);
-  assert.equal(res.status, 200);
-  assert.equal((await res.json()).code, "observed");
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).code, "signer_scope_forbidden");
   assert.equal(streamed.wasCancelled(), false);
   assert.equal(calls.prepare, 0);
 });
@@ -539,36 +535,12 @@ test("nonce store error -> 503 write_failed (fail-closed)", async () => {
   assert.equal((await res.json()).code, "write_failed");
 });
 
-test("soft mode observes (verify+normalize) but NEVER mutates", async () => {
-  // failBatch:true ensures any mutation attempt throws; soft must return before it.
-  const { db, calls } = stubDb({ nonceState: "fresh", failBatch: true });
-  const env = baseEnv({ ORDER_INGEST_MODE: "soft", DB: db });
-  const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
-  assert.equal(res.status, 200);
-  const body = await res.json();
-  assert.equal(body.code, "observed");
-  assert.equal(body.license_fingerprint, null);
-  assert.equal(calls.batch, 0, "soft mode never mutates");
-});
+// --- signer-scope authz (always enforced; no rollout selector) --------------
 
-test("soft mode rejects a historical new event exactly as required mode would", async () => {
-  const { db, calls } = stubDb({ failBatch: true });
-  const env = baseEnv({ ORDER_INGEST_MODE: "soft", DB: db });
-  const historical = validBody({ current_period_end: Math.floor(Date.now() / 1000) - 2 * 86_400 });
-  const res = await handleOrderIngest(await signedRequest(env, historical), env);
-  assert.equal(res.status, 400);
-  assert.equal((await res.json()).code, "invalid_order");
-  assert.equal(calls.prepare, 0, "soft mode evaluates new-event policy without reading or mutating durable state");
-  assert.equal(calls.batch, 0);
-});
-
-// --- R2.1 signer-scope authz -------------------------------------------------
-
-test("signer scope required + out-of-project -> 403 signer_scope_forbidden (no mutation)", async () => {
+test("a signer outside its ORDER_SIGNER_SCOPES entry is refused, with no scope-mode selector to set", async () => {
   const { db, calls } = stubDb({ failBatch: true });
   const env = baseEnv({
     DB: db,
-    ORDER_SIGNER_SCOPE_MODE: "required",
     ORDER_SIGNER_SCOPES: JSON.stringify({ [KEY_ID]: { project: "OTHER" } }),
   });
   const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
@@ -577,22 +549,10 @@ test("signer scope required + out-of-project -> 403 signer_scope_forbidden (no m
   assert.equal(calls.batch, 0, "an out-of-scope signer never reaches the mutator");
 });
 
-test("unknown signer-scope modes fail closed before HMAC or DB work", async () => {
-  for (const mode of ["typo", "REQUIRED", " required"]) {
-    const { db, calls } = stubDb();
-    const env = baseEnv({ DB: db, ORDER_SIGNER_SCOPE_MODE: mode });
-    const res = await handleOrderIngest(makeRequest({ body: validBody() }), env);
-    assert.equal(res.status, 503, `ORDER_SIGNER_SCOPE_MODE=${JSON.stringify(mode)}`);
-    assert.equal((await res.json()).code, "config_error");
-    assert.equal(calls.prepare, 0, "invalid configuration precedes nonce/persistence work");
-  }
-});
-
-test("signer scope required + no scope entry for the key -> 403 (fail-closed)", async () => {
+test("no scope entry for the signing key -> 403 (fail-closed)", async () => {
   const { db } = stubDb();
   const env = baseEnv({
     DB: db,
-    ORDER_SIGNER_SCOPE_MODE: "required",
     ORDER_SIGNER_SCOPES: JSON.stringify({ "some-other-key": { project: "DEFAULT" } }),
   });
   const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
@@ -606,7 +566,6 @@ test("prototype-named signer keys require their own explicit scope entry", async
     const env = baseEnv({
       DB: db,
       ORDER_HMAC_SECRETS: JSON.stringify({ [keyId]: SECRET_B64 }),
-      ORDER_SIGNER_SCOPE_MODE: "required",
       ORDER_SIGNER_SCOPES: JSON.stringify({ "some-other-key": { project: "DEFAULT" } }),
     });
     const ts = String(Math.floor(Date.now() / 1000));
@@ -624,7 +583,6 @@ test("an own __proto__ signer scope is data and still enforces its constraints",
   const env = baseEnv({
     DB: db,
     ORDER_HMAC_SECRETS: JSON.stringify({ [keyId]: SECRET_B64 }),
-    ORDER_SIGNER_SCOPE_MODE: "required",
     ORDER_SIGNER_SCOPES: JSON.stringify({ [keyId]: { project: "OTHER", customer_id: "cus_other" } }),
   });
   const ts = String(Math.floor(Date.now() / 1000));
@@ -636,9 +594,9 @@ test("an own __proto__ signer scope is data and still enforces its constraints",
   assert.equal(calls.batch, 0);
 });
 
-test("signer scope required but no scope map -> 503 config_error", async () => {
+test("missing ORDER_SIGNER_SCOPES fails closed", async () => {
   const { db } = stubDb();
-  const env = baseEnv({ DB: db, ORDER_SIGNER_SCOPE_MODE: "required" });
+  const env = baseEnv({ DB: db, ORDER_SIGNER_SCOPES: undefined });
   const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
   assert.equal(res.status, 503);
   assert.equal((await res.json()).code, "config_error");
@@ -649,7 +607,6 @@ test("empty or misspelled signer constraints fail configuration closed", async (
     const { db, calls } = stubDb();
     const env = baseEnv({
       DB: db,
-      ORDER_SIGNER_SCOPE_MODE: "required",
       ORDER_SIGNER_SCOPES: JSON.stringify({ [KEY_ID]: scope }),
     });
     const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
@@ -659,28 +616,13 @@ test("empty or misspelled signer constraints fail configuration closed", async (
   }
 });
 
-test("signer scope required + in-scope project -> passes the scope gate", async () => {
+test("an in-scope signer passes the scope gate", async () => {
   const { db } = stubDb({ failBatch: false });
   const env = baseEnv({
     DB: db,
-    ORDER_SIGNER_SCOPE_MODE: "required",
     ORDER_SIGNER_SCOPES: JSON.stringify({ [KEY_ID]: { project: "DEFAULT" } }),
   });
   const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
   assert.notEqual(res.status, 403);
   assert.notEqual((await res.json()).code, "signer_scope_forbidden");
-});
-
-test("signer scope soft + out-of-project -> observes, does NOT block", async () => {
-  const { db, calls } = stubDb({ failBatch: true });
-  const env = baseEnv({
-    DB: db,
-    ORDER_INGEST_MODE: "soft",
-    ORDER_SIGNER_SCOPE_MODE: "soft",
-    ORDER_SIGNER_SCOPES: JSON.stringify({ [KEY_ID]: { project: "OTHER" } }),
-  });
-  const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
-  assert.equal(res.status, 200);
-  assert.equal((await res.json()).code, "observed");
-  assert.equal(calls.batch, 0);
 });

@@ -30,7 +30,10 @@ the device-bound API for protected online sessions.
 
 Two optional Cloudflare rate-limit bindings reject floods at the edge before any
 D1 write: `BOUND_REGISTRATION_RATE_LIMITER` for registration and
-`BOUND_SESSION_RATE_LIMITER` for challenge, exchange and renewal traffic.
+`BOUND_SESSION_RATE_LIMITER` for challenge, exchange and renewal traffic. The
+fixed D1 budgets apply either way, so an unbound limiter is never an outage;
+`/health` reports it as a names-only `config_warnings` entry so a stale or
+manual deploy that dropped a binding is visible instead of silent.
 
 > **Directory renamed (operator note).** This service directory was renamed
 > from `cloudflare-online-verifier` to `cloudflare-licensing-backend` to reflect
@@ -130,9 +133,8 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
 
 The protected production and staging deployment workflows run a bounded,
 name-only Worker secret inventory before any deploy. The check validates the
-materialized `wrangler.toml` as the exact environment profile, requires
-`ORDER_INGEST_MODE` and `ORDER_SIGNER_SCOPE_MODE` to be `required`, and
-requires the environment-specific `ORDER_INGEST_AUDIENCE`. It then invokes one
+materialized `wrangler.toml` as the exact environment profile, and requires the
+environment-specific `ORDER_INGEST_AUDIENCE`. It then invokes one
 `npx wrangler secret list --format json` command with a 30-second timeout and
 bounded output. Only secret names are parsed; secret values, Wrangler
 diagnostics, the account, and the Worker target are never emitted.
@@ -201,17 +203,16 @@ duplicate check as crash-redrive evidence.
 
 ## Notes
 
-- The security rollout selector is exact: `ORDER_SIGNER_SCOPE_MODE` accepts
-  only its documented lowercase values. An unset/empty value keeps its `off`
-  default; any other non-empty value fails closed with `503 config_error`
-  (`503 temporarily_unavailable` on the `/v2` routes). `/health` stays callable: a
-  healthy `200` reports `protected_device_ready: true` plus optional
-  names-only `config_warnings`; a protected device configuration that fails
-  its local readiness checks returns `503` with `protected_device_ready:
-  false`, and invalid configuration returns `503 config_error` with selector
-  names only. Static `/openapi.json` and `/docs`
-  remain available so operators can inspect this contract during a readiness
-  failure.
+- Order-ingest security has no rollout selector: HMAC verification and
+  `ORDER_SIGNER_SCOPES` signer-scope authorization always apply. A missing or
+  malformed scope map fails every order closed with `503 config_error`; a
+  signer outside its declared scope is refused with `403
+  signer_scope_forbidden`. `/health` stays callable: a healthy `200` reports
+  `protected_device_ready: true` plus optional names-only `config_warnings`;
+  a protected device configuration that fails its local readiness checks
+  returns `503` with `protected_device_ready: false`. Static `/openapi.json`
+  and `/docs` remain available so operators can inspect this contract during
+  a readiness failure.
 - Protected device keys are created and held on the client. The C++ client runtime
   provides conditional Windows Platform KSP and Ubuntu TPM2/OpenSSL provider
   surfaces, but they remain platform-specific and are not a universal client
@@ -264,21 +265,22 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   (constant-time). `ORDER_HMAC_SECRETS` is a JSON `{ key_id: base64-secret }` map
   (each secret ≥ 32 bytes), loaded into a null-prototype map (so a `__proto__`
   key_id cannot poison the lookup); an empty/short/malformed map fails closed.
-  In signer-scope `required` mode, every key id needs its own
+  Signer-scope authorization always applies: every key id needs its own
   `ORDER_SIGNER_SCOPES` entry containing at least one non-empty `project` or
   `customer_id` constraint and no other fields. Empty entries, misspellings,
-  inherited property names, and malformed values fail configuration closed.
-  A customer-scoped signer is checked against the `customer.id` every event
-  carries.
-- **Mode.** `ORDER_INGEST_MODE`: `required` (default), `soft` (verify + observe,
-  never mutates), `off` (dev-only, 404). `ORDER_INGEST_AUDIENCE` blocks
-  cross-environment replay and is asserted non-empty in `required`.
-  `ORDER_MAX_SKEW_SECONDS` bounds timestamp skew (default 300, cap 3600). A
-  signed-attempt identity `(key_id, authenticated_timestamp,
-  sha256(exact_raw_body_bytes))` is spent LAST (after verify+skew) in the
-  compatibility `order_ingest_nonces` store; an exact signed replay is `401
-  replayed`, while a freshly signed same-event retry can reach the durable
-  event cache. A nonce-store error is a fail-closed `503`.
+  inherited property names, and malformed values fail configuration closed
+  with `503 config_error`; a signer outside its declared scope is refused
+  with `403 signer_scope_forbidden`. A customer-scoped signer is checked
+  against the `customer.id` every event carries.
+- **No rollout selector.** HMAC verification and signer-scope authorization
+  always apply; there is no dev-only bypass. `ORDER_INGEST_AUDIENCE` blocks
+  cross-environment replay and is asserted non-empty. `ORDER_MAX_SKEW_SECONDS`
+  bounds timestamp skew (default 300, cap 3600). A signed-attempt identity
+  `(key_id, authenticated_timestamp, sha256(exact_raw_body_bytes))` is spent
+  LAST (after verify+skew) in the compatibility `order_ingest_nonces` store;
+  an exact signed replay is `401 replayed`, while a freshly signed same-event
+  retry can reach the durable event cache. A nonce-store error is a
+  fail-closed `503`.
 - **Request shape.** The body is a closed object: `event_id`,
   `subscription_id`, `project`, `intent`, non-negative `seq`, and
   `customer.id` are required on every intent, revocations included;

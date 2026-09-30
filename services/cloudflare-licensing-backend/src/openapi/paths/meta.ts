@@ -57,25 +57,16 @@ const healthPath: Record<string, unknown> = {
       },
       "503": {
         description:
-          "Not ready. protected_device_ready is false when the protected device configuration fails a local readiness check; config_error with invalid_config_modes means one or more security rollout selectors is invalid. Health remains callable and returns names and booleans only, never raw configuration values or secrets.",
+          "Not ready: the protected device configuration fails a local readiness check. Health remains callable and returns names and booleans only, never raw configuration values or secrets.",
         content: {
           "application/json": {
-            schema: { $ref: "#/components/schemas/HealthConfigError" },
+            schema: { $ref: "#/components/schemas/HealthFailure" },
             examples: {
               protected_not_ready: {
                 value: {
                   ok: false,
                   service: "licensecc-online-verifier",
                   protected_device_ready: false,
-                },
-              },
-              config_error: {
-                value: {
-                  ok: false,
-                  service: "licensecc-online-verifier",
-                  protected_device_ready: true,
-                  code: "config_error",
-                  invalid_config_modes: ["ORDER_SIGNER_SCOPE_MODE"],
                 },
               },
             },

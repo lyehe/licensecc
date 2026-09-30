@@ -19,17 +19,13 @@ crons = ["*/5 * * * *"]
 # Protected deploy configs must set BOUND_DEVICE_CONFIG and the public key in [vars];
 # /health answers 503 protected_device_ready:false until all four values are valid.
 # --- Slice 1 order-ingest (POST /v1/orders): signed, exactly-once subscription fulfillment ---
-# Mode: required (default; reject unsigned/replayed) | soft (verify + observe, NEVER mutate) |
-# off (dev-only; the endpoint 404s). Roll out off -> soft -> required.
-ORDER_INGEST_MODE = "required"
+# Always enforced: HMAC verify (reject unsigned/replayed) and signer-scope authorization
+# (deny a signer outside ORDER_SIGNER_SCOPES, a required secret below). No rollout selector.
 # Audience folded into the signed bytes to block cross-environment replay (e.g. prod/staging).
-# MUST be non-empty in required mode (asserted at verify time, fail-closed).
+# MUST be non-empty (asserted at verify time, fail-closed).
 ORDER_INGEST_AUDIENCE = "prod"
 # Accepted clock skew (seconds) for the signed X-LCC-Timestamp; default 300, hard cap 3600.
 ORDER_MAX_SKEW_SECONDS = "300"
-# HMAC signer authorization scope: off (default), soft (log), or required
-# (deny a signer outside ORDER_SIGNER_SCOPES). The scope map remains a secret.
-ORDER_SIGNER_SCOPE_MODE = "off"
 # Protected-device global fuse (requests/minute across all sources); counts only
 # traffic already admitted by its own per-source budget. Default 1000, range 100..1000000.
 # BOUND_GLOBAL_RATE_LIMIT = "1000"
@@ -69,6 +65,11 @@ simple = { limit = 600, period = 60 }
 # decodes to >= 32 bytes. The map is asserted non-empty / well-formed at verify time
 # (fail-closed). Rotate by adding a new key_id before retiring the old.
 # wrangler secret put ORDER_HMAC_SECRETS
+# Order-signer scope map, MANDATORY: a JSON object { "<key_id>": { "project"?: "<p>",
+# "customer_id"?: "<c>" } } with at least one constraint per key id in ORDER_HMAC_SECRETS.
+# Missing or malformed fails every order closed with 503 config_error; a signer outside
+# its declared scope is refused with 403 signer_scope_forbidden.
+# wrangler secret put ORDER_SIGNER_SCOPES
 # Webhook signing key map: a JSON object { "<key_id>": "<base64-secret>" }; each secret decodes to
 # >= 32 bytes (fail-closed; mirrors ORDER_HMAC_SECRETS). The cron-drained webhook dispatcher signs
 # each delivery HMAC-SHA256 over "<t>.<rawjsonbody>" and sends header

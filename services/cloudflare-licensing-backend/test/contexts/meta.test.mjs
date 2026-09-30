@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import worker from "../../dist/app.js";
-import { protectedDeviceEnv } from "../helpers/protected-device-env.mjs";
+import { configConsistencyCleanEnv, protectedDeviceEnv } from "../helpers/protected-device-env.mjs";
 
 // One signer for the whole file. Each test spreads it into a fresh env object, so the
-// per-env readiness result is never shared between tests.
-const PROTECTED = await protectedDeviceEnv();
+// per-env readiness result is never shared between tests. Also warning-free for
+// /health's config-consistency check (a signer-scope map plus both edge limiters), so
+// a test that wants one specific warning removes just that one field.
+const PROTECTED = { ...(await protectedDeviceEnv()), ...configConsistencyCleanEnv() };
 
 async function health(env) {
   const response = await worker.fetch(new Request("https://example.test/health"), env);
@@ -22,7 +24,6 @@ test("health reports protected_device_ready false and 503 without BOUND_DEVICE_C
   const { BOUND_DEVICE_CONFIG: _registry, ...withoutRegistry } = PROTECTED;
   const { BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM: _signer, ...withoutSigner } = PROTECTED;
   for (const [label, env] of [
-    ["empty env", {}],
     ["no registry", withoutRegistry],
     ["invalid registry", { ...PROTECTED, BOUND_DEVICE_CONFIG: "{}" }],
     ["no signer", withoutSigner],
@@ -35,79 +36,44 @@ test("health reports protected_device_ready false and 503 without BOUND_DEVICE_C
   }
 });
 
-test("an invalid security selector fails health even when protected licensing is ready", async () => {
-  const invalid = await health({ ...PROTECTED, ORDER_SIGNER_SCOPE_MODE: "not-a-mode" });
-  assert.equal(invalid.status, 503, "invalid security configuration fails readiness");
-  assert.equal(invalid.body.ok, false);
-  assert.equal(invalid.body.protected_device_ready, true);
-  assert.equal(invalid.body.code, "config_error");
-  assert.deepEqual(invalid.body.invalid_config_modes, ["ORDER_SIGNER_SCOPE_MODE"]);
-  assert.doesNotMatch(JSON.stringify(invalid.body), /not-a-mode/, "health never reflects raw configuration values");
+test("an empty env fails readiness and also warns on every missing config-consistency check", async () => {
+  const result = await health({});
+  assert.equal(result.status, 503);
+  assert.equal(result.body.ok, false);
+  assert.equal(result.body.protected_device_ready, false);
+  assert.ok(Array.isArray(result.body.config_warnings));
+  assert.equal(result.body.config_warnings.length, 3);
+  assert.ok(result.body.config_warnings.some((w) => w.includes("ORDER_SIGNER_SCOPES")));
+  assert.ok(result.body.config_warnings.some((w) => w.includes("BOUND_REGISTRATION_RATE_LIMITER")));
+  assert.ok(result.body.config_warnings.some((w) => w.includes("BOUND_SESSION_RATE_LIMITER")));
 });
 
-test("/health exposes every invalid security-mode selector without its raw value", async () => {
-  const selectors = ["ORDER_SIGNER_SCOPE_MODE"];
-  // Treat typos, case changes, and whitespace changes as configuration errors. Each
-  // one could otherwise normalize into an unintentionally permissive mode.
-  for (const raw of ["typo", "REQUIRED", " required"]) {
-    for (const selector of selectors) {
-      const response = await worker.fetch(new Request("https://example.test/health"), { ...PROTECTED, [selector]: raw });
-      assert.equal(response.status, 503, `${selector}=${JSON.stringify(raw)} fails readiness`);
-      const body = await response.json();
-      assert.equal(body.ok, false);
-      assert.equal(body.code, "config_error");
-      assert.deepEqual(body.invalid_config_modes, [selector]);
-      assert.doesNotMatch(JSON.stringify(body), new RegExp(raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    }
-  }
+test("/health has no config_warnings for a fully configured deploy", async () => {
+  const result = await health({ ...PROTECTED });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.equal(result.body.config_warnings, undefined);
 });
 
-test("/health surfaces config-consistency warnings for a half-configured deploy (R2.3)", async () => {
-  // A secret present but its enforcing mode left off -> a permissive posture the operator likely
-  // did not intend. Marker-free non-empty values (the check only tests presence, never parses).
-  const env = {
-    ...PROTECTED,
-    ORDER_SIGNER_SCOPES: "configured",
-    ORDER_SIGNER_SCOPE_MODE: "off",
-  };
-  const res = await worker.fetch(new Request("https://example.test/health"), env);
-  const body = await res.json();
-  assert.equal(body.ok, true);
-  assert.ok(Array.isArray(body.config_warnings));
-  assert.ok(body.config_warnings.some((w) => w.includes("ORDER_SIGNER_SCOPE_MODE")));
+test("/health warns when ORDER_SIGNER_SCOPES is missing", async () => {
+  const { ORDER_SIGNER_SCOPES: _scopes, ...withoutScopes } = PROTECTED;
+  const result = await health(withoutScopes);
+  assert.equal(result.status, 200, "a missing signer-scope map is a warning, not a readiness failure");
+  assert.equal(result.body.ok, true);
+  assert.ok(Array.isArray(result.body.config_warnings));
+  assert.ok(result.body.config_warnings.some((w) => w.includes("ORDER_SIGNER_SCOPES")));
 });
 
-test("/health has no config_warnings when enforcing modes match the configured secrets (R2.3)", async () => {
-  const env = {
-    ...PROTECTED,
-    ORDER_SIGNER_SCOPES: "configured",
-    ORDER_SIGNER_SCOPE_MODE: "required",
-  };
-  const res = await worker.fetch(new Request("https://example.test/health"), env);
-  const body = await res.json();
-  assert.equal(body.ok, true);
-  assert.equal(body.config_warnings, undefined);
+test("/health warns when BOUND_REGISTRATION_RATE_LIMITER is unbound", async () => {
+  const { BOUND_REGISTRATION_RATE_LIMITER: _limiter, ...withoutLimiter } = PROTECTED;
+  const result = await health(withoutLimiter);
+  assert.equal(result.status, 200, "an unbound edge limiter is a warning, not a readiness failure");
+  assert.ok(result.body.config_warnings.some((w) => w.includes("BOUND_REGISTRATION_RATE_LIMITER")));
 });
 
-test("/health normalizes empty, unset, and off paired-mode values before emitting half-config warnings", async () => {
-  for (const raw of [undefined, "", "off"]) {
-    const env = { ...PROTECTED, ORDER_SIGNER_SCOPES: "configured" };
-    if (raw !== undefined) env.ORDER_SIGNER_SCOPE_MODE = raw;
-    const response = await worker.fetch(new Request("https://example.test/health"), env);
-    assert.equal(response.status, 200);
-    const body = await response.json();
-    assert.ok(body.config_warnings.some((warning) => warning.includes("ORDER_SIGNER_SCOPE_MODE")));
-  }
-});
-
-test("/health treats an invalid paired mode as a readiness error rather than a permissive warning", async () => {
-  const response = await worker.fetch(new Request("https://example.test/health"), {
-    ORDER_SIGNER_SCOPES: "configured",
-    ORDER_SIGNER_SCOPE_MODE: "not-a-mode",
-  });
-  assert.equal(response.status, 503);
-  const body = await response.json();
-  assert.deepEqual(body.invalid_config_modes, ["ORDER_SIGNER_SCOPE_MODE"]);
-  assert.ok(body.config_warnings.some((warning) => warning.includes("invalid value")));
-  assert.equal(body.config_warnings.some((warning) => warning.includes("order signer scoping is not enforced")), false);
+test("/health warns when BOUND_SESSION_RATE_LIMITER is unbound", async () => {
+  const { BOUND_SESSION_RATE_LIMITER: _limiter, ...withoutLimiter } = PROTECTED;
+  const result = await health(withoutLimiter);
+  assert.equal(result.status, 200, "an unbound edge limiter is a warning, not a readiness failure");
+  assert.ok(result.body.config_warnings.some((w) => w.includes("BOUND_SESSION_RATE_LIMITER")));
 });

@@ -204,7 +204,10 @@ async function ingest(env, body, extraEnv = {}) {
     ...env,
     ORDER_HMAC_SECRETS: JSON.stringify({ [HMAC_KEY_ID]: base64(HMAC_SECRET) }),
     ORDER_INGEST_AUDIENCE: HMAC_AUDIENCE,
-    ORDER_INGEST_MODE: "required",
+    // A default in-scope signer, so tests that do not care about signer-scope authz keep
+    // exercising the rest of the pipeline; SCOPED_TO_A (below) overrides it for the
+    // ownership tests, which do care.
+    ORDER_SIGNER_SCOPES: JSON.stringify({ [HMAC_KEY_ID]: { project: PROJECT } }),
     ...extraEnv,
   });
   return { status: response.status, body: await response.json() };
@@ -1397,7 +1400,6 @@ test("a withdrawal for a subscription with no grant creates nothing", async () =
 // =============================================================================
 const FOREIGN_FP = "f".repeat(64);
 const SCOPED_TO_A = {
-  ORDER_SIGNER_SCOPE_MODE: "required",
   ORDER_SIGNER_SCOPES: JSON.stringify({ [HMAC_KEY_ID]: { customer_id: "cus_A" } }),
 };
 const OTHER_INTENTS = [

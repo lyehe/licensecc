@@ -15,8 +15,6 @@ import {
 function protectedConfig(profile = "staging", overrides = {}) {
   const name = profile === "production" ? "licensecc-online-verifier" : "licensecc-online-verifier-staging";
   const values = {
-    ORDER_INGEST_MODE: "required",
-    ORDER_SIGNER_SCOPE_MODE: "required",
     ORDER_INGEST_AUDIENCE: `licensecc-${profile}`,
     ...overrides,
   };
@@ -41,14 +39,12 @@ function inventory(names = REQUIRED_BACKEND_SECRET_NAMES) {
   return JSON.stringify(names.map((name) => ({ name, type: "secret_text" })));
 }
 
-test("protected backend config requires exact security selectors and the environment order audience", () => {
+test("protected backend config requires the environment order audience", () => {
   assert.deepEqual(validateProtectedConfig(protectedConfig("production"), "production"), {
     profile: "production",
-    selectorCount: 3,
+    selectorCount: 1,
   });
   for (const [key, value] of [
-    ["ORDER_INGEST_MODE", "soft"],
-    ["ORDER_SIGNER_SCOPE_MODE", "off"],
     ["ORDER_INGEST_AUDIENCE", "licensecc-production"],
   ]) {
     assert.throws(

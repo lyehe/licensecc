@@ -1,7 +1,7 @@
 import { json, requestId } from "@licensecc/cloudflare-runtime/http/kit";
 import type { Env, ExecutionContextLike } from "./env.js";
 import { scheduled as scheduledMaintenance } from "./maintenance/index.js";
-import { invalidSecurityModeNames, logEvent } from "./observability/index.js";
+import { logEvent } from "./observability/index.js";
 import { handleOpenApi, handleDocs, handleHealth } from "./routes/meta.js";
 import { handleOrders } from "./routes/orders.js";
 import { handleBoundDevice } from "./routes/bound_devices.mjs";
@@ -44,29 +44,6 @@ const app = {
     try {
       const url = new URL(request.url);
       const route = DISPATCH[`${request.method} ${url.pathname}`];
-      // Meta documentation is static and must remain inspectable when a deployment has
-      // invalid security configuration. Health is the readiness exception: it reports
-      // invalid mode *names* without their values.
-      if (
-        route !== undefined &&
-        (url.pathname === "/openapi.json" || url.pathname === "/docs" || url.pathname === "/health")
-      ) {
-        return await route(request, env, ctx);
-      }
-      const invalidConfigModes = invalidSecurityModeNames(env);
-      if (route !== undefined && invalidConfigModes.length > 0) {
-        logEvent("error", "config.invalid_security_modes", {
-          request_id: requestId(request),
-          path: url.pathname,
-          invalid_config_modes: invalidConfigModes,
-        });
-        if (url.pathname.startsWith("/v2/")) {
-          const response = json({ ok: false, code: "temporarily_unavailable", request_id: crypto.randomUUID() }, 503);
-          response.headers.set("cache-control", "no-store");
-          return response;
-        }
-        return json({ ok: false, code: "config_error" }, 503);
-      }
       if (route !== undefined) {
         return await route(request, env, ctx);
       }

@@ -19,7 +19,6 @@ test("structured logs retain operational fields and drop sensitive or unbounded 
   const lines = capture("error", () => logEvent("error", "request.unhandled_error", {
     request_id: `ray\n${"r".repeat(300)}`,
     affected_rows: 42,
-    invalid_config_modes: ["ORDER_SIGNER_SCOPE_MODE"],
     license_fingerprint: "a".repeat(64),
     client_ip: "192.0.2.1",
     token: "must-not-appear",
@@ -31,7 +30,6 @@ test("structured logs retain operational fields and drop sensitive or unbounded 
   assert.equal(parsed.event, "request.unhandled_error");
   assert.equal(parsed.severity, "error");
   assert.equal(parsed.affected_rows, 42);
-  assert.deepEqual(parsed.invalid_config_modes, ["ORDER_SIGNER_SCOPE_MODE"]);
   assert.equal(parsed.request_id.includes("\n"), false);
   assert.equal(parsed.request_id.length, 256);
   assert.equal(parsed.license_fingerprint, undefined);

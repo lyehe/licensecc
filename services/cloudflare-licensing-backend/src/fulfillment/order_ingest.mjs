@@ -47,7 +47,6 @@ import {
   terminalizeMissingEntitlementOrderEvent,
   terminalizeRevokedOrderEvent,
 } from "./order_result_store.mjs";
-import { parseOrderSignerScopeMode } from "../security_modes.mjs";
 import {
   ENTITLEMENT_COLUMNS,
   REVOCATION_SEQ_BUMP,
@@ -180,29 +179,12 @@ function stableStringify(value) {
   return `{${parts.join(",")}}`;
 }
 
-// --- ORDER_INGEST_MODE gate --------------------------------------------------
-
-/** required (default) | soft (observe-only, never mutates) | off (dev-only 404). */
-function ingestMode(env) {
-  const raw = env?.ORDER_INGEST_MODE;
-  if (raw === "off" || raw === "soft" || raw === "required") {
-    return raw;
-  }
-  return "required";
-}
-
-// --- ORDER_SIGNER_SCOPE gate (audit R2.1) ------------------------------------
-// Bind each order-HMAC key-id to an allowed project/customer so ONE shared signing key can no longer
-// create/revoke ANY customer's entitlements. Staged off (default, back-compat) -> soft (log the
-// violation, still process) -> required (deny out-of-scope). ORDER_SIGNER_SCOPES is a JSON map
+// --- ORDER_SIGNER_SCOPE gate ---------------------------------------------------
+// Bind each order-HMAC key-id to an allowed project/customer so ONE shared signing key can never
+// create/revoke ANY customer's entitlements. Always enforced: ORDER_SIGNER_SCOPES is a JSON map
 // { "<keyId>": { "project"?: "<p>", "customer_id"?: "<c>" } }; a keyId absent from the map is
-// out-of-scope in required mode (fail-closed: every signer must declare its scope).
-
-/** off (default) | soft | required. */
-function signerScopeMode(env) {
-  const parsed = parseOrderSignerScopeMode(env);
-  return parsed.valid ? parsed.mode : null;
-}
+// out-of-scope (fail-closed: every signer must declare its scope). A missing or malformed map is
+// a 503 config_error; an out-of-scope signer is a 403 signer_scope_forbidden.
 
 /** Parse ORDER_SIGNER_SCOPES; null when unset/blank/malformed. */
 function loadSignerScopes(env) {
@@ -781,21 +763,7 @@ function patchFields(order, prev, descriptor) {
 // =============================================================================
 
 export async function handleOrderIngest(request, env) {
-  const mode = ingestMode(env);
-  const scopeMode = signerScopeMode(env);
-
-  // An unknown non-empty scope mode must never silently disable signer authz.
-  // Resolve it before body/HMAC work so a deployment typo has no side effects.
-  if (scopeMode === null) {
-    return jsonResponse({ ok: false, code: "config_error" }, 503);
-  }
-
-  // Step 0a — mode gate. off => the endpoint does not exist (dev-only).
-  if (mode === "off") {
-    return jsonResponse({ ok: false, code: "not_found" }, 404);
-  }
-
-  // Step 0b/c — read the raw body ONCE (never .text()/.json()); the byte ceiling
+  // Step 0a/b — read the raw body ONCE (never .text()/.json()); the byte ceiling
   // is enforced against actual stream bytes, including a missing or lying header.
   const rawBody = await readOrderBodyBytes(request);
   if (!rawBody.ok) {
@@ -839,41 +807,22 @@ export async function handleOrderIngest(request, env) {
     return jsonResponse({ ok: false, code: "invalid_order" }, 400);
   }
 
-  // Step 0e2 — signer-scope authz (audit R2.1). Orthogonal to the ingest mode: a signer that is not
-  // allowed to write this project/customer is denied even in ingest-soft (it is an authz failure, not
-  // a mutation). Runs before the ingest-soft observe-return so violations are surfaced there too.
-  if (scopeMode !== "off") {
-    const scopes = loadSignerScopes(env);
-    if (scopes === null) {
-      // Enforcement requested but no usable scope map => operator misconfig, fail-closed 503.
-      return jsonResponse({ ok: false, code: "config_error" }, 503);
-    }
-    const violation = signerScopeViolation(scopes, hmac.keyId, order);
-    if (violation !== null) {
-      if (scopeMode === "required") {
-        return jsonResponse({ ok: false, code: "signer_scope_forbidden" }, 403);
-      }
-      console.warn(JSON.stringify({ event: "order.signer_scope_violation", severity: "warn", mode: "soft", code: "scope_violation" }));
-    }
+  // Step 0e2 — signer-scope authz, always enforced: a signer that is not allowed to
+  // write this project/customer is denied.
+  const scopes = loadSignerScopes(env);
+  if (scopes === null) {
+    // No usable scope map => operator misconfig, fail-closed 503.
+    return jsonResponse({ ok: false, code: "config_error" }, 503);
   }
-
-  // soft mode: observe-only. Verify + normalize + new-event period policy succeeded, but NEVER
-  // mutate AND never spend the replay nonce. Spending it here (before this return) would burn the
-  // signed-attempt identity: after the operator flipped soft->required, the first real delivery of
-  // that event could be rejected as 'replayed' and never applied. Soft mode does not query durable
-  // replay state, so it must apply the same historical-period gate a new required-mode event faces;
-  // otherwise an observation can claim an event is acceptable when enforcement will reject it.
-  if (mode === "soft") {
-    if (!orderPeriodIsAcceptable(order, now)) {
-      return jsonResponse({ ok: false, code: "invalid_order" }, 400);
-    }
-    return jsonResponse({ ok: true, code: "observed", license_fingerprint: null }, 200);
+  const violation = signerScopeViolation(scopes, hmac.keyId, order);
+  if (violation !== null) {
+    return jsonResponse({ ok: false, code: "signer_scope_forbidden" }, 403);
   }
 
   const digest = await payloadDigest(order);
 
-  // Step 0f — spend the exact signed-request identity LAST (after verify+skew), required mode
-  // only. The timestamp is part of the verified HMAC framing; the digest is over the exact raw
+  // Step 0f — spend the exact signed-request identity LAST (after verify+skew). The
+  // timestamp is part of the verified HMAC framing; the digest is over the exact raw
   // signed body bytes. The separate normalized payload digest above remains the logical-event
   // idempotency identity, so harmless JSON reserialization cannot create an event-id conflict.
   const maxSkew = clampMaxSkew(env?.ORDER_MAX_SKEW_SECONDS);

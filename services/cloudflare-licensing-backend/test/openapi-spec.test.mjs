@@ -140,52 +140,41 @@ test("the doc routes are served without credentials or environment (behavioral)"
   // Health reads the protected configuration, so an empty env is a readiness failure, never a throw.
   const health = await worker.fetch(new Request("http://test/health"), {});
   assert.equal(health.status, 503);
-  assert.deepEqual(await health.json(), { ok: false, service: "licensecc-online-verifier", protected_device_ready: false });
+  const healthBody = await health.json();
+  assert.equal(healthBody.ok, false);
+  assert.equal(healthBody.service, "licensecc-online-verifier");
+  assert.equal(healthBody.protected_device_ready, false);
 });
 
-test("invalid security-mode config leaves static docs available and is documented on every gated operation", async () => {
+test("static docs are documented with no 503, and every other operation documents its own failure responses", () => {
   const staticMeta = new Set(["/openapi.json", "/docs"]);
   for (const route of CANONICAL) {
     const operation = openApiSpec.paths[route.path][route.method.toLowerCase()];
     if (staticMeta.has(route.path)) {
-      assert.equal(operation.responses["503"], undefined, route.path + " stays available during invalid security config");
+      assert.equal(operation.responses["503"], undefined, route.path + " never depends on runtime configuration");
       continue;
     }
     const response = operation.responses["503"];
-    assert.ok(response, route.path + " documents the global invalid-config response");
-    assert.match(JSON.stringify(response), route.path.startsWith("/v2/") ? /temporarily_unavailable/ : /config_error/, route.path + " 503 documents its config failure envelope");
+    assert.ok(response, route.path + " documents its own 503 failure envelope");
   }
-
-  const invalidEnv = { ORDER_SIGNER_SCOPE_MODE: "not-a-mode" };
-  const spec = await worker.fetch(new Request("http://test/openapi.json"), invalidEnv);
-  assert.equal(spec.status, 200);
-  const docs = await worker.fetch(new Request("http://test/docs"), invalidEnv);
-  assert.equal(docs.status, 200);
-  const health = await worker.fetch(new Request("http://test/health"), invalidEnv);
-  assert.equal(health.status, 503);
-  assert.equal((await health.json()).code, "config_error");
 });
 
-test("health documents protected readiness, warnings, and invalid-mode config errors", () => {
+test("health documents protected readiness and consistency warnings", () => {
   const schemas = openApiSpec.components.schemas;
   const healthy = schemas.HealthSuccess;
   assert.deepEqual(healthy.required, ["ok", "service", "protected_device_ready"]);
   assert.deepEqual(healthy.properties.protected_device_ready.enum, [true]);
   assert.equal(healthy.properties.config_warnings.type, "array");
-  const failure = schemas.HealthConfigError;
+  const failure = schemas.HealthFailure;
   assert.deepEqual(failure.required, ["ok", "service", "protected_device_ready"]);
-  assert.equal(failure.properties.protected_device_ready.type, "boolean");
-  assert.deepEqual(failure.dependentRequired, { code: ["invalid_config_modes"], invalid_config_modes: ["code"] });
+  assert.deepEqual(failure.properties.protected_device_ready.enum, [false]);
   assert.deepEqual(Object.keys(healthy.properties).sort(), ["config_warnings", "ok", "protected_device_ready", "service"]);
-  assert.deepEqual(Object.keys(failure.properties).sort(), ["code", "config_warnings", "invalid_config_modes", "ok", "protected_device_ready", "service"]);
-  // ORDER_SIGNER_SCOPE_MODE is the only security-mode selector left.
-  assert.deepEqual(failure.properties.invalid_config_modes.items.enum, ["ORDER_SIGNER_SCOPE_MODE"]);
+  assert.deepEqual(Object.keys(failure.properties).sort(), ["config_warnings", "ok", "protected_device_ready", "service"]);
 
   const healthOperation = openApiSpec.paths["/health"].get;
   assert.ok(healthOperation.responses["503"]);
-  assert.match(JSON.stringify(healthOperation.responses["503"]), /config_error/);
-  assert.deepEqual(Object.keys(healthOperation.responses["503"].content["application/json"].examples).sort(), ["config_error", "protected_not_ready"]);
-  assert.equal(healthOperation.responses["503"].content["application/json"].schema.$ref, "#/components/schemas/HealthConfigError");
+  assert.deepEqual(Object.keys(healthOperation.responses["503"].content["application/json"].examples).sort(), ["protected_not_ready"]);
+  assert.equal(healthOperation.responses["503"].content["application/json"].schema.$ref, "#/components/schemas/HealthFailure");
   assert.doesNotMatch(JSON.stringify(healthOperation), /account_token/);
 });
 
@@ -208,7 +197,8 @@ test("order ingest documents distinct config/write failures and raw-wire body se
   const order503 = operation.responses["503"];
   const examples = order503.content["application/json"].examples;
   assert.deepEqual(Object.keys(examples).sort(), ["config_error", "write_failed"]);
-  assert.match(order503.description, /^config_error: a nonempty ORDER_SIGNER_SCOPE_MODE is not an exact documented mode\. /u);
+  assert.match(order503.description, /^config_error: unusable ORDER_HMAC_SECRETS or ORDER_INGEST_AUDIENCE/u);
+  assert.match(order503.description, /ORDER_SIGNER_SCOPES/);
   assert.match(order503.description, /write_failed/);
   assert.match(operation.responses["400"].description, /UTF-8/);
   assert.match(operation.responses["413"].description, /raw wire bytes/);

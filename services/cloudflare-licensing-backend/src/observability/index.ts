@@ -1,9 +1,5 @@
 import type { Env } from "../env.js";
 import { safeErrorType } from "@licensecc/cloudflare-runtime/http/kit";
-import {
-  invalidSecurityModeNames as invalidSecurityModeNamesFromEnv,
-  parseOrderSignerScopeMode,
-} from "../security_modes.mjs";
 
 export type LogSeverity = "info" | "warn" | "error";
 
@@ -17,7 +13,6 @@ const LOG_FIELD_NAMES = new Set([
   "delivery_id",
   "endpoint_id",
   "error_type",
-  "invalid_config_modes",
   "last_status",
   "limit_reached",
   "measured_at",
@@ -63,26 +58,25 @@ export function logEvent(severity: LogSeverity, event: string, fields: Record<st
   console.log(line);
 }
 
-// The app composition root already owns the observability dependency. Re-export the
-// names-only config check here so routing can log/reject invalid security config
-// without adding another composition edge.
-export function invalidSecurityModeNames(env: Env): string[] {
-  return invalidSecurityModeNamesFromEnv(env);
-}
-
-// Config-consistency warnings (audit R2.3): surface half-configured deploys where a security
-// secret is present but its enforcing mode is left off, so an operator who set the scope map
-// but forgot to flip the mode sees it on /health instead of silently shipping a permissive posture.
+// Config-consistency warnings: names-only /health signals for a deploy that would otherwise
+// silently fail closed on every order (a missing signer-scope map) or run a protected route
+// with no edge rate limit (a stale or manual deploy that dropped a binding).
 export function configConsistencyWarnings(env: Env): string[] {
   const warnings: string[] = [];
   const has = (v: string | undefined): boolean => typeof v === "string" && v.length > 0;
-  const orderSignerScope = parseOrderSignerScopeMode(env);
-  for (const name of invalidSecurityModeNames(env)) {
-    warnings.push(`${name} has an invalid value — use only its documented exact mode names`);
-  }
-  if (has(env.ORDER_SIGNER_SCOPES) && orderSignerScope.valid && orderSignerScope.mode === "off") {
+  if (!has(env.ORDER_SIGNER_SCOPES)) {
     warnings.push(
-      "ORDER_SIGNER_SCOPES is set but ORDER_SIGNER_SCOPE_MODE is off — order signer scoping is not enforced",
+      "ORDER_SIGNER_SCOPES is not set — every order will be refused with config_error",
+    );
+  }
+  if (env.BOUND_REGISTRATION_RATE_LIMITER === undefined) {
+    warnings.push(
+      "BOUND_REGISTRATION_RATE_LIMITER is not bound — registration has no edge rate limit",
+    );
+  }
+  if (env.BOUND_SESSION_RATE_LIMITER === undefined) {
+    warnings.push(
+      "BOUND_SESSION_RATE_LIMITER is not bound — challenge/exchange/renew traffic has no edge rate limit",
     );
   }
   return warnings;

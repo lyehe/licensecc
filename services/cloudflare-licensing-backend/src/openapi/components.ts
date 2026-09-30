@@ -16,19 +16,6 @@ export function errorResponse(description: string, code: string | readonly strin
   };
 }
 
-export const INVALID_SECURITY_MODE_CONFIG_ERROR =
-  "config_error: a nonempty ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance.";
-
-export function securityModeConfigErrorResponse(
-  additionalDescription = "",
-  additionalCodes: readonly string[] = [],
-): Record<string, unknown> {
-  return errorResponse(
-    INVALID_SECURITY_MODE_CONFIG_ERROR + (additionalDescription.length > 0 ? " " + additionalDescription : ""),
-    ["config_error", ...additionalCodes],
-  );
-}
-
 export function jsonBody(schemaRef: string, required = true): Record<string, unknown> {
   return {
     required,
@@ -86,35 +73,25 @@ export const openApiComponents: LabeledComponentFragment = {
           config_warnings: {
             type: "array",
             items: { type: "string" },
-            description: "Optional names-only operator warnings for paired security material configured with a non-enforcing normalized mode.",
+            description: "Optional names-only operator warnings for a half-configured or unprotected deploy, such as a missing order signer-scope map or an unbound edge rate limiter.",
           },
         },
       }],
-      ["HealthConfigError", {
+      ["HealthFailure", {
         type: "object",
         required: ["ok", "service", "protected_device_ready"],
-        dependentRequired: { code: ["invalid_config_modes"], invalid_config_modes: ["code"] },
         properties: {
           ok: { type: "boolean", enum: [false] },
           service: { type: "string", enum: ["licensecc-online-verifier"] },
           protected_device_ready: {
             type: "boolean",
+            enum: [false],
             description: "False when the protected device configuration fails a local readiness check; the failing check is never named.",
-          },
-          code: { type: "string", enum: ["config_error"], description: "Present only with invalid_config_modes." },
-          invalid_config_modes: {
-            type: "array",
-            minItems: 1,
-            items: {
-              type: "string",
-              enum: ["ORDER_SIGNER_SCOPE_MODE"],
-            },
-            description: "Invalid selector names only; raw values are never returned.",
           },
           config_warnings: {
             type: "array",
             items: { type: "string" },
-            description: "Optional names-only consistency warnings; invalid configuration remains terminal readiness failure.",
+            description: "Optional names-only consistency warnings; the failed readiness check is never named.",
           },
         },
       }],

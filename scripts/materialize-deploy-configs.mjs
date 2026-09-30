@@ -349,9 +349,6 @@ function validateCronList(config, target, label, { exact = undefined } = {}) {
 
 function validateBackend(config, target, profile, profileName) {
   const vars = objectValue(config.vars, target, "vars");
-  for (const key of ["ORDER_INGEST_MODE", "ORDER_SIGNER_SCOPE_MODE"]) {
-    exactString(vars[key], "required", target, `vars.${key}`);
-  }
   exactString(vars.ORDER_INGEST_AUDIENCE, profile.orderAudience, target, "vars.ORDER_INGEST_AUDIENCE");
   if (!/^\d{1,4}$/u.test(String(vars.ORDER_MAX_SKEW_SECONDS ?? "")) || Number(vars.ORDER_MAX_SKEW_SECONDS) < 1 || Number(vars.ORDER_MAX_SKEW_SECONDS) > 3600) {
     fail(target, "must set vars.ORDER_MAX_SKEW_SECONDS to an integer in [1, 3600]");

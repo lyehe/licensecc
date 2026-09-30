@@ -33,10 +33,8 @@ type WranglerBindings = Pick<Cloudflare.Env,
   | "DB"
   | "BOUND_REGISTRATION_RATE_LIMITER"
   | "BOUND_SESSION_RATE_LIMITER"
-  | "ORDER_INGEST_MODE"
   | "ORDER_INGEST_AUDIENCE"
   | "ORDER_MAX_SKEW_SECONDS"
-  | "ORDER_SIGNER_SCOPE_MODE"
 >;
 
 interface RuntimeEnv {
@@ -55,18 +53,17 @@ interface RuntimeEnv {
   BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM?: string;
   BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM?: string;
   // Slice 1 order-ingest (POST /v1/orders): the signed, exactly-once subscription
-  // fulfillment inbox. ORDER_HMAC_SECRETS is a JSON map {key_id: base64-secret} (each
-  // secret >= 32 bytes); the map / audience are asserted non-empty at verify time
-  // (fail-closed). ORDER_INGEST_MODE: required (default) | soft (observe-only) | off
-  // (dev-only). ORDER_MAX_SKEW_SECONDS default 300 (cap 3600). ORDER_INGEST_AUDIENCE
-  // (e.g. "prod"/"staging") is folded into the signed bytes to block cross-env replay.
+  // fulfillment inbox, always enforced (HMAC verify + signer-scope authz; no rollout
+  // selector). ORDER_HMAC_SECRETS is a JSON map {key_id: base64-secret} (each secret
+  // >= 32 bytes); the map / audience are asserted non-empty at verify time (fail-closed).
+  // ORDER_MAX_SKEW_SECONDS default 300 (cap 3600). ORDER_INGEST_AUDIENCE (e.g.
+  // "prod"/"staging") is folded into the signed bytes to block cross-env replay.
   ORDER_HMAC_SECRETS?: string;
-  ORDER_INGEST_MODE?: string;
   ORDER_MAX_SKEW_SECONDS?: string;
   ORDER_INGEST_AUDIENCE?: string;
-  // Optional authorization binding for order-HMAC signer keys. `off` (default),
-  // `soft`, or `required`; unknown non-empty values are a fail-closed config error.
-  ORDER_SIGNER_SCOPE_MODE?: string;
+  // Mandatory authorization binding for order-HMAC signer keys: each key id must
+  // declare its allowed project/customer scope. Missing or malformed is a fail-closed
+  // config error; a signer outside its declared scope is refused.
   ORDER_SIGNER_SCOPES?: string;
   // Webhook dispatcher (cron-drained read-side outbox). WEBHOOK_SIGNING_SECRETS is a JSON map
   // {keyId: base64-secret} (each secret >= 32 bytes), mirroring ORDER_HMAC_SECRETS; the active

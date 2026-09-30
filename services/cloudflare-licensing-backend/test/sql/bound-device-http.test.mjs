@@ -354,17 +354,13 @@ test("HTTP valid proof cannot bypass PKCE, operation identity, retirement or sig
   assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_leases").get().n,1);
 });
 
-test("HTTP rejects unsigned URL queries and keeps configuration failures no-store",async t=>{
+test("HTTP rejects unsigned URL queries",async t=>{
   const f=fixture(t),d=await enrollment(f),request=await signed(f,d,"exchange");
   for(const suffix of ["?extra=1","?"]) {
     const response=await f.call(`/v2/device-authorizations/exchange${suffix}`,request);
     assert.equal(response.status,400); assert.equal(response.body.code,"invalid_request");
   }
   assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_leases").get().n,0);
-  f.env.ORDER_SIGNER_SCOPE_MODE="invalid-mode";
-  const response=await f.call("/v2/device-authorizations/exchange",request);
-  assert.equal(response.status,503); assert.equal(response.body.code,"temporarily_unavailable");
-  assert.equal(typeof response.body.request_id,"string");
 });
 
 test("HTTP current denial is not hidden by a competing successful operation",async t=>{

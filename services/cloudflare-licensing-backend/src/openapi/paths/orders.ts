@@ -1,11 +1,11 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { errorResponse, jsonBody, securityModeConfigErrorResponse } from "../components.js";
+import { errorResponse, jsonBody } from "../components.js";
 
 const ordersPath: Record<string, unknown> = {
   post: {
     tags: ["fulfillment"],
     summary:
-      "Exactly-once subscription order fulfillment. HMAC-SHA256 signed, fingerprint-deduplicated, monotonic epoch/seq floor. Modes: off (404), soft (observe-only), required (mutate).",
+      "Exactly-once subscription order fulfillment. HMAC-SHA256 signed, fingerprint-deduplicated, monotonic epoch/seq floor, signer-scope authorized. Always enforced; no rollout selector.",
     operationId: "postOrders",
     security: [{ orderKeyId: [], orderTimestamp: [], orderSignature: [] }],
     description:
@@ -28,10 +28,9 @@ const ordersPath: Record<string, unknown> = {
         ["unknown_key_id", "stale_timestamp", "bad_signature", "replayed"],
       ),
       "403": errorResponse(
-        "signer_scope_forbidden: the authenticated signer is not authorized for the requested project while ORDER_SIGNER_SCOPE_MODE requires scope enforcement.",
+        "signer_scope_forbidden: the authenticated signer is not authorized for the requested project or customer per its ORDER_SIGNER_SCOPES entry.",
         "signer_scope_forbidden",
       ),
-      "404": errorResponse("not_found: ORDER_INGEST_MODE=off.", "not_found"),
       "409": errorResponse(
         "Conflict: event_id_conflict (same event_id, different digest), seq_conflict (same subscription epoch/sequence with a different payload), fingerprint_owned (fingerprint belongs to a different subscription), entitlement_owner_mismatch (an entitlement already exists for the fingerprint and is owned by another customer or by no one; refused for every intent, withdrawals included. A refusal before admission writes nothing; one at apply records the event as rejected and advances the subscription cursor, without touching the entitlement), entitlement_revoked (targets a revoked terminal entitlement), or the original stored conflict result for a freshly signed matching replay of a rejected event.",
         ["event_id_conflict", "seq_conflict", "fingerprint_owned", "entitlement_owner_mismatch", "entitlement_revoked"],
@@ -40,9 +39,9 @@ const ordersPath: Record<string, unknown> = {
         "payload_too_large: declared Content-Length over 16384 or accumulated raw wire bytes over 16384. The stream is cancelled on rejection; Content-Length is only an early hint and cannot bypass the raw-byte cap.",
         "payload_too_large",
       ),
-      "503": securityModeConfigErrorResponse(
-        "config_error also covers unusable ORDER_HMAC_SECRETS or ORDER_INGEST_AUDIENCE, and a missing/invalid required ORDER_SIGNER_SCOPES map. write_failed: DB batch unavailable, DB errors, or order_ingest_nonces store unavailable.",
-        ["write_failed"],
+      "503": errorResponse(
+        "config_error: unusable ORDER_HMAC_SECRETS or ORDER_INGEST_AUDIENCE, or a missing/malformed required ORDER_SIGNER_SCOPES map. The Worker rejects these before route authentication, body processing, persistence, or issuance. write_failed: DB batch unavailable, DB errors, or order_ingest_nonces store unavailable.",
+        ["config_error", "write_failed"],
       ),
     },
   },

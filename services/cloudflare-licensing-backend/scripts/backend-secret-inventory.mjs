@@ -22,12 +22,9 @@ export const REQUIRED_BACKEND_SECRET_NAMES = Object.freeze([
   "WEBHOOK_SIGNING_SECRETS",
 ]);
 
-const REQUIRED_MODES = Object.freeze([
-  "ORDER_INGEST_MODE",
-  "ORDER_SIGNER_SCOPE_MODE",
-]);
-// The required modes plus ORDER_INGEST_AUDIENCE.
-const PROTECTED_SELECTOR_COUNT = REQUIRED_MODES.length + 1;
+// There is no rollout selector left to require; only the environment-specific
+// ORDER_INGEST_AUDIENCE is validated below.
+const PROTECTED_SELECTOR_COUNT = 1;
 const SECRET_NAME = /^[A-Z][A-Z0-9_]{0,127}$/u;
 
 class InventoryError extends Error {
@@ -80,9 +77,6 @@ export function validateProtectedConfig(configText, profile) {
 
   const expectedName = profile === "production" ? "licensecc-online-verifier" : "licensecc-online-verifier-staging";
   if (extractBasicString(configText, "", "name") !== expectedName) fail("invalid_protected_config");
-  for (const mode of REQUIRED_MODES) {
-    if (extractBasicString(configText, "vars", mode) !== "required") fail("invalid_protected_config");
-  }
   if (extractBasicString(configText, "vars", "ORDER_INGEST_AUDIENCE") !== `licensecc-${profile}`) {
     fail("invalid_protected_config");
   }
