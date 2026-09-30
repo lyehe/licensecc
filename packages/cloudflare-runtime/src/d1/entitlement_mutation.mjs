@@ -10,7 +10,7 @@ import {
   entitlementMatchesInput,
   syncEventType,
 } from "@licensecc/licensing-domain/entitlements/contracts";
-import { assertExpectedEntitlement, CAPACITY_COLUMNS, isNonNegativeInteger } from "./entitlement_guards.mjs";
+import { assertExpectedEntitlement, observedExpectation, CAPACITY_COLUMNS, isNonNegativeInteger } from "./entitlement_guards.mjs";
 import { entitlementCurrentJsonSql } from "./entitlement_json.mjs";
 
 export {
@@ -443,9 +443,8 @@ export async function transitionEntitlement(env, key, status, eventType, reason,
 }
 
 // Sync yields only protected grants: an unchanged grant of another mode is a conflict, not a no-op.
-// A disable or revocation of an existing grant always applies as an operator's status-only
-// transition (stored owner, license, notes and validity kept; terminal revocation; no-op when
-// unchanged, and never blocked by the mandatory guard, satisfied here with the row just read).
+// A disable or revocation of an existing grant always applies as an operator's status-only transition (stored owner, license, notes and validity kept; terminal revocation; no-op when unchanged).
+// The withdrawal below satisfies the mandatory guard with the row it just read; a concurrent change before the write's own re-read still surfaces as the usual retryable 409 stale_transition.
 // extraStatements, the admin sync's protected assertion, ride only a create or an active write.
 export async function syncEntitlement(env, input, reason, ctx, idempotency, extraStatements = []) {
   const key = { project: input.project, feature: input.feature, license_fingerprint: input.license_fingerprint };
@@ -456,7 +455,7 @@ export async function syncEntitlement(env, input, reason, ctx, idempotency, extr
   }
   const targetStatus = input.status ?? "active";
   const withdrawal = targetStatus === "revoked" ? "revoke" : "disable";
-  if (prev !== null && targetStatus !== "active") return transitionEntitlement(env, key, targetStatus, withdrawal, reason, { ...ctx, expectedEntitlement: { customer_id: prev.customer_id, revocation_seq: prev.revocation_seq } }, idempotency);
+  if (prev !== null && targetStatus !== "active") return transitionEntitlement(env, key, targetStatus, withdrawal, reason, { ...ctx, expectedEntitlement: observedExpectation(prev) }, idempotency);
   return createEntitlement(env, input, ctx, reason, syncEventType(prev, targetStatus), idempotency, extraStatements);
 }
 

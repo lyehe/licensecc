@@ -384,8 +384,8 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   // request fence above still drops any response that no longer matches the current request.
   const visibleEntitlements = entitlements;
   const visibleEntitlementsCursor = ready ? entitlementsCursor : null;
-  const selectedVisibleRows = visibleEntitlements.filter((item) => selectedIds.has(item.id)), selectedVisibleIds = selectedVisibleRows.map((item) => item.id);
-  const selectedCount = selectedVisibleIds.length;
+  const selectedVisibleRows = visibleEntitlements.filter((item) => selectedIds.has(item.id));
+  const selectedCount = selectedVisibleRows.length;
   // "Select all {n} loaded" selects every loaded row; a run larger than the Worker's per-request
   // cap is split into sequential chunks rather than capped here.
   const allSelected = visibleEntitlements.length > 0 && selectedCount === visibleEntitlements.length;
@@ -394,7 +394,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   }
 
   function bulkConfirmBody(action: EntitlementAction): string {
-    const count = selectedVisibleIds.length;
+    const count = selectedVisibleRows.length;
     const noun = `${count} selected entitlement${count === 1 ? "" : "s"}`;
     if (action === "revoke") return `Revoke ${noun}. Revocation is TERMINAL and cannot be undone; already-revoked rows are reported as revoked-terminal and skipped.`;
     return `Disable ${noun}. Disabled entitlements stop verifying until re-enabled.`;

@@ -257,7 +257,7 @@ export function hasOnlyKeys(input: Record<string, unknown>, allowed: ReadonlySet
   return Object.keys(input).every((key) => allowed.has(key));
 }
 
-export function readNullableNonNegativeInt(input: Record<string, unknown>, field: string, max = MAX_DEVICE_LIMIT): number | null | typeof INVALID {
+export function readNullableNonNegativeInt(input: Record<string, unknown>, field: string, max: number): number | null | typeof INVALID {
   if (input[field] === undefined || input[field] === null || input[field] === "") {
     return null;
   }
@@ -383,7 +383,7 @@ export function validateCatalogPlanFeatureInput(value: unknown): CatalogPlanFeat
   const policyId = input.policy_id === undefined ? null : nullableCatalogIdentifier(input.policy_id, 128);
   const status = catalogStatus(input.status);
   const displayOrder = boundedInt(input.display_order ?? 0, 0, 1_000_000);
-  const maxActiveDevices = readNullableNonNegativeInt(input, "max_active_devices");
+  const maxActiveDevices = readNullableNonNegativeInt(input, "max_active_devices", MAX_DEVICE_LIMIT);
   if (
     project === null || featureKey === null ||
     (inclusion !== "included" && inclusion !== "addon") ||

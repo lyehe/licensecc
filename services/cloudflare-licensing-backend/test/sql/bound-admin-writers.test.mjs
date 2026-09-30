@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { createEntitlement, findEntitlement, patchEntitlement, syncEntitlement, setEntitlementCapacity } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import { buildPolicyStampStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
+import { observedExpectation } from "@licensecc/cloudflare-runtime/d1/entitlement_guards";
 
 function fixture(t, state) {
   const sql = new DatabaseSync(":memory:"); t.after(() => sql.close());
@@ -40,9 +41,8 @@ const idempotency = { scope: "writer-test", responseCode: "updated" };
 // The owner/revocation-sequence precondition patchEntitlement and setEntitlementCapacity now
 // require, read fresh off the row so it always matches whatever this test's preceding calls left.
 function observed(f) {
-  const row = f.sql.prepare("SELECT customer_id, revocation_seq FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=?")
-    .get(key.project, key.feature, key.license_fingerprint);
-  return { customer_id: row.customer_id, revocation_seq: row.revocation_seq };
+  return observedExpectation(f.sql.prepare("SELECT customer_id, revocation_seq FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=?")
+    .get(key.project, key.feature, key.license_fingerprint));
 }
 
 for (const state of ["active", "retiring"]) {

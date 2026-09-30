@@ -57,16 +57,46 @@ test("admin create refuses device_hash and assertion_ttl_seconds", async () => {
   assert.equal(env.DB.entitlements.size, 0);
 });
 
+// The mandatory owner/revocation-sequence precondition is checked before any D1 read, for every
+// mutation route: a missing field refuses the request, leaves the stored row and its audit trail
+// untouched, and never prepares a D1 statement.
+test("PATCH, disable, reenable and revoke each refuse a missing precondition before any read", async () => {
+  const db = new MockD1();
+  const env = baseEnv(db);
+  const create = await worker.fetch(authed("/api/admin/entitlements", { method: "POST", body: JSON.stringify(protectedGrant) }), env);
+  const id = (await json(create)).data.id;
+  const key = keyOf(protectedGrant.project, protectedGrant.feature, protectedGrant.license_fingerprint);
+  for (const [label, path, method, body] of [
+    ["PATCH", `/api/admin/entitlements/${id}`, "PATCH", { notes: "no precondition" }],
+    ["disable", `/api/admin/entitlements/${id}/disable`, "POST", { reason: "support" }],
+    ["reenable", `/api/admin/entitlements/${id}/reenable`, "POST", {}],
+    ["revoke", `/api/admin/entitlements/${id}/revoke`, "POST", { reason: "support" }],
+  ]) {
+    const before = clone(env.DB.entitlements.get(key));
+    const eventsBefore = db.events.length;
+    const originalPrepare = db.prepare.bind(db);
+    let prepareCalls = 0;
+    db.prepare = (sql) => { prepareCalls += 1; return originalPrepare(sql); };
+    const response = await worker.fetch(authed(path, { method, body: JSON.stringify(body) }), env);
+    db.prepare = originalPrepare;
+    assert.equal(response.status, 400, label);
+    assert.equal((await json(response)).code, "invalid_request", label);
+    assert.deepEqual(env.DB.entitlements.get(key), before, label);
+    assert.equal(db.events.length, eventsBefore, label);
+    assert.equal(prepareCalls, 0, `${label}: no D1 statement is prepared before the precondition check`);
+  }
+});
+
 test("PATCH refuses device_hash on a protected grant", async () => {
   const { env, request } = protectedCreateFixture();
   const created = await request("/api/admin/entitlements", protectedGrant);
   assert.equal(created.status, 200);
-  const { id } = (await created.json()).data;
+  const { id, customer_id: customerId, revocation_seq: revocationSeq } = (await created.json()).data;
   const key = keyOf(protectedGrant.project, protectedGrant.feature, protectedGrant.license_fingerprint);
   const before = clone(env.DB.entitlements.get(key));
   const patched = await worker.fetch(authed(`/api/admin/entitlements/${id}`, {
     method: "PATCH",
-    body: JSON.stringify({ device_hash: "d".repeat(64) }),
+    body: JSON.stringify({ device_hash: "d".repeat(64), expected_customer_id: customerId, expected_revocation_seq: revocationSeq }),
   }), env);
   assert.equal(patched.status, 400);
   assert.equal((await patched.json()).code, "invalid_request");
@@ -78,12 +108,12 @@ test("PATCH refuses assertion_ttl_seconds on a protected grant", async () => {
   const { env, request } = protectedCreateFixture();
   const created = await request("/api/admin/entitlements", protectedGrant);
   assert.equal(created.status, 200);
-  const { id } = (await created.json()).data;
+  const { id, customer_id: customerId, revocation_seq: revocationSeq } = (await created.json()).data;
   const key = keyOf(protectedGrant.project, protectedGrant.feature, protectedGrant.license_fingerprint);
   const before = clone(env.DB.entitlements.get(key));
   const patched = await worker.fetch(authed(`/api/admin/entitlements/${id}`, {
     method: "PATCH",
-    body: JSON.stringify({ assertion_ttl_seconds: 120 }),
+    body: JSON.stringify({ assertion_ttl_seconds: 120, expected_customer_id: customerId, expected_revocation_seq: revocationSeq }),
   }), env);
   assert.equal(patched.status, 400);
   assert.equal((await patched.json()).code, "invalid_request");

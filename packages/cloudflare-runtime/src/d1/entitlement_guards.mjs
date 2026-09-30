@@ -6,12 +6,18 @@
 // silently skipping the check a stale-write race depends on.
 export function assertExpectedEntitlement(row, ctx) {
   const expected = ctx.expectedEntitlement;
-  if (expected === undefined) {
+  if (expected == null) {
     throw new Error("invalid_patch");
   }
   if (row.customer_id !== expected.customer_id || row.revocation_seq !== expected.revocation_seq) {
     throw new Error("stale_transition");
   }
+}
+
+/** The precondition a caller who already holds `row` can pass as its own observed expectation:
+ * it always matches, so the mandatory guard above is satisfied without weakening it. */
+export function observedExpectation(row) {
+  return { customer_id: row.customer_id, revocation_seq: row.revocation_seq };
 }
 
 export const CAPACITY_COLUMNS = new Set([

@@ -11,6 +11,7 @@ import {
   csvExportResponse,
   entitlementBatchTooLargeResponse,
   errorResponse,
+  EXPECTED_ENTITLEMENT_PROPERTIES,
   featureKeyParam,
   formatCsvParam,
   idempotencyKeyHeader,
@@ -28,7 +29,7 @@ const expectedState = {
   type: "object",
   description: "Required precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409). Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
   required: ["expected_customer_id", "expected_revocation_seq"],
-  properties: { expected_customer_id: { type: ["string", "null"], maxLength: 128 }, expected_revocation_seq: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER } },
+  properties: EXPECTED_ENTITLEMENT_PROPERTIES,
 };
 function withExpected(ref: string): Record<string, unknown> { return { allOf: [{ $ref: ref }, expectedState] }; }
 export const entitlementPaths: LabeledPathFragment = {

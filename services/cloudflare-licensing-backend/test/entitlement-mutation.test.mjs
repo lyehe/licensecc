@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   createEntitlement,
+  patchEntitlement,
+  transitionEntitlement,
   setEntitlementCapacity,
   withId,
   entitlementId,
@@ -244,6 +246,27 @@ test("setEntitlementCapacity throws revoked_terminal on a revoked entitlement", 
     setEntitlementCapacity(env, KEY, { max_active_devices: 2 }, ctx({ expectedEntitlement: { customer_id: state.entitlement.customer_id, revocation_seq: state.entitlement.revocation_seq } })),
     /revoked_terminal/,
   );
+});
+
+// The guard is never a no-op: a caller of any of the three guarded writers that supplies no
+// precondition (absent, or explicitly null) fails loudly instead of silently skipping the check.
+test("patchEntitlement, transitionEntitlement and setEntitlementCapacity each reject invalid_patch and write nothing without an expectation", async () => {
+  for (const missing of [undefined, null]) {
+    for (const run of [
+      (env) => patchEntitlement(env, KEY, { notes: "no precondition" }, ctx({ expectedEntitlement: missing }), null),
+      (env) => transitionEntitlement(env, KEY, "disabled", "disable", "reason", ctx({ expectedEntitlement: missing }), null),
+      (env) => setEntitlementCapacity(env, KEY, { max_active_devices: 2 }, ctx({ expectedEntitlement: missing }), null),
+    ]) {
+      const state = {};
+      const env = { DB: makeDb(state) };
+      await createEntitlement(env, input(), ctx());
+      const before = { ...state.entitlement };
+      state.events = [];
+      await assert.rejects(run(env), /invalid_patch/, `expectedEntitlement: ${missing}`);
+      assert.deepEqual(state.entitlement, before, "a caller with no precondition writes nothing");
+      assert.equal(state.events.length, 0, "a caller with no precondition writes no audit event");
+    }
+  }
 });
 
 test("withId derives the id and strips cache_ttl_seconds", () => {

@@ -1718,7 +1718,7 @@
               }
             }
           },
-          "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable. device_hash and assertion_ttl_seconds are refused with 400 invalid_request: a protected grant carries neither. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the optional expected_* precondition may), or the PATCH returns 400 invalid_request.",
+          "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable. device_hash and assertion_ttl_seconds are refused with 400 invalid_request: a protected grant carries neither. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the required expected_* precondition may), or the PATCH returns 400 invalid_request.",
           "not": {
             "anyOf": [
               {

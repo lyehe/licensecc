@@ -61,7 +61,9 @@ function readBody(request) {
   });
 }
 
-function mockAdminHandler() {
+/** `transitions` (when given) captures each revoke/reenable request's path and parsed body, so a
+ * test can assert the script actually sends the mandatory owner/revocation-sequence precondition. */
+function mockAdminHandler(transitions = []) {
   const idempotency = new Map();
   let row = null;
   return async (request, response) => {
@@ -129,11 +131,13 @@ function mockAdminHandler() {
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/admin/entitlements/scratch-id/revoke") {
+      transitions.push({ path: "revoke", body: await readBody(request) });
       row = { ...row, status: "revoked", revocation_seq: 2 };
       json(response, 200, { ok: true, code: "entitlement_revoked", data: row });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/admin/entitlements/scratch-id/reenable") {
+      transitions.push({ path: "reenable", body: await readBody(request) });
       json(response, 409, { ok: false, code: "revoked_entitlement_is_terminal" });
       return;
     }
@@ -370,7 +374,8 @@ test("access admin drill fails closed when no token source is configured", () =>
 });
 
 test("access validator exercises read, mutation, replay, revoke, and terminal denial", async () => {
-  await withServer(mockAdminHandler(), async (baseUrl) => {
+  const transitions = [];
+  await withServer(mockAdminHandler(transitions), async (baseUrl) => {
     const summary = await runAccessAdminValidation({
       baseUrl: new URL(baseUrl),
       accessJwt: "admin-token",
@@ -394,6 +399,13 @@ test("access validator exercises read, mutation, replay, revoke, and terminal de
     assert.equal("feature" in summary, false);
     assert.equal("fingerprint" in summary, false);
   });
+  // The revoke and reenable calls each send the mandatory owner/revocation-sequence precondition
+  // observed from the row they act on, not just a reason.
+  assert.deepEqual(transitions.map((t) => t.path), ["revoke", "reenable"]);
+  assert.equal(transitions[0].body.expected_customer_id, "cust_1");
+  assert.equal(transitions[0].body.expected_revocation_seq, 1);
+  assert.equal(transitions[1].body.expected_customer_id, "cust_1");
+  assert.equal(transitions[1].body.expected_revocation_seq, 2);
 });
 
 test("access validator read-only mode validates UI and summary without mutation", async () => {

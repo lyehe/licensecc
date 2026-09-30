@@ -12,7 +12,7 @@ import {
   transitionEntitlement,
   withId,
 } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
-import type { Actor, MutationContext } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
+import type { Actor, GuardedMutationContext, MutationContext } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import { stampFromPolicy, type Policy } from "@licensecc/licensing-domain/entitlements/policy";
 import { buildPolicyStampStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
 import { readIdempotentResponse, writeIdempotentResponse } from "@licensecc/cloudflare-runtime/d1/idempotency_store";
@@ -271,7 +271,7 @@ export async function handleMutation(request: Request, env: Env, actor: Actor, r
   if (expected === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
-  ctx.expectedEntitlement = expected;
+  const guardedCtx: GuardedMutationContext = { ...ctx, expectedEntitlement: expected };
   if (request.method === "PATCH" && action === undefined) {
     const patch = validateEntitlementPatch(body);
     if (patch === null) {
@@ -282,10 +282,10 @@ export async function handleMutation(request: Request, env: Env, actor: Actor, r
       // The device limit is its own audited capacity write, so it is patched alone.
       if (Object.keys(fields).length > 0) return envelope(requestIdValue, "invalid_request", undefined, 400);
       return mutationResponse(request, env, ctx, "entitlement_patched", (idempotency) =>
-        patchDeviceLimit(env, key, limit, ctx, idempotency));
+        patchDeviceLimit(env, key, limit, guardedCtx, idempotency));
     }
     return mutationResponse(request, env, ctx, "entitlement_patched", (idempotency) =>
-      patchEntitlement(env, key, fields, ctx, idempotency));
+      patchEntitlement(env, key, fields, guardedCtx, idempotency));
   }
   if (request.method === "POST" && action !== undefined) {
     const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
@@ -295,11 +295,15 @@ export async function handleMutation(request: Request, env: Env, actor: Actor, r
     const transition = action as "disable" | "reenable" | "revoke";
     const targetStatus = transition === "reenable" ? "active" : transition === "disable" ? "disabled" : "revoked";
     return mutationResponse(request, env, ctx, `entitlement_${action}d`, (idempotency) =>
-      transitionEntitlement(env, key, targetStatus, transition, reason, ctx, idempotency));
+      transitionEntitlement(env, key, targetStatus, transition, reason, guardedCtx, idempotency));
   }
   return envelope(requestIdValue, "not_found", undefined, 404);
 }
 
+// POST /api/admin/entitlements/batch — admin-only. Composes the SHARED transitionEntitlement once
+// per row; one bad row never aborts the others (per-row success/failure is collected).
+// createEntitlement is NOT touched. Each row gets a DISTINCT idempotency sub-key (below), so a
+// re-POST of the same batch with the same Idempotency-Key replays each row's OWN cached response.
 export async function handleBatchTransition(request: Request, env: Env, actor: Actor, requestIdValue: string): Promise<Response> {
   const adminError = requireAdmin(actor, requestIdValue);
   if (adminError !== null) {
@@ -370,7 +374,7 @@ export async function handleBatchTransition(request: Request, env: Env, actor: A
     }
     // DISTINCT per-row sub-key — the heart of the footgun guard.
     const rowKey = `${baseKey}:${id}`;
-    const ctx: MutationContext = {
+    const ctx: GuardedMutationContext = {
       actor,
       requestId: requestIdValue,
       ip: clientIp(request),

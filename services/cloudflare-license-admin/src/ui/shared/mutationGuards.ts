@@ -387,7 +387,7 @@ export function hasBatchResultsData(value: unknown, expectedIds: readonly string
   // same batch succeeded; that is a known partial outcome, not an ambiguous
   // transport/mutation outcome.  Unknown codes or mixed-up identities remain
   // invalid because the UI cannot truthfully summarize them.
-  const terminalFailureCodes = ["invalid_entitlement_id", "not_found", "revoked_entitlement_is_terminal", "mutation_failed"] as const;
+  const terminalFailureCodes = ["invalid_entitlement_id", "not_found", "revoked_entitlement_is_terminal", "stale_transition", "mutation_failed"] as const;
   const valid = data.results.every((item, index) => {
     const row = record(item);
     if (row === null || typeof row.id !== "string" || row.id !== expectedIds[index] || !ids.has(row.id) || seen.has(row.id) || typeof row.ok !== "boolean" || typeof row.code !== "string" ||

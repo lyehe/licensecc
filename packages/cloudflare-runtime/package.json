@@ -33,6 +33,9 @@
       "types": "./src/d1/entitlement_mutation.d.ts",
       "default": "./src/d1/entitlement_mutation.mjs"
     },
+    "./d1/entitlement_guards": {
+      "default": "./src/d1/entitlement_guards.mjs"
+    },
     "./d1/entitlement_json": {
       "types": "./src/d1/entitlement_json.d.ts",
       "default": "./src/d1/entitlement_json.mjs"

@@ -57,12 +57,20 @@ export const test = base.extend({
 const POLICY_PATCHABLE_FIELDS = ["valid_from_offset_sec", "duration_sec", "max_active_devices", "expiry_strategy", "trial_expiration_basis", "trial_duration_sec", "trial_one_per_device", "notes"];
 /** A protected grant has no device hash or assertion TTL, and no PATCH chooses its mode; a create
  * or PATCH naming any of them is refused. Derived from the Worker's own list (rather than hand-copied)
- * so the two can never drift. */
+ * so the two can never drift. The scrape only understands double-quoted string literals, so the
+ * parsed list is checked against the exact expected value: a reformatted Worker source (single
+ * quotes, a renamed field, a different literal shape) fails loudly here instead of silently
+ * producing a wrong or empty refusal list. */
 const REFUSED_ENTITLEMENT_FIELDS = (() => {
   const source = readFileSync(new URL("../src/worker/groups/entitlements/validation.ts", import.meta.url), "utf8");
   const match = /REFUSED_ENTITLEMENT_FIELDS = \[([^\]]+)\]/.exec(source);
   if (match === null) throw new Error("could not find REFUSED_ENTITLEMENT_FIELDS in validation.ts");
-  return match[1].split(",").map((field) => field.trim().replace(/^"|"$/g, "")).filter(Boolean);
+  const parsed = match[1].split(",").map((field) => field.trim().replace(/^"|"$/g, "")).filter(Boolean);
+  const expected = ["enforcement_mode", "device_hash", "assertion_ttl_seconds"];
+  if (parsed.length !== expected.length || parsed.some((field, index) => field !== expected[index])) {
+    throw new Error(`REFUSED_ENTITLEMENT_FIELDS scrape produced ${JSON.stringify(parsed)}; expected exactly ${JSON.stringify(expected)}. Update this expectation only after confirming the scrape still parses the Worker's real list correctly.`);
+  }
+  return parsed;
 })();
 /** A create's own body legitimately names its mode (the Worker validates it separately and strips
  * it before this same refusal check); only a PATCH naming it is refused. */

@@ -1,7 +1,7 @@
 import type { CapacityInUseData, EntitlementRecord } from "../../../shared/api.js";
 import type { Env } from "../../env.js";
 import { envelope } from "../../responses.js";
-import { setEntitlementCapacity, type EntitlementKey, type IdempotencyCommit, type MutationContext, type MutationResult } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
+import { setEntitlementCapacity, type EntitlementKey, type GuardedMutationContext, type IdempotencyCommit, type MutationResult } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import { boundOccupiedSql } from "@licensecc/cloudflare-runtime/device/bound_capacity";
 
 // A PATCH that sets the device limit goes through the runtime's capacity chokepoint, alone: it is
@@ -9,7 +9,7 @@ import { boundOccupiedSql } from "@licensecc/cloudflare-runtime/device/bound_cap
 // keeps a protected grant's limit at or above its connected devices; the schema trigger refuses a
 // lower one with capacity_in_use, and the answer says how many devices hold a slot, counted with
 // the same occupancy rule the trigger and the lease path use.
-export async function patchDeviceLimit(env: Env, key: EntitlementKey, limit: number, ctx: MutationContext,
+export async function patchDeviceLimit(env: Env, key: EntitlementKey, limit: number, ctx: GuardedMutationContext,
   idempotency: IdempotencyCommit | null): Promise<MutationResult<EntitlementRecord> | Response | null> {
   try {
     return await setEntitlementCapacity(env, key, { max_active_devices: limit }, ctx, idempotency);

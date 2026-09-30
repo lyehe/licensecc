@@ -50,6 +50,14 @@ export interface MutationContext {
   expectedEntitlement?: { customer_id: string | null; revocation_seq: number };
 }
 
+/**
+ * The context patchEntitlement, transitionEntitlement and setEntitlementCapacity require: the
+ * mandatory owner/revocation-sequence precondition the caller observed, not merely offered.
+ */
+export interface GuardedMutationContext extends MutationContext {
+  expectedEntitlement: { customer_id: string | null; revocation_seq: number };
+}
+
 export interface IdempotencyCommit {
   scope: string;
   responseCode: string;
@@ -121,7 +129,7 @@ export function patchEntitlement(
   env: MutationEnv,
   key: EntitlementKey,
   patch: EntitlementPatch,
-  ctx: MutationContext,
+  ctx: GuardedMutationContext,
   idempotency: IdempotencyCommit | null,
 ): Promise<MutationResult<EntitlementRecord> | null>;
 
@@ -131,7 +139,7 @@ export function transitionEntitlement(
   status: EntitlementStatus,
   eventType: "disable" | "reenable" | "revoke",
   reason: string,
-  ctx: MutationContext,
+  ctx: GuardedMutationContext,
   idempotency: IdempotencyCommit | null,
 ): Promise<MutationResult<EntitlementRecord> | null>;
 
@@ -154,6 +162,6 @@ export function setEntitlementCapacity(
   env: MutationEnv,
   key: EntitlementKey,
   capacity: EntitlementCapacity,
-  ctx: MutationContext,
+  ctx: GuardedMutationContext,
   idempotency?: IdempotencyCommit | null,
 ): Promise<MutationResult<EntitlementRecord> | null>;

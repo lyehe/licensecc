@@ -270,6 +270,9 @@ export const ADMIN_MUTATION_AUTH_ERRORS = {
   "403": errorResponse("Authorization failed (RBAC / invalid JWT / admin role required).", "invalid_access_jwt", "admin_role_denied", "admin_role_required"),
 } as const;
 
+// The precondition every grant mutation requires, shared by paths/entitlements.ts and BatchTransitionInput below.
+export const EXPECTED_ENTITLEMENT_PROPERTIES = { expected_customer_id: { type: ["string", "null"], maxLength: 128 }, expected_revocation_seq: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER } };
+
 export const openApiComponents: LabeledComponentFragment = {
   label: "admin-components",
   namespaces: [
@@ -1017,13 +1020,14 @@ export const openApiComponents: LabeledComponentFragment = {
         },
       }],
       ["BatchTransitionInput", {
-        type: "object",
-        required: ["action", "rows"],
+        type: "object", required: ["action", "rows"],
         description: `Bulk transition body. \`reason\` is required (non-empty) for disable/revoke. \`rows\` names the entitlements to transition (1..${ENTITLEMENT_BATCH_MAX_IDS}), each with the same owner/revocation-sequence precondition the single-row routes require; a larger batch is rejected before any D1 query or mutation, with recovery guidance in the error data.`,
         properties: {
           action: { type: "string", enum: ["disable", "reenable", "revoke"] },
           reason: { type: "string", maxLength: 1000, description: "Required (non-empty) for disable/revoke; ignored for reenable." },
-          rows: { type: "array", minItems: 1, maxItems: ENTITLEMENT_BATCH_MAX_IDS, items: { type: "object", required: ["id", "expected_customer_id", "expected_revocation_seq"], description: "One entitlement to transition, with the precondition observed for it.", properties: { id: { type: "string", description: "Encoded entitlement id." }, expected_customer_id: { type: ["string", "null"], maxLength: 128 }, expected_revocation_seq: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER } } } },
+          rows: { type: "array", minItems: 1, maxItems: ENTITLEMENT_BATCH_MAX_IDS, items: {
+            type: "object", required: ["id", "expected_customer_id", "expected_revocation_seq"], description: "One entitlement to transition, with the precondition observed for it.", properties: { id: { type: "string", description: "Encoded entitlement id." }, ...EXPECTED_ENTITLEMENT_PROPERTIES },
+          } },
         },
       }],
       ["EntitlementBatchTooLargeData", {

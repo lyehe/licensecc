@@ -214,17 +214,6 @@ export async function handleCustomerTransition(
   );
 }
 
-// ── Bulk entitlement transitions (Workstream C) ──────────────────────────────
-// POST /api/admin/entitlements/batch — admin-only. Body { action, reason, ids[] }.
-// Composes the SHARED transitionEntitlement once per id; one bad row never aborts the
-// others (per-row success/failure is collected). createEntitlement is NOT touched.
-//
-// FOOTGUN guarded here: mutation_idempotency is keyed by (scope, idempotency_key). If every
-// row reused the SAME idempotency key, the FIRST row's cached response would be replayed for
-// every subsequent row (mergeable only by accident). So each row gets a DISTINCT sub-key
-// `<base>:<id>` derived from the request's Idempotency-Key (or a generated batch id), and the
-// scope mirrors the single mutations (METHOD:pathname:actor.subject) so a re-POST of the same
-// batch with the same Idempotency-Key replays each row's OWN cached response — not row #1's.
 export async function globalSearch(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
   const rawQ = url.searchParams.get("q");

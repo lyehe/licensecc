@@ -541,6 +541,28 @@ test("batch: max-plus-one is rejected before any D1 prepare, batch, query, or wr
   assert.equal(d1.writeQueries, 0, "the length guard runs before any D1 write");
 });
 
+test("batch: a row missing either precondition field refuses the whole batch before any D1 query", async () => {
+  const db = freshDb();
+  const d1 = new QueryBudgetD1Like(db);
+  const env = devEnv(db, d1);
+  const record = await createEntitlementFor(env, FP_A);
+
+  for (const row of [
+    { id: record.id, expected_revocation_seq: record.revocation_seq }, // missing expected_customer_id
+    { id: record.id, expected_customer_id: record.customer_id }, // missing expected_revocation_seq
+  ]) {
+    d1.resetMetrics();
+    const response = await worker.fetch(devReq("/api/admin/entitlements/batch", {
+      method: "POST",
+      body: JSON.stringify({ action: "disable", reason: "audit", rows: [row] }),
+    }), env);
+    assert.equal(response.status, 400, JSON.stringify(row));
+    assert.equal((await body(response)).code, "invalid_request", JSON.stringify(row));
+    assert.equal(d1.queryCount, 0, "a row missing its precondition is refused before any D1 query");
+  }
+  assert.equal(db.prepare("SELECT status FROM entitlements WHERE license_fingerprint=?").get(FP_A).status, "active");
+});
+
 test("batch: reader RBAC is blocked; createEntitlement remains byte-identical (untouched)", async (t) => {
   const db = freshDb();
   const fixture = await accessFixture(t);

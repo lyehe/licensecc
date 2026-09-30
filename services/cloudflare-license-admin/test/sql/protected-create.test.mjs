@@ -200,7 +200,7 @@ test("malformed modes and attempts to patch mode are rejected", async t => {
     assert.equal(response.status, 400);
   }
   const first = await f.send(), body = await first.json(); assert.equal(first.status, 200);
-  assert.equal((await f.send({ enforcement_mode: "legacy" }, "patch", `${path}/${body.data.id}`, "PATCH")).status, 400);
+  assert.equal((await f.send({ enforcement_mode: "legacy", expected_customer_id: body.data.customer_id, expected_revocation_seq: body.data.revocation_seq }, "patch", `${path}/${body.data.id}`, "PATCH")).status, 400);
   assert.deepEqual(f.sql.prepare("PRAGMA foreign_key_check").all(), []);
 });
 

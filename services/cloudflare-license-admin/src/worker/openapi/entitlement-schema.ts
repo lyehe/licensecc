@@ -91,7 +91,7 @@ export const entitlementPatchSchema = {
   type: "object",
   // A protected grant carries no device hash or assertion TTL, and no PATCH changes its mode.
   not: { anyOf: [{ required: ["enforcement_mode"] }, { required: ["device_hash"] }, { required: ["assertion_ttl_seconds"] }] },
-  description: "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable. device_hash and assertion_ttl_seconds are refused with 400 invalid_request: a protected grant carries neither. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the optional expected_* precondition may), or the PATCH returns 400 invalid_request.",
+  description: "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable. device_hash and assertion_ttl_seconds are refused with 400 invalid_request: a protected grant carries neither. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the required expected_* precondition may), or the PATCH returns 400 invalid_request.",
   properties: {
     ...patchFields,
     max_active_devices: { type: "integer", minimum: 1, maximum: MAX_DEVICE_LIMIT, description: "Device limit. A protected grant refuses a limit below its connected devices with 409 capacity_in_use and data.devices_in_use." },
