@@ -643,7 +643,6 @@ test("rejects plaintext Worker secrets in every service while ignoring comment-o
     ["bound approval encryption key", (env) => mutateBackend(env, (source) => source.replace('[vars]', '[vars]\nBOUND_APPROVAL_ENCRYPTION_KEYS = "plaintext"')), /Worker secret/u],
     ["bound lease private key", (env) => mutateBackend(env, (source) => source.replace('[vars]', '[vars]\nBOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM = "plaintext"')), /Worker secret/u],
     ["backend secret", (env) => mutateBackend(env, (source) => source.replace('[vars]', '[vars]\nORDER_HMAC_SECRETS = "plaintext"')), /Worker secret/u],
-    ["backend lease private key", (env) => mutateBackend(env, (source) => source.replace('[vars]', '[vars]\nLEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM = "plaintext"')), /Worker secret/u],
     ["admin secret", (env) => mutateJson(env, "LICENSECC_ADMIN_WRANGLER_CONFIG_B64", (config) => { config.vars.SYNC_API_TOKEN = "plaintext"; }), /Worker secret/u],
     ["portal secret", (env) => mutateJson(env, "LICENSECC_PORTAL_WRANGLER_CONFIG_B64", (config) => { config.vars.PORTAL_OTP_PEPPERS = "plaintext"; }), /Worker secret/u],
     ["backup secret", (env) => mutateJson(env, "LICENSECC_BACKUP_WRANGLER_CONFIG_B64", (config) => { config.vars.D1_REST_API_TOKEN = "plaintext"; }), /Worker secret/u],

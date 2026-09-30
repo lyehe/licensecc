@@ -8,5 +8,4 @@ prerequisites and keeps evaluation separate from deployment.
    :maxdepth: 2
 
    offline-first-license
-   local-online-evaluation
    sdk-and-support

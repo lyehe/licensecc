@@ -17,8 +17,6 @@ const RUNTIME_SUBPATHS = [
   "@licensecc/cloudflare-runtime/device/bound_trial",
   "@licensecc/cloudflare-runtime/entitlements/policy_store",
   "@licensecc/cloudflare-runtime/http/kit",
-  "@licensecc/cloudflare-runtime/lease/metering",
-  "@licensecc/cloudflare-runtime/lease/trial_store",
   "@licensecc/cloudflare-runtime/webhooks/webhook",
   "@licensecc/cloudflare-runtime/webhooks/event_types",
 ];

@@ -292,7 +292,6 @@ test("the docs identity, primary navigation, and example inventory are deliberat
 test("first-success tutorials expose the complete human and agent execution contract", () => {
   for (const path of [
     "doc/tutorials/offline-first-license.rst",
-    "doc/tutorials/local-online-evaluation.rst",
   ]) {
     const tutorial = source(path);
     assert.match(tutorial, /^Audience and result$/mu, `${path} must name its audience and result`);

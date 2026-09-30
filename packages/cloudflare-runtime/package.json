@@ -60,13 +60,6 @@
       "types": "./src/http/kit.d.ts",
       "default": "./src/http/kit.mjs"
     },
-    "./lease/metering": {
-      "default": "./src/lease/metering.mjs"
-    },
-    "./lease/trial_store": {
-      "types": "./src/lease/trial_store.d.ts",
-      "default": "./src/lease/trial_store.mjs"
-    },
     "./webhooks/webhook": {
       "default": "./src/webhooks/webhook.mjs"
     },

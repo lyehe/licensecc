@@ -23,9 +23,6 @@ Choose a starting point
    * - Integrate a C or C++ application
      - :doc:`usage/integration`
      - Your CMake target links the matching installed Licensecc component.
-   * - Evaluate online verification locally
-     - :doc:`tutorials/local-online-evaluation`
-     - The real Worker returns a signed assertion through its SQLite host.
    * - Use Python, .NET, or Java
      - :doc:`tutorials/sdk-and-support` and :doc:`api/sdks`
      - The selected SDK verifies server tokens against the shared contract.

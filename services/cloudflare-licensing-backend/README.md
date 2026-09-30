@@ -6,13 +6,12 @@ Reference Cloudflare Worker for low-volume online license verification.
 platform. Native users who only need offline `.lic` files do not need this
 service.
 
-**Status:** Cloudflare D1 is the production target. The local SQLite host is
-the supported evaluation path.
+**Status:** Cloudflare D1 is the production target. The local SQLite adapter
+backs the backend's own tests and local schema initialization only.
 See the [database backend status](../../doc/operations/database-backends.md).
 
 | Goal | Start here | Side effects |
 | --- | --- | --- |
-| Evaluate online verification locally | [`local-host/README.md`](local-host/README.md) | Writes a local ignored SQLite database and local signing key only |
 | Change backend behavior | Run the focused workspace checks documented below | Local build/test output only |
 | Configure a hosted environment | [Hosted setup](#hosted-setup-remote-changes) | Creates or mutates Cloudflare resources and secrets |
 | Judge production readiness | [Production readiness](../../doc/operations/production-readiness.md) | Evidence review; deployment remains an operator decision |
@@ -149,47 +148,6 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
    Use `--flag=value` form when invoking through `npm run`; the script also
    supports direct `node scripts/public-verifier-drill.mjs --url <url> ...`.
 
-### Machine activation and renewal
-
-The hosted setup above configures online assertions. To also use
-`/v1/activate` and `/v1/renew`, configure the separate lease signer. From
-`services/cloudflare-licensing-backend`, after configuring the intended remote
-Worker, store its PKCS#8 private key and matching key id interactively:
-
-```console
-npx wrangler secret put LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM
-npx wrangler secret put LEASE_SIGNING_KEY_ID
-```
-
-Use a dedicated lease-signing key, and distribute its matching public key to
-the client license verifier. The online assertion key and lease key serve
-different verification paths; configuring only `ONLINE_SIGNING_*` does not
-enable lease issuance. Keep private keys in Worker secrets, never in D1 or the
-admin UI.
-
-Keep `ACCOUNT_TOKEN_MODE=required`, configure `ACCOUNT_TOKEN_PEPPERS`, and
-issue a scoped account token using `scripts/account-token.mjs`. An entitlement
-must belong to the token's customer. For device ownership proof on activation
-and renewal, set `DEVICE_PROOF_MODE=required` and enroll the device public key
-as described above. The client must sign each request with its device-held
-private key. `REQUEST_SIGNATURE_MODE=required` protects online verification;
-it does not replace the separate lease proof selector. This device-required
-profile is for direct device clients, not the standard portal deployment
-profile described below.
-
-Use the [admin Worker](../cloudflare-license-admin/README.md#hosted-setup)
-against the same D1 database to create entitlements, extend `valid_until`, and
-disable or re-enable licenses and enrolled device keys. D1 stores validity,
-device records, lease issuance history, and the entitlement `revocation_seq`.
-That sequence is a revocation floor, not a per-activation revision counter.
-
-There is currently no client `/v1/deactivate` route. `/v1/release` releases a
-floating seat; admin device disabling prevents subsequent proof-authorized
-use but does not release the node-locked issuance-history rebind cap. Already
-issued offline leases remain subject to their signed expiry and the client's
-online-verification policy. Applications requiring self-service machine
-transfer need an explicit deactivation contract before deployment.
-
 ## Capacity and observability evidence
 
 `npm run capacity:public-verifier` is the bounded, open-loop load harness for
@@ -220,9 +178,8 @@ npm run capacity:public-verifier -- --mode=soak
 ```
 
 The public `/v1/verify` route does not use account-token Authorization, so the
-capacity harness neither accepts nor sends an account token. Account-token and
-lease-signing readiness are exercised by the separate protected staging lease
-drill. When request proof is enforced, set
+capacity harness neither accepts nor sends an account token. When request
+proof is enforced, set
 `LICENSECC_CAPACITY_DEVICE_PRIVATE_KEY_PKCS8_PEM` and
 `LICENSECC_CAPACITY_DEVICE_KEY_ID` to a dedicated registered staging P-256 key.
 The key is imported once in memory and signs a fresh nonce and timestamp for
@@ -300,8 +257,6 @@ emergency rollback.
 The required deployed secret names are:
 
 - `ACCOUNT_TOKEN_PEPPERS`
-- `LEASE_SIGNING_KEY_ID`
-- `LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM`
 - `ONLINE_SIGNING_KEY_ID`
 - `ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM`
 - `ORDER_HMAC_SECRETS`
@@ -318,36 +273,7 @@ health and the signed post-deploy drills remain necessary.
 The standard four-Worker topology keeps `DEVICE_PROOF_MODE=off` because the
 current portal checkout/download flows do not originate a device-held proof.
 That selector controls whether proof is mandatory; a proof that is presented
-is still always verified. The staging workflow therefore runs
-`npm run validate:staging-lease` against the exact materializer-bound backend
-URL using a dedicated active entitlement, scoped account token, registered
-P-256 device key, expected lease key id, and matching RSA PKCS#1 DER public key
-supplied only through protected environment values. The workflow provides the
-last value as `LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64`; this
-workflow-only public key is not part of the deployed Worker secret inventory.
-Its canonical DER SHA-256 must equal the expected lease key id before any
-request is sent. The drill sends fresh, separately signed `/v1/activate` and
-`/v1/renew` requests. Both must return a bounded v201 lease with the expected
-feature section, expected key id, time envelope, and an RSA-SHA256 signature
-that verifies over the shared v201 canonical payload after reinserting the
-protected fixture project and feature. The time check requires
-`server_time < renew_by <= valid_to_epoch`, a server clock within 300 seconds
-of the signed request, a signed interval containing the server UTC date, and a
-signed `valid-to` date matching `valid_to_epoch`. This exercises account-token
-authorization for the one protected fixture tuple, registered-device proof,
-and the server lease-signing path
-without emitting the token, private key, fixture, lease, customer, license, or
-fingerprint. Evidence records only the verification booleans, not the public
-key, key id, signature, or canonical payload. It does not exercise a negative
-cross-scope token request, so it is not proof of least-privilege denial outside
-that tuple.
-
-These direct drill credentials must never be copied into browser or portal
-runtime configuration. An architecture-correct future portal proof flow would
-generate or load a non-exportable P-256 key on the end device, register only
-its public SPKI/key id, and sign a fresh purpose-bound nonce locally. The drill
-fixture and canonical proof helper demonstrate the protocol, but its protected
-server-side private key is not a suitable portal implementation.
+is still always verified.
 
 Staging additionally runs `npm run validate:staging-order` with no command-line
 arguments. Its URL, dedicated HMAC key id and key bytes, and exact synthetic
@@ -843,7 +769,7 @@ batches, up to 10,000 rows per scheduled run. Logical expiry does not depend on
 the sweep. Outages and backlog can delay erasure, and historical backups require
 their own retention policy.
 
-Node HTTP tests and the local SQLite host import `dist/app.js`.
+Node HTTP tests import `dist/app.js`.
 The deployed `src/index.ts` additionally loads the Cloudflare-native RPC runtime;
 local workerd tests verify that entrypoint and its service-binding isolation.
 

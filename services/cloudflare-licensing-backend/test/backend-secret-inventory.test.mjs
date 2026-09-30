@@ -85,8 +85,8 @@ test("inventory validator invokes one bounded JSON name-only Wrangler command", 
     });
     assert.equal(result.ok, true);
     assert.equal(result.evidence.verdict, "pass");
-    assert.equal(result.evidence.required_secret_count, 11);
-    assert.equal(result.evidence.discovered_secret_count, 12);
+    assert.equal(result.evidence.required_secret_count, 9);
+    assert.equal(result.evidence.discovered_secret_count, 10);
     assert.deepEqual(result.evidence.missing_required_secret_names, []);
     assert.deepEqual(calls, [{
       command: process.platform === "win32" ? "npx.cmd" : "npx",
@@ -104,7 +104,7 @@ test("inventory validator invokes one bounded JSON name-only Wrangler command", 
 
 test("missing required names fail without exposing discovered extra names or values", async () => {
   await withConfig(protectedConfig("production"), async (configPath) => {
-    const missing = ["LEASE_SIGNING_KEY_ID", "LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM"];
+    const missing = ["ONLINE_SIGNING_KEY_ID", "ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM"];
     const present = REQUIRED_BACKEND_SECRET_NAMES.filter((name) => !missing.includes(name));
     const result = await inspectBackendSecretInventory({
       profile: "production",

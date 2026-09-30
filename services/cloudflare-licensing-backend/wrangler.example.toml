@@ -5,9 +5,8 @@ compatibility_flags = ["global_fetch_strictly_public"]
 workers_dev = true
 preview_urls = false
 
-# Cron Trigger: the scheduled() handler reclaims lapsed concurrent seats (so idle entitlements
-# still free seats and keep peak_concurrent accurate without waiting for a later checkout) and
-# enforces retention on the append-only usage_events / lease_issuance logs.
+# Cron Trigger: the scheduled() handler runs protected-device cleanup, portal session sweeps,
+# webhook delivery and the audit digest.
 [triggers]
 crons = ["*/5 * * * *"]
 
@@ -111,9 +110,6 @@ simple = { limit = 600, period = 60 }
 # to >= 32 bytes (fail-closed). Tokens are stored as keyed HMAC under a pepper; rotate by adding a
 # new pepper_key_id + flipping ACCOUNT_TOKEN_ACTIVE_PEPPER_ID (old tokens keep validating until drained).
 # wrangler secret put ACCOUNT_TOKEN_PEPPERS
-# Break-glass operator bearer for the SEPARATE /v1/emergency/* route ONLY (never the scoped paths).
-# Unset = closed (the route 404s). Use only for incident recovery; every use is logged at warn.
-# wrangler secret put EMERGENCY_OPERATOR_BEARER
 # Webhook signing key map: a JSON object { "<key_id>": "<base64-secret>" }; each secret decodes to
 # >= 32 bytes (fail-closed; mirrors ORDER_HMAC_SECRETS). The cron-drained webhook dispatcher signs
 # each delivery HMAC-SHA256 over "<t>.<rawjsonbody>" and sends header

@@ -264,29 +264,12 @@ deployment identities and bounded drill results are retained as a redacted
 archive before expiry when they support a release decision.
 
 The standard portal-compatible topology deliberately requires
-`DEVICE_PROOF_MODE=off` for lease and seat issuance. Missing proof is accepted,
-while any presented proof is still verified. The portal never receives or
-signs with a device private key. Moving this global selector to `required`
-remains blocked on a reviewed client/browser device-key registration and
-signing workflow; the compatibility posture is a recorded residual risk, not a
-claim of device possession.
-
-To exercise the direct protected path without misrepresenting the portal, a
-separate staging lease drill targets the exact materializer-bound backend URL.
-Protected values supply a dedicated active entitlement, an account token for
-that authorized fixture tuple,
-registered P-256 device key, expected lease key ID, and canonical PKCS#1 DER
-RSA public key. Before traffic the drill requires a canonical 2048–4096-bit
-key and `sha256(DER) == expected_lease_key_id`. Fresh, separately signed
-`/v1/activate` and `/v1/renew` requests must each return the exact fixture
-feature's v201 section. The drill reconstructs the canonical signed fields and
-RSA-SHA256 verifies both signatures with that protected expected public key. It
-also validates bounded request/server skew, ordered renew/valid-to times, the
-server UTC date inside the signed interval, and signed/envelope valid-to
-agreement. The drill emits none of the token, private key, public-key bytes,
-fixture, lease, customer, license, or fingerprint. Evidence proves only the
-authorized fixture tuple, not a negative cross-scope least-privilege denial;
-the protected server-side fixture is not a portal/browser key UX.
+`DEVICE_PROOF_MODE=off` for `/v1/verify`. Missing proof is accepted, while any
+presented proof is still verified. The portal never receives or signs with a
+device private key. Moving this global selector to `required` remains blocked
+on a reviewed client/browser device-key registration and signing workflow; the
+compatibility posture is a recorded residual risk, not a claim of device
+possession.
 
 ## Protected staging capacity evidence
 

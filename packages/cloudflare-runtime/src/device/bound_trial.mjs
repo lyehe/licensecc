@@ -2,7 +2,7 @@
 // Callers supply a verified/registered key, never a self-reported machine ID.
 // Shared by two deployables: the licensing backend decides protected-trial access with it, and the
 // customer portal uses its deadline rule (boundTrialDeadlineSql) for protected rows, to show when
-// their trial ends. A legacy row follows legacyTrialDeadlineSql (lease/trial_store) instead.
+// their trial ends.
 const activationBases = new Set(["from_first_activation", "from_first_use"]);
 const safeTime = value => Number.isSafeInteger(value) && value >= 0;
 const keyId = value => typeof value === "string" && value.length === 71 && /^sha256:[0-9a-f]{64}$/.test(value);

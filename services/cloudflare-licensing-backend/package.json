@@ -31,11 +31,9 @@
     "migrate:remote": "npx wrangler d1 migrations apply DB --remote --config wrangler.toml",
     "db:local:init": "node --experimental-sqlite local-host/migrate.mjs",
     "db:local:reset": "node --experimental-sqlite local-host/migrate.mjs --reset",
-    "local:server": "node --experimental-sqlite local-host/server.mjs",
     "entitlement": "node scripts/entitlement.mjs",
     "account-token": "node scripts/account-token.mjs",
     "device-key": "node scripts/device-key.mjs",
-    "report": "node scripts/report.mjs",
     "order:sign": "node scripts/order-sign.mjs",
     "generate-online-key": "node scripts/generate-online-key.mjs",
     "generate-online-assertion-fixture": "node scripts/generate-online-assertion-fixture.mjs",
@@ -43,11 +41,10 @@
     "validate:protected-config": "node scripts/protected-device-readiness.mjs",
     "validate:protected-smoke": "node scripts/protected-readiness-smoke.mjs",
     "validate:secret-inventory": "node scripts/backend-secret-inventory.mjs",
-    "validate:staging-lease": "node scripts/staging-lease-drill.mjs",
     "validate:staging-order": "node scripts/staging-order-drill.mjs",
     "capacity:public-verifier": "node scripts/public-verifier-capacity.mjs",
     "test:capacity": "node --test test/public-verifier-capacity.test.mjs",
-    "test:deployed-readiness": "node --test test/backend-secret-inventory.test.mjs test/protected-readiness-smoke.test.mjs test/public-verifier-drill.test.mjs test/staging-lease-drill.test.mjs test/staging-order-drill.test.mjs"
+    "test:deployed-readiness": "node --test test/backend-secret-inventory.test.mjs test/protected-readiness-smoke.test.mjs test/public-verifier-drill.test.mjs test/staging-order-drill.test.mjs"
   },
   "devDependencies": {
     "@typescript/typescript6": "6.0.2",

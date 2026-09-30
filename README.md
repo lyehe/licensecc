@@ -25,7 +25,6 @@ before integrating Licensecc into proprietary or closed-source software.
 | You want to... | Start here | What you need |
 | --- | --- | --- |
 | Add offline licensing to a C/C++ application | [First successful license check](#first-successful-license-check) | CMake, a C++17 compiler, and Boost |
-| Evaluate online verification without deploying | [Local online evaluation](doc/tutorials/local-online-evaluation.rst) | Node 22.5+ and the root npm workspace |
 | Verify server tokens from Python, .NET, or Java | [SDK and support entry points](doc/tutorials/sdk-and-support.rst) | Only the selected language toolchain |
 | Diagnose a customer machine or license | [SDK and support entry points](doc/tutorials/sdk-and-support.rst#support-with-lccinspector) | An installed native build |
 | Set up Cloudflare hosting | [Cloudflare setup](doc/operations/cloudflare-setup.md) | Workers, D1, Access and backup setup in order |

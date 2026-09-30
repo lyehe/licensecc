@@ -181,21 +181,10 @@ the exact candidate.
   to remain terminal `400 invalid_order` (including replay), while omitted
   fields carry the durable values forward; the protected staging sequence does
   not by itself exercise that conflict branch.
-- A separate direct staging lease drill uses the protected account token for
-  one authorized fixture tuple and a fresh registered P-256 proof for both
-  activate and renew. Before traffic it validates a canonical PKCS#1 DER RSA
-  public key (2048–4096 bits) whose SHA-256 is the expected lease key ID. It
-  then parses the exact fixture feature's v201 section, reconstructs the
-  canonical signed fields, and RSA-SHA256 verifies both returned signatures.
-  It also requires bounded request/server skew, ordered renew/valid-to times,
-  the server UTC date inside the signed interval, and agreement between the
-  signed and envelope valid-to values. This proves only the authorized fixture
-  tuple; negative cross-scope token denial remains separate evidence, and the
-  protected server-side fixture is not a portal/browser key workflow.
 - The last-known-good Worker version is restored in a timed rollback drill.
 
 The standard portal-compatible topology keeps `DEVICE_PROOF_MODE=off` for
-lease/seat issuance: missing proof is accepted, while any presented proof is
+`/v1/verify`: missing proof is accepted, while any presented proof is
 verified. The portal does not hold a device private key. Global required proof
 is blocked until a reviewed client/browser registration and signing workflow
 exists; release evidence must carry this residual-risk disposition.
@@ -393,7 +382,7 @@ their own.
 - **Objective:** deploy the exact candidate to isolated staging and prove the
   security-sensitive positive, negative, replay, and lifecycle paths.
 - **Deliverables:** four changed deployment IDs with sole 100% version/commit
-  bindings; admin, portal, order, and direct-lease evidence; a controlled order
+  bindings; admin, portal, and order evidence; a controlled order
   crash/redrive result; rollback target identity; and a disposition for the
   portal device-proof compatibility posture.
 - **Dependencies:** Phases 1–2, pre-created synthetic fixtures, protected
@@ -406,16 +395,12 @@ their own.
   experiment could corrupt shared state; routine execution remains xhigh.
 - **Local verification:** run `npm run test:services`, `npm run test:e2e`, and
   `npm run test:release-operations`; verify protected-config, staging-order,
-  staging-lease, admin, portal, and rollback contract tests remain included and
+  admin, portal, and rollback contract tests remain included and
   green.
 - **Protected verification/evidence:** run `.github/workflows/deploy-staging.yml`
   from the exact SHA. Require the PRD-03 admin denials; order apply, exact
   replay denial, fresh-signature cached result, terminal linked-order conflict,
-  and controlled crash redrive; and canonical v201 lease activate/renew with
-  RSA-SHA256 verification. In addition to the authorized lease tuple, use an
-  explicitly project/feature/operation-scoped staging token against a
-  pre-created synthetic tuple outside that scope and require `403
-  forbidden_scope` with no mutation. For the portal, separately require an
+  and controlled crash redrive. For the portal, separately require an
   expired unused OTP denial, denial of a previously authenticated cookie after
   the server-side session TTL, real email receipt, and two-fixture cross-tenant
   denial. Retain status/code and fixture-class labels, never credentials,

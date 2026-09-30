@@ -84,10 +84,6 @@ const workerSecretNames = new Set([
   "BOUND_APPROVAL_ENCRYPTION_KEYS",
   "BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM",
   "D1_REST_API_TOKEN",
-  "EMERGENCY_OPERATOR_BEARER",
-  "LEASE_ISSUE_BEARER",
-  "LEASE_SIGNING_KEY_ID",
-  "LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM",
   "ONLINE_SIGNING_KEY_ID",
   "ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM",
   "ORDER_HMAC_SECRETS",
@@ -397,7 +393,7 @@ function validateBackend(config, target, profile, profileName) {
   if (!/^[1-9]\d*$/u.test(String(limiter.namespace_id ?? ""))) fail(target, "must set a positive ratelimits[0].namespace_id");
   const simple = objectValue(limiter.simple, target, "ratelimits[0].simple");
   if (!Number.isInteger(simple.limit) || simple.limit < 1 || !Number.isInteger(simple.period) || simple.period < 1) fail(target, "must set positive integer rate-limit values");
-  validateCronList(config, target, "seat-reclamation");
+  validateCronList(config, target, "maintenance");
   if (config.assets !== undefined) fail(target, "must not define static assets for the backend");
   const flags = config.compatibility_flags;
   if (!Array.isArray(flags) || !flags.includes("global_fetch_strictly_public") || flags.includes("global_fetch_private_origin")) {

@@ -24,9 +24,6 @@ Choose a workflow
      - :doc:`examples`
      - A maintained example for fail-closed, online, integrity, or device-key
        behavior.
-   * - Evaluate online verification locally
-     - :doc:`../tutorials/local-online-evaluation`
-     - The real backend Worker running on a loopback SQLite host.
    * - Use a language SDK or support tool
      - :doc:`../tutorials/sdk-and-support`
      - Python, .NET, or Java token verification, or native support diagnostics.
@@ -56,8 +53,6 @@ Prerequisites by workflow
      - .NET 8 SDK.
    * - Java SDK consumer
      - JDK 17 or newer.
-   * - Local online evaluator
-     - Node 22+ and root npm ``10.9.8`` install; no Cloudflare account.
    * - Repository contributor
      - PowerShell 7, Node 22+, npm ``10.9.8``, Python 3.12, uv ``0.12.5``,
        JDK 17.0.20, and only the optional platform tools required by the
@@ -107,10 +102,11 @@ configuration example, tests, and operational README. All six Node workspaces
 share the root lockfile, so run ``npm ci`` once at the repository root; a
 service-local ``npm ci`` is unsupported.
 
-The backend's SQLite host provides local end-to-end evaluation without a
-Cloudflare deployment. :doc:`../tutorials/local-online-evaluation` routes to
-that service-owned runbook. Use :doc:`../operations/production-readiness` only
-when planning an authorized deployment.
+The backend's local SQLite adapter backs its own test suite and
+``db:local:init``/``db:local:reset``; see
+:doc:`../operations/database-backends`. Use
+:doc:`../operations/production-readiness` only when planning an authorized
+deployment.
 
 From the repository root, the service and packaging checks are:
 

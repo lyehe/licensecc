@@ -12,7 +12,6 @@ import {
   catalogImportManifestSnapshot,
   isCatalogImportPreviewId,
 } from "../src/catalog/import_preview.mjs";
-import { summarizeUsage } from "../src/usage/usage_report.mjs";
 import {
   MAX_SUPPORT_UNTIL_EPOCH_SECONDS,
   desiredPlanProjectionRow,
@@ -27,9 +26,6 @@ const DOMAIN_SUBPATHS = [
   "@licensecc/licensing-domain/catalog/plan_projection",
   "@licensecc/licensing-domain/entitlements/contracts",
   "@licensecc/licensing-domain/entitlements/policy",
-  "@licensecc/licensing-domain/lease/canonical_payload",
-  "@licensecc/licensing-domain/lease/trial",
-  "@licensecc/licensing-domain/usage/usage_report",
   "@licensecc/licensing-domain/orders/intents",
 ];
 
@@ -58,8 +54,7 @@ test("policies are trial, node-locked or subscription, and a stamp is pure and c
   assert.deepEqual(Object.keys(stamped.input).sort(), ["customer_id", "feature", "license_fingerprint", "license_id", "notes", "project", "status", "valid_from", "valid_until"]);
 });
 
-test("usage and audit cores are deterministic without D1", async () => {
-  assert.equal(summarizeUsage([{ event_type: "checkout", ts: 1, seat_id: "s", device_key_id: "d" }]).peak_concurrent, 1);
+test("the audit digest core is deterministic without D1", async () => {
   const event = canonicalEntitlementEvent({ id: 1, created_at: 2, project: "p", feature: "F", license_fingerprint: "fp", event_type: "create", status: "active", revocation_seq: 1 });
   assert.equal(await computeSegmentDigest("", [event]), await computeSegmentDigest("", [event]));
 });

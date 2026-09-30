@@ -24,15 +24,6 @@
       "types": "./src/entitlements/policy.d.ts",
       "default": "./src/entitlements/policy.mjs"
     },
-    "./lease/canonical_payload": {
-      "default": "./src/lease/canonical_payload.mjs"
-    },
-    "./lease/trial": {
-      "default": "./src/lease/trial.mjs"
-    },
-    "./usage/usage_report": {
-      "default": "./src/usage/usage_report.mjs"
-    },
     "./lease/device_protocol": {
       "types": "./src/lease/device_protocol.d.ts",
       "default": "./src/lease/device_protocol.mjs"
