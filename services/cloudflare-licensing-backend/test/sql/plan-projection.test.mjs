@@ -340,6 +340,56 @@ for (const state of ["active", "retiring"]) {
   });
 }
 
+// The authority read the protected issuer makes before it signs (bound_issue.mjs): an active grant
+// of an active customer, inside its validity window, with no seat pool, in the protected mode.
+const PROTECTED_AUTHORITY_SQL = `SELECT e.feature FROM entitlements e JOIN customers c ON c.id = e.customer_id
+  WHERE e.project = ? AND e.feature = ? AND e.license_fingerprint = ? AND e.customer_id = ?
+    AND e.status = 'active' AND c.status = 'active' AND e.pool_size = 0
+    AND (e.valid_from IS NULL OR e.valid_from <= ?) AND (e.valid_until IS NULL OR e.valid_until > ?)
+    AND e.enforcement_mode = 'device_bound_v1'`;
+
+test("plan apply keeps a protected grant issuable", async (t) => {
+  const db = freshDb(); t.after(() => db.close()); seedCatalog(db);
+  // A catalog row that still carries seat, borrow and meter values, over an existing protected grant.
+  db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_1','Customer',1,1);
+    INSERT INTO licenses(id,customer_id,project,label,created_at,updated_at) VALUES('lic_1','cus_1','DEFAULT','License',1,1);
+    INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,enforcement_mode,max_active_devices,created_at,updated_at)
+      VALUES('DEFAULT','vault','${FP}','active','cus_1','lic_1','device_bound_v1',1,1,1);
+    INSERT INTO catalog_features(id,project,feature_key,name,description,category,status,created_at,updated_at)
+      VALUES('feat_vault','DEFAULT','vault','Vault','','','active',${NOW},${NOW});
+    INSERT INTO catalog_plan_features(project,plan_id,feature_key,feature_inclusion,addon_key,policy_id,status,display_order,
+        assertion_ttl_seconds,pool_size,max_active_devices,max_borrow_sec,meter_quota,meter_period_sec,created_at,updated_at)
+      VALUES('DEFAULT','plan_pro','vault','included',NULL,'pol_node','active',4,NULL,5,NULL,60,10,NULL,${NOW},${NOW});`);
+  const env = { DB: new D1Like(db) };
+  const preview = await previewPlanProjection(env, projectionInput({ addons: [] }), "admin", NOW);
+  assert.deepEqual(preview.will_update.map((row) => row.feature), ["vault"]);
+  await applyPlanProjection(env, preview.preview_id, ctx(), null, NOW);
+
+  const row = db.prepare(`SELECT enforcement_mode, policy_id, pool_size, max_borrow_sec, meter_quota, device_hash
+    FROM entitlements WHERE project = 'DEFAULT' AND feature = 'vault' AND license_fingerprint = ?`).get(FP);
+  assert.deepEqual({ ...row }, { enforcement_mode: "device_bound_v1", policy_id: "pol_node", pool_size: 0, max_borrow_sec: 0, meter_quota: 0, device_hash: "" });
+  assert.deepEqual(db.prepare(PROTECTED_AUTHORITY_SQL).all("DEFAULT", "vault", FP, "cus_1", NOW + 1, NOW + 1).map((found) => found.feature), ["vault"]);
+});
+
+test("plan apply creates protected rows", async (t) => {
+  const db = freshDb(); t.after(() => db.close()); seedCatalog(db);
+  const env = { DB: new D1Like(db) };
+  // The team add-on's policy and plan row both carry a seat pool, borrowing and a meter.
+  const preview = await previewPlanProjection(env, projectionInput(), "admin", NOW);
+  assert.deepEqual(preview.will_create.map((row) => [row.feature, row.license_mode]), [["core", "node_locked"], ["export", "node_locked"], ["team", "node_locked"]]);
+  await applyPlanProjection(env, preview.preview_id, ctx(), null, NOW);
+
+  const protectedRow = (feature, maxActiveDevices) => ({
+    feature, enforcement_mode: "device_bound_v1", device_hash: "", pool_size: 0, max_active_devices: maxActiveDevices,
+    max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000, assertion_ttl_seconds: 300, cache_ttl_seconds: 3600,
+  });
+  const rows = db.prepare(`SELECT feature, enforcement_mode, device_hash, pool_size, max_active_devices, max_borrow_sec, meter_quota,
+      meter_period_sec, assertion_ttl_seconds, cache_ttl_seconds
+    FROM entitlements WHERE license_fingerprint = ? ORDER BY feature`).all(FP);
+  // The plan row's device limit override is the one capacity a protected grant takes from the catalog.
+  assert.deepEqual(rows.map((row) => ({ ...row })), [protectedRow("core", 1), protectedRow("export", 1), protectedRow("team", 7)]);
+});
+
 test("legacy entitlement identity fence uses the project-license-fingerprint index", () => {
   const db = freshDb();
   const plan = db

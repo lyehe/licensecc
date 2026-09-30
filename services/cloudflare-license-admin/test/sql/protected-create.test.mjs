@@ -64,7 +64,9 @@ test("an omitted or legacy mode is refused, a legacy grant is never converted, a
   const before = f.snapshot();
   const convert = await f.send(input, "convert");
   assert.equal(convert.status, 409); assert.equal((await convert.json()).code, "enforcement_mode_conflict");
-  for (const [body, key] of [[omitted, "omitted"], [{ ...input, enforcement_mode: "legacy" }, "legacy"]]) {
+  // A policy create takes the same rule: its stamp never supplies a mode.
+  for (const [body, key] of [[omitted, "omitted"], [{ ...input, enforcement_mode: "legacy" }, "legacy"],
+    [{ ...omitted, policy_id: "policy" }, "policy-omitted"], [{ ...input, policy_id: "policy", enforcement_mode: "legacy" }, "policy-legacy"]]) {
     const refused = await f.send(body, key);
     assert.equal(refused.status, 400); assert.equal((await refused.json()).code, "invalid_request");
   }

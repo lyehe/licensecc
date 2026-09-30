@@ -15,6 +15,7 @@ import {
 import { summarizeUsage } from "../src/usage/usage_report.mjs";
 import {
   MAX_SUPPORT_UNTIL_EPOCH_SECONDS,
+  desiredPlanProjectionRow,
   normalizePlanProjectionInput,
   planProjectionMatchesDesired,
 } from "../src/catalog/plan_projection.mjs";
@@ -82,35 +83,33 @@ test("catalog import preview values have a stable opaque grammar and canonical d
   assert.equal(isCatalogImportPreviewId("civ_not=safe"), false);
 });
 
-test("plan projections treat a persisted cache TTL mismatch as an update without exposing it", () => {
-  const desired = {
-    input: {
-      project: "DEFAULT",
-      feature: "CORE",
-      license_fingerprint: "f".repeat(64),
-      device_hash: "",
-      status: "active",
-      assertion_ttl_seconds: 300,
-      valid_from: null,
-      valid_until: null,
-      notes: "",
-      customer_id: null,
-      license_id: "lic_1",
-    },
-    policy_id: null,
-    capacity: { pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2_592_000 },
-    trial: { is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0, trial_require_device_proof: 0 },
-  };
+test("a plan-projected grant takes only its device limit from the catalog, and a change is judged on what apply writes", () => {
+  const input = normalizePlanProjectionInput({ project: "DEFAULT", license_id: "lic_1", license_fingerprint: "f".repeat(64), plan_key: "basic" });
+  // A catalog row that still carries seat, borrow, meter and TTL overrides.
+  const desired = desiredPlanProjectionRow({
+    feature_key: "CORE", feature_inclusion: "included", addon_key: null, feature_name: "Core", policy_id_resolved: null,
+    assertion_ttl_seconds: 600, pool_size: 5, max_active_devices: 3, max_borrow_sec: 60, meter_quota: 10, meter_period_sec: 3600,
+  }, input, 100);
+  assert.deepEqual(desired.capacity, { max_active_devices: 3 });
+  assert.equal("device_hash" in desired.input, false);
+  assert.equal("assertion_ttl_seconds" in desired.input, false);
   const existing = {
     ...desired.input,
-    cache_ttl_seconds: 86_400,
     policy_id: null,
     ...desired.capacity,
     ...desired.trial,
+    // Columns plan apply never writes: a grant keeps its own values, so they never make a change.
+    device_hash: "",
+    assertion_ttl_seconds: 900,
+    cache_ttl_seconds: 86_400,
+    pool_size: 0,
+    max_borrow_sec: 0,
+    meter_quota: 0,
+    meter_period_sec: 2_592_000,
   };
 
-  assert.equal(planProjectionMatchesDesired(existing, desired), false);
-  assert.equal(planProjectionMatchesDesired({ ...existing, cache_ttl_seconds: 300 }, desired), true);
+  assert.equal(planProjectionMatchesDesired(existing, desired), true);
+  assert.equal(planProjectionMatchesDesired({ ...existing, max_active_devices: 1 }, desired), false);
 });
 
 test("plan projection support_until is a safe, bounded epoch second", () => {

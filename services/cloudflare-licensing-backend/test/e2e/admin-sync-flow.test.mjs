@@ -27,7 +27,7 @@ function syncRequest(body) {
 
 // Every grant the shared writer creates is protected, so a synced grant is enrolled and exchanged
 // through the device protocol.
-test("user database sync yields a protected grant that supports a signed exchange until it is revoked", async t => {
+test("user database sync yields a protected grant that supports a signed exchange and renewal until it is revoked", async t => {
   const { db, env: portal } = baseFixture(); t.after(() => db.close());
   const now = Math.floor(Date.now() / 1000); db.function("unixepoch", () => now);
   db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_sync','Owner',1,1);
@@ -44,10 +44,13 @@ test("user database sync yields a protected grant that supports a signed exchang
 
   const env = { DB: portal.DB, BOUND_DEVICE_CONFIG: JSON.stringify(config), BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM: privatePem,
     BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM: publicPem, DEVICE_PROOF_MODE: "off", ACCOUNT_TOKEN_MODE: "off", REQUEST_SIGNATURE_MODE: "off", D1_RATE_LIMIT_ENABLED: "0" };
-  const call = async (path, body) => {
+  const send = async (path, body) => {
     const response = await backend.fetch(new Request(`https://license.test${path}`, { method: "POST",
       headers: { "content-type": "application/json", "cf-connecting-ip": "127.0.0.2" }, body: JSON.stringify(body) }), env);
-    const result = await response.json(); assert.equal(response.status, 200, JSON.stringify(result)); return result.data;
+    return { status: response.status, result: await response.json() };
+  };
+  const call = async (path, body) => {
+    const { status, result } = await send(path, body); assert.equal(status, 200, JSON.stringify(result)); return result.data;
   };
   const authorize = async () => {
     const keys = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
@@ -78,6 +81,20 @@ test("user database sync yields a protected grant that supports a signed exchang
   assert.equal(lease.claims.project, "APP"); assert.equal(lease.claims.feature, "PRO");
   assert.equal(db.prepare("SELECT count(*) AS n FROM device_bound_bindings WHERE state='active'").get().n, 1);
 
+  // A renewal of the enrolled binding, proved with its device key under a fresh challenge.
+  const renewal = async () => {
+    const renew = { binding_id: result.binding_id, generation: result.generation, operation_id: boundRandomId(32) };
+    const renewChallenge = await call("/v2/device-challenges", { purpose: "renew", binding_id: renew.binding_id, operation_id: renew.operation_id });
+    const renewIntent = { audience: config.audience, method: "POST", path: "/v2/device-leases/renew", key_id: keyId,
+      operation_id: renew.operation_id, body_sha256: await sha256Hex(deviceOperationBody("renew", renew)), ...renewChallenge };
+    const renewSignature = encodeBase64url(normalizeDeviceSignature(new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, keys.privateKey, deviceProofSigningInput(renewIntent)))));
+    return { ...renew, proof: { key_id: keyId, challenge_id: renewChallenge.challenge_id, nonce: renewChallenge.nonce,
+      expires_at: renewChallenge.expires_at, signature: renewSignature } };
+  };
+  assert.equal((await call("/v2/device-leases/renew", await renewal())).binding_id, result.binding_id, "the active grant renews");
+  // Proved and challenged while the grant is still active, submitted after the revocation lands.
+  const pendingRenewal = await renewal();
+
   // A revocation synced from the user database reaches the protected path: the grant is no longer offered.
   assert.equal((await authorize()).page.entitlements.length, 1, "the active grant is still offered");
   const revoked = await adminWorker.fetch(syncRequest({ ...grant, status: "revoked", reason: "subscription revoked" }), adminEnv);
@@ -85,5 +102,13 @@ test("user database sync yields a protected grant that supports a signed exchang
   assert.equal(revoked.status, 200, JSON.stringify(revokedBody));
   assert.equal(revokedBody.data.status, "revoked");
   assert.equal((await authorize()).page.entitlements.length, 0);
+  // The already-enrolled binding cannot renew: the issuer refuses the proved renewal, and no new one can start.
+  const refused = await send("/v2/device-leases/renew", pendingRenewal);
+  assert.equal(refused.status, 403, JSON.stringify(refused.result));
+  assert.equal(refused.result.code, "access_denied");
+  const unavailable = await send("/v2/device-challenges", { purpose: "renew", binding_id: result.binding_id, operation_id: boundRandomId(32) });
+  assert.equal(unavailable.status, 404, JSON.stringify(unavailable.result));
+  assert.equal(unavailable.result.code, "binding_unavailable");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM device_bound_leases").get().n, 2, "only the exchange and the renewal before the revocation issued leases");
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
 });

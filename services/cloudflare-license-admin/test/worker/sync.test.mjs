@@ -42,6 +42,43 @@ test("sync endpoint requires its dedicated bearer secret", async () => {
   assert.equal((await json(invalid)).code, "invalid_sync_token");
 });
 
+// Every synced grant is protected, so it names the customer who owns it and that customer's licence.
+const ownedSync = { project: "APP", feature: "PRO", license_fingerprint: fingerprint, status: "active", customer_id: "cus_1", license_id: "lic_1" };
+
+test("sync without customer_id is refused", async () => {
+  const db = new MockD1();
+  const { customer_id: _omitted, ...payload } = ownedSync;
+  for (const body of [payload, { ...payload, customer_id: null }, { ...payload, customer_id: "" }]) {
+    const response = await worker.fetch(syncAuthed(body), syncEnv(db));
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.equal((await json(response)).code, "invalid_request");
+  }
+  assert.equal(db.entitlements.size, 0);
+  assert.equal(db.events.length, 0);
+});
+
+test("sync without license_id is refused", async () => {
+  const db = new MockD1();
+  const { license_id: _omitted, ...payload } = ownedSync;
+  for (const body of [payload, { ...payload, license_id: null }, { ...payload, license_id: "" }]) {
+    const response = await worker.fetch(syncAuthed(body), syncEnv(db));
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.equal((await json(response)).code, "invalid_request");
+  }
+  assert.equal(db.entitlements.size, 0);
+  assert.equal(db.events.length, 0);
+});
+
+test("sync refuses device_hash and assertion_ttl_seconds", async () => {
+  const db = new MockD1();
+  for (const field of [{ device_hash: "" }, { device_hash: "d".repeat(64) }, { assertion_ttl_seconds: 300 }]) {
+    const response = await worker.fetch(syncAuthed({ ...ownedSync, ...field }), syncEnv(db));
+    assert.equal(response.status, 400, JSON.stringify(field));
+    assert.equal((await json(response)).code, "invalid_request");
+  }
+  assert.equal(db.entitlements.size, 0);
+});
+
 test("sync endpoint upserts user database projection and no-ops identical state", async () => {
   const db = new MockD1();
   const env = syncEnv(db);

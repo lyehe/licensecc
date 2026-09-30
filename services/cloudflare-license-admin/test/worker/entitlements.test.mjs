@@ -46,6 +46,50 @@ test("admin create with enforcement_mode legacy is refused", async () => {
   assert.equal(response.status, 400);
 });
 
+// A protected grant carries no device hash (the device key proves the device) and no assertion TTL.
+test("admin create refuses device_hash and assertion_ttl_seconds", async () => {
+  const { env, request } = protectedCreateFixture();
+  for (const field of [{ device_hash: "" }, { device_hash: "d".repeat(64) }, { assertion_ttl_seconds: 300 }]) {
+    const response = await request("/api/admin/entitlements", { ...protectedGrant, ...field });
+    assert.equal(response.status, 400, JSON.stringify(field));
+    assert.equal((await response.json()).code, "invalid_request");
+  }
+  assert.equal(env.DB.entitlements.size, 0);
+});
+
+test("PATCH refuses device_hash on a protected grant", async () => {
+  const { env, request } = protectedCreateFixture();
+  const created = await request("/api/admin/entitlements", protectedGrant);
+  assert.equal(created.status, 200);
+  const { id } = (await created.json()).data;
+  const key = keyOf(protectedGrant.project, protectedGrant.feature, protectedGrant.license_fingerprint);
+  const before = clone(env.DB.entitlements.get(key));
+  const patched = await worker.fetch(authed(`/api/admin/entitlements/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ device_hash: "d".repeat(64) }),
+  }), env);
+  assert.equal(patched.status, 400);
+  assert.equal((await patched.json()).code, "invalid_request");
+  assert.deepEqual(env.DB.entitlements.get(key), before);
+  assert.equal(env.DB.events.length, 1);
+});
+
+test("PATCH refuses assertion_ttl_seconds on a protected grant", async () => {
+  const { env, request } = protectedCreateFixture();
+  const created = await request("/api/admin/entitlements", protectedGrant);
+  assert.equal(created.status, 200);
+  const { id } = (await created.json()).data;
+  const key = keyOf(protectedGrant.project, protectedGrant.feature, protectedGrant.license_fingerprint);
+  const before = clone(env.DB.entitlements.get(key));
+  const patched = await worker.fetch(authed(`/api/admin/entitlements/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ assertion_ttl_seconds: 120 }),
+  }), env);
+  assert.equal(patched.status, 400);
+  assert.equal((await patched.json()).code, "invalid_request");
+  assert.deepEqual(env.DB.entitlements.get(key), before);
+});
+
 test("cloudflare access reader can read but cannot mutate", async (t) => {
   const fixture = await accessFixture(t);
   const db = new MockD1();
