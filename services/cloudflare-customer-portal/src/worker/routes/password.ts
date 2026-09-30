@@ -1,6 +1,6 @@
 import { authSession } from "./auth.js";
 import { envelope, readJson, retryAfterHeaders } from "../support.js";
-import { hashPassword, loginEmail, validPassword, verifyPassword } from "../password/crypto.js";
+import { hashPassword, loginEmail, validPassword, verifyPassword } from "@licensecc/cloudflare-runtime/auth/password";
 import { HEADERS, primary, gate, throttle, signedIn, RESET_ELIGIBLE_SQL } from "../password/shared.js";
 import { passwordInvalidations } from "../password/invalidation.js";
 import { PASSWORD_EMAIL_DISPATCH } from "./password-email.js";
@@ -70,7 +70,7 @@ async function settings(request: Request, env: Env, reqId: string, now: number):
     : env.DB.prepare(`INSERT INTO portal_passwords (customer_id, email_lower, password_hash, created_at, updated_at) SELECT ?, ?, ?, ?, ? WHERE ${sessionGuard} ON CONFLICT DO NOTHING RETURNING customer_id`).bind(session.customer_id, email, passwordHash, now, now, session.id, session.customer_id, now);
   const results = await env.DB.batch([
     write,
-    ...passwordInvalidations(env.DB, session.customer_id, passwordHash, now, { revokeAccountTokens: true }),
+    ...passwordInvalidations(env.DB, session.customer_id, passwordHash, now),
   ]);
   if (!results[0]?.results.length) return envelope(reqId, "password_change_conflict", undefined, 409, HEADERS);
   return signedIn(request, env, reqId, session.customer_id, passwordHash, now);

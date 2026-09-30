@@ -64,8 +64,6 @@ interface RuntimeEnv {
   BACKEND?: { fetch(request: Request): Promise<Response> };
   PORTAL_OTP_PEPPERS?: string;
   PORTAL_SESSION_PEPPERS?: string;
-  ACCOUNT_TOKEN_PEPPERS?: string;
-  ACCOUNT_TOKEN_ACTIVE_PEPPER_ID?: string;
   PORTAL_GOOGLE_CLIENT_ID?: string;
   PORTAL_GOOGLE_CLIENT_SECRET?: string;
   PORTAL_GITHUB_CLIENT_ID?: string;

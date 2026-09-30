@@ -41,9 +41,9 @@ non-browser clients.
 Customer portal API
 -------------------
 
-The portal owns session-bound customer reads, device release, downloads, and
-floating-seat actions. It server-resolves customer and entitlement ownership
-rather than trusting those identities from request bodies.
+The portal owns session-bound customer reads, protected device consent and
+connected-device retirement. It server-resolves customer and entitlement
+ownership rather than trusting those identities from request bodies.
 
 .. licensecc-openapi:: portal
 

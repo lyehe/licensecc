@@ -3,7 +3,7 @@
 // ONE portal_otp row backs BOTH a numeric code AND a magic-link secret:
 //   secret = base64url(32 random bytes)        -> the magic-link body (?token=...)
 //   code   = (first 4 secret bytes as uint32) % 1e8, zero-padded to 8 digits
-// Stored as KEYED HMAC (pepper-versioned), NEVER plaintext, mirroring account_tokens:
+// Stored as KEYED HMAC (pepper-versioned), NEVER plaintext, mirroring portal_sessions:
 //   secret_hmac = HMAC(pepper, secret)
 //   code_hmac   = HMAC(pepper, email_lower + ":" + code)   <- email-bound (A's code + B's email no-match)
 // Single-use is enforced by an ATOMIC `UPDATE ... consumed_at ... WHERE consumed_at IS NULL ... RETURNING`,
@@ -97,7 +97,7 @@ async function observeEmailDelivery(deliver, emitFailure) {
   }
 }
 
-// loadSecretMap lives on account_token via order_hmac; re-export the same contract for OTP peppers.
+// The shared fail-closed loadSecretMap loader parses the OTP pepper map.
 /** @param {PortalEnv | null | undefined} env */
 export function loadOtpPeppers(env) {
   return loadSecretMap(env?.PORTAL_OTP_PEPPERS);

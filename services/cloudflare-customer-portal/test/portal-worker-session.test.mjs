@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, policyCapacityViolation, FP_A, FP_B, installBackendStub, cookieFor, sameSiteHeaders, entitlementId, ownedEntitlementId, call, baseFixture, seedDevice, seedEntitlement, CTX, NOW } from "./portal-worker-fixtures.mjs";
+import { assert, worker, cookieFor, call, baseFixture, CTX } from "./portal-worker-fixtures.mjs";
 test("missing / invalid / revoked session -> 401 on a protected read", async () => {
   const { db, env } = baseFixture();
   // Missing.
@@ -23,31 +23,31 @@ test("a disabled customer's session -> 401", async () => {
 });
 
 test("cross-site POST is rejected 403 (CSRF defense)", async () => {
-  const { db, env } = baseFixture();
+  const retirements = [];
+  const { db, env } = baseFixture({ DEVICE_CONSENT: { retire: async (...args) => { retirements.push(args); throw new Error("a cross-site request must not reach the backend"); } } });
   const cookie = await cookieFor(env, "A");
-  const req = new Request("https://portal.test/api/portal/checkout", {
+  const req = new Request("https://portal.test/api/portal/device-bindings/retire", {
     method: "POST",
-    headers: { "content-type": "application/json", cookie, "sec-fetch-site": "cross-site", origin: "https://evil.test" },
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT" }),
+    headers: { "content-type": "application/json", cookie, "sec-fetch-site": "cross-site", origin: "https://evil.test", "x-expected-customer-id": "A" },
+    body: JSON.stringify({ binding_id: Buffer.alloc(16, 1).toString("base64url"), expected_revision: 0 }),
   });
   const res = await worker.fetch(req, env, CTX);
   assert.equal(res.status, 403);
   assert.equal((await res.json()).code, "cross_site_forbidden");
+  assert.equal(retirements.length, 0, "the rejected retirement never reaches the backend");
   db.close();
 });
 
 // =================================================================================================
-// LOGOUT bumps revocation_seq (invariant 9)
+// LOGOUT revokes the session
 // =================================================================================================
 
-test("logout revokes the session AND bumps account_token_revocations.revocation_seq", async () => {
+test("logout revokes the session and clears the cookie", async () => {
   const { db, env } = baseFixture();
   const cookie = await cookieFor(env, "A");
   const r = await call(env, "POST", "/portal/v1/auth/logout", { cookie, body: {} });
   assert.equal(r.status, 200);
   assert.match(r.res.headers.get("set-cookie") ?? "", /Max-Age=0/, "the cookie is cleared");
-  const seq = db.prepare("SELECT revocation_seq FROM account_token_revocations WHERE customer_id = 'A'").get();
-  assert.ok(seq && seq.revocation_seq >= 1, "the per-customer revocation floor is bumped on logout");
   // The session is revoked.
   const after = await call(env, "GET", "/api/portal/me", { cookie });
   assert.equal(after.status, 401, "the session no longer resolves after logout");

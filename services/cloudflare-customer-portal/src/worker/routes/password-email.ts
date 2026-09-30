@@ -3,7 +3,7 @@ import { canonicalHttpsOrigin, emailApiOrigin } from "../../auth/portal_destinat
 import { portalRateLimit } from "../../auth/portal_ratelimit.mjs";
 import { deliveryErrorType, emitEmailDeliveryFailure } from "../../auth/portal_otp.mjs";
 import { clientIp, envelope, readJson, retryAfterHeaders } from "../support.js";
-import { hashPassword, loginEmail, validPassword } from "../password/crypto.js";
+import { hashPassword, loginEmail, validPassword } from "@licensecc/cloudflare-runtime/auth/password";
 import { HEADERS, primary, gate, throttle, signedIn, digest, RESET_ELIGIBLE_SQL } from "../password/shared.js";
 import { passwordInvalidations } from "../password/invalidation.js";
 import type { Env, ExecutionContextLike, TopRoute } from "../env.js";
@@ -106,9 +106,7 @@ async function complete(request: Request, env: Env, reqId: string, now: number):
     statements.push(env.DB.prepare(`UPDATE customers SET email = ?, updated_at = ? WHERE id = ? AND email = '' AND EXISTS (SELECT 1 FROM portal_passwords WHERE customer_id = ? AND password_hash = ?) AND NOT EXISTS (SELECT 1 FROM customers o WHERE lower(o.email) = ?)`)
       .bind(email, now, id, id, passwordHash, email));
   }
-  statements.push(...passwordInvalidations(env.DB, id, passwordHash, now, {
-    email, revokeAccountTokens: action.purpose === "reset",
-  }));
+  statements.push(...passwordInvalidations(env.DB, id, passwordHash, now, { email }));
   const results = await env.DB.batch(statements);
   if (!results[writeIndex]?.results.length) return invalid();
   let session: Response | null = null;

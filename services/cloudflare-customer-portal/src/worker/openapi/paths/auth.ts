@@ -1,5 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { ERR_BODY_TOO_LARGE, ERR_CROSS_SITE, ERR_INVALID_JSON, errorResponse, LEASE_ACTION_REQUEST, RETRY_AFTER_HEADER } from "../components.js";
+import { ERR_BODY_TOO_LARGE, ERR_CROSS_SITE, ERR_INVALID_JSON, errorResponse, RETRY_AFTER_HEADER } from "../components.js";
 
 // OTP request/verify and magic-redeem's JSON branch now answer their 429 with a real
 // retry-after header (the form-encoded/redirect branch of magic-redeem never gets one -- a top-level
@@ -229,9 +229,7 @@ export const authPaths: LabeledPathFragment = {
         summary: "Revoke the session and clear the cookie (idempotent).",
         description:
           "No auth required (the session is optional — logout is idempotent). Marks the session row " +
-          "revoked and bumps the per-customer revocation floor (account_token_revocations.revocation_seq, " +
-          "invariant 9), which the backend uses to reject reads from a stale replica; in-flight 120s " +
-          "proxy tokens expire on their own TTL. Always clears the cookie (Max-Age=0).",
+          "revoked, so the cookie no longer resolves. Always clears the cookie (Max-Age=0).",
         security: [{ sessionCookie: [] }, {}],
         responses: {
           "200": {

@@ -12,7 +12,7 @@ deployable.
 
 ## License access in the portal
 
-App details distinguish protected-device grants from legacy license downloads. Protected grants direct customers to Connect in their application; they never offer a device-key field or a `.lic` download. Legacy downloads remain available for compatible non-floating grants.
+Every grant is protected: app details direct customers to Connect in their application. The portal never offers a device-key field or a `.lic` download; offline `.lic` files are issued by the operator.
 
 The status label preserves disabled/revoked state and marks past or future validity windows as Expired or Not started. Enabled describes the listed dates only: the backend still checks device, trial and account eligibility. The browser clock updates these labels without server polling; it does not authorize access.
 
@@ -32,13 +32,12 @@ preserves outstanding signed access and capacity holds, and returns the exact
 the later of the existing hold and the retirement commit. On a timeout or 503,
 retry the same body and key; exact recovery lasts 48 hours. Never silently
 replace a pending operation with a new key. All responses are `no-store`.
-The Devices screen lists protected connections independently of legacy account
-reads, with Connected, Disconnecting, and Disconnected states. Last verified means
-authenticated contact, not live presence. Retirement requires confirmation and
-saves the exact request in account-scoped session storage before sending. A lost
-response, navigation or reload offers the same retry; storage failure prevents
-sending. Terminal conflicts inspect the exact binding before a separate explicit
-clear action. The old device-release endpoint keeps its own behavior and mode fence.
+The Devices screen lists protected connections with Connected, Disconnecting,
+and Disconnected states. Last verified means authenticated contact, not live
+presence. Retirement requires confirmation and saves the exact request in
+account-scoped session storage before sending. A lost response, navigation or
+reload offers the same retry; storage failure prevents sending. Terminal
+conflicts inspect the exact binding before a separate explicit clear action.
 
 `GET /api/portal/device-bindings` requires the session and displayed-account
 header. It returns at most 100 owned bindings in binding-ID order, with
@@ -106,19 +105,16 @@ configuration.
 
 The portal uses the shared charcoal visual style and a locally bundled IBM Plex
 Sans font. Apps groups licenses by project. Each app has one License access
-list with capacity, validity and mode-specific activation actions; Activity
-expands separately. Devices distinguishes protected app connections, legacy
-registrations and browser sessions. Browser sessions stays open while a local
-seat or pending release needs attention; Renew seat sends the existing heartbeat.
+list with capacity, validity and the Connect activation action; Activity
+expands separately. Devices lists the protected app connections.
 Account contains sign-in methods and expandable password/account details.
-Sign out stays in the shell and does not release app devices or seats.
+Sign out stays in the shell and does not disconnect app devices.
 
 Google and GitHub support sign-in and registration when their OAuth credentials
 are configured. Existing customers can connect a provider from Account after
 signing in through their existing method. Email-code login remains available
 when email delivery is configured. Protected application enrollment uses the
-Connect approval flow. Configured capacity is not presented as available capacity. The portal's browser-managed
-seat controls do not represent native application sessions on other machines.
+Connect approval flow. Configured capacity is not presented as available capacity.
 
 | Goal | Start here | Side effects |
 | --- | --- | --- |
@@ -240,15 +236,15 @@ Worker or in browser-delivered configuration to simulate possession.
 `BACKEND_ORIGIN` and the optional `PORTAL_EMAIL_API_BASE` are strict canonical
 HTTPS origins: use `https://host.example` (or the same origin with one terminal
 slash) only. Userinfo, a path, query, fragment, malformed spelling, and HTTP
-are rejected before the Worker mints/sends a bearer or constructs an email API
+are rejected before the Worker sends a request or constructs an email API
 key request. There is no HTTP local-development exception; use a local HTTPS
 endpoint when overriding either destination.
 
-The portal reaches the backend through the `BACKEND` service binding (readiness
-and self-service proxying) and `DEVICE_CONSENT` (the `DeviceConsent` RPC
-entrypoint). Wrangler environment blocks do not inherit `services`: declare
-both bindings under every `env.<name>` with that environment's backend Worker
-name, or staging will call production.
+The portal reaches the backend through the `BACKEND` service binding (readiness)
+and `DEVICE_CONSENT` (the `DeviceConsent` RPC entrypoint). Wrangler environment
+blocks do not inherit `services`: declare both bindings under every
+`env.<name>` with that environment's backend Worker name, or staging will call
+production.
 
 See the [change guide](../../doc/architecture/change-guide.md) before adding
 a route, migration, policy rule, UI workflow, or OpenAPI operation. Keep real
@@ -394,8 +390,8 @@ removed on subsequent eligible email requests; audit events are unaffected.
 Account supports changing a password with the current password, or setting or
 resetting one within ten minutes of a Google, GitHub, or email-code sign-in.
 Successful changes and emailed resets revoke old browser sessions and email
-codes, advance the account-token revocation sequence, invalidate old reset
-links, and issue a fresh session. Concurrent link redemption permits one write.
+codes, invalidate old reset links, and issue a fresh session. Concurrent link
+redemption permits one write.
 
 The registration API now accepts `{ "email": "..." }` and returns 202; clients
 must follow the email link and POST `{ "token": "...", "password": "..." }` to
@@ -429,12 +425,11 @@ contact. Set the optional `PORTAL_SUPPORT_CONTACT` variable to an `https:` URL
 or one `mailto:` address, for example `mailto:support@example.com`. The
 providers endpoint publishes it as `support`, and the portal links it as
 "Contact support" wherever its sign-in and app-connection messages tell a
-customer to contact someone. The seat message "All seats are in use — release
-one or ask your administrator." stays unlinked on purpose. A URL containing a
-user name or password, a `mailto:` with several addresses or a `?` query, any
-other scheme (`http:`, `javascript:` and so on), a relative path, or an empty
-value counts as unset, and the portal says "Contact your administrator"
-instead. The value is public configuration, not a secret.
+customer to contact someone. A URL containing a user name or password, a
+`mailto:` with several addresses or a `?` query, any other scheme (`http:`,
+`javascript:` and so on), a relative path, or an empty value counts as unset,
+and the portal says "Contact your administrator" instead. The value is public
+configuration, not a secret.
 
 Disabling is also the first step of deleting an account. The portal has no
 delete action; follow the operator runbook

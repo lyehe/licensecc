@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { assert, baseFixture, call, NOW, mintSession, within } from "./portal-worker-fixtures.mjs";
-import { hashPassword } from "../dist-worker/worker/password/crypto.js";
+import { hashPassword } from "@licensecc/cloudflare-runtime/auth/password";
 
 const PATH = "/portal/v1/auth/password";
 const PASSWORD = "A long testing passphrase 1!";
@@ -59,7 +59,6 @@ test("email proof precedes account creation and creates verified, empty account 
   assert.ok(!JSON.stringify(response.body).includes(f.token()));
   const result = await f.complete();
   assert.equal(result.status, 200);
-  assert.equal(f.db.prepare("SELECT count(*) n FROM account_token_revocations").get().n, 0);
   assert.match(result.res.headers.get("set-cookie"), /HttpOnly; Secure; SameSite=Lax/);
   assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = ?").get(result.body.data.customer_id).email, "new@example.com");
   const settings = await call(f.env, "GET", PATH, { cookie: cookie(result) });
@@ -81,7 +80,7 @@ test("existing, missing, disabled and unverified accounts get generic email requ
   assert.equal(f.db.prepare("SELECT count(*) n FROM customers").get().n,2);
 });
 
-test("reset rotates credentials, sessions, OTPs and token revocations; old links cannot replay", async t => {
+test("reset rotates credentials, sessions and OTPs; old links cannot replay", async t => {
   const f = fixture(t);
   const oldHash = await credential(f.env);
   f.db.prepare("INSERT INTO portal_otp (id,customer_id,email_lower,secret_hmac,code_hmac,pepper_key_id,expires_at,created_at) VALUES ('otp-reset','A','a@x.com','secret-test','code-test','p1',?,?)").run(NOW+600,NOW);
@@ -91,7 +90,6 @@ test("reset rotates credentials, sessions, OTPs and token revocations; old links
   assert.equal(result.status,200);
   assert.equal((await call(f.env,"GET","/api/portal/me",{cookie:`lccp_session=${old.raw}`})).status,401);
   assert.equal((await call(f.env,"GET","/api/portal/me",{cookie:cookie(result)})).status,200);
-  assert.equal(f.db.prepare("SELECT revocation_seq FROM account_token_revocations WHERE customer_id = 'A'").get().revocation_seq,1);
   assert.equal(f.db.prepare("SELECT consumed_at FROM portal_otp WHERE id = 'otp-reset'").get().consumed_at,NOW);
   assert.equal((await call(f.env,"POST",`${PATH}/login`,{body:{email:"a@x.com",password:PASSWORD}})).status,401);
   assert.equal((await call(f.env,"POST",`${PATH}/login`,{body:{email:"a@x.com",password:NEXT}})).status,200);
@@ -108,7 +106,6 @@ test("expiry, password change, disabling and account creation invalidate outstan
   await f.request("reset","a@x.com");
   f.db.prepare("UPDATE portal_passwords SET password_hash = ? WHERE customer_id = 'A'").run(await hashPassword(NEXT));
   assert.equal((await f.complete()).body.code,"invalid_link");
-  assert.equal(f.db.prepare("SELECT count(*) n FROM account_token_revocations").get().n,0);
   f.db.exec("DELETE FROM rate_limit_counters");
   await f.request("reset","a@x.com");
   f.db.exec("UPDATE customers SET status = 'disabled' WHERE id = 'A'");

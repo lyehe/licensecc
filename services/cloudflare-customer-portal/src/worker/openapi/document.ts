@@ -32,10 +32,10 @@ export const openApiDocument: OpenApiDocument = {
     title: "licensecc Customer Portal Worker",
     version: "0.1.0-rc.2",
     description:
-      "Self-serve customer portal: email-OTP / magic-link sign-in, read-only session-scoped " +
-      "entitlement/device/usage views, and per-action seat operations (checkout/heartbeat/" +
-      "release/download) proxied to the licensing backend via an ephemeral, session-scoped " +
-      "account token. Every authenticated route binds the session-derived customer_id; no " +
+      "Self-serve customer portal: email-OTP / magic-link, password and provider sign-in, " +
+      "read-only session-scoped entitlement views, and protected device consent and " +
+      "connected-device retirement through the licensing backend's DeviceConsent entrypoint. " +
+      "Every authenticated route binds the session-derived customer_id; no " +
       "client-supplied customer_id or fingerprint reaches a mutation chokepoint. This document " +
       "describes the routes the Worker actually serves and is pinned to the source by a " +
       "build-time cross-check test.",
@@ -44,7 +44,7 @@ export const openApiDocument: OpenApiDocument = {
   tags: [
     { name: "auth", description: "Public sign-in / sign-out (email OTP + magic link). No session required." },
     { name: "admin", description: "Operator break-glass OTP issuance (bearer-gated; unset -> 404)." },
-    { name: "portal", description: "Session-scoped customer data + per-action seat operations. Requires the lccp_session cookie." },
+    { name: "portal", description: "Session-scoped customer data, device consent and connected devices. Requires the lccp_session cookie." },
     { name: "ops", description: "Health / operational endpoints." },
   ],
   components: assembleComponents(openApiComponents),

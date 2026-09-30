@@ -1,5 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { ERR_BODY_TOO_LARGE, ERR_CROSS_SITE, ERR_INVALID_JSON, errorResponse, LEASE_ACTION_REQUEST } from "../components.js";
+import { errorResponse } from "../components.js";
 
 export const opsPaths: LabeledPathFragment = {
   label: "ops",

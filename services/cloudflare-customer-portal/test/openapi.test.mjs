@@ -13,8 +13,6 @@ import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "../
 import { openApiDocument } from "../dist-worker/worker/openapi/document.js";
 import { ALL_ROUTES, META_ROUTES, PUBLIC_ROUTES, SESSION_ROUTES } from "../dist-worker/worker/routes.js";
 import worker, { PORTAL_ROUTE_KEYS } from "../dist-worker/worker/index.js";
-import { BACKEND_PROXY_ERROR_MANIFEST, BACKEND_PROXY_SUCCESS_MANIFEST } from "../src/auth/portal_backend_error_manifest.mjs";
-import { canonicalBackendErrorManifest, canonicalBackendSuccessManifest, expectedProxyErrorCodes, PROXIED_ERROR_STATUSES, proxiedBackendOperations } from "./backend-proxy-contract.mjs";
 
 const keyOf = (r) => `${r.method} ${r.path}`;
 
@@ -219,9 +217,10 @@ test("the providers envelope documents its nullable support contact", () => {
 test("the entitlements envelope documents each row's nullable trial end and its activation flag", () => {
   const data = openApiDocument.paths["/api/portal/entitlements"].get.responses["200"].content["application/json"].schema.properties.data;
   const row = data.properties.items.items;
+  assert.deepEqual(row.properties.enforcement_mode?.enum, ["device_bound_v1"], "every listed grant is protected");
   assert.deepEqual(row.properties.trial_ends_at?.type, ["integer", "null"]);
   const description = row.properties.trial_ends_at.description;
-  assert.match(description, /rule that enforces/, "the end follows each row's own rule, not the protected rule for every row");
+  assert.match(description, /protected-device trial rule that enforces/, "the end follows the protected-device trial rule that enforces every row");
   assert.match(description, /valid_until/, "the end never outlives the license");
   assert.match(description, /not started/, "the description says why an activation trial can have no end yet");
   assert.equal(row.properties.trial_starts_on_activation?.type, "boolean");
@@ -247,45 +246,6 @@ test("health OpenAPI keeps the reviewed readiness envelope and status contract",
     true,
   );
   assert.equal(health.responses["503"].content["application/json"].schema.properties.code.const, "account_token_mode_not_required");
-});
-
-test("OpenAPI models exact portal and canonical-backend proxy error alternatives", () => {
-  for (const operation of proxiedBackendOperations) {
-    for (const status of PROXIED_ERROR_STATUSES) {
-      const expectedCodes = expectedProxyErrorCodes(operation, status);
-      const response = openApiDocument.paths[operation.portalPath]?.post?.responses?.[status];
-      if (expectedCodes.length === 0) {
-        assert.equal(response, undefined, `${operation.portalPath} must not claim impossible backend ${status} failures`);
-        continue;
-      }
-      assert.deepEqual(
-        [...documentedErrorCodes(operation.portalPath, status)].sort(),
-        [...expectedCodes].sort(),
-        `${operation.portalPath} ${status} alternatives must match the portal and canonical backend contracts`,
-      );
-    }
-  }
-  assert.deepEqual(documentedErrorCodes("/api/portal/devices/release", 500), ["portal_error"]);
-});
-
-test("runtime backend-error manifest is exactly derived from the canonical backend contract", () => {
-  for (const operation of proxiedBackendOperations) {
-    assert.deepEqual(
-      BACKEND_PROXY_ERROR_MANIFEST[operation.name],
-      canonicalBackendErrorManifest(operation),
-      `${operation.name} runtime error allowlist must be neither broader nor narrower than its backend contract`,
-    );
-  }
-});
-
-test("runtime backend-success manifest is exactly derived from the canonical backend contract", () => {
-  for (const operation of proxiedBackendOperations) {
-    assert.deepEqual(
-      BACKEND_PROXY_SUCCESS_MANIFEST[operation.name],
-      canonicalBackendSuccessManifest(operation),
-      `${operation.name} runtime success allowlist must expose only its canonical backend fields`,
-    );
-  }
 });
 
 test("the doc routes are served without credentials or environment (behavioral)", async () => {

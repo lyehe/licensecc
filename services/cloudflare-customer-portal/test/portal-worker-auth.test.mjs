@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, policyCapacityViolation, FP_A, FP_B, installBackendStub, cookieFor, sameSiteHeaders, entitlementId, ownedEntitlementId, call, baseFixture, seedDevice, seedEntitlement, CTX, NOW, within } from "./portal-worker-fixtures.mjs";
+import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, FP_A, FP_B, cookieFor, sameSiteHeaders, call, baseFixture, seedEntitlement, CTX, NOW, within } from "./portal-worker-fixtures.mjs";
 
 const textEncoder = new TextEncoder();
 

@@ -36,16 +36,6 @@ export const RETRY_AFTER_HEADER = {
   },
 };
 
-// Request body shared by the four lease/action routes + the data fields they accept.
-export const LEASE_ACTION_REQUEST = {
-  required: true,
-  content: {
-    "application/json": {
-      schema: { $ref: "#/components/schemas/LeaseActionRequest" },
-    },
-  },
-};
-
 export const openApiComponents: LabeledComponentFragment = {
   label: "portal-components",
   namespaces: [
@@ -57,7 +47,7 @@ export const openApiComponents: LabeledComponentFragment = {
         description:
           "Opaque DB-backed session token (HMAC at rest, never a JWT). HttpOnly; Secure; " +
           "SameSite=Lax; Path=/; Max-Age=86400 (24h). Single-use revocation semantics; logout " +
-          "marks the row revoked and bumps the per-customer account-token revocation floor.",
+          "marks the row revoked.",
       }],
       ["bootstrapBearer", {
         type: "http",
@@ -96,27 +86,6 @@ export const openApiComponents: LabeledComponentFragment = {
           code: { type: "string", description: "Machine-readable error code." },
           request_id: { type: "string" },
         },
-      }],
-      ["LeaseActionRequest", {
-        type: "object",
-        required: ["entitlement_id", "client_instance_id", "nonce"],
-        properties: {
-          entitlement_id: { type: "string", description: "Opaque entitlement id returned by /api/portal/entitlements." },
-          client_instance_id: { type: "string", description: "Client instance id forwarded to backend seat operations." },
-          nonce: { type: "string", description: "Per-action nonce forwarded to backend seat operations." },
-          seat_id: { type: "string", description: "Required for heartbeat and release." },
-          device_key_id: { type: "string", description: "Optional device key id for proof-capable seat operations." },
-        },
-        additionalProperties: false,
-      }],
-      ["DownloadRequest", {
-        type: "object",
-        required: ["entitlement_id", "device_key_id"],
-        properties: {
-          entitlement_id: { type: "string", description: "Opaque entitlement id returned by /api/portal/entitlements." },
-          device_key_id: { type: "string", description: "Device key id required by backend /v1/activate." },
-        },
-        additionalProperties: false,
       }],
     ]],
   ],

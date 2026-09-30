@@ -38,7 +38,7 @@
     // The portal's public origin — used to build magic-link URLs. NEVER taken from the request
     // Host header (invariant 6); always this configured value.
     "PORTAL_PUBLIC_ORIGIN": "https://portal.example.com",
-    // The licensing-backend origin the portal proxies per-action account tokens to (POST /v1/*).
+    // The licensing-backend origin the portal's /health readiness check calls (GET /health).
     // It must be a canonical HTTPS origin only: no userinfo, path, query, fragment, or HTTP.
     // This applies in development too; use a local HTTPS endpoint rather than an HTTP exception.
     "BACKEND_ORIGIN": "https://licensecc-online-verifier.example.workers.dev",
@@ -58,7 +58,6 @@
     //   PORTAL_GITHUB_CLIENT_SECRET  GitHub OAuth app client secret
     //   PORTAL_OTP_PEPPERS         JSON { key_id: base64-secret(>=32 bytes) } — OTP HMAC-at-rest
     //   PORTAL_SESSION_PEPPERS     JSON { key_id: base64-secret(>=32 bytes) } — session HMAC-at-rest
-    //   ACCOUNT_TOKEN_PEPPERS      JSON { key_id: base64-secret } — mints the per-action account token
     //   PORTAL_EMAIL_API_KEY       Resend API key (transactional email)
     //   PORTAL_BOOTSTRAP_BEARER    break-glass operator OTP issuance (unset in steady state)
     //   PORTAL_BOOTSTRAP_REQUIRE_ACCESS  "1" to require a Cloudflare Access JWT on bootstrap

@@ -6,7 +6,7 @@ import { HEALTH_DISPATCH, META_DISPATCH } from "./routes/meta.js";
 import { PASSWORD_DISPATCH } from "./routes/password.js";
 import { OAUTH_DISPATCH } from "./routes/oauth.js";
 import { AUTH_DISPATCH, authSession } from "./routes/auth.js";
-import { SESSION_DISPATCH as SELF_SERVICE_DISPATCH, resolveOwnedEntitlement } from "./routes/self-service.js";
+import { SESSION_DISPATCH as SELF_SERVICE_DISPATCH } from "./routes/self-service.js";
 import { CONSENT_DISPATCH } from "./routes/device-consent.js";
 import { BINDING_DISPATCH } from "./routes/device-bindings.js";
 import { envelope, isCrossSite, constantTimeEqual, decodeEntitlementId, entitlementId } from "./support.js";
@@ -57,7 +57,7 @@ async function handleApiPortal(request: Request, env: Env, reqId: string, now: n
   for (const key of session) {
     if (!(key in SESSION_DISPATCH)) throw new Error(`route without session dispatch entry: ${key}`);
   }
-  if (ALL_ROUTES.length !== 36) throw new Error(`portal route inventory changed: expected 36, got ${ALL_ROUTES.length}`);
+  if (ALL_ROUTES.length !== 29) throw new Error(`portal route inventory changed: expected 29, got ${ALL_ROUTES.length}`);
 }
 
 export const PORTAL_ROUTE_KEYS: readonly string[] = [...Object.keys(TOP_DISPATCH), ...Object.keys(SESSION_DISPATCH)];
@@ -81,4 +81,4 @@ export default {
   },
 };
 
-export const portalInternalsForTests = { isCrossSite, constantTimeEqual, entitlementId, decodeEntitlementId, resolveOwnedEntitlement };
+export const portalInternalsForTests = { isCrossSite, constantTimeEqual, entitlementId, decodeEntitlementId };

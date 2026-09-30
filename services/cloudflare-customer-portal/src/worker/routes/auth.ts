@@ -329,12 +329,6 @@ async function handleLogout(request: Request, env: Env, reqId: string, now: numb
     return envelope(reqId, "logged_out", undefined, 200, { "set-cookie": clearSessionCookie() });
   }
   await revokeSession(env, session.id, session.customer_id);
-  // Invariant 9: bump the per-customer revocation floor, which the backend uses to reject reads
-  // from a stale replica; in-flight 120s proxy tokens expire on their own TTL.
-  await env.DB.prepare(
-    "INSERT INTO account_token_revocations (customer_id, revocation_seq, updated_at) VALUES (?, 1, ?) " +
-      "ON CONFLICT(customer_id) DO UPDATE SET revocation_seq = account_token_revocations.revocation_seq + 1, updated_at = ?",
-  ).bind(session.customer_id, now, now).run();
   return envelope(reqId, "logged_out", undefined, 200, { "set-cookie": clearSessionCookie() });
 }
 

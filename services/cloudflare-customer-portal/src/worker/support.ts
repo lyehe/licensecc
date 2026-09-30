@@ -10,7 +10,7 @@ const MAX_BODY_BYTES = 8192;
 const PROJECT_RE = /^[A-Za-z0-9_.:-]{1,127}$/;
 const FEATURE_RE = /^[A-Za-z0-9_.:-]{1,15}$/;
 
-type LicenseMode = "trial" | "node_locked" | "floating";
+type LicenseMode = "trial" | "node_locked";
 
 export interface OwnedEntitlement {
   id: string;
@@ -26,7 +26,7 @@ export interface OwnedEntitlement {
   heartbeat_grace_sec: number;
   is_trial: number;
   policy_id: string | null;
-  enforcement_mode?: "legacy" | "device_bound_v1";
+  enforcement_mode: "device_bound_v1";
   license_mode: LicenseMode;
 }
 
@@ -73,9 +73,9 @@ export function decodeEntitlementId(id: string): { project: string; feature: str
   }
 }
 
-function licenseMode(row: { is_trial?: number; pool_size?: number }): LicenseMode {
-  if (Number(row.is_trial ?? 0) === 1) return "trial";
-  return Number(row.pool_size ?? 0) > 0 ? "floating" : "node_locked";
+// Every grant binds devices, so a license is a trial or node-locked; there are no floating seats.
+function licenseMode(row: { is_trial?: number }): LicenseMode {
+  return Number(row.is_trial ?? 0) === 1 ? "trial" : "node_locked";
 }
 
 // Keeps any extra column a caller selected (the list's trial_ends_at) in the returned row's type.

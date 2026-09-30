@@ -91,7 +91,6 @@ export function pepperB64(seed = 1) {
 
 export const OTP_PEPPERS = JSON.stringify({ p1: pepperB64(3) });
 export const SESSION_PEPPERS = JSON.stringify({ s1: pepperB64(11) });
-export const ACCOUNT_PEPPERS = JSON.stringify({ a1: pepperB64(23) });
 
 // --- seed helpers ---------------------------------------------------------------------------------
 
@@ -103,27 +102,30 @@ export function seedCustomer(db, id, email, status = "active") {
   ).run(id, `cust-${id}`, email, NOW, NOW, status);
 }
 
-export function seedEntitlement(db, { project = "DEFAULT", feature = "DEFAULT", fingerprint, customerId, status = "active", poolSize = 5, validUntil = NOW + 365 * 86400 } = {}) {
+// Every grant is protected (device_bound_v1) and owned, as production writes it: a node-locked row
+// with no seat pool and an empty device_hash. Seed the owning customer first; a grant without one
+// is refused here rather than silently seeded.
+export function seedEntitlement(db, { project = "DEFAULT", feature = "DEFAULT", fingerprint, customerId, status = "active", validUntil = NOW + 365 * 86400 } = {}) {
+  if (typeof customerId !== "string" || db.prepare("SELECT 1 FROM customers WHERE id = ?").get(customerId) === undefined) {
+    throw new Error(`seedEntitlement needs an existing owning customer, got ${String(customerId)}`);
+  }
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, " +
+    "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, enforcement_mode, status, " +
       "assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, " +
-      "customer_id, max_active_devices, lease_seconds, rebind_window_sec, pool_size, " +
-      "heartbeat_grace_sec, max_borrow_sec, allow_overdraft, created_at, updated_at) VALUES " +
-      "(?, ?, ?, '', ?, 300, 300, 0, ?, ?, ?, 10, 2592000, 7776000, ?, 900, 0, 0, ?, ?)",
-  ).run(project, feature, fingerprint, status, NOW - 86400, validUntil, customerId, poolSize, NOW, NOW);
+      "customer_id, max_active_devices, pool_size, created_at, updated_at) VALUES " +
+      "(?, ?, ?, '', 'device_bound_v1', ?, 300, 300, 0, ?, ?, ?, 10, 0, ?, ?)",
+  ).run(project, feature, fingerprint, status, NOW - 86400, validUntil, customerId, NOW, NOW);
 }
 
-// Build a portal Env wired to a fresh DB with all three pepper maps + required mode.
+// Build a portal Env wired to a fresh DB with the OTP and session pepper maps.
 export function portalEnv(db, overrides = {}) {
   return {
     DB: new D1Like(db),
     ENVIRONMENT: "test",
-    ACCOUNT_TOKEN_ACTIVE_PEPPER_ID: "a1",
     PORTAL_PUBLIC_ORIGIN: "https://portal.test",
     BACKEND_ORIGIN: "https://backend.test",
     PORTAL_OTP_PEPPERS: OTP_PEPPERS,
     PORTAL_SESSION_PEPPERS: SESSION_PEPPERS,
-    ACCOUNT_TOKEN_PEPPERS: ACCOUNT_PEPPERS,
     ...overrides,
   };
 }

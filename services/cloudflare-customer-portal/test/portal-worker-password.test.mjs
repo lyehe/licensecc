@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { scryptSync } from "node:crypto";
 import { assert, baseFixture, call, mintSession, NOW } from "./portal-worker-fixtures.mjs";
-import { hashPassword, verifyPassword, validPassword } from "../dist-worker/worker/password/crypto.js";
+import { hashPassword, verifyPassword, validPassword } from "@licensecc/cloudflare-runtime/auth/password";
 
 const PASSWORD = "A long testing passphrase 1!";
 const NEXT = "Another long passphrase 2!";
@@ -113,7 +113,6 @@ test("password change requires proof, rotates sessions and prevents old-hash ses
   assert.equal((await call(env, "GET", "/api/portal/me", { cookie: cookie(changed) })).status, 200);
   assert.equal((await login(env)).status, 401);
   assert.equal((await login(env, "new@example.com", NEXT)).status, 200);
-  assert.equal(db.prepare("SELECT revocation_seq FROM account_token_revocations WHERE customer_id = ?").get(credential.customer_id).revocation_seq, 1);
   assert.equal(db.prepare("SELECT count(*) AS n FROM portal_passwords WHERE customer_id = 'B'").get().n, 0);
   assert.equal((await mintSession(env, { customerId: credential.customer_id, authMethod: "password", passwordHash: credential.password_hash, now: NOW })).ok, false);
 });
@@ -140,7 +139,6 @@ test("a raced password change preserves the winning credential and existing acce
   assert.equal(db.prepare("SELECT password_hash FROM portal_passwords").get().password_hash, winningHash);
   assert.equal(db.prepare("SELECT count(*) n FROM portal_sessions WHERE status = 'active'").get().n, 1);
   assert.equal(db.prepare("SELECT consumed_at FROM portal_otp WHERE id = 'otp-race'").get().consumed_at, null);
-  assert.equal(db.prepare("SELECT count(*) n FROM account_token_revocations").get().n, 0);
 });
 
 test("first password and recovery require recent verified sign-in", async () => {

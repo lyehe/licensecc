@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import ts from "@typescript/typescript6";
-import { BACKEND_PROXY_ERROR_MANIFEST } from "../src/auth/portal_backend_error_manifest.mjs";
 
 // Transpile the PURE portalWorkflow.ts (no React/DOM/node deps) and import it as an ES module — the
 // same seam the admin uses. If portalWorkflow ever pulls in a non-pure import, this fails to import.
@@ -175,22 +174,15 @@ test("portal UI workflow gives every StatusLine-reachable result code human copy
     for (const match of text.matchAll(envelopeLiteralRe)) routeCodes.add(match[1]);
   }
   // Sanity check on the scan itself: a silently-broken regex (e.g. after a call-shape change) would
-  // otherwise make this whole test vacuously pass with zero collected codes.
-  assert.ok(
-    routeCodes.size >= 20,
-    `expected at least 20 distinct envelope() codes across the four route files, found ${routeCodes.size}`,
+  // otherwise make this whole test vacuously pass with zero collected codes. The count is exact, so a
+  // route code added to or removed from these files is a deliberate change here too.
+  assert.equal(
+    routeCodes.size,
+    19,
+    `expected exactly 19 distinct envelope() codes across the four route files, found ${routeCodes.size}`,
   );
 
-  // ---- 2) BACKEND_PROXY_ERROR_MANIFEST codes ------------------------------------------------------
-  const manifestCodes = new Set();
-  for (const statuses of Object.values(BACKEND_PROXY_ERROR_MANIFEST)) {
-    for (const codes of Object.values(statuses)) {
-      for (const code of codes) manifestCodes.add(code);
-    }
-  }
-  assert.ok(manifestCodes.size >= 15, `expected at least 15 distinct manifest codes, found ${manifestCodes.size}`);
-
-  // ---- 3) local UI-only codes: string literals + identifier constants passed to localMessage() ----
+  // ---- 2) local UI-only codes: string literals + identifier constants passed to localMessage() ----
   // Walk EVERY .ts/.tsx file under src/ui recursively rather than scanning a fixed file list -- a
   // fixed list silently misses a later new file that calls localMessage(...) (an earlier version of
   // this scan used a fixed list of 5 files, which would not have noticed a 6th).
@@ -207,7 +199,7 @@ test("portal UI workflow gives every StatusLine-reachable result code human copy
     return files;
   }
   const uiFiles = listUiSourceFiles(uiRoot);
-  // Sanity check on the walk itself, mirroring the >=20/>=15 guards above: a silently-broken walk
+  // Sanity check on the walk itself, mirroring the route-code guard above: a silently-broken walk
   // (e.g. a wrong root) would otherwise make this whole test vacuously pass with zero collected files.
   assert.ok(uiFiles.length >= 15, `expected at least 15 .ts/.tsx files under src/ui, found ${uiFiles.length}`);
 
@@ -246,54 +238,26 @@ test("portal UI workflow gives every StatusLine-reachable result code human copy
     localCodes.add(resolved);
   }
 
-  // ---- 4) the dynamic `${operation}_ok` success family (self-service.ts apiAction) -----------------
-  // Not a string literal (a template literal keyed by the server-controlled `operation`); its only
-  // three possible values are fixed by SESSION_DISPATCH's three seat operations (checkout/heartbeat/
-  // release), and DevicesFeature.tsx's seatAction() passes every one of them to setMessage/resultMessage.
-  const seatAckCodes = ["checkout_ok", "heartbeat_ok", "release_ok"];
-
-  // ---- 5) pure data-payload codes StatusLine never renders -----------------------------------------
+  // ---- 3) pure data-payload codes StatusLine never renders -----------------------------------------
   // Each is a GET envelope's 200 `data` payload consumed as fields/rows elsewhere, never handed to
   // setMessage -- confirmed by grepping resultMessage( call sites (usePortalData.ts, AuthFeature.tsx):
-  // none of them pass a "me"/"entitlements"/"devices"/"usage" result to it.
+  // none of them pass a "me"/"entitlements" result to it.
   const DATA_ONLY_CODES = new Set([
     "me", // GET /api/portal/me: PortalMe read off result.data in AuthFeature's loadMe(), never given to setMessage
     "entitlements", // GET /api/portal/entitlements: { items } consumed as table rows in usePortalData.ts, never given to setMessage
-    "devices", // GET /api/portal/devices: { items } consumed as table rows in usePortalData.ts, never given to setMessage
-    "usage", // GET /api/portal/usage: { items } consumed as table rows in usePortalData.ts, never given to setMessage
     "bootstrap_otp", // POST /portal/v1/admin/bootstrap-otp: operator break-glass payload; the customer SPA has no caller for this route at all, so it never reaches setMessage
   ]);
 
-  // ---- 6) codes covered by a React node (ui/shared/ActionResult.tsx) instead of RESULT_CODE_COPY --
-  // pool_exhausted's copy links out through <SupportContact/>, which cannot live in this pure
-  // string map, so it is excluded here the same way DATA_ONLY_CODES is -- but verified against the
-  // node file's actual source, not just blindly excluded, so a future removal there would still fail.
-  const NODE_ONLY_CODES = new Set(["pool_exhausted"]);
-  const actionResultSource = readFileSync(new URL("../src/ui/shared/ActionResult.tsx", import.meta.url), "utf8");
-  for (const code of NODE_ONLY_CODES) {
-    const keyRe = new RegExp(`\\b${code}:\\s*<>`);
-    assert.match(
-      actionResultSource,
-      keyRe,
-      `ActionResult.tsx must map "${code}" to a React node -- update NODE_ONLY_CODES if it moved elsewhere`,
-    );
-  }
-  assert.match(
-    actionResultSource,
-    /<SupportContact\s*\/>/,
-    "ActionResult.tsx's pool_exhausted copy must link out through <SupportContact/>",
-  );
-
-  const allCodes = new Set([...routeCodes, ...manifestCodes, ...localCodes, ...seatAckCodes]);
+  const allCodes = new Set([...routeCodes, ...localCodes]);
   const uncovered = [...allCodes].filter(
-    (code) => !DATA_ONLY_CODES.has(code) && !NODE_ONLY_CODES.has(code) && workflow.describeResultCode(code) === null,
+    (code) => !DATA_ONLY_CODES.has(code) && workflow.describeResultCode(code) === null,
   );
-  assert.deepEqual(uncovered, [], `every StatusLine-reachable code needs RESULT_CODE_COPY (or NODE_ONLY_CODES) copy; missing: ${uncovered.join(", ")}`);
+  assert.deepEqual(uncovered, [], `every StatusLine-reachable code needs RESULT_CODE_COPY copy; missing: ${uncovered.join(", ")}`);
 
-  // Every DATA_ONLY_CODES/NODE_ONLY_CODES entry must actually be one of the collected codes, or the
-  // exclusion is dead (and may be hiding a code that should really be covered).
-  const deadExclusions = [...DATA_ONLY_CODES, ...NODE_ONLY_CODES].filter((code) => !allCodes.has(code));
-  assert.deepEqual(deadExclusions, [], `DATA_ONLY_CODES/NODE_ONLY_CODES entries never collected -- remove them: ${deadExclusions.join(", ")}`);
+  // Every DATA_ONLY_CODES entry must actually be one of the collected codes, or the exclusion is
+  // dead (and may be hiding a code that should really be covered).
+  const deadExclusions = [...DATA_ONLY_CODES].filter((code) => !allCodes.has(code));
+  assert.deepEqual(deadExclusions, [], `DATA_ONLY_CODES entries never collected -- remove them: ${deadExclusions.join(", ")}`);
 
   // The verbatim success copy pinned by the brief.
   assert.equal(workflow.describeResultCode("otp_requested"), "Check your email for a sign-in code.");

@@ -49,13 +49,6 @@ export const SESSION_ROUTES = [
   { method: "POST", path: "/api/portal/device-authorizations/deny", inSpec: true },
   { method: "GET", path: "/api/portal/me", inSpec: true },
   { method: "GET", path: "/api/portal/entitlements", inSpec: true },
-  { method: "GET", path: "/api/portal/devices", inSpec: true },
-  { method: "POST", path: "/api/portal/devices/release", inSpec: true },
-  { method: "GET", path: "/api/portal/usage", inSpec: true },
-  { method: "POST", path: "/api/portal/checkout", inSpec: true },
-  { method: "POST", path: "/api/portal/heartbeat", inSpec: true },
-  { method: "POST", path: "/api/portal/release", inSpec: true },
-  { method: "POST", path: "/api/portal/download", inSpec: true },
 ] as const satisfies readonly PortalRoute[];
 
 export const ALL_ROUTES = [...META_ROUTES, ...PUBLIC_ROUTES, ...SESSION_ROUTES] as const;

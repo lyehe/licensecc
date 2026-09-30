@@ -2,7 +2,7 @@
 //
 // No JWT for the customer session: revocation needs a server row, so the session is an OPAQUE
 // `lccp_<base64url(32)>` cookie whose KEYED HMAC is the only thing stored (session_hmac, never the
-// plaintext — mirrors account_tokens / portal_otp). The session is HttpOnly + Secure + SameSite=Lax,
+// plaintext — mirrors portal_otp). The session is HttpOnly + Secure + SameSite=Lax,
 // so the browser never reads it from JS and it does not ride a cross-site request body.
 //
 // resolveSession uses env.DB.withSession?.("first-primary") (a strong, read-your-write read when D1
@@ -140,10 +140,7 @@ export async function resolveSession(env, raw, now = Math.floor(Date.now() / 100
 
 /**
  * revokeSession(env, sessionId, customerId) — logout. Sets status='revoked' for THIS session (bound
- * to its customer_id so a forged session id cannot revoke a foreign row). The worker ALSO bumps the
- * per-customer revocation floor (account_token_revocations.revocation_seq, invariant 9), which the
- * backend uses to reject reads from a stale replica; in-flight 120s proxy tokens expire on their own
- * TTL.
+ * to its customer_id so a forged session id cannot revoke a foreign row).
  */
 /** @param {PortalEnv} env @param {string} sessionId @param {string} customerId */
 export async function revokeSession(env, sessionId, customerId) {

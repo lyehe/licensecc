@@ -59,13 +59,6 @@ const ROUTE_OWNER_TABLE = Object.freeze({
   "POST /portal/v1/admin/bootstrap-otp": "auth",
   "GET /api/portal/me": "selfService",
   "GET /api/portal/entitlements": "selfService",
-  "GET /api/portal/devices": "selfService",
-  "POST /api/portal/devices/release": "selfService",
-  "GET /api/portal/usage": "selfService",
-  "POST /api/portal/checkout": "selfService",
-  "POST /api/portal/heartbeat": "selfService",
-  "POST /api/portal/release": "selfService",
-  "POST /api/portal/download": "selfService",
 });
 
 const routeKey = (route) => `${route.method} ${route.path}`;

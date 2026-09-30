@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, policyCapacityViolation, FP_A, FP_B, installBackendStub, cookieFor, sameSiteHeaders, entitlementId, ownedEntitlementId, call, baseFixture, seedCustomer, seedDevice, seedEntitlement, CTX, NOW } from "./portal-worker-fixtures.mjs";
+import { assert, FP_B, cookieFor, call, baseFixture, seedCustomer, seedEntitlement, NOW } from "./portal-worker-fixtures.mjs";
 
 test("A's /api/portal/entitlements returns ONLY A's entitlements", async () => {
   const { db, env } = baseFixture();
@@ -8,14 +8,15 @@ test("A's /api/portal/entitlements returns ONLY A's entitlements", async () => {
     assert.equal(r.status, 200);
     assert.equal(r.body.data.items.length, 1);
     assert.equal(r.body.data.items[0].project, "DEFAULT");
-    assert.equal(r.body.data.items[0].license_mode, "floating");
-    assert.equal(r.body.data.items[0].pool_size, 5);
-    assert.equal(r.body.data.items[0].enforcement_mode, "legacy");
+    assert.equal(r.body.data.items[0].license_mode, "node_locked");
+    assert.equal(r.body.data.items[0].pool_size, 0);
+    assert.equal(r.body.data.items[0].enforcement_mode, "device_bound_v1");
     assert.equal(typeof r.body.data.items[0].id, "string");
   // The response carries no fingerprint/foreign id.
   assert.ok(!JSON.stringify(r.body).includes(FP_B), "B's data never appears in A's response");
   db.close();
 });
+
 
 test("/api/portal/me reports the SESSION customer, never a client value", async () => {
   const { db, env } = baseFixture();
@@ -134,445 +135,13 @@ test("/api/portal/me: when customers.email is empty but a password AND an identi
   db.close();
 });
 
-test("devices + usage are gated by the ownership EXISTS (A sees no B rows)", async () => {
-  const { db, env } = baseFixture();
-  // Seed a device + usage event on B's entitlement.
-  db.prepare(
-    "INSERT INTO entitlement_devices (project, feature, license_fingerprint, device_key_id, public_key_spki_der_base64, status, created_at, updated_at) VALUES ('DEFAULT','DEFAULT',?, 'dk_b','x','active',?,?)",
-  ).run(FP_B, NOW, NOW);
-  db.prepare(
-    "INSERT INTO usage_events (project, feature, license_fingerprint, event_type, ts) VALUES ('DEFAULT','DEFAULT',?, 'checkout', ?)",
-  ).run(FP_B, NOW);
-  const cookie = await cookieFor(env, "A");
-  const devices = await call(env, "GET", "/api/portal/devices", { cookie });
-  assert.equal(devices.body.data.items.length, 0, "A sees none of B's devices");
-  const usage = await call(env, "GET", "/api/portal/usage", { cookie });
-  assert.equal(usage.body.data.items.length, 0, "A sees none of B's usage");
-  db.close();
-});
-
-test("A releases A's own device -> 200 device_released; it disappears from GET /devices and is audited", async () => {
-  const { db, env } = baseFixture();
-  seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
-  const cookie = await cookieFor(env, "A");
-  // Present before the release.
-  const before = await call(env, "GET", "/api/portal/devices", { cookie });
-  assert.equal(before.body.data.items.length, 1, "A's own device is listed before release");
-  const seqBefore = db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq;
-
-  const rel = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
-  assert.equal(rel.status, 200);
-  assert.equal(rel.body.code, "device_released");
-
-  // Gone from the customer-facing listing.
-  const after = await call(env, "GET", "/api/portal/devices", { cookie });
-  assert.equal(after.body.data.items.length, 0, "the released device no longer appears");
-
-  // The device row is flipped (not deleted) and the entitlement revocation_seq is bumped so the
-  // released device is refused by the online-verify path on its next proof-carrying check.
-  const dev = db.prepare("SELECT status FROM entitlement_devices WHERE device_key_id = 'dk_a'").get();
-  assert.equal(dev.status, "revoked", "the device is flipped away from active, not deleted");
-  const seqAfter = db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq;
-  assert.ok(seqAfter > seqBefore, "releasing bumps the entitlement revocation_seq");
-
-  // An audit event records the release with the SESSION customer id (no client value).
-  const audit = db.prepare("SELECT actor, source, reason, detail FROM entitlement_events WHERE reason = 'portal_device_release'").get();
-  assert.ok(audit, "an audit event row exists for the portal device release");
-  assert.equal(audit.actor, "A", "the audit records the session customer id");
-  assert.equal(audit.source, "portal");
-  assert.match(audit.detail, /dk_a/, "the audit detail names the released device");
-  db.close();
-});
-
-test("A -> B: releasing another customer's device is a generic not_found (no existence oracle)", async () => {
-  const { db, env } = baseFixture();
-  seedDevice(db, { fingerprint: FP_B, deviceKeyId: "dk_b" });
-  const cookie = await cookieFor(env, "A");
-  const rel = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_b" } });
-  assert.equal(rel.status, 404, "a foreign device is the SAME generic not_found as an absent one (no 403 oracle)");
-  assert.equal(rel.body.code, "not_found");
-  // B's device is untouched (no cross-account write).
-  const dev = db.prepare("SELECT status FROM entitlement_devices WHERE device_key_id = 'dk_b'").get();
-  assert.equal(dev.status, "active", "a foreign device is never mutated");
-  db.close();
-});
-
-test("releasing the same device twice -> the second call is 409 device_status_conflict", async () => {
-  const { db, env } = baseFixture();
-  seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
-  const cookie = await cookieFor(env, "A");
-  const first = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
-  assert.equal(first.status, 200);
-  assert.equal(first.body.code, "device_released");
-  const second = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
-  assert.equal(second.status, 409, "an already-released device cannot be released again (guarded transition)");
-  assert.equal(second.body.code, "device_status_conflict");
-  db.close();
-});
-
-test("the release audit records the FRESHLY-BUMPED revocation_seq, not the stale pre-read value", async () => {
-  const { db, env } = baseFixture();
-  seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
-  const cookie = await cookieFor(env, "A");
-  const rel = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
-  assert.equal(rel.status, 200);
-  const seqAfter = db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq;
-  const audit = db.prepare("SELECT revocation_seq FROM entitlement_events WHERE reason = 'portal_device_release'").get();
-  assert.equal(audit.revocation_seq, seqAfter, "the audit event carries the bumped revocation_seq the release produced");
-  db.close();
-});
-
-test("lost race between the ownership pre-read and the guarded write -> 409 with NO audit row and NO seq bump", async () => {
-  const { db, env } = baseFixture();
-  seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
-  const cookie = await cookieFor(env, "A");
-  const seqBefore = db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq;
-
-  // Simulate a concurrent release landing AFTER apiDeviceRelease's ownership pre-read saw the device
-  // active but BEFORE its guarded batch runs: wrap batch() to flip the device out of 'active' first,
-  // so the guarded bump/flip both match 0 rows (RETURNING empty -> the 409 branch).
-  const realBatch = env.DB.batch.bind(env.DB);
-  let raced = false;
-  env.DB.batch = async (statements) => {
-    if (!raced) {
-      raced = true;
-      db.prepare("UPDATE entitlement_devices SET status = 'revoked' WHERE device_key_id = 'dk_a'").run();
-    }
-    return realBatch(statements);
-  };
-
-  const rel = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
-  assert.equal(rel.status, 409, "a lost race yields the guarded-transition conflict");
-  assert.equal(rel.body.code, "device_status_conflict");
-
-  // The guarded write matched 0 rows, so the release recorded NOTHING: the audit is gated on the
-  // bump succeeding, and the revocation_seq is untouched. A phantom audit row here would misattribute
-  // a slot change that never happened.
-  const auditCount = db.prepare("SELECT COUNT(*) AS n FROM entitlement_events WHERE reason = 'portal_device_release'").get();
-  assert.equal(auditCount.n, 0, "a lost-race 409 emits no audit row");
-  const seqAfter = db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq;
-  assert.equal(seqAfter, seqBefore, "a lost-race 409 does not bump the revocation_seq");
-  db.close();
-});
-
-test("ownership transfer between the device pre-read and batch cannot revoke the new owner's device", async () => {
-  const { db, env } = baseFixture();
-  seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
-  const cookie = await cookieFor(env, "A");
-  const seqBefore = db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq;
-
-  // This models the precise TOCTOU: A owned the device when the route's ownership-scoped pre-read
-  // succeeded, but the entitlement transfers to B immediately before D1 executes its atomic batch.
-  // The transition must see both guarded UPDATEs affect zero rows; in particular it must NOT revoke
-  // the device after it belongs to B.
-  const realBatch = env.DB.batch.bind(env.DB);
-  let transferred = false;
-  env.DB.batch = async (statements) => {
-    if (!transferred) {
-      transferred = true;
-      db.prepare("UPDATE entitlements SET customer_id = 'B' WHERE license_fingerprint = ?").run(FP_A);
-    }
-    return realBatch(statements);
-  };
-
-  const rel = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
-  assert.equal(rel.status, 409);
-  assert.equal(rel.body.code, "device_status_conflict");
-  assert.equal(
-    db.prepare("SELECT status FROM entitlement_devices WHERE device_key_id = 'dk_a'").get().status,
-    "active",
-    "the new owner's device is not changed by A's stale release",
-  );
-  assert.equal(
-    db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq,
-    seqBefore,
-    "the stale release does not bump B's entitlement revocation sequence",
-  );
-  assert.equal(
-    db.prepare("SELECT COUNT(*) AS n FROM entitlement_events WHERE reason = 'portal_device_release'").get().n,
-    0,
-    "the stale release emits no audit event",
-  );
-  db.close();
-});
-
-for (const state of ["active", "retiring"]) {
-  test(`stale legacy portal release rolls back every write against protected binding state ${state}`, async (t) => {
-    const { db, env } = baseFixture();
-    t.after(() => db.close());
-    seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
-    const cookie = await cookieFor(env, "A");
-    const tables = ["entitlements", "entitlement_devices", "entitlement_events", "device_bound_devices", "device_bound_bindings"];
-    const snapshot = () => tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
-    const realBatch = env.DB.batch.bind(env.DB);
-    let committedBeforeRelease;
-    let rejectedByModeFence = false;
-    env.DB.batch = async (statements) => {
-      // Model an external replacement/restore after the legacy ownership read.
-      // This is adversarial state, not an authorized conversion workflow. Keep
-      // every production trigger enabled, including the in-place conversion ban.
-      assert.equal(committedBeforeRelease, undefined, "one release transaction");
-      const row = db.prepare("SELECT * FROM entitlements WHERE license_fingerprint = ?").get(FP_A);
-      assert.throws(() => db.prepare("UPDATE entitlements SET enforcement_mode='device_bound_v1' WHERE license_fingerprint=?").run(FP_A), /protected_mode_migration_required/);
-      db.prepare("DELETE FROM entitlements WHERE license_fingerprint = ?").run(FP_A);
-      // A bulk restore can load child rows before their parent with deferred
-      // foreign keys. Reproduce that mixed history without removing any fence.
-      db.exec("BEGIN; PRAGMA defer_foreign_keys=ON");
-      seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
-      row.enforcement_mode = "device_bound_v1";
-      row.pool_size = 0;
-      const columns = Object.keys(row);
-      db.prepare(`INSERT INTO entitlements (${columns.join(",")}) VALUES (${columns.map(() => "?").join(",")})`).run(...Object.values(row));
-      db.prepare("INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at) VALUES('protected-device','A','DEFAULT','protected-key','public',?,?)").run(NOW, NOW);
-      db.prepare("INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,hold_until,created_at,updated_at) VALUES('protected-binding','DEFAULT','DEFAULT',?,'protected-device',?,?,?,?)").run(FP_A, state, NOW + 3600, NOW, NOW);
-      db.exec("COMMIT");
-      committedBeforeRelease = snapshot();
-      try {
-        return await realBatch(statements);
-      } catch (error) {
-        assert.match(String(error), /legacy_protocol_disabled/);
-        rejectedByModeFence = true;
-        throw error;
-      }
-    };
-    const response = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
-    assert.equal(response.status, 500);
-    assert.equal(response.body.code, "portal_error");
-    assert.equal(rejectedByModeFence, true);
-    assert.deepEqual(snapshot(), committedBeforeRelease, "revision bump, legacy device, audit, identity and occupied hold all survive unchanged");
-    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
-  });
-}
-
-test("an audit failure rolls back the device release batch without a seq or audit side effect", async () => {
-  const { db, env } = baseFixture();
-  seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
-  const cookie = await cookieFor(env, "A");
-  const seqBefore = db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq;
-  const realPrepare = env.DB.prepare.bind(env.DB);
-  const realBatch = env.DB.batch.bind(env.DB);
-  let batchStatementCount = 0;
-  env.DB.prepare = (sql) => {
-    // Fail only the portal-device-release audit statement. With the old separate audit this happens
-    // after the bump/flip commit (RED); with the audited three-statement D1 transaction it aborts and
-    // rolls back the prior guarded updates (GREEN).
-    if (sql.startsWith("INSERT INTO entitlement_events")) {
-      return realPrepare("INSERT INTO entitlement_events (missing_audit_column) VALUES (1)");
-    }
-    return realPrepare(sql);
-  };
-  env.DB.batch = async (statements) => {
-    batchStatementCount = statements.length;
-    return realBatch(statements);
-  };
-
-  const rel = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
-  assert.equal(rel.status, 500);
-  assert.equal(rel.body.code, "portal_error");
-  assert.equal(batchStatementCount, 3, "the audit must execute inside the same D1 batch as bump and flip");
-  assert.equal(
-    db.prepare("SELECT status FROM entitlement_devices WHERE device_key_id = 'dk_a'").get().status,
-    "active",
-    "the failed audit rolls the device transition back",
-  );
-  assert.equal(
-    db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq,
-    seqBefore,
-    "the failed audit rolls the revocation sequence back",
-  );
-  assert.equal(
-    db.prepare("SELECT COUNT(*) AS n FROM entitlement_events WHERE reason = 'portal_device_release'").get().n,
-    0,
-    "the failed audit leaves no audit row",
-  );
-  db.close();
-});
-
-// =================================================================================================
-// ACTIONS — server-resolve the tuple; forged body ignored; no oracle
-// =================================================================================================
-
-test("A's checkout on A's tuple proxies the SERVER-RESOLVED fingerprint with a real bearer", async () => {
-  const { db, env } = baseFixture();
-  const stub = installBackendStub();
-  try {
-    const cookie = await cookieFor(env, "A");
-    const id = await ownedEntitlementId(env, cookie);
-    const beforeCheckout = Math.floor(Date.now() / 1000);
-    const r = await call(env, "POST", "/api/portal/checkout", { cookie, body: { entitlement_id: id, client_instance_id: "i1", nonce: "e".repeat(64) } });
-    assert.equal(r.status, 200);
-    assert.equal(r.body.ok, true);
-    assert.equal(r.body.code, "checkout_ok");
-    assert.equal(stub.calls.length, 1);
-    assert.match(stub.calls[0].url, /\/v1\/checkout$/);
-    assert.match(stub.calls[0].auth, /^Bearer lcca_/, "a real ephemeral account token is presented");
-    assert.equal(stub.calls[0].body.license_fingerprint, FP_A, "the server-resolved fingerprint is proxied");
-    // The minted token row is real, scope-pinned, and 120s-lived.
-    const tok = db.prepare("SELECT scopes_json, expires_at, customer_id FROM account_tokens WHERE customer_id = 'A' ORDER BY created_at DESC LIMIT 1").get();
-    assert.equal(tok.customer_id, "A");
-    const scopes = JSON.parse(tok.scopes_json);
-    assert.deepEqual(scopes.projects, ["DEFAULT"]);
-    assert.deepEqual(scopes.features, ["DEFAULT"]);
-    // R2.5 least privilege: the token is scoped to EXACTLY the one operation being proxied, not all
-    // five action ops (deepEqual, not includes -- the un-narrowed mint would carry all five here).
-    assert.deepEqual(scopes.operations, ["checkout"]);
-    assert.ok(scopes.allow_all === undefined, "never allow_all");
-    assert.ok(!scopes.projects.includes("*") && !scopes.features.includes("*"), "scope axes are never *");
-    // ~120s TTL; anchor the check beside the minting call so the intentional readiness-timeout
-    // coverage elsewhere in this process cannot age the fixture's module-load NOW baseline.
-    assert.ok(tok.expires_at > beforeCheckout && tok.expires_at <= beforeCheckout + 125, "~120s TTL");
-    db.close();
-  } finally {
-    stub.restore();
-  }
-});
-
-test("A -> B: a checkout referencing B's tuple is a GENERIC not_found (no oracle, no proxy, no mint)", async () => {
-  const { db, env } = baseFixture();
-  const stub = installBackendStub();
-  try {
-    const cookie = await cookieFor(env, "A");
-    // A references B's project/feature pair — but B's entitlement is not owned by A. The server
-    // resolves WHERE customer_id='A' AND project/feature -> 0 rows -> generic not_found.
-    // (Here both use DEFAULT/DEFAULT, so the discriminator is the OWNER; we instead seed a B-only
-    //  feature to make the cross-owner reference explicit.)
-    seedEntitlement(db, { feature: "BONLY", fingerprint: "c".repeat(64), customerId: "B" });
-    const r = await call(env, "POST", "/api/portal/checkout", { cookie, body: { entitlement_id: entitlementId("DEFAULT", "BONLY", "c".repeat(64)), client_instance_id: "i1", nonce: "e".repeat(64) } });
-    assert.equal(r.status, 404);
-    assert.equal(r.body.code, "not_found", "the SAME generic not_found as an absent tuple (no existence oracle)");
-    assert.equal(stub.calls.length, 0, "no proxy for a foreign tuple");
-    // No account token minted for A against a foreign feature.
-    const minted = db.prepare("SELECT COUNT(*) AS c FROM account_tokens WHERE customer_id = 'A'").get();
-    assert.equal(minted.c, 0, "no token minted for a denied action");
-    db.close();
-  } finally {
-    stub.restore();
-  }
-});
-
-test("a forged body customer_id is IGNORED; the mint binds the SESSION customer only (invariant 2)", async () => {
-  const { db, env } = baseFixture();
-  const stub = installBackendStub();
-  try {
-    const cookie = await cookieFor(env, "A");
-    const id = await ownedEntitlementId(env, cookie);
-    // Forge customer_id=B AND license_fingerprint=B's in the body. Both must be ignored: the handler
-    // server-resolves A's own fingerprint and the mint takes the session (customer A) ONLY.
-    const r = await call(env, "POST", "/api/portal/checkout", {
-      cookie,
-      body: { entitlement_id: id, customer_id: "B", license_fingerprint: FP_B, client_instance_id: "i1", nonce: "e".repeat(64) },
-    });
-    assert.equal(r.status, 200);
-    assert.equal(stub.calls[0].body.license_fingerprint, FP_A, "the forged B fingerprint is ignored; A's is used");
-    // The minted token is for A, never B.
-    const forB = db.prepare("SELECT COUNT(*) AS c FROM account_tokens WHERE customer_id = 'B'").get();
-    assert.equal(forB.c, 0, "no token ever minted for the forged customer_id");
-    const forA = db.prepare("SELECT customer_id FROM account_tokens ORDER BY created_at DESC LIMIT 1").get();
-    assert.equal(forA.customer_id, "A");
-    db.close();
-  } finally {
-    stub.restore();
-  }
-});
-
-// HARD invariant-2 test: the mint chokepoint signature accepts the SESSION ONLY — no request/body arg.
-test("HARD: mintSessionToken's call site passes ONLY the session (no body/request field)", async () => {
-  const { mintSessionToken } = await import("../src/auth/portal_token.mjs");
-  // The function takes (env, session, options). options has NO customer/tuple field. We prove the
-  // SOURCE of the worker's call passes the resolved session object, not a request-derived value, by
-  // inspecting the function's parameter shape + that a forged session.customer_id is the ONLY lever.
-  const src = (await import("node:fs")).readFileSync(new URL("../src/worker/routes/self-service.ts", import.meta.url), "utf8");
-  // Every mintSessionToken call in the worker passes `session` as the 2nd arg (never a body object).
-  const calls = [...src.matchAll(/mintSessionToken\(\s*env\s*,\s*([A-Za-z0-9_]+)\s*,/g)].map((m) => m[1]);
-  assert.ok(calls.length >= 2, "the worker mints in at least the action + download paths");
-  for (const arg of calls) {
-    assert.equal(arg, "session", "mintSessionToken's 2nd arg is ALWAYS the verified session object");
-  }
-  // And the function itself never reads a request/body — its only identity input is session.customer_id.
-  const tokenSrc = (await import("node:fs")).readFileSync(new URL("../src/auth/portal_token.mjs", import.meta.url), "utf8");
-  assert.ok(/session\?\.customer_id/.test(tokenSrc), "the mint reads customer_id from the session ONLY");
-  assert.ok(!/options\.(customer|customer_id|license_fingerprint|tuple)/.test(tokenSrc), "the mint never reads a client tuple/customer field");
-  void mintSessionToken;
-});
-
-// =================================================================================================
-// DOWNLOAD streams the signed bytes + strips upstream auth
-// =================================================================================================
-
-test("download streams the signed .lic and STRIPS the upstream Authorization", async () => {
-  const { db, env } = baseFixture();
-  const stub = installBackendStub();
-  try {
-    const cookie = await cookieFor(env, "A");
-    const id = await ownedEntitlementId(env, cookie);
-    const req = new Request("https://portal.test/api/portal/download", {
-      method: "POST",
-      headers: { "content-type": "application/json", cookie, origin: "https://portal.test", "sec-fetch-site": "same-origin" },
-      body: JSON.stringify({ entitlement_id: id, device_key_id: "device-a" }),
-    });
-    const res = await worker.fetch(req, env, CTX);
-    assert.equal(res.status, 200);
-    assert.match(res.headers.get("content-disposition") ?? "", /attachment/);
-    assert.equal(res.headers.get("authorization"), null, "the upstream bearer never reaches the browser");
-    const text = await res.text();
-    assert.match(text, /SIGNED-LIC-BYTES/, "the signed bytes pass through unchanged");
-    assert.equal(stub.calls[0].body.license_fingerprint, FP_A, "the server-resolved fingerprint is used");
-    db.close();
-  } finally {
-    stub.restore();
-  }
-});
-
-test("A -> B download referencing B's tuple is a generic not_found (no proxy)", async () => {
-  const { db, env } = baseFixture();
-  const stub = installBackendStub();
-  try {
-    seedEntitlement(db, { feature: "BONLY", fingerprint: "d".repeat(64), customerId: "B" });
-    const cookie = await cookieFor(env, "A");
-    const r = await call(env, "POST", "/api/portal/download", { cookie, body: { entitlement_id: entitlementId("DEFAULT", "BONLY", "d".repeat(64)), device_key_id: "device-b" } });
-    assert.equal(r.status, 404);
-    assert.equal(r.body.code, "not_found");
-    assert.equal(stub.calls.length, 0, "no proxy for a foreign tuple");
-    db.close();
-  } finally {
-    stub.restore();
-  }
-});
-
-test("heartbeat and release routes enforce session auth and request validation", async () => {
-  const { db, env } = baseFixture();
-  const cookie = await cookieFor(env, "A");
-  const id = await ownedEntitlementId(env, cookie);
-  const heartbeat = await call(env, "POST", "/api/portal/heartbeat", { cookie, body: { entitlement_id: id } });
-  assert.equal(heartbeat.status, 400);
-  assert.equal(heartbeat.body.code, "invalid_request");
-  const release = await call(env, "POST", "/api/portal/release", { cookie, body: { entitlement_id: id } });
-  assert.equal(release.status, 400);
-  assert.equal(release.body.code, "invalid_request");
-  const crossSite = await call(env, "POST", "/api/portal/heartbeat", {
-    cookie,
-    body: {},
-    headers: { origin: "https://evil.test", "sec-fetch-site": "cross-site" },
-  });
-  assert.equal(crossSite.status, 403);
-  assert.equal(crossSite.body.code, "cross_site_forbidden");
-  db.close();
-});
-
 export const DIRECT_ROUTE_TESTS = Object.freeze([
   "GET /api/portal/me",
   "GET /api/portal/entitlements",
-  "GET /api/portal/devices",
-  "POST /api/portal/devices/release",
-  "GET /api/portal/usage",
-  "POST /api/portal/checkout",
-  "POST /api/portal/heartbeat",
-  "POST /api/portal/release",
-  "POST /api/portal/download",
 ]);
 
 
-test("portal entitlement projection distinguishes protected enrollment without exposing another owner", async () => {
+test("portal entitlement projection lists each owned protected grant without exposing another owner", async () => {
   const { db, env } = baseFixture();
   try {
     db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,enforcement_mode,status,pool_size,max_active_devices,created_at,updated_at) VALUES ('PROTECTED','DEFAULT',?,'A','device_bound_v1','active',0,1,?,?)").run("c".repeat(64), NOW, NOW);
@@ -583,27 +152,26 @@ test("portal entitlement projection distinguishes protected enrollment without e
   } finally { db.close(); }
 });
 
+test("a stray seat pool on a grant never makes the portal show a floating license", async () => {
+  const { db, env } = baseFixture();
+  try {
+    db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,enforcement_mode,status,pool_size,max_active_devices,created_at,updated_at) VALUES ('POOLED','DEFAULT',?,'A','device_bound_v1','active',3,1,?,?)").run("c".repeat(64), NOW, NOW);
+    const result = await call(env, "GET", "/api/portal/entitlements", { cookie: await cookieFor(env, "A") });
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body.data.items.map((row) => row.license_mode), ["node_locked", "node_locked"], "every grant binds devices; none is floating");
+  } finally { db.close(); }
+});
+
 // =================================================================================================
-// TRIAL END — each row says when its trial ends by the rule that enforces that row: the
-// protected-device rule for a protected row, the legacy lease rule otherwise (a legacy trial has a
-// clock only for an activation basis with a positive duration). A trial never outlives its license
-// (valid_until wins), a clock not yet started has no end (null), and trial_starts_on_activation says
-// whether the first activation starts one.
+// TRIAL END — each row says when its trial ends by the protected-device trial rule. A trial never
+// outlives its license (valid_until wins), a clock not yet started has no end (null), and
+// trial_starts_on_activation says whether the first activation starts one.
 // =================================================================================================
 
 const TRIAL_KEY = `sha256:${"e".repeat(64)}`;
 const DAY = 86400;
 
-// A legacy row: seeded as usual, then given its trial columns.
-function seedTrial(db, feature, fingerprint, { basis = null, duration = 0, started = null, validUntil = null, isTrial = 1 }) {
-  seedEntitlement(db, { feature, fingerprint, customerId: "A", poolSize: 0, validUntil });
-  db.prepare(
-    "UPDATE entitlements SET is_trial = ?, trial_expiration_basis = ?, trial_duration_sec = ?, trial_started_at = ?, trial_device_hash = ? " +
-      "WHERE license_fingerprint = ?",
-  ).run(isTrial, basis, duration, started, started === null ? null : TRIAL_KEY, fingerprint);
-}
-
-// A protected row is inserted as one: an existing row cannot be moved into protected mode.
+// A protected trial grant owned by A, inserted with its trial columns and, once started, the trial key.
 function seedProtectedTrial(db, feature, fingerprint, { basis, duration, started = null, validUntil = null }) {
   db.prepare(
     "INSERT INTO entitlements (project, feature, license_fingerprint, customer_id, enforcement_mode, status, pool_size, max_active_devices, " +
@@ -613,23 +181,17 @@ function seedProtectedTrial(db, feature, fingerprint, { basis, duration, started
   ).run(feature, fingerprint, validUntil, basis, duration, started, started === null ? null : TRIAL_KEY, NOW, NOW);
 }
 
-test("each row's trial end follows the rule that enforces it and never outlives the license", async () => {
+test("each row's trial end follows the protected trial rule and never outlives the license", async () => {
   const { db, env } = baseFixture();
   try {
-    seedTrial(db, "RUNNING", "1".repeat(64), { basis: "from_first_activation", duration: 14 * DAY, started: NOW - DAY });
-    seedTrial(db, "ENDED", "2".repeat(64), { basis: "from_first_activation", duration: 7 * DAY, started: NOW - 30 * DAY });
-    seedTrial(db, "UNSTARTED", "3".repeat(64), { basis: "from_first_use", duration: 7 * DAY });
-    seedTrial(db, "ISSUED", "4".repeat(64), { basis: "from_issue", duration: 7 * DAY, validUntil: NOW + 7 * DAY });
-    seedTrial(db, "PAID", "5".repeat(64), { isTrial: 0, validUntil: NOW + 30 * DAY });
-    seedTrial(db, "ZERO", "6".repeat(64), { basis: "from_first_activation", duration: 0, started: NOW - 30 * DAY });
-    seedTrial(db, "OPEN", "7".repeat(64), { basis: "from_issue" });
-    seedTrial(db, "CLAMPED", "8".repeat(64), { basis: "from_first_activation", duration: 30 * DAY, started: NOW - DAY, validUntil: NOW + 7 * DAY });
     seedProtectedTrial(db, "PSTARTED", "9".repeat(64), { basis: "from_first_activation", duration: 7 * DAY, started: NOW - DAY });
+    seedProtectedTrial(db, "PENDED", "2".repeat(64), { basis: "from_first_activation", duration: 7 * DAY, started: NOW - 30 * DAY });
     seedProtectedTrial(db, "PPENDING", "0".repeat(64), { basis: "from_first_activation", duration: 7 * DAY });
     seedProtectedTrial(db, "PCLAMPED", "d".repeat(64), { basis: "from_first_use", duration: 30 * DAY, started: NOW - DAY, validUntil: NOW + 7 * DAY });
     seedProtectedTrial(db, "PSHORT", "c".repeat(64), { basis: "from_first_activation", duration: 1 });
     seedProtectedTrial(db, "PISSUED", "f".repeat(64), { basis: "from_issue", duration: 7 * DAY, validUntil: NOW + 7 * DAY });
-    seedTrial(db, "ZEROPEND", "e".repeat(64), { basis: "from_first_activation", duration: 0 });
+    seedProtectedTrial(db, "POPEN", "7".repeat(64), { basis: "from_issue", duration: 0 });
+    seedEntitlement(db, { feature: "PAID", fingerprint: "5".repeat(64), customerId: "A", validUntil: NOW + 30 * DAY });
     const r = await call(env, "GET", "/api/portal/entitlements", { cookie: await cookieFor(env, "A") });
     assert.equal(r.status, 200);
     const trialOf = (feature, endsAt, startsOnActivation, why) => {
@@ -637,21 +199,18 @@ test("each row's trial end follows the rule that enforces it and never outlives 
       assert.equal(row.trial_ends_at, endsAt, `${feature}: ${why}`);
       assert.equal(row.trial_starts_on_activation, startsOnActivation, `${feature}: ${why}`);
     };
-    trialOf("RUNNING", NOW + 13 * DAY, false, "a started legacy clock ends its duration after it started");
-    trialOf("ENDED", NOW - 23 * DAY, false, "an ended legacy clock still reports when it ended");
-    trialOf("UNSTARTED", null, true, "a legacy clock the first activation starts has no end yet");
-    trialOf("ISSUED", NOW + 7 * DAY, false, "a from_issue trial ends with the license");
-    trialOf("ZERO", null, false, "a zero-duration legacy trial has no clock: no end of its own and no false expiry");
-    trialOf("OPEN", null, false, "the admin's default trial (from_issue, no duration, no end date) has no end and no activation clock");
-    trialOf("CLAMPED", NOW + 7 * DAY, false, "a trial never outlives its license: valid_until wins, so the Mode label and the Valid column agree");
     trialOf("PSTARTED", NOW + 6 * DAY, false, "a started protected trial ends its duration after it started");
+    trialOf("PENDED", NOW - 23 * DAY, false, "an ended protected clock still reports when it ended");
     trialOf("PPENDING", null, true, "a protected trial the first activation starts has no end yet");
-    trialOf("PCLAMPED", NOW + 7 * DAY, false, "a protected trial never outlives its license either");
+    trialOf("PCLAMPED", NOW + 7 * DAY, false, "a trial never outlives its license: valid_until wins, so the Mode label and the Valid column agree");
     trialOf("PSHORT", null, false, "the protected rule refuses a duration under 2 seconds, so no activation will start this clock");
     trialOf("PISSUED", NOW + 7 * DAY, false, "a protected from_issue trial ends with the license");
-    trialOf("ZEROPEND", null, false, "an unstarted zero-duration legacy trial has no clock for an activation to start");
+    trialOf("POPEN", null, false, "a from_issue trial with no end date has no end and no activation clock");
     trialOf("PAID", null, false, "a license that is not a trial has no trial end");
-    trialOf("DEFAULT", null, false, "the floating license is not a trial either");
+    trialOf("DEFAULT", null, false, "the node-locked license is not a trial either");
+    for (const row of r.body.data.items) {
+      assert.equal(row.license_mode, row.feature === "PAID" || row.feature === "DEFAULT" ? "node_locked" : "trial", `${row.feature} license mode`);
+    }
     // Only the derived values reach the browser, never the columns they are computed from.
     for (const row of r.body.data.items) {
       for (const column of ["trial_started_at", "trial_duration_sec", "trial_expiration_basis", "trial_device_hash"]) {
