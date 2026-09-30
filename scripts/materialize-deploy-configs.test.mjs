@@ -485,6 +485,33 @@ test("backend config without a valid BOUND_DEVICE_CONFIG is refused", () => {
   }
 });
 
+test("the backend cron is labelled maintenance and no lease or emergency secret is expected", () => {
+  const cronRoot = mkdtempSync(join(tmpdir(), "licensecc-deploy-configs-cron-label-"));
+  try {
+    const environment = validEnvironment();
+    mutateBackend(environment, (source) => source.replace('crons = ["*/5 * * * *"]', 'crons = ["*/5 * * * *", "*/5 * * * *"]'));
+    assert.throws(
+      () => materializeDeploymentConfigs({ root: cronRoot, environment, profile: "production" }),
+      /must define exactly one maintenance cron trigger/u,
+    );
+    assertNoConfigsWritten(cronRoot, "duplicate backend cron");
+  } finally {
+    rmSync(cronRoot, { recursive: true, force: true });
+  }
+
+  const secretRoot = mkdtempSync(join(tmpdir(), "licensecc-deploy-configs-no-lease-secret-"));
+  try {
+    const environment = validEnvironment();
+    mutateBackend(environment, (source) => source.replace(
+      "[vars]",
+      '[vars]\nLEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM = "plaintext"\nLEASE_SIGNING_KEY_ID = "plaintext"\nLEASE_ISSUE_BEARER = "plaintext"\nEMERGENCY_OPERATOR_BEARER = "plaintext"',
+    ));
+    assert.equal(materializeDeploymentConfigs({ root: secretRoot, environment, profile: "production" }).length, 4);
+  } finally {
+    rmSync(secretRoot, { recursive: true, force: true });
+  }
+});
+
 test("consent binding cannot cross deployment profiles or select another capability", () => {
   const mutations=[
     config=>{config.services[0].service="licensecc-online-verifier";},
