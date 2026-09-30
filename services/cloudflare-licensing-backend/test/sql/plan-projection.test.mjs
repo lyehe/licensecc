@@ -368,12 +368,16 @@ test("plan apply creates protected rows", async (t) => {
   assert.deepEqual(rows.map((row) => ({ ...row })), [protectedRow("core", 1), protectedRow("export", 1), protectedRow("team", 7)]);
 });
 
+// Preview reports what Apply will do: every grant an owner-less input would write is blocked with
+// the reason owner_required, and Apply refuses it with invalid_patch before any write.
 test("plan projection refuses an entitlement input without an owner", async (t) => {
   for (const customerId of [undefined, null, "   "]) {
     const db = freshDb(); t.after(() => db.close()); seedCatalog(db);
     const env = { DB: new D1Like(db) };
     const preview = await previewPlanProjection(env, projectionInput({ customer_id: customerId }), "admin", NOW);
-    assert.deepEqual(preview.will_create.map((row) => row.feature), ["core", "export", "team"]);
+    assert.deepEqual(preview.will_create, []);
+    assert.deepEqual(preview.blocked.map((row) => [row.feature, row.reason]), [["core", "owner_required"], ["export", "owner_required"], ["team", "owner_required"]]);
+    assert.equal(preview.summary.blocked, 3);
     const key = `ownerless-${String(customerId)}`;
     const before = projectionApplyState(db, preview.preview_id, key);
     const batches = env.DB.batchSizes.length;

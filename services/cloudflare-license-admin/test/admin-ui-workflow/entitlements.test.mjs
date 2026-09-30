@@ -148,17 +148,30 @@ test("admin UI workflow prepares entitlement edit patch payloads", async () => {
     ...editForm,
     valid_until: "2024-07-03",
     notes: "",
-    customer_id: "",
+    customer_id: "cus_456",
     license_id: "lic_123",
   });
   assert.deepEqual(patch, {
     valid_from: 1709942400,
     valid_until: 1719964800,
     notes: "",
-    customer_id: null,
+    customer_id: "cus_456",
     license_id: "lic_123",
   });
   assert.equal(workflow.patchPath(item), "/api/admin/entitlements/ent-123");
+});
+
+// Every grant has an owner: the edit form can move it to another customer but never clear it, so an
+// empty customer is a form error and the edit never sends a null owner.
+test("the edit form requires an owner and never sends a null customer", async () => {
+  const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
+  const edit = { valid_from: "", valid_until: "", notes: "", customer_id: "", license_id: "lic_1" };
+  for (const customer_id of ["", "   "]) {
+    assert.equal(workflow.entitlementFormErrors({ ...edit, customer_id }).customer_id, "Choose the customer who owns this license.", JSON.stringify(customer_id));
+  }
+  assert.throws(() => workflow.normalizeEntitlementPatch(edit), /^Error: customer_id_required$/);
+  assert.deepEqual(workflow.entitlementFormErrors({ ...edit, customer_id: "cus_2" }), {});
+  assert.equal(workflow.normalizeEntitlementPatch({ ...edit, customer_id: "cus_2" }).customer_id, "cus_2");
 });
 
 test("admin UI workflow action rules match entitlement lifecycle invariants", async () => {
@@ -300,7 +313,7 @@ test("entitlement date edits preserve stored instants and use UTC midnight for c
     ...workflow.emptyEntitlementForm,
     valid_from: Date.parse("2026-09-07T13:25:17Z") / 1000,
     valid_until: Date.parse("2026-09-08T18:42:03Z") / 1000,
-    customer_id: null,
+    customer_id: "cus_1",
     license_id: null,
   };
   const edit = workflow.editFormFromEntitlement(original);

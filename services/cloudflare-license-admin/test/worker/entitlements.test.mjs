@@ -95,6 +95,35 @@ test("PATCH, disable, reenable and revoke each refuse a missing precondition bef
 
 // A PATCH reads exactly its patch fields, the device limit and the precondition; anything else,
 // including the grant's identity and status, is refused whole and writes nothing.
+// Every grant has an owner, so a PATCH can move it to another customer but never clear it, and its
+// precondition always names the owner it observed. Either refusal happens before any D1 read or write.
+test("PATCH refuses a null or empty owner before any read or write", async () => {
+  const { env, request } = protectedCreateFixture();
+  const created = await request("/api/admin/entitlements", protectedGrant);
+  assert.equal(created.status, 200);
+  const { id, customer_id: customerId, revocation_seq: revocationSeq } = (await created.json()).data;
+  const key = keyOf(protectedGrant.project, protectedGrant.feature, protectedGrant.license_fingerprint);
+  const before = clone(env.DB.entitlements.get(key));
+  const prepare = env.DB.prepare.bind(env.DB);
+  let queries = 0;
+  env.DB.prepare = (sql) => { queries += 1; return prepare(sql); };
+  for (const owner of [null, ""]) {
+    for (const [path, body] of [
+      [`/api/admin/entitlements/${id}`, { customer_id: owner, expected_customer_id: customerId, expected_revocation_seq: revocationSeq }],
+      [`/api/admin/entitlements/${id}`, { notes: "stale owner", expected_customer_id: owner, expected_revocation_seq: revocationSeq }],
+      [`/api/admin/entitlements/${id}/disable`, { reason: "support", expected_customer_id: owner, expected_revocation_seq: revocationSeq }],
+    ]) {
+      const method = path.endsWith("/disable") ? "POST" : "PATCH";
+      const refused = await worker.fetch(authed(path, { method, body: JSON.stringify(body) }), env);
+      assert.equal(refused.status, 400, JSON.stringify(body));
+      assert.equal((await refused.json()).code, "invalid_request", JSON.stringify(body));
+    }
+  }
+  assert.equal(queries, 0);
+  assert.deepEqual(env.DB.entitlements.get(key), before);
+  assert.equal(env.DB.events.length, 1);
+});
+
 test("PATCH refuses a body naming any field a PATCH does not read", async () => {
   const { env, request } = protectedCreateFixture();
   const created = await request("/api/admin/entitlements", protectedGrant);

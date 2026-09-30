@@ -272,6 +272,35 @@ test("license-plan preview is non-mutating and returns the concrete entitlement 
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
 });
 
+// Preview and Apply agree on a projection without an owner: Preview blocks every grant it would
+// write with the reason owner_required, and Apply refuses it with 400 invalid_request, writing nothing.
+test("license-plan preview blocks an owner-less projection that apply refuses", async () => {
+  for (const owner of [{ customer_id: null }, { customer_id: "" }, {}]) {
+    const db = freshDb();
+    seedCatalog(db);
+    const env = devEnv(db);
+    const request = { ...projectionBody(), ...owner };
+    if (!("customer_id" in owner)) delete request.customer_id;
+    const preview = await worker.fetch(devReq("/api/admin/license-plans/preview", { method: "POST", body: JSON.stringify(request) }), env);
+    assert.equal(preview.status, 200, await preview.clone().text());
+    const data = (await body(preview)).data;
+    assert.deepEqual(data.will_create, []);
+    assert.deepEqual(data.blocked.map((item) => [item.feature, item.reason]), [["core", "owner_required"], ["export", "owner_required"], ["team", "owner_required"]]);
+    assert.equal(data.summary.blocked, 3);
+    const apply = await worker.fetch(devReq("/api/admin/license-plans/apply", {
+      method: "POST",
+      headers: { "idempotency-key": `ownerless-${JSON.stringify(owner)}` },
+      body: JSON.stringify({ preview_id: data.preview_id }),
+    }), env);
+    assert.equal(apply.status, 400, await apply.clone().text());
+    assert.equal((await body(apply)).code, "invalid_request");
+    for (const table of ["entitlements", "entitlement_events", "license_plan_assignments", "mutation_idempotency"]) {
+      assert.equal(db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get().c, 0, `${table} ${JSON.stringify(owner)}`);
+    }
+    db.close();
+  }
+});
+
 test("catalog admin APIs create plan definitions consumed by projection", async () => {
   const db = freshDb();
   seedPolicy(db, "pol_node");

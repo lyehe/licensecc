@@ -14,6 +14,7 @@ import {
 } from "../src/catalog/import_preview.mjs";
 import {
   MAX_SUPPORT_UNTIL_EPOCH_SECONDS,
+  classifyPlanProjection,
   desiredPlanProjectionRow,
   normalizePlanProjectionInput,
   planProjectionMatchesDesired,
@@ -106,6 +107,28 @@ test("a plan-projected grant takes only its device limit from the catalog, and a
 
   assert.equal(planProjectionMatchesDesired(existing, desired), true);
   assert.equal(planProjectionMatchesDesired({ ...existing, max_active_devices: 1 }, desired), false);
+});
+
+// Every grant has an owner, so a projection without one cannot write any grant: its preview blocks
+// each one it would create or update with the reason owner_required, as Apply refuses it. A revoked
+// grant keeps its own reason.
+test("a plan projection without an owner blocks every grant it would write", () => {
+  const plan = { id: "plan_basic", plan_key: "basic" };
+  const row = (feature) => ({ feature_key: feature, feature_inclusion: "included", addon_key: null, feature_name: feature, policy_id_resolved: null, max_active_devices: 1 });
+  const base = { project: "DEFAULT", license_id: "lic_1", license_fingerprint: "f".repeat(64), plan_key: "basic" };
+  const existing = (feature, status, customer_id) => ({ project: "DEFAULT", feature, license_fingerprint: "f".repeat(64), status, customer_id,
+    policy_id: null, source: "included", is_trial: 0, max_active_devices: 1, valid_from: null, valid_until: null });
+  for (const customer_id of [undefined, null, "  "]) {
+    const input = normalizePlanProjectionInput({ ...base, customer_id });
+    const desired = ["CORE", "EXTRA", "GONE"].map((feature) => desiredPlanProjectionRow(row(feature), input, 100));
+    const preview = classifyPlanProjection({ input, plan, desired, existingRows: [existing("EXTRA", "active", "cus_1"), existing("GONE", "revoked", "cus_1")] });
+    assert.deepEqual(preview.blocked.map((item) => [item.feature, item.reason]), [["CORE", "owner_required"], ["EXTRA", "owner_required"], ["GONE", "revoked_entitlement"]]);
+    assert.deepEqual([preview.will_create, preview.will_update, preview.unchanged], [[], [], []]);
+    assert.equal(preview.summary.blocked, 3);
+  }
+  const owned = classifyPlanProjection({ input: normalizePlanProjectionInput({ ...base, customer_id: "cus_1" }), plan,
+    desired: [desiredPlanProjectionRow(row("CORE"), normalizePlanProjectionInput({ ...base, customer_id: "cus_1" }), 100)], existingRows: [] });
+  assert.deepEqual([owned.will_create.map((item) => item.feature), owned.blocked], [["CORE"], []]);
 });
 
 test("plan projection support_until is a safe, bounded epoch second", () => {

@@ -55,6 +55,30 @@ test("admin creates a fresh protected grant and exactly replays it without alloc
   assert.deepEqual(f.snapshot(), before);
 });
 
+// Every grant has an owner. A create, policy create, sync or PATCH that names none is refused with
+// 400 before any write, never as a database constraint failure.
+test("a create, sync or PATCH without an owner is refused before any write", async t => {
+  const f = fixture(t), before = f.snapshot();
+  const ownerless = { ...input }; delete ownerless.customer_id;
+  for (const [index, body] of [ownerless, { ...input, customer_id: null }, { ...input, customer_id: "" }].entries()) {
+    for (const [kind, create] of [["direct", body], ["policy", { ...body, policy_id: "policy" }]]) {
+      const refused = await f.send(create, `ownerless-${kind}-${index}`);
+      assert.equal(refused.status, 400, JSON.stringify(create)); assert.equal((await refused.json()).code, "invalid_request", JSON.stringify(create));
+    }
+    const synced = await worker.fetch(syncAuthed(body), syncEnv(f.db));
+    assert.equal(synced.status, 400, JSON.stringify(body)); assert.equal((await synced.json()).code, "invalid_request");
+  }
+  assert.deepEqual(f.snapshot(), before);
+  const first = await f.send(); assert.equal(first.status, 200);
+  const created = (await first.json()).data, stored = f.snapshot();
+  for (const owner of [null, ""]) {
+    const patched = await f.send({ customer_id: owner, expected_customer_id: created.customer_id, expected_revocation_seq: created.revocation_seq },
+      `patch-${owner === null ? "null" : "empty"}`, `${path}/${created.id}`, "PATCH");
+    assert.equal(patched.status, 400, JSON.stringify(owner)); assert.equal((await patched.json()).code, "invalid_request", JSON.stringify(owner));
+  }
+  assert.deepEqual(f.snapshot(), stored);
+});
+
 for (const [change, reason] of [[{ customer_id: "other" }, "license_customer_mismatch"], [{ license_id: null }, "license_missing"]]) {
   test(`protected creation rejects ineligible input ${JSON.stringify(change)} without residue`, async t => {
     const f = fixture(t), before = f.snapshot();
