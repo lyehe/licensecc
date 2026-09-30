@@ -399,7 +399,7 @@ service's `DeviceOperator` entrypoint. Profile materialization pins that binding
 to the corresponding backend and rejects cross-profile or hidden overrides.
 Deploy the backend capability before the admin integration. A missing or
 malformed capability fails closed with `temporarily_unavailable`.
-Open **Customers → Apps & access → Protected connections** to inspect bindings,
+Open **Customers → Apps & access → Connected devices** to inspect bindings,
 last verified contact and paginated audit history. Administrators can retire an
 active connection after reviewing its binding ID and hold deadline. Reader and
 disabled-customer contexts retain inspection and saved-request review.

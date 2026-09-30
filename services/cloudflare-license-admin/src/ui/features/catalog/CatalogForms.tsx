@@ -158,9 +158,7 @@ export function CatalogPlanFeatureEditor({
       {form.policy_id && <details><summary>Policy details</summary><code>{form.policy_id}</code></details>}
       <label>Display order<input type="number" {...field("display_order", "Display order")} value={form.display_order} onChange={(event) => set("display_order", Number(event.target.value))} />{error("display_order")}</label>{details("display_order")}
       <label>Status<select value={form.status} onChange={(event) => onChange({ ...form, status: event.target.value as CatalogPlanFeature["status"] })}><option value="active">active</option><option value="disabled">disabled</option></select></label>
-      <label>Pool size<input type="number" {...field("pool_size", "Pool size")} value={form.pool_size} onChange={(event) => set("pool_size", event.target.value)} />{error("pool_size")}</label>{details("pool_size")}
       <label>Device limit<input type="number" {...field("max_active_devices", "Device limit")} value={form.max_active_devices} onChange={(event) => set("max_active_devices", event.target.value)} />{error("max_active_devices")}</label>{details("max_active_devices")}
-      <label>Max borrow (seconds)<input type="number" {...field("max_borrow_sec", "Max borrow (seconds)")} value={form.max_borrow_sec} onChange={(event) => set("max_borrow_sec", event.target.value)} />{error("max_borrow_sec")}</label>{details("max_borrow_sec")}
       <FormStatus feedback={feedback.status} />
       <button disabled={busy || !plansSettled || !activePoliciesSettled || !selectedPlanId || !plans.some((plan) => plan.id === selectedPlanId)} type="submit">Save plan feature</button>
     </form>
@@ -197,7 +195,7 @@ export function PlanProjectionEditor({
       <label>Plan key<input placeholder="pro" {...field("plan_key", "Plan key")} value={form.plan_key} onChange={(event) => set("plan_key", event.target.value)} />{error("plan_key")}</label>{details("plan_key")}
       <label>Plan ID<input {...field("plan_id", "Plan ID")} value={form.plan_id} onChange={(event) => set("plan_id", event.target.value)} />{error("plan_id")}</label>{details("plan_id")}
       <label>Support until<input type="date" {...field("support_until", "Support until")} value={form.support_until} onChange={(event) => set("support_until", event.target.value)} />{error("support_until")}</label>{details("support_until")}
-      <label>Add-ons (csv)<input placeholder="team_seats,priority_support" {...field("addons", "Add-ons (csv)")} value={form.addons} onChange={(event) => set("addons", event.target.value)} />{error("addons")}</label>{details("addons")}
+      <label>Add-ons (csv)<input placeholder="priority_support,analytics" {...field("addons", "Add-ons (csv)")} value={form.addons} onChange={(event) => set("addons", event.target.value)} />{error("addons")}</label>{details("addons")}
       <label>Notes<textarea {...field("notes", "Notes")} value={form.notes} onChange={(event) => set("notes", event.target.value)} />{error("notes")}</label>{details("notes")}
       <FormStatus feedback={feedback.status} />
       <div className="actions"><button disabled={busy} type="submit">Preview</button><button disabled={busy || previewBinding === null || previewBinding.preview.blocked.length > 0} type="button" onClick={onApply}>Apply</button></div>

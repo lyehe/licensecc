@@ -165,11 +165,6 @@ test("customer app pages recover failed refreshes and manage only the selected o
   await expect(page.getByRole("alert")).toHaveCount(0);
   await page.getByRole("button", { name: "View app", exact: true }).click();
   await expect(page.getByRole("button", { name: "Manage access", exact: true })).toHaveCount(1);
-  await page.getByRole("button", { name: "Activated devices", exact: true }).click();
-  await expect(page.getByText("No records found.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Floating seats", exact: true }).click();
-  await expect(page.getByText("No records found.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Access grants", exact: true }).click();
   await page.getByRole("button", { name: "Manage access", exact: true }).click();
   await expect(page.getByText(/License access for customer/)).toContainText(customer.id);
   await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
@@ -231,13 +226,13 @@ test("a customer workspace shows connected devices and no seat, legacy-device or
   await page.getByRole("button", { name: "View app", exact: true }).click();
   await expect(page.getByRole("button", { name: "Manage access", exact: true })).toHaveCount(1);
   await expect(page.getByRole("navigation", { name: "App records" })).toHaveCount(0);
-  for (const name of ["Activated devices", "Floating seats"]) {
-    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
+  for (const name of [/activated devices?/i, /floating seats?/i]) {
+    await expect(page.getByRole("button", { name })).toHaveCount(0);
     await expect(page.getByText(name)).toHaveCount(0);
   }
   await page.getByRole("navigation", { name: "Customer detail sections" }).getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByText("Login email: login@example.test", { exact: true })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Account tokens" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: /account tokens?/i })).toHaveCount(0);
   await expect(page.getByText(/account tokens?/i)).toHaveCount(0);
 });
 

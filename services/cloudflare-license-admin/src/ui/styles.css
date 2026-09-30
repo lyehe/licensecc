@@ -290,12 +290,6 @@ button.danger:hover:not(:disabled) {
   padding: 0 24px;
 }
 
-.chartGrid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: 1fr 1fr;
-}
-
 .chartCard {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -350,55 +344,16 @@ button.danger:hover:not(:disabled) {
   stroke: none;
 }
 
-.checkoutsArea {
-  fill: rgba(40, 95, 82, 0.16);
+.seriesArea {
+  fill: color-mix(in srgb, var(--status-danger-ink) 16%, transparent);
 }
 
-.checkoutsLine {
-  stroke: var(--status-ok-ink);
-}
-
-.denialsLine {
+.seriesLine {
   stroke: var(--status-danger-ink);
-  stroke-dasharray: 4 3;
-}
-
-.denialRateLine {
-  stroke: var(--status-warn-ink);
 }
 
 .chartBar {
   fill: var(--status-ok-ink);
-}
-
-/* Legend chips beneath the line/area chart. */
-.chartLegend {
-  display: flex;
-  gap: 14px;
-}
-
-.legend {
-  align-items: center;
-  color: var(--muted);
-  display: inline-flex;
-  font-size: var(--text-small);
-  gap: 6px;
-}
-
-.legend::before {
-  border-radius: 2px;
-  content: "";
-  display: inline-block;
-  height: 10px;
-  width: 14px;
-}
-
-.checkoutsLegend::before {
-  background: var(--status-ok-ink);
-}
-
-.denialsLegend::before {
-  background: var(--status-danger-ink);
 }
 
 .fulfillmentSpark {
@@ -459,12 +414,6 @@ button.danger:hover:not(:disabled) {
 .health-suspended {
   background: var(--status-danger-bg);
   color: var(--status-danger-ink);
-}
-
-@media (max-width: 920px) {
-  .chartGrid {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* Screen-reader-only: visually hidden but exposed to assistive tech (audit R6.5 a11y).

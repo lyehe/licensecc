@@ -52,7 +52,7 @@ test("direct customer section URLs survive intent consumption and refresh", asyn
 test("customer secondary records keep legacy URLs and their primary section", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
-  for (const [section, tab, heading] of [["overview", "Apps & access", "Apps & access"], ["licenses", "Apps & access", "Customer licenses"], ["orders", "Activity", "Customer orders"], ["tokens", "Account", "Account tokens"]]) {
+  for (const [section, tab, heading] of [["overview", "Apps & access", "Apps & access"], ["licenses", "Apps & access", "Customer licenses"], ["orders", "Activity", "Customer orders"], ["account", "Account", "Account details"]]) {
     await page.goto(`/#/customers/cus_acme?section=${section}`);
     await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Customer detail sections" }).getByRole("button", { name: tab, exact: true })).toHaveAttribute("aria-current", "page");
@@ -291,39 +291,31 @@ function seedCustomerApps(api) {
 
 const currentHash = (page) => () => new URL(page.url()).hash;
 
-test("a customer's app and record view are history entries that survive reload", async ({ page }) => {
+test("a customer's app is a history entry that survives reload", async ({ page }) => {
   const api = makeAdminApiFixture();
   const { customer } = seedCustomerApps(api);
   await page.route("**/api/admin/**", api.route);
   const accessHash = `#/customers/${customer.id}?section=access`;
   await page.goto(`/${accessHash}`);
-  const records = page.getByRole("navigation", { name: "App records" });
-  const recordView = (name) => records.getByRole("button", { name, exact: true });
+  const manageAccess = page.getByRole("button", { name: "Manage access", exact: true });
 
   await page.locator(".recordCard").filter({ hasText: "CAD" }).getByRole("button", { name: "View app", exact: true }).click();
-  await expect(recordView("Access grants")).toHaveAttribute("aria-current", "page");
+  await expect(manageAccess).toBeVisible();
   await expect.poll(currentHash(page)).toBe(`${accessHash}&app=CAD`);
   // The app's existence check reads one record; it does not repeat the grants list read.
   await expect.poll(() => api.requests.customerWorkspaceReads.filter((read) => read.startsWith("access")).sort()).toEqual(["access?project=CAD", "access?project=CAD&limit=1"]);
-  await recordView("Activated devices").click();
-  await expect(recordView("Activated devices")).toHaveAttribute("aria-current", "page");
-  await expect.poll(currentHash(page)).toBe(`${accessHash}&app=CAD&view=nodes`);
 
   await page.reload();
-  await expect(recordView("Activated devices")).toHaveAttribute("aria-current", "page");
+  await expect(manageAccess).toBeVisible();
   await expect(page.getByText("CAD", { exact: true })).toBeVisible();
-  await expect.poll(currentHash(page)).toBe(`${accessHash}&app=CAD&view=nodes`);
+  await expect.poll(currentHash(page)).toBe(`${accessHash}&app=CAD`);
 
   await page.goBack();
-  await expect(recordView("Access grants")).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("button", { name: "Manage access", exact: true })).toBeVisible();
-  await expect.poll(currentHash(page)).toBe(`${accessHash}&app=CAD`);
-  await page.goBack();
   await expect(page.getByRole("button", { name: "View app", exact: true })).toHaveCount(2);
-  await expect(records).toHaveCount(0);
+  await expect(manageAccess).toHaveCount(0);
   await expect.poll(currentHash(page)).toBe(accessHash);
   await page.goForward();
-  await expect(recordView("Access grants")).toHaveAttribute("aria-current", "page");
+  await expect(manageAccess).toBeVisible();
   await expect.poll(currentHash(page)).toBe(`${accessHash}&app=CAD`);
 });
 
@@ -415,6 +407,9 @@ test("app, record-view, and plan combinations the console cannot address fall ba
     `#/customers/${customer.id}?section=access&view=nodes`,
     `#/customers/${customer.id}?section=history&app=CAD`,
     `#/customers/${customer.id}?section=access&app=CAD&view=sideways`,
+    // An app shows its access grants only; the removed device and seat views have no address.
+    `#/customers/${customer.id}?section=access&app=CAD&view=nodes`,
+    `#/customers/${customer.id}?section=access&app=CAD&view=sessions`,
     `#/plans?view=features&plan=${plan.id}`,
   ]) {
     await page.goto(`/${hash}`);
@@ -431,10 +426,10 @@ test("a deep link to an app the customer no longer has shows all apps with a not
   const { customer } = seedCustomerApps(api);
   await page.route("**/api/admin/**", api.route);
   const accessHash = `#/customers/${customer.id}?section=access`;
-  await page.goto(`/${accessHash}&app=RETIRED&view=nodes`);
+  await page.goto(`/${accessHash}&app=RETIRED`);
   await expect(page.getByText("That app was not found for this customer. All apps are shown.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "View app", exact: true })).toHaveCount(2);
-  await expect(page.getByRole("navigation", { name: "App records" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Manage access", exact: true })).toHaveCount(0);
   await expect.poll(currentHash(page)).toBe(accessHash);
 });
 

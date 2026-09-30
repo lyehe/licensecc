@@ -78,8 +78,8 @@ export function useFormFeedback(form: string, resetKey: unknown): FormFeedback {
   const [status, setStatus] = useState<OperatorFeedback | null>(null);
   useEffect(() => { setErrors({}); setDetails({}); setStatus(null); }, [resetKey]);
   const show = useCallback((code: string, requestId: string | null, fieldFor: (code: string) => string | null): string | null => {
-    // A field the form does not show right now (such as a device-locked policy's seat pool) cannot
-    // carry the error; the form's status line does instead.
+    // A field the form does not show right now (such as the add-on key of an included plan feature)
+    // cannot carry the error; the form's status line does instead.
     const mapped = fieldFor(code);
     const field = mapped !== null && fieldElement(form, mapped) !== null ? mapped : null;
     if (field === null) {

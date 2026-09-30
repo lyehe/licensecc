@@ -214,27 +214,24 @@ test("admin UI workflow builds catalog paths and payloads", async () => {
     feature_key: "team",
     feature_inclusion: "addon",
     addon_key: "team_seats",
-    policy_id: "pol_float",
+    policy_id: "pol_team",
     display_order: 3,
-    pool_size: "6",
     max_active_devices: "6",
-    max_borrow_sec: "172800",
   });
+  // A plan feature grants a device limit and nothing else: the Worker refuses a body naming a seat,
+  // borrowing, meter or TTL field.
   assert.deepEqual(planFeature, {
     project: "DEFAULT",
     feature_key: "team",
     feature_inclusion: "addon",
     addon_key: "team_seats",
-    policy_id: "pol_float",
+    policy_id: "pol_team",
     status: "active",
     display_order: 3,
-    assertion_ttl_seconds: null,
-    pool_size: 6,
     max_active_devices: 6,
-    max_borrow_sec: 172800,
-    meter_quota: null,
-    meter_period_sec: null,
   });
+  assert.deepEqual(Object.keys(workflow.emptyCatalogPlanFeatureForm).sort(),
+    ["addon_key", "display_order", "feature_inclusion", "feature_key", "max_active_devices", "policy_id", "project", "status"]);
 
   assert.throws(() => workflow.normalizeCatalogFeatureForm({
     ...workflow.emptyCatalogFeatureForm,
@@ -422,15 +419,13 @@ test("each catalog validation code names the field of its own form, and whole-fo
 
   const row = (patch) => codeOf(() => workflow.normalizeCatalogPlanFeatureForm({ ...workflow.emptyCatalogPlanFeatureForm, feature_key: "export", ...patch }));
   assert.equal(fields.catalogPlanFeatureFieldForCode(row({ feature_inclusion: "addon" })), "addon_key");
-  assert.equal(fields.catalogPlanFeatureFieldForCode(row({ pool_size: "-1" })), "pool_size");
   assert.equal(fields.catalogPlanFeatureFieldForCode(row({ max_active_devices: "1.5" })), "max_active_devices");
-  assert.equal(fields.catalogPlanFeatureFieldForCode(row({ max_borrow_sec: "-1" })), "max_borrow_sec");
   assert.equal(fields.catalogPlanFeatureFieldForCode(row({ display_order: -1 })), "display_order");
   assert.equal(fields.catalogPlanFeatureFieldForCode("catalog_feature_not_found"), "feature_key");
   assert.equal(fields.catalogPlanFeatureFieldForCode("catalog_policy_not_available"), "policy_id");
   assert.equal(fields.catalogPlanFeatureFieldForCode("policy_disabled"), "policy_id");
   // Rules for fields this editor does not show stay with the whole form.
-  assert.equal(fields.catalogPlanFeatureFieldForCode(row({ meter_quota: "-1" })), null);
+  assert.equal(fields.catalogPlanFeatureFieldForCode("pool_size_must_be_between_0_and_1000000"), null);
 
   const projection = (patch) => codeOf(() => workflow.normalizePlanProjectionForm({ ...workflow.emptyPlanProjectionForm, license_id: "lic_1", plan_key: "pro", ...patch }));
   assert.equal(fields.planProjectionFieldForCode(projection({ plan_key: "" })), "plan_key");

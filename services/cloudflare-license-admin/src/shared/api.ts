@@ -11,8 +11,6 @@ export type {
   EntitlementInput,
   EntitlementCreateInput,
   EntitlementPatch,
-  DeviceStatus,
-  EntitlementDeviceRecord,
 } from "@licensecc/licensing-domain/entitlements/contracts";
 
 export type {
@@ -139,12 +137,8 @@ export interface CatalogPlanFeature {
   policy_id: string | null;
   status: CatalogStatus;
   display_order: number;
-  assertion_ttl_seconds: number | null;
-  pool_size: number | null;
+  /** Device limit override; null takes the limit from the policy (or 1 without one). */
   max_active_devices: number | null;
-  max_borrow_sec: number | null;
-  meter_quota: number | null;
-  meter_period_sec: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -157,12 +151,7 @@ export interface CatalogPlanFeatureInput {
   policy_id?: string | null;
   status?: CatalogStatus;
   display_order?: number;
-  assertion_ttl_seconds?: number | null;
-  pool_size?: number | null;
   max_active_devices?: number | null;
-  max_borrow_sec?: number | null;
-  meter_quota?: number | null;
-  meter_period_sec?: number | null;
 }
 
 // ── License-policy templates (Stage 3) ───────────────────────────────────────
@@ -184,61 +173,41 @@ export interface Policy {
   status: PolicyStatus;
   valid_from_offset_sec: number | null;
   duration_sec: number | null;
-  assertion_ttl_seconds: number;
-  pool_size: number;
   max_active_devices: number;
-  max_borrow_sec: number;
-  meter_quota: number;
-  meter_period_sec: number;
   expiry_strategy: ExpiryStrategy;
   trial_expiration_basis: TrialExpirationBasis;
   trial_duration_sec: number;
   trial_one_per_device: number;
-  trial_require_device_proof: number;
   notes: string;
   created_at: number;
   updated_at: number;
 }
 
 // Create body. project/name/type are required; everything else takes the column default.
-// Explicit node_locked policies require pool_size=0; explicit floating policies require pool_size>0.
 export interface PolicyInput {
   project: string;
   name: string;
   type: PolicyType;
   valid_from_offset_sec?: number | null;
   duration_sec?: number | null;
-  assertion_ttl_seconds?: number;
-  pool_size?: number;
   max_active_devices?: number;
-  max_borrow_sec?: number;
-  meter_quota?: number;
-  meter_period_sec?: number;
   expiry_strategy?: ExpiryStrategy;
   trial_expiration_basis?: TrialExpirationBasis;
   trial_duration_sec?: number;
   trial_one_per_device?: number;
-  trial_require_device_proof?: number;
   notes?: string;
 }
 
 // Patch body. project/name/type/status are NOT patchable (name/type are frozen
 // identity; status flips only through disable/reenable). All fields optional.
-// A pool_size patch must preserve the existing policy type's node_locked/floating invariant.
 export interface PolicyPatch {
   valid_from_offset_sec?: number | null;
   duration_sec?: number | null;
-  assertion_ttl_seconds?: number;
-  pool_size?: number;
   max_active_devices?: number;
-  max_borrow_sec?: number;
-  meter_quota?: number;
-  meter_period_sec?: number;
   expiry_strategy?: ExpiryStrategy;
   trial_expiration_basis?: TrialExpirationBasis;
   trial_duration_sec?: number;
   trial_one_per_device?: number;
-  trial_require_device_proof?: number;
   notes?: string;
 }
 
@@ -402,19 +371,6 @@ export interface WebhookTestResult {
   status_class: WebhookTestStatusClass;
 }
 
-// Optional frozen-trial + provenance columns surfaced on an entitlement record that
-// was stamped from a policy. Read by dedicated SELECTs (not part of ENTITLEMENT_COLUMNS).
-export interface EntitlementTrialFields {
-  policy_id?: string | null;
-  is_trial?: number;
-  trial_expiration_basis?: TrialExpirationBasis | null;
-  trial_duration_sec?: number;
-  trial_one_per_device?: number;
-  trial_require_device_proof?: number;
-  trial_started_at?: number | null;
-  trial_device_hash?: string | null;
-}
-
 // ── Workstream F: reports ────────────────────────────────────────────────────
 // Admin routes that read the SAME D1 the backend owns: a bucketed time-series of refused
 // connections and fulfillment counts (for the inline-SVG charts), and an expiring-soon
@@ -456,12 +412,4 @@ export interface ExpiringEntitlement {
 export interface ExpiringData {
   items: ExpiringEntitlement[];
   next_cursor: string | null;
-}
-
-// POST /api/admin/entitlements/:id/release-seats — admin-only. Reclaims the LIVE seat_checkouts for
-// the entitlement tuple and records one 'reclaim' usage_events row per seat (reason='force_release').
-// 0 released is a valid idempotent success.
-export interface ReleaseSeatsData {
-  released: number;
-  seat_ids: string[];
 }

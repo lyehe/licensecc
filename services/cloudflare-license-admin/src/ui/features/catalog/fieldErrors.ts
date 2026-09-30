@@ -27,7 +27,7 @@ export function catalogPlanFieldForCode(code: string): string | null {
 }
 
 export function catalogPlanFeatureFieldForCode(code: string): string | null {
-  return fieldForCode(code, ["project", "feature_key", "addon_key", "policy_id", "display_order", "pool_size", "max_active_devices", "max_borrow_sec"], {
+  return fieldForCode(code, ["project", "feature_key", "addon_key", "policy_id", "display_order", "max_active_devices"], {
     addon_key_required: "addon_key",
     catalog_feature_not_found: "feature_key",
     catalog_policy_not_available: "policy_id",

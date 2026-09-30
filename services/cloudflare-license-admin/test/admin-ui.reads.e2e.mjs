@@ -505,42 +505,6 @@ test("admin UI debounces policy and webhook filter reloads to one request each",
   expect(api.requests.webhookReads.length).toBe(webhookReadsSettled);
 });
 
-test("admin UI fences ordinary device and meter reads across an ABA selection", async ({ page }) => {
-  const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
-  for (const [project, fingerprint] of [["fence-device-one", "a"], ["fence-device-two", "b"]]) {
-    api.seed.entitlement({ project, feature: "float", enforcement_mode: "legacy", license_fingerprint: fingerprint.repeat(64) });
-  }
-  await page.route("**/api/admin/**", api.route);
-  await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
-
-  // Excludes the inline inspector's own <tr>, which sits between two entitlement rows once open.
-  const rows = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr[data-focus-row]");
-  const devicePane = page.getByRole("region", { name: "Registered devices" });
-  api.behavior.deferReads.add("devices:ent-1");
-  await clickAction(rows.nth(0).getByRole("button", { name: "Devices", exact: true, includeHidden: true }).first());
-  await expect.poll(() => api.behavior.releaseReads.has("devices:ent-1")).toBe(true);
-  await clickAction(rows.nth(1).getByRole("button", { name: "Devices", exact: true, includeHidden: true }).first());
-  await expect(devicePane.locator(".desktopRecords tbody code")).toContainText("sha256:cccccccc");
-  await clickAction(rows.nth(0).getByRole("button", { name: "Devices", exact: true, includeHidden: true }).first());
-  await expect(devicePane.locator(".desktopRecords tbody code")).toContainText("sha256:bbbbbbbb");
-  api.behavior.releaseReads.get("devices:ent-1")();
-  await expect(devicePane.locator(".desktopRecords tbody code")).toContainText("sha256:bbbbbbbb");
-
-  const meterPane = page.getByRole("region", { name: "Metering status" });
-  api.behavior.deferReads.add("meter:ent-1");
-  await clickAction(rows.nth(0).getByRole("button", { name: "Meter", exact: true, includeHidden: true }).first());
-  await expect.poll(() => api.behavior.releaseReads.has("meter:ent-1")).toBe(true);
-  await clickAction(rows.nth(1).getByRole("button", { name: "Meter", exact: true, includeHidden: true }).first());
-  await expect(meterPane).toContainText("Consumed this period: 20");
-  await clickAction(rows.nth(0).getByRole("button", { name: "Meter", exact: true, includeHidden: true }).first());
-  await expect(meterPane).toContainText("Consumed this period: 10");
-  api.behavior.releaseReads.get("meter:ent-1")();
-  await expect(meterPane).toContainText("Consumed this period: 10");
-});
-
 test("admin UI fences webhook deliveries and report reads after a superseded context", async ({ page }) => {
   const api = makeAdminApiFixture();
   api.seed.webhook();
@@ -574,9 +538,9 @@ test("admin UI fences webhook deliveries and report reads after a superseded con
   await expect.poll(() => api.behavior.releaseReads.has("expiring:30")).toBe(true);
 
   await page.locator(".chartPanels .rangeSelector").getByRole("button", { name: "last 30d" }).click();
-  const checkoutLine = page.locator(".checkoutsLine");
-  await expect(checkoutLine).toBeVisible();
-  const currentLine = await checkoutLine.getAttribute("d");
+  const refusalLine = page.locator(".seriesLine");
+  await expect(refusalLine).toBeVisible();
+  const currentLine = await refusalLine.getAttribute("d");
   await page.getByRole("group", { name: "Expiring horizon" }).getByRole("button", { name: "7d" }).click();
   await expect(page.locator(".expiringPanel")).toContainText("pro-7");
 
@@ -589,7 +553,7 @@ test("admin UI fences webhook deliveries and report reads after a superseded con
   api.behavior.releaseReads.get("timeseries")();
   api.behavior.releaseReads.get("expiring:30")();
   api.behavior.releaseReads.get("report")();
-  await expect(checkoutLine).toHaveAttribute("d", currentLine ?? "");
+  await expect(refusalLine).toHaveAttribute("d", currentLine ?? "");
   await expect(page.locator(".expiringPanel")).toContainText("pro-7");
   await expect(reportTotal).toHaveText("2");
 });

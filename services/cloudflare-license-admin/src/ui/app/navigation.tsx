@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import type { AdminRoute, AdminTab, CatalogView, CustomerAccessRoute, CustomerAccessView, CustomerSection, ManagedGrant, NavigationIntent, NavigationTarget } from "./types";
+import type { AdminRoute, AdminTab, CatalogView, CustomerAccessRoute, CustomerSection, ManagedGrant, NavigationIntent, NavigationTarget } from "./types";
 import { hashForRoute, managesGrant, parseAdminHash, routeForTab, routeForTarget, targetForRoute, withoutManagedGrant } from "./navigationState";
 import { useOperatorControls } from "../shared/controls";
 import { NO_FEEDBACK } from "../shared/operatorFeedback";
@@ -51,8 +51,8 @@ interface NavigationContextValue {
   openCustomer: (id: string, section?: CustomerSection) => boolean;
   showCustomerList: () => void;
   setCustomerSection: (section: CustomerSection) => boolean;
-  /** Opens one app's records (or all apps, for null) on the selected customer's access section. */
-  setCustomerAccess: (access: { app: string; view: CustomerAccessView } | null) => boolean;
+  /** Opens one app's access grants (or all apps, for null) on the selected customer's access section. */
+  setCustomerAccess: (access: { app: string } | null) => boolean;
   openManagedGrant: (grant: ManagedGrant) => boolean;
   closeManagedGrant: () => boolean;
   setCatalogView: (view: CatalogView) => boolean;
@@ -299,7 +299,7 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
     const current = entry.current.route;
     return current.tab === "customers" && current.customerId !== null ? transition({ tab: "customers", customerId: current.customerId, section, filter: current.filter }) : false;
   }, [transition]);
-  const setCustomerAccess = useCallback((access: { app: string; view: CustomerAccessView } | null): boolean => {
+  const setCustomerAccess = useCallback((access: { app: string } | null): boolean => {
     const current = entry.current.route;
     if (current.tab !== "customers" || current.customerId === null) return false;
     const section = { tab: "customers" as const, customerId: current.customerId, section: "access" as const, filter: current.filter };
@@ -308,7 +308,7 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
   const openManagedGrant = useCallback((grant: ManagedGrant): boolean => {
     const current = entry.current.route;
     if (current.tab !== "customers" || current.access === undefined || current.customerId !== grant.customer_id || current.access.app !== grant.project) return false;
-    return transition({ ...current, section: "access", access: { app: grant.project, view: "grants", manage: true } }, null, grant);
+    return transition({ ...current, section: "access", access: { app: grant.project, manage: true } }, null, grant);
   }, [transition]);
   const closeManagedGrant = useCallback((): boolean => transition(withoutManagedGrant(entry.current.route)), [transition]);
   const setCatalogView = useCallback((view: CatalogView): boolean => transition({ tab: "plans", view, filter: {} }), [transition]);

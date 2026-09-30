@@ -13,7 +13,7 @@ import {
   withId,
 } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type { Actor, MutationContext } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
-import { stampFromPolicy } from "@licensecc/licensing-domain/entitlements/policy";
+import { stampFromPolicy, type Policy } from "@licensecc/licensing-domain/entitlements/policy";
 import { buildPolicyStampStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
 import { readIdempotentResponse, writeIdempotentResponse } from "@licensecc/cloudflare-runtime/d1/idempotency_store";
 import {
@@ -21,7 +21,7 @@ import {
   ENTITLEMENT_BATCH_TOO_LARGE_CODE,
   ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE,
 } from "../../../shared/api.js";
-import type { EntitlementRecord, Policy } from "../../../shared/api";
+import type { EntitlementRecord } from "../../../shared/api";
 import type { Env } from "../../env.js";
 import { requireAdmin } from "../../auth.js";
 import { parseJsonBody, safeNotes } from "../../request.js";
@@ -36,6 +36,7 @@ function policyStampOn(env: Env): boolean {
   return env.POLICY_STAMP_MODE === "on";
 }
 
+// The stored policy row as the stamp reads it, including columns the policy record omits.
 async function findPolicy(env: Env, policyId: string): Promise<Policy | null> {
   return env.DB.prepare("SELECT * FROM entitlement_policies WHERE id = ?").bind(policyId).first<Policy>();
 }

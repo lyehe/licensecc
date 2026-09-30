@@ -15,11 +15,9 @@ async function clickAction(button) {
   await button.click();
 }
 
-test("admin UI renders Workstream F charts, expiring panel, validity indicators, and force-release", async ({ page }) => {
+test("admin UI renders Workstream F charts, expiring panel, and validity indicators", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: a floating grant needs a legacy enforcement mode, which the create form can no
-  // longer produce now that every create it sends is protected.
-  api.seed.entitlement({ feature: "float", enforcement_mode: "legacy", pool_size: 5, license_fingerprint: "a".repeat(64) });
+  api.seed.entitlement({ feature: "pro", license_fingerprint: "a".repeat(64) });
   await page.route("**/api/admin/**", api.route);
 
   await page.goto("/");
@@ -28,24 +26,19 @@ test("admin UI renders Workstream F charts, expiring panel, validity indicators,
   // Lifecycle and expiry are shown without implying that activation/device checks passed.
   await expect(page.locator(".desktopRecords .status.active")).toHaveText("active");
   await expect(page.locator(".desktopRecords").getByText("No expiry", { exact: true })).toBeVisible();
+  // A grant's only capacity is its device limit; no seat, device or meter action is offered.
+  await expect(page.locator(".desktopRecords")).toContainText("Device limit 1");
+  for (const name of [/^release seats?$/i, /^devices$/i, /^meter$/i]) {
+    await expect(page.getByRole("button", { name, includeHidden: true })).toHaveCount(0);
+  }
 
-  // FORCE-RELEASE: the danger verb routes through the typed-confirm modal (reason required).
-  await clickAction(page.getByRole("button", { name: "Release seats", includeHidden: true }).first());
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await page.getByRole("dialog").getByLabel(/Reason/).fill("dead machine");
-  await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
-  await expect.poll(() => api.requests.releaseSeats.length).toBe(2);
-  expect(api.requests.releaseSeats[0].reason).toBe("dead machine");
-  expect(api.requests.releaseSeats[1].idempotencyKey).toBe(api.requests.releaseSeats[0].idempotencyKey);
-  expect(api.requests.releaseSeats[1].rawBody).toBe(api.requests.releaseSeats[0].rawBody);
-  await expect(page.getByText("Released 2 seats.")).toBeVisible();
-
-  // REPORTS TAB: the inline-SVG charts render (aria-labelled), plus the expiring-soon panel rows.
+  // REPORTS TAB: the refused-connection chart renders (aria-labelled), plus the expiring-soon rows.
   if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
   await page.getByRole("link", { name: "Reports" }).click();
   await expect.poll(() => api.requests.timeseries.length).toBeGreaterThan(0);
-  await expect(page.getByRole("img", { name: /Checkouts .* versus denials/ })).toBeVisible();
-  await expect(page.getByRole("img", { name: /Denial rate/ })).toBeVisible();
+  await expect(page.getByRole("img", { name: /Connections refused at the device limit/ })).toBeVisible();
+  await expect(page.locator(".chartCard")).toHaveCount(1);
+  await expect(page.getByText(/checkout|denial rate/i)).toHaveCount(0);
   // The expiring-soon panel lists the in-window rows; the first deep-links to its entitlement.
   await expect(page.getByRole("heading", { name: "Expiring soon" })).toBeVisible();
   await expect.poll(() => api.requests.expiring.length).toBeGreaterThan(0);
@@ -88,9 +81,7 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   api.seed.policy();
   api.seed.webhook();
   api.seed.catalogFeature();
-  // Seeded directly: this scenario needs a legacy grant with a Release seats verb, which the create
-  // form can no longer produce now that every create it sends is protected.
-  api.seed.entitlement({ feature: "float", enforcement_mode: "legacy", pool_size: 5, license_fingerprint: "f".repeat(64) });
+  api.seed.entitlement({ feature: "pro", license_fingerprint: "f".repeat(64) });
   await page.route("**/api/admin/**", api.route);
 
   async function assertConfirmation(button, consequence, dismissWithEscape = false, typedPhrase = null, confirmLabel = "Confirm") {
@@ -121,16 +112,7 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   const entitlementRow = page.locator(".tablePane table tbody tr").first();
   await assertConfirmation(entitlementRow.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first(), "Verification and downloads stop until it is re-enabled", true);
   await assertConfirmation(entitlementRow.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL and cannot be undone", false, "REVOKE 1", "Revoke");
-  await assertConfirmation(entitlementRow.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first(), "dead/unreachable machine");
   expect(api.requests.transitions).toHaveLength(0);
-  expect(api.requests.releaseSeats).toHaveLength(0);
-
-  await clickAction(entitlementRow.getByRole("button", { name: "Devices", exact: true, includeHidden: true }).first());
-  const devicePane = page.locator('[aria-label="Registered devices"]');
-  await expect(devicePane).toBeVisible();
-  await assertConfirmation(devicePane.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first(), "refused on its next online check");
-  await assertConfirmation(devicePane.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL", false, "REVOKE 1", "Revoke");
-  expect(api.requests.deviceTransitions).toHaveLength(0);
 
   await page.getByRole("link", { name: "Customers", exact: true }).click();
   await page.locator("#customer-open-cus_acme").click();
@@ -1025,61 +1007,6 @@ test("admin UI visibly locks other actions while a refused action's notice waits
   expect(api.requests.transitions).toHaveLength(1);
 });
 
-test("admin UI rejects duplicate release-seat identities as unknown", async ({ page }) => {
-  const api = makeAdminApiFixture();
-  // Seeded directly: this scenario needs a legacy grant with a Release seats verb, which the create
-  // form can no longer produce now that every create it sends is protected.
-  api.seed.entitlement({ feature: "float", enforcement_mode: "legacy", pool_size: 5, license_fingerprint: "1".repeat(64) });
-  await page.route("**/api/admin/**", api.route);
-  await page.goto("/");
-  await page.getByRole("link", { name: "License access", exact: true }).click();
-
-  await clickAction(page.getByRole("button", { name: "Release seats", includeHidden: true }).first());
-  const dialog = page.getByRole("dialog");
-  await dialog.getByLabel(/Reason/).fill("dead machine");
-  api.behavior.releaseSeatsResponse = {
-    ok: true,
-    code: "seats_released",
-    request_id: "ui-e2e-release-duplicate",
-    data: { released: 2, seat_ids: ["seat_1", "seat_1"] },
-  };
-  await dialog.getByRole("button", { name: "Confirm" }).click();
-
-  await expect.poll(() => api.requests.releaseSeats.length).toBe(1);
-  await expect(dialog).toBeVisible();
-  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
-  await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
-  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
-});
-
-test("admin UI rejects a device transition that proves a different entitlement", async ({ page }) => {
-  const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
-  api.seed.entitlement({ project: "device-evidence", feature: "float", enforcement_mode: "legacy", license_fingerprint: "e".repeat(64) });
-  await page.route("**/api/admin/**", api.route);
-  await page.goto("/");
-  await page.getByRole("link", { name: "License access", exact: true }).click();
-
-  const row = page.locator(".tablePane table tbody tr").first();
-  await clickAction(row.getByRole("button", { name: "Devices", exact: true, includeHidden: true }).first());
-  const devices = page.getByRole("region", { name: "Registered devices" });
-  await revealAction(devices.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
-  await expect(devices.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first()).toBeVisible();
-  await clickAction(devices.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
-  const dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Reason (required)").fill("operator review");
-  api.behavior.deviceTransitionResponse = (parent, action) => makeEnvelope(`device_${action}d`, {
-    ...parent,
-    id: "ent-not-selected",
-    status: "disabled",
-    revocation_seq: parent.revocation_seq + 1,
-  });
-  await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect.poll(() => api.requests.deviceTransitions.length).toBe(1);
-  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
-});
-
 test("admin UI gates ordinary mutations while consequence recovery is pending", async ({ page }) => {
   const api = makeAdminApiFixture();
   // Seeded directly: the create form can no longer produce a legacy grant now that every create it
@@ -1333,93 +1260,19 @@ test("admin UI keeps unresolved recovery exclusive without stealing focus after 
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 });
 
-test("admin UI discards stale device recovery after filter supersession while actions are locked", async ({ page }) => {
-  const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
-  for (const [project, fingerprint] of [["device-one", "9"], ["device-two", "a"]]) {
-    api.seed.entitlement({ project, feature: "float", enforcement_mode: "legacy", license_fingerprint: fingerprint.repeat(64) });
-  }
-  await page.route("**/api/admin/**", api.route);
-  await page.goto("/");
-  await page.getByRole("link", { name: "License access", exact: true }).click();
-
-  await clickAction(page.locator(".desktopRecords").getByRole("button", { name: "Devices", exact: true, includeHidden: true }).nth(0));
-  const devices = page.getByRole("region", { name: "Registered devices" });
-  await expect(devices).toBeVisible();
-  await expect.poll(() => api.requests.deviceReads.at(-1)).toBe("ent-1");
-  await expect(devices.locator(".desktopRecords code").first()).toContainText("sha256:bbbbbbbb");
-
-  api.behavior.deviceRefreshFailures = ["response-error"];
-  await clickAction(devices.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
-  const disableDialog = page.getByRole("dialog");
-  await disableDialog.getByLabel("Reason (required)").fill("operator review");
-  await disableDialog.getByRole("button", { name: "Confirm" }).click();
-  await expect.poll(() => api.requests.deviceTransitions.length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
-
-  // The retained recovery owns the operation gate, so switching device rows
-  // is visibly unavailable. A still-editable filter can supersede the source
-  // context without granting an overlapping mutation.
-  await expect(page.locator(".desktopRecords").getByRole("button", { name: "Devices", exact: true, includeHidden: true }).nth(1)).toBeDisabled();
-  api.behavior.deferDeviceRefresh = true;
-  const refreshButton = page.getByRole("button", { name: "Refresh status" });
-  await refreshButton.click();
-  await expect.poll(() => api.behavior.releaseDeviceRefresh).not.toBeNull();
-  const releaseOriginalDeviceRefresh = api.behavior.releaseDeviceRefresh;
-  const filter = page.locator('input[aria-label="Filter by project"]');
-  await filter.fill("device-two");
-  await expect.poll(() => api.requests.entitlementReads.at(-1)).toBe("device-two");
-  api.behavior.deferDeviceRefresh = false;
-  releaseOriginalDeviceRefresh();
-  if (api.behavior.releaseDeviceRefresh !== releaseOriginalDeviceRefresh) api.behavior.releaseDeviceRefresh();
-  await expect(filter).toBeFocused();
-  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
-  await filter.fill("");
-  await expect.poll(() => api.requests.entitlementReads.at(-1)).toBe("");
-  await refreshButton.click();
-  await expect(page.locator(".operatorNotice")).toHaveCount(0);
-  await expect(devices.locator(".desktopRecords code").first()).toContainText("sha256:bbbbbbbb");
-  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
-});
-
-test("the device inspector renders under its row, takes focus, and returns focus to Devices on close", async ({ page }) => {
-  const api = makeAdminApiFixture();
-  api.seed.entitlement();
-  await page.route("**/api/admin/**", api.route);
-  await page.goto("/#/entitlements");
-
-  const row = page.locator(".desktopRecords tbody tr").first();
-  const devicesButton = row.getByRole("button", { name: "Devices", exact: true, includeHidden: true }).first();
-  await clickAction(devicesButton);
-
-  const heading = page.getByRole("heading", { name: "Devices", exact: true });
-  await expect(heading).toBeInViewport();
-  await expect(heading).toBeFocused();
-  const devicesPane = page.getByRole("region", { name: "Registered devices" });
-  await expect(devicesPane).toBeVisible();
-  // The panel sits in the row immediately after the one that opened it, inside the same table.
-  expect(await row.evaluate((node) => node.nextElementSibling?.querySelector('[aria-label="Registered devices"]') !== null)).toBe(true);
-
-  await page.getByRole("button", { name: "Close devices", exact: true }).click();
-  await expect(devicesPane).toHaveCount(0);
-  await expect(devicesButton).toBeFocused();
-});
-
 test("'More actions' closes after choosing an action, including one that opens a dialog", async ({ page }) => {
   const api = makeAdminApiFixture();
-  api.seed.entitlement();
+  api.seed.entitlement({ status: "disabled" });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/#/entitlements");
 
   const row = page.locator(".desktopRecords tbody tr").first();
   const menu = row.locator("details.contextActions");
 
-  // A non-dialog action (Meter opens an inline panel, not a modal) closes the menu on its own.
-  await clickAction(row.getByRole("button", { name: "Meter", exact: true, includeHidden: true }).first());
-  await expect(page.getByRole("region", { name: "Metering status" })).toBeVisible();
+  // A non-dialog action (Reenable runs at once, without a modal) closes the menu on its own.
+  await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
+  await expect(row.locator(".status")).toHaveText("active");
   expect(await menu.evaluate((node) => node.hasAttribute("open"))).toBe(false);
-  await page.getByRole("button", { name: "Close metering", exact: true }).click();
 
   // A dialog-opening action closes the menu too; focus goes to the dialog, not back to the menu.
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -1488,12 +1341,8 @@ test("report charts show axis labels with units and UTC bucket dates", async ({ 
   await page.route("**/api/admin/**", api.route);
   await page.goto("/#/reports");
 
-  const usageCard = page.locator(".chartCard").filter({ has: page.getByRole("heading", { name: "Checkouts vs denials" }) });
-  await expect(usageCard.locator(".chartAxisY")).toContainText("checkouts");
-  await expect(usageCard.locator(".chartAxisY")).toContainText("denials");
-  await expect(usageCard.locator(".chartAxisX")).toContainText("UTC");
-
-  const denialCard = page.locator(".chartCard").filter({ has: page.getByRole("heading", { name: "Denial-rate trend" }) });
-  await expect(denialCard.locator(".chartAxisY")).toContainText("denial rate");
-  await expect(denialCard.locator(".chartAxisX")).toContainText("UTC");
+  const refusedCard = page.locator(".chartCard").filter({ has: page.getByRole("heading", { name: "Refused connections", exact: true }) });
+  await expect(refusedCard.locator(".chartAxisY")).toContainText("refused connections per interval");
+  await expect(refusedCard.locator(".chartAxisY")).toContainText("max 1");
+  await expect(refusedCard.locator(".chartAxisX")).toContainText("UTC");
 });

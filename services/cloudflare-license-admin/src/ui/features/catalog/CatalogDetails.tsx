@@ -4,21 +4,18 @@ import type { CatalogImportEffect, CatalogImportPreviewResponse, CatalogPlanFeat
 import { formatEpoch, formatUtcDate } from "../../shared/format";
 import { catalogImportEffectValueLabel, catalogImportTargetFields, catalogImportTargetKey } from "./workflow";
 
-/** The console still shows a seat pool, which a preview item no longer reports. */
-type ConsoleProjectionItem = PlanProjectionItem & { pool_size?: number };
-
-export function ProjectionRows({ title, items }: { title: string; items: ConsoleProjectionItem[] }): React.ReactElement | null {
+export function ProjectionRows({ title, items }: { title: string; items: PlanProjectionItem[] }): React.ReactElement | null {
   if (items.length === 0) return null;
   return (
     <section className="deliveriesPane">
       <h3>{title}</h3>
       <div className="tableScroll" role="region" aria-label={`${title} table`} tabIndex={0}><table>
-        <thead><tr><th>Feature</th><th>Mode</th><th>Policy</th><th>Window</th><th>Capacity</th><th>Source</th></tr></thead>
+        <thead><tr><th>Feature</th><th>Mode</th><th>Policy</th><th>Window</th><th>Device limit</th><th>Source</th></tr></thead>
         <tbody>{items.map((item) => (
           <tr key={`${title}:${item.feature}`}>
             <td>{item.feature}</td><td>{item.license_mode}</td><td>{item.policy_id ?? "-"}</td>
             <td>{item.valid_until === null ? "open" : formatUtcDate(item.valid_until)}</td>
-            <td>{item.pool_size !== undefined && item.pool_size > 0 ? `pool ${item.pool_size}` : `devices ${item.max_active_devices}`}</td>
+            <td>{item.max_active_devices}</td>
             <td>{item.addon_key ?? item.source}{item.reason ? ` / ${item.reason}` : ""}</td>
           </tr>
         ))}</tbody>
@@ -82,14 +79,7 @@ export function CatalogImportConsequenceDetails({ preview }: { preview: CatalogI
   );
 }
 
+/** A plan feature's own device limit, when it overrides its policy's; "-" when it does not. */
 export function catalogOverrideSummary(row: CatalogPlanFeature): string {
-  const parts = [
-    row.assertion_ttl_seconds === null ? "" : `TTL ${row.assertion_ttl_seconds}s`,
-    row.pool_size === null ? "" : `pool ${row.pool_size}`,
-    row.max_active_devices === null ? "" : `devices ${row.max_active_devices}`,
-    row.max_borrow_sec === null ? "" : `borrow ${row.max_borrow_sec}s`,
-    row.meter_quota === null ? "" : `meter ${row.meter_quota}`,
-    row.meter_period_sec === null ? "" : `period ${row.meter_period_sec}s`,
-  ].filter((item) => item !== "");
-  return parts.length === 0 ? "-" : parts.join(" / ");
+  return row.max_active_devices === null ? "-" : `device limit ${row.max_active_devices}`;
 }

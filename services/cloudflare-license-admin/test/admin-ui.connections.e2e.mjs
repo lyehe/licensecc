@@ -1,8 +1,8 @@
 import { expect } from '@playwright/test';
 import { makeProtectedConnectionsFixture as fixture, test } from './admin-ui.fixture.mjs';
 
-async function open(page,f){await page.route('**/api/admin/**',f.route);await page.goto('/');await expect(page.getByRole('button',{name:'Search',exact:true})).toBeVisible();if(await page.getByRole('button',{name:'Menu',exact:true}).isVisible())await page.getByRole('button',{name:'Menu',exact:true}).click();await page.getByRole('navigation',{name:'Main navigation'}).getByRole('link',{name:'Customers',exact:true}).click();await expect(page.getByRole('region',{name:'Customers',exact:true})).toContainText('Acme Corp');if(await page.locator('#customer-open-cus_acme').isVisible())await page.locator('#customer-open-cus_acme').click();else await page.getByRole('article').filter({has:page.getByRole('heading',{name:'Acme Corp',exact:true})}).getByRole('button',{name:'Open details'}).click();await expect(page.getByRole('heading',{name:'Protected connections',exact:true})).toBeVisible();}
-const region=page=>page.getByRole('region',{name:'Protected connections'});
+async function open(page,f){await page.route('**/api/admin/**',f.route);await page.goto('/');await expect(page.getByRole('button',{name:'Search',exact:true})).toBeVisible();if(await page.getByRole('button',{name:'Menu',exact:true}).isVisible())await page.getByRole('button',{name:'Menu',exact:true}).click();await page.getByRole('navigation',{name:'Main navigation'}).getByRole('link',{name:'Customers',exact:true}).click();await expect(page.getByRole('region',{name:'Customers',exact:true})).toContainText('Acme Corp');if(await page.locator('#customer-open-cus_acme').isVisible())await page.locator('#customer-open-cus_acme').click();else await page.getByRole('article').filter({has:page.getByRole('heading',{name:'Acme Corp',exact:true})}).getByRole('button',{name:'Open details'}).click();await expect(page.getByRole('heading',{name:'Connected devices',exact:true})).toBeVisible();}
+const region=page=>page.getByRole('region',{name:'Connected devices'});
 // Records the typed field's value and the commit button's state at the moment the dialog's `open`
 // attribute appears, before any later render or effect could correct a stale value. Call it while
 // the dialog is closed; the returned function waits for that sample.
@@ -37,7 +37,7 @@ test("admin connections retire with explicit hold, exact request and audit histo
   await commit.evaluate(button=>{button.click();button.click();});
   await expect(dialog).not.toBeVisible();await expect(region(page)).toContainText('Renewal stopped for Design workstation');
   expect(f.posts).toHaveLength(1);expect(JSON.parse(f.posts[0].body)).toEqual({expected_revision:0});expect(f.posts[0].key).toMatch(/^[A-Za-z0-9_-]{43}$/);
-  await expect(region(page).getByRole('heading',{name:'Protected connections',exact:true})).toBeFocused();
+  await expect(region(page).getByRole('heading',{name:'Connected devices',exact:true})).toBeFocused();
   await region(page).getByText('History',{exact:true}).click();await expect(region(page)).toContainText('operator:access:operator-one');
 });
 
@@ -190,7 +190,7 @@ test("admin connections mobile dialog fits, traps focus and returns focus on can
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   for(let n=0;n<6;n++){await page.keyboard.press('Tab');expect(await dialog.evaluate(el=>el.contains(document.activeElement))).toBe(true);}
   await page.screenshot({path:testInfo.outputPath('connections-mobile.png')});await page.keyboard.press('Escape');await expect(dialog).not.toBeVisible();
-  await expect(region(page).getByRole('heading',{name:'Protected connections',exact:true})).toBeFocused();expect(f.posts).toHaveLength(0);
+  await expect(region(page).getByRole('heading',{name:'Connected devices',exact:true})).toBeFocused();expect(f.posts).toHaveLength(0);
 });
 
 test("admin connections reopen an unsent confirmation after section navigation",async({page})=>{

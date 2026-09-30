@@ -123,8 +123,8 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
   }
   const allowReview=!!saved && (saved==='invalid' || stopped || confirmed || (!!page && !stale && (!sameOperator || !mayRetire)));
   if(!active && !saved)return null;
-  return <section className="protectedConnections" aria-label="Protected connections" aria-busy={loading}>
-    <div className="sectionHeading"><div><h3 ref={heading} tabIndex={-1}>Protected connections</h3><p>Machines holding an app license slot. Last verified contact is not live presence.</p></div><button disabled={loading || sending} onClick={()=>void load()}>Refresh connections</button></div>
+  return <section className="protectedConnections" aria-label="Connected devices" aria-busy={loading}>
+    <div className="sectionHeading"><div><h3 ref={heading} tabIndex={-1}>Connected devices</h3><p>Machines holding an app license slot. Last verified contact is not live presence.</p></div><button disabled={loading || sending} onClick={()=>void load()}>Refresh connections</button></div>
     {message && <p role="status">{message}</p>}{error && <p role="alert">{error}</p>}
     {saved && <div className="connectionNotice" role="status"><p>{saved==='invalid'?'A saved disconnect request cannot be read. Review this customer before clearing it.':`A disconnect request for ${saved.label} needs resolution.`}</p><button disabled={locked} onClick={resume}>Review saved request</button></div>}
     {loading && <p role="status">Loading connections…</p>}

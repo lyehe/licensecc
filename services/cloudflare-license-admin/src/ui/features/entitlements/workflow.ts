@@ -27,8 +27,6 @@ export interface EntitlementFormState {
   project: string;
   feature: string;
   license_fingerprint: string;
-  device_hash: string;
-  assertion_ttl_seconds: number;
   valid_from: string;
   valid_until: string;
   notes: string;
@@ -43,8 +41,6 @@ export interface EntitlementFormState {
 }
 
 export interface EntitlementEditState {
-  device_hash: string;
-  assertion_ttl_seconds: number;
   valid_from: string;
   valid_until: string;
   notes: string;
@@ -58,8 +54,6 @@ export const emptyEntitlementForm: EntitlementFormState = {
   project: "DEFAULT",
   feature: "DEFAULT",
   license_fingerprint: "",
-  device_hash: "",
-  assertion_ttl_seconds: 300,
   valid_from: "",
   valid_until: "",
   notes: "",
@@ -69,8 +63,6 @@ export const emptyEntitlementForm: EntitlementFormState = {
 };
 
 export const emptyEntitlementEditForm: EntitlementEditState = {
-  device_hash: "",
-  assertion_ttl_seconds: 300,
   valid_from: "",
   valid_until: "",
   notes: "",
@@ -89,11 +81,6 @@ export function entitlementsPath(filter: EntitlementFilter): string {
   return `/api/admin/entitlements${params.size === 0 ? "" : `?${params.toString()}`}`;
 }
 
-/** Exact target read used to reconcile a release-seat mutation. */
-export function entitlementDetailPath(id: string): string {
-  return `/api/admin/entitlements/${encodeURIComponent(id)}`;
-}
-
 /** A deep link naming the exact entitlement id (from search, or the "Expiring soon" report)
  * guarantees exactly one row; only then does the list show the "Showing 1 entitlement" banner. */
 export function isSingleEntitlementFilter(filter: Pick<EntitlementFilter, "id">): boolean {
@@ -106,8 +93,6 @@ export function filterAfterShowAll(filter: EntitlementFilter): EntitlementFilter
   return { project: filter.project, feature: filter.feature, status: filter.status };
 }
 
-// A protected grant carries no device hash or assertion TTL, and the Worker refuses a create or
-// PATCH body naming either, so no body below sends them.
 export function normalizeEntitlementForm(form: EntitlementFormState): AdminEntitlementCreateInput {
   return {
     enforcement_mode: form.enforcement_mode,
@@ -131,22 +116,15 @@ export function isDeviceLimit(value: number): boolean {
 
 export const DEVICE_LIMIT_RULE = "Enter a whole number of devices from 1 to 1,000,000.";
 
-/** What a policy grants: a floating policy a seat pool, any other a device limit. */
-export function policyGrant(policy: Pick<Policy, "pool_size" | "max_active_devices">): { label: "Seats" | "Device limit"; count: number } {
-  return policy.pool_size > 0 ? { label: "Seats", count: policy.pool_size } : { label: "Device limit", count: policy.max_active_devices };
+/** "{name} · {n} devices · {project}": what a policy grants is its device limit. */
+export function policyOptionLabel(policy: Pick<Policy, "name" | "project" | "max_active_devices">): string {
+  const count = policy.max_active_devices;
+  return `${policy.name} · ${count} device${count === 1 ? "" : "s"} · ${policy.project}`;
 }
 
-/** "{name} · {n} devices · {project}", or "{n} seats" for a floating policy. */
-export function policyOptionLabel(policy: Pick<Policy, "name" | "project" | "pool_size" | "max_active_devices">): string {
-  const grant = policyGrant(policy);
-  const unit = grant.label === "Seats" ? "seat" : "device";
-  return `${policy.name} · ${grant.count} ${unit}${grant.count === 1 ? "" : "s"} · ${policy.project}`;
-}
-
-/** A grant can only be stamped from a policy of its own project; a floating policy grants seats,
- * which a protected create never offers, so it is excluded too. */
-export function policiesForProject<T extends Pick<Policy, "project"> & { type: Policy["type"] | "floating" }>(policies: readonly T[], project: string): T[] {
-  return policies.filter((policy) => policy.project === project && policy.type !== "floating");
+/** A grant can only be stamped from a policy of its own project. */
+export function policiesForProject<T extends Pick<Policy, "project">>(policies: readonly T[], project: string): T[] {
+  return policies.filter((policy) => policy.project === project);
 }
 
 export function normalizeCreateFromPolicy(form: EntitlementFormState): EntitlementCreateInput & { policy_id: string } {
@@ -167,8 +145,6 @@ export function normalizeCreateFromPolicy(form: EntitlementFormState): Entitleme
 
 export function editFormFromEntitlement(item: EntitlementRecord): EntitlementEditState {
   return {
-    device_hash: item.device_hash,
-    assertion_ttl_seconds: item.assertion_ttl_seconds,
     valid_from: epochToDateInput(item.valid_from),
     valid_until: epochToDateInput(item.valid_until),
     notes: item.notes,
@@ -209,46 +185,12 @@ export function canRunAction(status: EntitlementStatus, action: EntitlementActio
   return status !== "revoked";
 }
 
-export function entitlementDevicesPath(entitlementId: string): string {
-  return `/api/admin/entitlements/${encodeURIComponent(entitlementId)}/devices`;
-}
-
-export function entitlementMeterPath(entitlementId: string): string {
-  return `/api/admin/entitlements/${encodeURIComponent(entitlementId)}/meter`;
-}
-
-export type DeviceAction = "revoke" | "disable" | "reenable";
-
-export function deviceTransitionPath(entitlementId: string, deviceKeyId: string, action: DeviceAction): string {
-  return `/api/admin/entitlements/${encodeURIComponent(entitlementId)}/devices/${encodeURIComponent(deviceKeyId)}/${action}`;
-}
-
-export function canRunDeviceAction(status: string, action: DeviceAction): boolean {
-  if (status === "revoked") {
-    return false;
-  }
-  if (action === "disable") {
-    return status === "active";
-  }
-  if (action === "reenable") {
-    return status === "disabled";
-  }
-  return true;
-}
-
+/** A refused connection's device key id, shortened for display. */
 export function shortDeviceKeyId(deviceKeyId: string): string {
   if (deviceKeyId.startsWith("sha256:") && deviceKeyId.length >= 15) {
     return `sha256:${deviceKeyId.slice(7, 15)}…`;
   }
   return deviceKeyId.length > 12 ? `${deviceKeyId.slice(0, 12)}…` : deviceKeyId;
-}
-
-export function revokeDeviceConfirm(device: { device_key_id: string }): string {
-  return `Revoke device key ${shortDeviceKeyId(device.device_key_id)}. This is TERMINAL: the device is refused on its next online check (before token TTL) and cannot be re-enabled.`;
-}
-
-export function disableDeviceConfirm(device: { device_key_id: string }): string {
-  return `Disable device key ${shortDeviceKeyId(device.device_key_id)}. It is refused on its next online check; you can re-enable it later.`;
 }
 
 export function revokeEntitlementConfirm(item: { project: string; feature: string; license_fingerprint: string }): string {
@@ -328,10 +270,6 @@ export const ENTITLEMENT_RELOADED_AFTER_STALE = "This license (entitlement) chan
 /** A stale save whose refresh then failed: nothing was refreshed, so the draft still meets old values. */
 export const ENTITLEMENT_NOT_RELOADED_AFTER_STALE = "This license (entitlement) changed after you opened it, and its current values could not be refreshed. Use Retry to refresh the list before you save again.";
 
-export function releaseSeatsPath(id: string): string {
-  return `/api/admin/entitlements/${encodeURIComponent(id)}/release-seats`;
-}
-
 export function entitlementFormErrors(form: EntitlementEditState | EntitlementFormState, original?: Pick<EntitlementRecord, "valid_from" | "valid_until">): Record<string, string> {
   const errors: Record<string, string> = {};
   if ("license_fingerprint" in form) {
@@ -341,8 +279,6 @@ export function entitlementFormErrors(form: EntitlementEditState | EntitlementFo
     // A selected policy stamps its own device limit (the field is read-only then); blank sends none.
     if (form.policy_id === "" && form.max_active_devices !== "" && !isDeviceLimit(form.max_active_devices)) errors.max_active_devices = DEVICE_LIMIT_RULE;
   }
-  if (form.device_hash !== "" && !/^[0-9a-fA-F]{64}$/.test(form.device_hash)) errors.device_hash = "Enter 64 hexadecimal characters or leave this blank.";
-  if (!Number.isInteger(form.assertion_ttl_seconds) || form.assertion_ttl_seconds < 1 || form.assertion_ttl_seconds > 3600) errors.assertion_ttl_seconds = "Enter a whole number from 1 to 3600 seconds.";
   for (const field of ["valid_from", "valid_until"] as const) {
     try {
       const epoch = dateInputToEpoch(form[field], field);
@@ -364,13 +300,8 @@ export function entitlementFormErrors(form: EntitlementEditState | EntitlementFo
     if (form.license_fingerprint.length !== 64 || !/^[a-f0-9]{64}$/.test(form.license_fingerprint)) errors.license_fingerprint = "Protected licenses require the exact 64-character lowercase hexadecimal fingerprint.";
     if (!form.customer_id.trim()) errors.customer_id = "Choose the customer who owns this license.";
     if (!form.license_id.trim()) errors.license_id = "Choose a license for this customer and project.";
-    if (form.device_hash !== "") errors.device_hash = "Protected enrollment establishes the device identity. Leave this field empty.";
   }
   return errors;
-}
-
-export function releaseSeatsConfirm(item: { project: string; feature: string; license_fingerprint: string }): string {
-  return `Force-release ALL live seats for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). This frees a seat stuck on a dead/unreachable machine; live clients simply re-acquire on their next checkout.`;
 }
 
 function parseBoundedInteger(value: number, label: string, min: number, max: number): number {

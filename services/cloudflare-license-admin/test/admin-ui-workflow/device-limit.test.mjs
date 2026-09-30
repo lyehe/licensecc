@@ -36,16 +36,13 @@ test("an untouched device limit is not sent; a typed one is; a policy create lea
 
 test("policy options name what they grant and the project, and list only the draft's project", async () => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
-  const policy = (id, project, extra = {}) => ({ id, name: `Policy ${id}`, project, type: "node_locked", pool_size: 0, max_active_devices: 3, ...extra });
+  const policy = (id, project, extra = {}) => ({ id, name: `Policy ${id}`, project, type: "node_locked", max_active_devices: 3, ...extra });
   assert.equal(workflow.policyOptionLabel(policy("pro", "APP")), "Policy pro · 3 devices · APP");
   assert.equal(workflow.policyOptionLabel(policy("solo", "APP", { max_active_devices: 1 })), "Policy solo · 1 device · APP");
-  // A floating policy grants a seat pool, not a device limit; the read-only field says the same, but
-  // a protected create's picker never offers one (checked below).
-  assert.equal(workflow.policyOptionLabel(policy("team", "APP", { pool_size: 5 })), "Policy team · 5 seats · APP");
-  assert.deepEqual(workflow.policyGrant(policy("pro", "APP")), { label: "Device limit", count: 3 });
-  assert.deepEqual(workflow.policyGrant(policy("team", "APP", { pool_size: 5, max_active_devices: 9 })), { label: "Seats", count: 5 });
-  const policies = [policy("a", "APP"), policy("b", "OTHER"), policy("c", "APP"), policy("d", "APP", { type: "floating", pool_size: 5 })];
-  assert.deepEqual(workflow.policiesForProject(policies, "APP").map((item) => item.id), ["a", "c"]);
+  // A policy grants only a device limit, so the picker has nothing else to say.
+  assert.equal(workflow.policyGrant, undefined);
+  const policies = [policy("a", "APP"), policy("b", "OTHER"), policy("c", "APP"), policy("d", "APP", { type: "subscription" })];
+  assert.deepEqual(workflow.policiesForProject(policies, "APP").map((item) => item.id), ["a", "c", "d"]);
   assert.deepEqual(workflow.policiesForProject(policies, "NONE"), []);
 });
 
@@ -96,20 +93,17 @@ test("the device limit PATCH carries only the limit and the observed state, and 
 test("the policy editor edits every patchable field and never the policy's identity", async () => {
   const workflow = await loadWorkflowModule("features/policies/workflow.ts");
   const policy = { id: "pol_1", project: "APP", name: "Pro", type: "node_locked", status: "active", valid_from_offset_sec: null, duration_sec: 86400,
-    assertion_ttl_seconds: 600, pool_size: 0, max_active_devices: 3, max_borrow_sec: 0, meter_quota: 10, meter_period_sec: 3600,
-    expiry_strategy: "fixed_window", trial_expiration_basis: "from_issue", trial_duration_sec: 0, trial_one_per_device: 1, trial_require_device_proof: 0,
+    max_active_devices: 3, expiry_strategy: "fixed_window", trial_expiration_basis: "from_issue", trial_duration_sec: 0, trial_one_per_device: 1,
     notes: "tier", created_at: 1, updated_at: 2 };
   const form = workflow.policyFormFromPolicy(policy);
-  assert.deepEqual(form, { project: "APP", name: "Pro", type: "node_locked", valid_from_offset_sec: "", duration_sec: "86400", assertion_ttl_seconds: 600,
-    pool_size: 0, max_active_devices: 3, max_borrow_sec: 0, meter_quota: 10, meter_period_sec: 3600, expiry_strategy: "fixed_window",
-    trial_expiration_basis: "from_issue", trial_duration_sec: 0, trial_one_per_device: true, trial_require_device_proof: false, notes: "tier" });
+  assert.deepEqual(form, { project: "APP", name: "Pro", type: "node_locked", valid_from_offset_sec: "", duration_sec: "86400", max_active_devices: 3,
+    expiry_strategy: "fixed_window", trial_expiration_basis: "from_issue", trial_duration_sec: 0, trial_one_per_device: true, notes: "tier" });
   const patch = workflow.normalizePolicyPatch({ ...form, max_active_devices: 5, name: "Renamed", project: "OTHER" });
-  assert.deepEqual(patch, { valid_from_offset_sec: null, duration_sec: 86400, assertion_ttl_seconds: 600, pool_size: 0, max_active_devices: 5, max_borrow_sec: 0,
-    meter_quota: 10, meter_period_sec: 3600, expiry_strategy: "fixed_window", trial_expiration_basis: "from_issue", trial_duration_sec: 0,
-    trial_one_per_device: 1, trial_require_device_proof: 0, notes: "tier" });
+  // Exactly the fields the Worker patches: it refuses a body naming any other field.
+  assert.deepEqual(patch, { valid_from_offset_sec: null, duration_sec: 86400, max_active_devices: 5, expiry_strategy: "fixed_window",
+    trial_expiration_basis: "from_issue", trial_duration_sec: 0, trial_one_per_device: 1, notes: "tier" });
   for (const key of ["project", "name", "type", "status"]) assert.equal(key in patch, false, key);
   assert.throws(() => workflow.normalizePolicyPatch({ ...form, max_active_devices: -1 }), /max_active_devices_must_be_between_0_and_1000000/);
-  assert.throws(() => workflow.normalizePolicyPatch({ ...form, pool_size: 2 }), /node_locked_pool_size_must_be_0/);
 });
 
 test("a create refused for connected devices says which rule: the device limit, or a move to another customer", async () => {

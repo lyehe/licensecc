@@ -1,6 +1,6 @@
-import { MAX_DEVICE_LIMIT, PROTECTED_CREATE_REASONS, type EntitlementInput, type Policy, type ProtectedCreateReason } from "../../../shared/api.js";
+import { MAX_DEVICE_LIMIT, PROTECTED_CREATE_REASONS, type EntitlementInput, type ProtectedCreateReason } from "../../../shared/api.js";
 import type { Env } from "../../env.js";
-import { stampFromPolicy } from "@licensecc/licensing-domain/entitlements/policy";
+import { stampFromPolicy, type Policy } from "@licensecc/licensing-domain/entitlements/policy";
 import type { D1PreparedStatementLike } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import { boundOccupiedSql } from "@licensecc/cloudflare-runtime/device/bound_capacity";
 

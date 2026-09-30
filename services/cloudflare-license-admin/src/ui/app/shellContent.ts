@@ -15,10 +15,10 @@ export const tabs: ReadonlyArray<{ id: AdminTab; label: string }> = [
 
 export const descriptions: Record<AdminTab, string> = {
   overview: "Your licensing workspace at a glance.",
-  entitlements: "Create access, extend validity, and manage devices.",
+  entitlements: "Create access, extend validity, and set device limits.",
   customers: "View customer accounts and their access.",
   licenses: "Find issued licenses and linked entitlements.",
-  policies: "Define reusable rules for devices, seats, and trials.",
+  policies: "Define reusable rules for device limits and trials.",
   plans: "Organize features and policies into plans.",
   webhooks: "Manage event destinations and delivery status.",
   events: "Review changes and their audit history.",

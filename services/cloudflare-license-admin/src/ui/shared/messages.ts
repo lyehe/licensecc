@@ -53,7 +53,7 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   temporarily_unavailable: failed("The service is temporarily unavailable. Try again shortly."),
   audit_verify_failed: failed("The audit history could not be checked. Try again."),
 
-  // Licenses (entitlements), their device limit and activated devices.
+  // Licenses (entitlements) and their device limit.
   entitlement_saved: done("License (entitlement) created."),
   entitlement_patched: done("Entitlement changes saved."),
   entitlement_disabled: done("Entitlement suspended."),
@@ -62,7 +62,6 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   entitlement_synced: done("Entitlement synced."),
   entitlement_batch_too_large: failed("Too many entitlements for one request. Select fewer and try again."),
   batch_done: done("Batch finished."),
-  // Emitted for an entitlement and for an activated device, so it names neither.
   stale_transition: failed(`This record changed after you loaded it. ${REFRESH_AND_RETRY}`),
   revoked_entitlement_is_terminal: failed("Revocation is permanent; this license (entitlement) can no longer change."),
   invalid_entitlement_id: failed("That entitlement ID is not valid."),
@@ -70,13 +69,6 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   protected_creation_conflict: failed("This protected license (entitlement) can't be created with these settings."),
   policy_stamping_disabled: failed("Creating a license (entitlement) from a policy is turned off for this console."),
   capacity_in_use: failed("More devices are connected than this device limit allows; disconnect one first."),
-  seats_released: done("Seats released."),
-  device_disabled: done("Activated device suspended."),
-  device_reenabled: done("Activated device is active again."),
-  device_revoked: done("Activated device revoked."),
-  device_not_found: failed(`That activated device was not found. ${REFRESH_AND_RETRY}`),
-  device_is_terminal: failed("This activated device is revoked and can no longer change."),
-  invalid_device_key_id: failed("That device ID is not valid."),
 
   // Customers, their licenses and connections.
   customer_created: done("Customer account created."),
@@ -170,7 +162,6 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   csv_export_failed: failed("The CSV export failed. Try again."),
   invalid_form: failed("Check the highlighted values and try again."),
   customer_not_selected: failed("Select a customer first."),
-  device_entitlement_not_selected: failed("Open an entitlement's devices first."),
   no_entitlements_selected: failed("Select at least one entitlement."),
   policy_not_available: failed("The chosen policy is no longer available. Choose an active policy."),
   catalog_policy_not_available: failed("The chosen policy is no longer active. Choose an active policy."),
@@ -188,8 +179,6 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   license_id_required: failed("Enter a license ID."),
   invalid_date: failed("Enter a valid date."),
   notes_must_be_at_most_1000_chars: failed("Use one line of at most 1000 characters."),
-  floating_pool_size_must_be_at_least_1: failed("A floating policy needs a pool of at least 1 seat."),
-  node_locked_pool_size_must_be_0: failed("A device-locked policy has no seat pool; set the pool size to 0."),
   url_must_be_a_single_https_url: failed("Enter a single https:// URL without spaces."),
   url_must_be_https: failed("The URL must start with https://."),
   description_invalid: failed("Use one line of at most 500 characters."),

@@ -1,6 +1,6 @@
 import React, { ReactNode, createContext, useContext, useEffect, useMemo, useState } from "react";
 
-import type { TimeseriesBucket } from "../../shared/api";
+import type { TimeseriesData } from "../../shared/api";
 import { api, parseExactApiSuccess } from "./api";
 import { apiFailureFeedback } from "./messages";
 import type { OperatorFeedback } from "./operatorFeedback";
@@ -9,27 +9,17 @@ import { useRequestFence } from "./requestFence";
 import type { TimeseriesRange } from "./timeseries";
 import { timeseriesPath } from "./timeseries";
 
-/** The console's charts still read a checkout series, which the report no longer returns. */
-type ConsoleTimeseriesBucket = TimeseriesBucket & { checkouts: number; releases: number; denial_rate: number };
-
-export interface UsageTimeseriesData {
-  from: number;
-  to: number;
-  bucket_seconds: number;
-  buckets: ConsoleTimeseriesBucket[];
-}
-
 interface UsageTimeseriesControls {
   timeseriesLoading: boolean;
   timeseriesError: OperatorFeedback | null;
   retryTimeseries: () => void;
-  timeseries: UsageTimeseriesData | null;
+  timeseries: TimeseriesData | null;
   timeseriesRange: TimeseriesRange;
   setTimeseriesRange: React.Dispatch<React.SetStateAction<TimeseriesRange>>;
 }
 
 interface UsageTimeseriesState extends Omit<UsageTimeseriesControls, "timeseriesLoading" | "timeseriesError" | "retryTimeseries"> {
-  setTimeseries: React.Dispatch<React.SetStateAction<UsageTimeseriesData | null>>;
+  setTimeseries: React.Dispatch<React.SetStateAction<TimeseriesData | null>>;
 }
 
 const UsageTimeseriesContext = createContext<UsageTimeseriesState | null>(null);
@@ -38,7 +28,7 @@ const UsageTimeseriesContext = createContext<UsageTimeseriesState | null>(null);
 // Keeping it here preserves that behavior without making the application shell own report state.
 export function UsageTimeseriesProvider({ children }: { children: ReactNode }): React.ReactElement {
   const [timeseriesRange, setTimeseriesRange] = useState<TimeseriesRange>(7);
-  const [timeseries, setTimeseries] = useState<UsageTimeseriesData | null>(null);
+  const [timeseries, setTimeseries] = useState<TimeseriesData | null>(null);
   const value = useMemo(() => ({ timeseries, timeseriesRange, setTimeseries, setTimeseriesRange }), [timeseries, timeseriesRange]);
   return (
     <UsageTimeseriesContext.Provider value={value}>
@@ -64,10 +54,10 @@ export function useUsageTimeseries(active: boolean): UsageTimeseriesControls {
     void (async () => {
       const ticket = timeseriesFence.begin();
       setReadState({ key: readKey, loading: true, error: null });
-      const response = await api<UsageTimeseriesData>(timeseriesPath(controls.timeseriesRange));
+      const response = await api<TimeseriesData>(timeseriesPath(controls.timeseriesRange));
       if (!timeseriesFence.isCurrent(ticket)) return;
       setReadState({ key: readKey, loading: false, error: null });
-      const parsed = parseExactApiSuccess<UsageTimeseriesData>(response, "report_timeseries", hasTimeseriesData);
+      const parsed = parseExactApiSuccess<TimeseriesData>(response, "report_timeseries", hasTimeseriesData);
       if (parsed !== null) {
         if (timeseriesFence.settle(ticket)) controls.setTimeseries(parsed.data);
       } else {

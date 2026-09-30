@@ -24,9 +24,7 @@ keep its existing code while the text shown for it changes (for example to
 | Concept | Customer term (portal) | Operator term (admin) |
 |---|---|---|
 | Entitlement row | license | license (entitlement) |
-| Protected binding | connected device · "Connection ID" · Disconnect | connection · "Connection ID" · Disconnect |
-| Legacy device | activated device · Release | activated device · Release |
-| Floating seat | seat · Release seat | seat |
+| Protected binding | connected device · "Connection ID" · Disconnect | connection, listed under "Connected devices" · "Connection ID" · Disconnect |
 | Status | active / suspended / revoked / expired | same |
 | Capacity | device limit | device limit |
 
@@ -48,42 +46,24 @@ not to replace routine operator terminology.
 **Protected binding.** The live link between one device and one
 entitlement, keyed by `binding_id` (device-bound licensing, ADR 0006). Both
 apps call the record a **connected device** (customer) or **connection**
-(operator); either way, when its identifier is shown, the label is always
-**"Connection ID"** — never a bare `Binding:`/`Connection:` prefix or
-"Device ID" (that label is reserved for the *legacy* device's
-`device_key_id`, a different concept — see below). The action that ends the
+(operator), and both list them under **Connected devices**; either way, when
+its identifier is shown, the label is always **"Connection ID"** — never a
+bare `Binding:`/`Connection:` prefix or "Device ID". The action that ends the
 binding is **Disconnect** in both apps, not "Retire" — "retire"/"retirement"
 describes the same action in the current admin/portal copy and code
 (`retireBinding`, `retireConnection`, `pendingRetirement.ts`) and may keep
 those identifiers, but the words a person reads are "Disconnect".
 
-**Legacy device.** The older node-locked activation keyed by
-`device_key_id`, tracked outside the protected-binding path (portal:
-"Legacy device registrations"; admin: the customer's device records). Both
-apps already call it an **activated device** with a **Release** action, and
-that does not change. Its identifier label is **"Device ID"** — this is a
-different identifier than a protected binding's Connection ID, and the two
-must not be merged or cross-labelled.
-
-**Floating seat.** A time-limited checkout against a floating-mode
-entitlement's pool (`seat_id`, heartbeat/lease-based). The customer term is
-plain **seat** — not "floating seat" — with a **Release seat** action,
-distinct from a legacy device's bare "Release" so the two cannot be confused
-in the same UI. The operator term is also **seat** (for example the admin's
-bulk "Release seats" action already matches this).
-
-**Status.** The lifecycle of an entitlement or a device: **active**,
-**suspended**, **revoked**, or **expired**. Both apps use the same four
-words. Two notes:
-- The wire-level entitlement/device status code is `disabled`
+**Status.** The lifecycle of an entitlement: **active**, **suspended**,
+**revoked**, or **expired**. Both apps use the same four words. Two notes:
+- The wire-level entitlement status code is `disabled`
   (`EntitlementStatus = "active" | "disabled" | "revoked"`,
   `packages/licensing-domain/src/entitlements/contracts.d.ts`); the code is
   unchanged, but rendered text for that code says **suspended**, not
   "disabled" or "enabled". A customer account's own suspension (a different
   field, `customer.status`, also wire-coded `disabled`) is a related but
   separate concept; the admin console's operator-facing views (the customer
-  detail badge, its status filter, and the account-token list) display it as
-  **suspended** too, as of this task. The portal applies the term to a
+  detail badge and its status filter) display it as **suspended** too. The portal applies the term to a
   customer's own account at sign-in: the correct password, or a
   linked Google or GitHub identity, on a suspended account gets "This account
   is suspended." The same word applies to a customer's per-license status
@@ -98,11 +78,8 @@ words. Two notes:
 **Capacity.** The maximum concurrent devices an entitlement or policy
 allows (`max_active_devices`/`device_limit`). Both apps call this the
 **device limit** wherever it names that one field specifically (the portal
-already does, in the consent page and in `device_limit_exceeded` copy). A
-table column that reports capacity in *either* devices or floating seats,
-depending on the entitlement's mode, is a different, dual-unit display and
-is out of scope for this rename — relabelling it "device limit" would
-misdescribe a seat count.
+already does, in the consent page and in `device_limit_exceeded` copy). The
+device limit is a grant's only capacity: there is no seat pool.
 
 ## Applying this glossary
 
@@ -116,6 +93,8 @@ misdescribe a seat count.
   (`services/cloudflare-customer-portal/test/portal-glossary-copy.test.mjs`,
   `services/cloudflare-license-admin/test/admin-ui-workflow/glossary-copy.test.mjs`)
   fails if a retired term (`Binding:`, `Retire connection`, `Registered
-  nodes`, a quoted `"enabled"` status, `Floating sessions`; the portal's
-  guard also retires `Registered machines`) resurfaces in `src/ui/**`. Extend that list rather than reintroducing a retired word
-  under a new name.
+  nodes`, a quoted `"enabled"` status, `Floating sessions`, and the list
+  labels of the removed activated-device view; the admin guard also retires
+  the removed seat view's label, and the portal's guard `Registered
+  machines`) resurfaces in `src/ui/**`. Extend that list rather than
+  reintroducing a retired word under a new name.

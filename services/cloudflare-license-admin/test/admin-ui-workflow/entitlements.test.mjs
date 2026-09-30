@@ -9,7 +9,7 @@ test("protected form carries mode through both creation paths and reports incomp
   assert.equal(workflow.normalizeEntitlementForm(form).enforcement_mode, "device_bound_v1");
   assert.equal(workflow.normalizeCreateFromPolicy({ ...form, policy_id: "policy" }).enforcement_mode, "device_bound_v1");
   assert.deepEqual(workflow.entitlementFormErrors(form), {});
-  for (const [field, value] of [["project", "APP\u2029"], ["feature", "PRO SPACE"], ["license_fingerprint", "A".repeat(64)], ["customer_id", ""], ["license_id", ""], ["device_hash", "d".repeat(64)]]) {
+  for (const [field, value] of [["project", "APP\u2029"], ["feature", "PRO SPACE"], ["license_fingerprint", "A".repeat(64)], ["customer_id", ""], ["license_id", ""]]) {
     assert.ok(workflow.entitlementFormErrors({ ...form, [field]: value })[field]);
   }
 });
@@ -47,7 +47,6 @@ test("admin UI workflow normalizes create form payloads", async () => {
   const body = workflow.normalizeEntitlementForm({
     ...workflow.emptyEntitlementForm,
     license_fingerprint: "a".repeat(64),
-    assertion_ttl_seconds: 120,
     valid_from: "2024-03-09",
     valid_until: "",
     notes: "operator note",
@@ -55,8 +54,7 @@ test("admin UI workflow normalizes create form payloads", async () => {
     license_id: "lic_123",
   });
 
-  // The untouched form is protected, so the body carries that mode by default, and never a device
-  // hash or an assertion TTL: the Worker refuses a create naming either.
+  // The untouched form is protected, so the body carries that mode by default.
   assert.deepEqual(body, {
     enforcement_mode: "device_bound_v1",
     project: "DEFAULT",
@@ -86,10 +84,12 @@ test("admin UI workflow stamps a create-from-policy payload (attaches policy_id)
   assert.equal(inherited.policy_id, "pol_123");
   assert.equal(inherited.license_fingerprint, "b".repeat(64));
   assert.equal(inherited.project, "DEFAULT");
-  assert.equal("assertion_ttl_seconds" in inherited, false, "a protected grant takes no assertion TTL");
-  assert.equal("assertion_ttl_seconds" in workflow.normalizeCreateFromPolicy({
-    ...workflow.emptyEntitlementForm, policy_id: "pol_123", license_fingerprint: "b".repeat(64), assertion_ttl_seconds: 120,
-  }), false, "a TTL typed into the form is not sent either");
+  // A protected grant has no device hash or assertion TTL, so the form has no field for either.
+  for (const field of ["device_hash", "assertion_ttl_seconds"]) {
+    assert.equal(field in workflow.emptyEntitlementForm, false);
+    assert.equal(field in workflow.emptyEntitlementEditForm, false);
+    assert.equal(field in inherited, false);
+  }
   assert.equal("valid_from" in inherited, false, "blank valid_from inherits from the policy");
   assert.equal("valid_until" in inherited, false, "blank valid_until inherits from the policy");
 
@@ -126,8 +126,6 @@ test("admin UI workflow prepares entitlement edit patch payloads", async () => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
   const item = {
     id: "ent-123",
-    device_hash: "b".repeat(64),
-    assertion_ttl_seconds: 600,
     valid_from: 1709942400,
     valid_until: null,
     notes: "existing note",
@@ -136,8 +134,6 @@ test("admin UI workflow prepares entitlement edit patch payloads", async () => {
   };
   const editForm = workflow.editFormFromEntitlement(item);
   assert.deepEqual(editForm, {
-    device_hash: "b".repeat(64),
-    assertion_ttl_seconds: 600,
     valid_from: "2024-03-09",
     valid_until: "",
     notes: "existing note",
@@ -147,13 +143,11 @@ test("admin UI workflow prepares entitlement edit patch payloads", async () => {
 
   const patch = workflow.normalizeEntitlementPatch({
     ...editForm,
-    assertion_ttl_seconds: 900,
     valid_until: "2024-07-03",
     notes: "",
     customer_id: "",
     license_id: "lic_123",
   });
-  // A PATCH never sends a device hash or an assertion TTL: the Worker refuses either.
   assert.deepEqual(patch, {
     valid_from: 1709942400,
     valid_until: 1719964800,
@@ -188,48 +182,11 @@ test("admin UI workflow builds transition paths and short fingerprints", async (
   assert.equal(format.shortHash("a".repeat(64)), "aaaaaaaa...aaaaaaaa");
 });
 
-test("admin UI workflow builds device list + transition paths with encoding", async () => {
-  const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
-  const dev = `sha256:${"b".repeat(64)}`;
-  assert.equal(workflow.entitlementDevicesPath("ent-123"), "/api/admin/entitlements/ent-123/devices");
-  assert.equal(workflow.entitlementDevicesPath("ent/x"), "/api/admin/entitlements/ent%2Fx/devices");
-  assert.equal(workflow.entitlementMeterPath("ent-123"), "/api/admin/entitlements/ent-123/meter");
-  assert.equal(workflow.entitlementMeterPath("ent/x"), "/api/admin/entitlements/ent%2Fx/meter");
-  assert.equal(
-    workflow.deviceTransitionPath("ent-123", dev, "revoke"),
-    `/api/admin/entitlements/ent-123/devices/sha256%3A${"b".repeat(64)}/revoke`,
-  );
-  assert.equal(
-    workflow.deviceTransitionPath("ent-123", dev, "disable"),
-    `/api/admin/entitlements/ent-123/devices/sha256%3A${"b".repeat(64)}/disable`,
-  );
-  assert.equal(
-    workflow.deviceTransitionPath("ent-123", dev, "reenable"),
-    `/api/admin/entitlements/ent-123/devices/sha256%3A${"b".repeat(64)}/reenable`,
-  );
-});
-
-test("admin UI workflow device action rules make revoke terminal", async () => {
-  const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
-  assert.equal(workflow.canRunDeviceAction("active", "disable"), true);
-  assert.equal(workflow.canRunDeviceAction("active", "reenable"), false);
-  assert.equal(workflow.canRunDeviceAction("active", "revoke"), true);
-  assert.equal(workflow.canRunDeviceAction("disabled", "disable"), false);
-  assert.equal(workflow.canRunDeviceAction("disabled", "reenable"), true);
-  assert.equal(workflow.canRunDeviceAction("disabled", "revoke"), true);
-  assert.equal(workflow.canRunDeviceAction("revoked", "disable"), false);
-  assert.equal(workflow.canRunDeviceAction("revoked", "reenable"), false);
-  assert.equal(workflow.canRunDeviceAction("revoked", "revoke"), false);
-});
-
-test("admin UI workflow renders short device key ids and device confirm copy", async () => {
+test("admin UI workflow shortens a refused connection's device key id", async () => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
   assert.equal(workflow.shortDeviceKeyId(`sha256:${"b".repeat(64)}`), "sha256:bbbbbbbb…");
   assert.equal(workflow.shortDeviceKeyId("short"), "short");
-  const revoke = workflow.revokeDeviceConfirm({ device_key_id: `sha256:${"b".repeat(64)}` });
-  assert.match(revoke, /Revoke device key sha256:bbbbbbbb…/);
-  assert.match(revoke, /TERMINAL/);
-  assert.match(workflow.disableDeviceConfirm({ device_key_id: `sha256:${"b".repeat(64)}` }), /Disable device key sha256:bbbbbbbb…/);
+  assert.equal(workflow.shortDeviceKeyId("c".repeat(20)), `${"c".repeat(12)}…`);
 });
 
 test("admin UI workflow builds the bulk transition path and body", async () => {
@@ -300,15 +257,6 @@ test("a finished batch reads as one sentence, with every per-row outcome in word
   assert.equal(mixed, "Revoke finished: 0 done, 2 already revoked, 1 with an invalid ID, 1 failed, 1 changed meanwhile, 2 not changed.");
   assert.doesNotMatch(mixed, /\b[a-z]+_[a-z_]+\b/);
   assert.equal(workflow.batchResultSentence("reenable", []), "Reenable finished: 0 done.");
-});
-
-test("force-release confirm copy echoes the exact target and warns it frees all live seats", async () => {
-  const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
-  const format = await loadWorkflowModule("shared/format.ts");
-  const copy = workflow.releaseSeatsConfirm({ project: "DEFAULT", feature: "pro", license_fingerprint: "a".repeat(64) });
-  assert.match(copy, /Force-release ALL live seats for DEFAULT \/ pro/);
-  assert.match(copy, new RegExp(format.shortHash("a".repeat(64))));
-  assert.match(copy, /dead\/unreachable machine/);
 });
 
 test("entitlement date edits preserve stored instants and use UTC midnight for changed dates", async () => {

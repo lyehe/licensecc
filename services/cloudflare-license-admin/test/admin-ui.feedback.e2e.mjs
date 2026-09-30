@@ -367,6 +367,8 @@ test("a created entitlement outside the current filter opens alone, and its id s
   await page.goto("/#/entitlements");
   await page.getByLabel("Filter by status").selectOption("disabled");
   await expect(page).toHaveURL(/status=disabled/);
+  // The create starts from the settled suspended list, not while its debounced read is still due.
+  await expect(page.getByText("No entitlements match these filters.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const fingerprint = "ab".repeat(32);
   const form = page.getByRole("form", { name: "New entitlement", exact: true });

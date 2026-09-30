@@ -49,12 +49,7 @@ export interface CatalogPlanFeatureFormState {
   policy_id: string;
   status: "active" | "disabled";
   display_order: number;
-  assertion_ttl_seconds: string;
-  pool_size: string;
   max_active_devices: string;
-  max_borrow_sec: string;
-  meter_quota: string;
-  meter_period_sec: string;
 }
 
 export interface PlanProjectionFormState {
@@ -95,12 +90,7 @@ export const emptyCatalogPlanFeatureForm: CatalogPlanFeatureFormState = {
   policy_id: "",
   status: "active",
   display_order: 0,
-  assertion_ttl_seconds: "",
-  pool_size: "",
   max_active_devices: "",
-  max_borrow_sec: "",
-  meter_quota: "",
-  meter_period_sec: "",
 };
 
 export const emptyPlanProjectionForm: PlanProjectionFormState = {
@@ -342,12 +332,7 @@ export function normalizeCatalogPlanFeatureForm(form: CatalogPlanFeatureFormStat
     }
     body.addon_key = addonKey;
   }
-  body.assertion_ttl_seconds = parseOptionalBoundedInteger(form.assertion_ttl_seconds, "assertion_ttl_seconds", 0, 3600);
-  body.pool_size = parseOptionalBoundedInteger(form.pool_size, "pool_size", 0, 1_000_000);
   body.max_active_devices = parseOptionalBoundedInteger(form.max_active_devices, "max_active_devices", 0, 1_000_000);
-  body.max_borrow_sec = parseOptionalBoundedInteger(form.max_borrow_sec, "max_borrow_sec", 0, MAX_POLICY_DURATION_SECONDS);
-  body.meter_quota = parseOptionalBoundedInteger(form.meter_quota, "meter_quota", 0, 1_000_000_000);
-  body.meter_period_sec = parseOptionalBoundedInteger(form.meter_period_sec, "meter_period_sec", 0, MAX_POLICY_DURATION_SECONDS);
   return body;
 }
 
@@ -427,7 +412,6 @@ const MAX_CATALOG_PROJECT_SIZE = 127;
 const MAX_CATALOG_FEATURE_SIZE = 15;
 const MAX_CATALOG_NAME_SIZE = 127;
 const MAX_CATALOG_PLAN_KEY_SIZE = 128;
-const MAX_POLICY_DURATION_SECONDS = 3_153_600_000;
 
 function parseBoundedInteger(value: number, label: string, min: number, max: number): number {
   const parsed = Number(value);

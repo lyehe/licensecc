@@ -6,7 +6,7 @@ import { ReadNotice } from "../../shared/ReadNotice";
 import { api, parseExactApiSuccess } from "../../shared/api";
 import { apiFailureFeedback, codeFeedback } from "../../shared/messages";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
-import { DenialRateChart, LineAreaChart } from "../../shared/charts";
+import { LineAreaChart } from "../../shared/charts";
 import { useOperatorControls } from "../../shared/controls";
 import { formatUtcDate, shortHash } from "../../shared/format";
 import { hasExpiringListData, hasReportData } from "../../shared/mutationGuards";
@@ -20,7 +20,6 @@ interface Report {
   generated_at: number;
   entitlements: { total: number; active: number; revoked: number; disabled: number };
   customers: { total: number; active: number; disabled: number };
-  account_tokens: { active: number };
   licenses: { total: number };
   fulfillment: { accepted: number; processed: number; superseded: number; rejected: number; stale_accepted: number; events_24h: number; events_7d: number };
   customer_suspensions_7d: number;
@@ -131,15 +130,12 @@ export function Reports({ active, onNavigate }: { active: boolean; onNavigate: (
     <section className="reportsTab">
       <ReadNotice label="reports" loading={reportLoading} error={reportError} hasData={report !== null} onRetry={() => setRetryRevision((value) => value + 1)} />
       <section className="grid metrics reportCards">
-        <div><span>Customers total</span><strong>{report?.customers.total ?? "—"}</strong></div><div><span>Customers active</span><strong>{report?.customers.active ?? "—"}</strong></div><div><span>Customers suspended</span><strong>{report?.customers.disabled ?? "—"}</strong></div><div><span>Active account tokens</span><strong>{report?.account_tokens.active ?? "—"}</strong></div>
+        <div><span>Customers total</span><strong>{report?.customers.total ?? "—"}</strong></div><div><span>Customers active</span><strong>{report?.customers.active ?? "—"}</strong></div><div><span>Customers suspended</span><strong>{report?.customers.disabled ?? "—"}</strong></div>
         <div><span>Licenses total</span><strong>{report?.licenses.total ?? "—"}</strong></div><div><span>Fulfillment processed</span><strong>{report?.fulfillment.processed ?? "—"}</strong></div><div><span>Fulfillment stale accepted</span><strong>{report?.fulfillment.stale_accepted ?? "—"}</strong></div><div><span>Order events 24h</span><strong>{report?.fulfillment.events_24h ?? "—"}</strong></div><div><span>Order events 7d</span><strong>{report?.fulfillment.events_7d ?? "—"}</strong></div><div><span>Customer suspensions 7d</span><strong>{report?.customer_suspensions_7d ?? "—"}</strong></div>
       </section>
-      <section className="chartPanels"><ReadNotice label="usage trends" loading={timeseriesLoading} error={timeseriesError} hasData={timeseries !== null} onRetry={retryTimeseries} />
+      <section className="chartPanels"><ReadNotice label="refused-connection trends" loading={timeseriesLoading} error={timeseriesError} hasData={timeseries !== null} onRetry={retryTimeseries} />
         <div className="rangeSelector" role="group" aria-label="Time-series range"><span className="muted">Window</span>{TIMESERIES_RANGE_DAYS.map((days) => <button key={days} type="button" aria-pressed={timeseriesRange === days} className={timeseriesRange === days ? "active" : ""} onClick={() => setTimeseriesRange(days)}>last {days}d</button>)}</div>
-        <div className="chartGrid">
-          <div className="chartCard"><h3>Checkouts vs denials</h3><LineAreaChart checkouts={(timeseries?.buckets ?? []).map((bucket) => bucket.checkouts)} denials={(timeseries?.buckets ?? []).map((bucket) => bucket.denials)} bucketStarts={(timeseries?.buckets ?? []).map((bucket) => bucket.start)} unit="checkouts / denials per day" label={`Checkouts (filled) versus denials over the last ${timeseriesRange} days`} /><div className="chartLegend"><span className="legend checkoutsLegend">checkouts</span><span className="legend denialsLegend">denials</span></div></div>
-          <div className="chartCard"><h3>Denial-rate trend</h3><DenialRateChart rates={(timeseries?.buckets ?? []).map((bucket) => bucket.denial_rate)} bucketStarts={(timeseries?.buckets ?? []).map((bucket) => bucket.start)} label={`Denial rate (denials over checkout attempts) over the last ${timeseriesRange} days`} /><p className="muted chartHint">Review denied checkouts to identify capacity or access problems.</p></div>
-        </div>
+        <div className="chartCard"><h3>Refused connections</h3><LineAreaChart values={(timeseries?.buckets ?? []).map((bucket) => bucket.denials)} bucketStarts={(timeseries?.buckets ?? []).map((bucket) => bucket.start)} unit="refused connections per interval" empty="No refused connections in this window." label={`Connections refused at the device limit over the last ${timeseriesRange} days`} /><p className="muted chartHint">A connection is refused when its license already has as many devices connected as its device limit allows.</p></div>
       </section>
       <section className="tablePane full expiringPanel">
         <div className="expiringHead"><h2>Expiring soon</h2><div className="rangeSelector" role="group" aria-label="Expiring horizon">{[7, 30, 90].map((days) => <button key={days} type="button" aria-pressed={expiringWithinDays === days} className={expiringWithinDays === days ? "active" : ""} onClick={() => setExpiringWithinDays(days)}>{days}d</button>)}</div></div>

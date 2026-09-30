@@ -1,8 +1,7 @@
-import type { AdminRoute, AdminTab, CatalogView, CustomerAccessView, CustomerSection, NavigationTarget } from "./types";
+import type { AdminRoute, AdminTab, CatalogView, CustomerSection, NavigationTarget } from "./types";
 
 const tabs: readonly AdminTab[] = ["overview", "entitlements", "policies", "plans", "webhooks", "events", "customers", "licenses", "fulfillment", "reports"];
-const customerSections: readonly CustomerSection[] = ["overview", "access", "licenses", "tokens", "orders", "history"];
-const customerAccessViews: readonly CustomerAccessView[] = ["grants", "nodes", "sessions"];
+const customerSections: readonly CustomerSection[] = ["overview", "access", "licenses", "account", "orders", "history"];
 const catalogViews: readonly CatalogView[] = ["plans", "features", "import"];
 const filterKeys: Partial<Record<AdminTab, readonly string[]>> = {
   customers: ["status"],
@@ -74,10 +73,9 @@ export function hashForRoute(route: AdminRoute): string {
     // An app drill-down is addressable only on the access section, so nothing else is ever written.
     if (route.section === "access" && route.access !== undefined) {
       params.set("app", route.access.app);
-      if (route.access.view !== "grants") params.set("view", route.access.view);
       // Manage access writes a marker only: the grant (whose id encodes the license fingerprint)
       // stays in the in-memory history entry, like the entitlement id filters above.
-      else if (route.access.manage) params.set("manage", "1");
+      if (route.access.manage) params.set("manage", "1");
     }
   }
   if (route.tab === "plans") {
@@ -130,15 +128,13 @@ export function parseAdminHash(hash: string): ParsedAdminRoute {
     if (!customerSections.includes(section as CustomerSection) || (customerId === null && section !== "overview")) return fallback();
     const route = { tab, customerId, section: section as CustomerSection, filter };
     const app = params.get("app");
-    const view = params.get("view");
     const manage = params.get("manage");
-    // A record view or the Manage access marker without an app has no meaning.
-    if (app === null) return view === null && manage === null ? { route, invalid: false } : fallback();
-    const accessView = view ?? "grants";
-    if (section !== "access" || !validValue(app) || !customerAccessViews.includes(accessView as CustomerAccessView)) return fallback();
-    // Manage access is opened only from an app's access grants.
-    if (manage !== null && (manage !== "1" || accessView !== "grants")) return fallback();
-    return { route: { ...route, access: { app, view: accessView as CustomerAccessView, manage: manage !== null } }, invalid: false };
+    // An app shows its access grants only: a customer address names no other record view.
+    if (params.has("view")) return fallback();
+    // The Manage access marker without an app has no meaning.
+    if (app === null) return manage === null ? { route, invalid: false } : fallback();
+    if (section !== "access" || !validValue(app) || (manage !== null && manage !== "1")) return fallback();
+    return { route: { ...route, access: { app, manage: manage !== null } }, invalid: false };
   }
   if (tab === "plans") {
     const view = params.get("view") ?? "plans";

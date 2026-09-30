@@ -53,6 +53,12 @@ export const test = base.extend({
   },
 });
 
+/** The fields a policy PATCH may name; a create adds project, name and type. Mirrors the Worker. */
+const POLICY_PATCHABLE_FIELDS = ["valid_from_offset_sec", "duration_sec", "max_active_devices", "expiry_strategy", "trial_expiration_basis", "trial_duration_sec", "trial_one_per_device", "notes"];
+/** A protected grant has no device hash or assertion TTL; a create or PATCH naming either is refused. */
+const REFUSED_ENTITLEMENT_FIELDS = ["device_hash", "assertion_ttl_seconds"];
+const namesOnly = (body, allowed) => Object.keys(body).every((field) => allowed.includes(field));
+
 export function makeEnvelope(code, data) {
   makeEnvelope.nextRequestId += 1;
   return {
@@ -89,11 +95,10 @@ export function makeAdminApiFixture() {
     batches: [],
     searches: [],
     csvExports: [],
-    // Workstream F — usage-analytics reports + force-release.
+    // Workstream F — refused-connection and fulfillment reports.
     timeseries: [],
     expiring: [],
     expiringCursors: [],
-    releaseSeats: [],
     planPreviews: [],
     planApplies: [],
     catalogFeatures: [],
@@ -119,16 +124,12 @@ export function makeAdminApiFixture() {
     customerTransitions: [],
     policyTransitions: [],
     webhookTransitions: [],
-    deviceTransitions: [],
-    deviceReads: [],
-    meterReads: [],
     deliveryReads: [],
     deliveryCursors: [],
     reportReads: [],
     orderReads: [],
     orderCursors: [],
     entitlementReads: [],
-    entitlementDetailReads: [],
     customerReads: [],
     customerCursors: [],
     // A filter-driven list reload must never fan out to the cross-feature
@@ -173,10 +174,6 @@ export function makeAdminApiFixture() {
     transitionStatus: 200,
     transitionResponseOnce: false,
     batchResponse: null,
-    releaseSeatsResponse: null,
-    releaseSeatsResponses: [],
-    releaseSeatTargetOnSecondPage: false,
-    releaseSeatTargetId: null,
     transitionFailure: null,
     abortTransition: false,
     dropTransitionRow: false,
@@ -184,10 +181,6 @@ export function makeAdminApiFixture() {
     refreshFailures: [],
     deferRefresh: false,
     releaseRefresh: null,
-    deviceRefreshFailure: null,
-    deviceRefreshFailures: [],
-    deferDeviceRefresh: false,
-    releaseDeviceRefresh: null,
     customerDetailFailure: null,
     customerTransitionEmptyName: false,
     webhookCreateResponses: [],
@@ -216,11 +209,10 @@ export function makeAdminApiFixture() {
     deferMutations: new Set(),
     releaseMutations: new Map(),
     completedMutations: new Set(),
-    deviceTransitionResponse: null,
     reportVersioned: false,
     activePolicyPagination: false,
     // A number here pages the entitlements list for real (offset cursor), so Load More can be
-    // exercised across a genuine tab switch instead of the fixed single-cursor release-seat page.
+    // exercised across a genuine tab switch.
     entitlementsPageSize: null,
     // A number here pages the events list for real (keyset cursor), so Next page can be exercised.
     eventsPageSize: null,
@@ -254,10 +246,9 @@ export function makeAdminApiFixture() {
   function seedPolicy(id = "pol_confirm", name = "Confirm policy", overrides = {}) {
     const policy = {
       id, project: "DEFAULT", name, type: "trial", status: "active",
-      valid_from_offset_sec: null, duration_sec: null, assertion_ttl_seconds: 300, pool_size: 0,
-      max_active_devices: 1, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000,
+      valid_from_offset_sec: null, duration_sec: null, max_active_devices: 1,
       expiry_strategy: "fixed_window", trial_expiration_basis: "from_issue", trial_duration_sec: 0,
-      trial_one_per_device: 0, trial_require_device_proof: 0, notes: "", created_at: now, updated_at: now,
+      trial_one_per_device: 0, notes: "", created_at: now, updated_at: now,
       ...overrides,
     };
     policies.push(policy);
@@ -374,12 +365,7 @@ export function makeAdminApiFixture() {
       policy_id: nullable(feature.policy_id),
       status: feature.status ?? "active",
       display_order: feature.display_order ?? 0,
-      assertion_ttl_seconds: nullable(feature.assertion_ttl_seconds),
-      pool_size: nullable(feature.pool_size),
       max_active_devices: nullable(feature.max_active_devices),
-      max_borrow_sec: nullable(feature.max_borrow_sec),
-      meter_quota: nullable(feature.meter_quota),
-      meter_period_sec: nullable(feature.meter_period_sec),
     };
   }
 
@@ -509,12 +495,7 @@ export function makeAdminApiFixture() {
           policy_id: feature.policy_id,
           status: feature.status,
           display_order: feature.display_order,
-          assertion_ttl_seconds: feature.assertion_ttl_seconds,
-          pool_size: feature.pool_size,
           max_active_devices: feature.max_active_devices,
-          max_borrow_sec: feature.max_borrow_sec,
-          meter_quota: feature.meter_quota,
-          meter_period_sec: feature.meter_period_sec,
         };
         const after = catalogImportEffectKind(existing, next) === "unchanged"
           ? { ...existing }
@@ -592,21 +573,9 @@ export function makeAdminApiFixture() {
     return Array.from({ length: count }, () => seedCustomer());
   }
 
-  /**
-   * A grant's capacity shape, shared by the create route and every seed helper so a seeded row and
-   * a form-created row of the same feature/pool_size can never drift apart: `feature === "float"`
-   * (the create form's own historical shorthand) or an explicit positive pool_size makes it a
-   * floating seat pool; everything else, including every protected create, is node-locked.
-   */
-  function floatingCapacity(feature, poolSizeOverride) {
-    const floating = feature === "float" || (poolSizeOverride ?? 0) > 0;
-    return { pool_size: poolSizeOverride ?? (floating ? 5 : 0), license_mode: floating ? "floating" : "node_locked" };
-  }
-
   function seedEntitlement(overrides = {}) {
     const index = nextEntitlementId;
     const status = overrides.status ?? "active";
-    const capacity = floatingCapacity(overrides.feature, overrides.pool_size);
     const row = {
       id: `ent-${index}`,
       enforcement_mode: "device_bound_v1",
@@ -633,13 +602,13 @@ export function makeAdminApiFixture() {
       max_active_devices: 1,
       lease_seconds: 0,
       rebind_window_sec: 0,
-      pool_size: capacity.pool_size,
+      pool_size: 0,
       heartbeat_grace_sec: 300,
       max_borrow_sec: 0,
       allow_overdraft: 0,
       meter_quota: 0,
       meter_period_sec: 2_592_000,
-      license_mode: capacity.license_mode,
+      license_mode: "node_locked",
       created_at: now,
       updated_at: now,
       ...overrides,
@@ -676,8 +645,8 @@ export function makeAdminApiFixture() {
         status,
         valid_from: validity === 1 ? now + 7 * 86_400 : null,
         valid_until: validity === 2 ? now - 86_400 : validity === 3 ? now + 7 * 86_400 : null,
-        pool_size: index % 4 === 0 ? 5 : 0,
-        license_mode: index % 4 === 0 ? "floating" : "node_locked",
+        max_active_devices: index % 4 === 0 ? 5 : 1,
+        license_mode: index % 4 === 0 ? "trial" : "node_locked",
       });
     });
     for (const customer of seededCustomers) {
@@ -702,7 +671,6 @@ export function makeAdminApiFixture() {
         revocation_seq: item.revocation_seq,
         updated_at: item.updated_at,
       })),
-      account_tokens: [],
       licenses: [],
       orders: [],
       events: [],
@@ -836,8 +804,8 @@ export function makeAdminApiFixture() {
       }
       return fulfill(200, makeEnvelope("search_results", { results }));
     }
-    // Workstream F — usage-analytics time-series. Deterministic buckets so the inline-SVG charts have
-    // a visible (non-empty) line/area/bar to render.
+    // Workstream F — refused-connection and fulfillment time-series. Deterministic buckets so the
+    // inline-SVG charts have a visible (non-empty) line/area/bar to render.
     if (method === "GET" && path === "/api/admin/report/timeseries") {
       requests.timeseries.push(url.search);
       await deferRead("timeseries");
@@ -845,10 +813,10 @@ export function makeAdminApiFixture() {
       const to = Number(url.searchParams.get("to")) || from + 4;
       const rangeDays = Math.max(1, Math.round((to - from) / 86_400));
       const buckets = rangeDays <= 7
-        ? [{ start: from, checkouts: 2, releases: 1, denials: 1, denial_rate: 0.5, fulfillment_events: 1 }]
+        ? [{ start: from, denials: 1, fulfillment_events: 1 }]
         : [
-          { start: from, checkouts: 2, releases: 1, denials: 0, denial_rate: 0, fulfillment_events: 1 },
-          { start: from + 1, checkouts: 4, releases: 2, denials: 1, denial_rate: 0.2, fulfillment_events: 3 },
+          { start: from, denials: 0, fulfillment_events: 1 },
+          { start: from + 1, denials: 2, fulfillment_events: 3 },
         ];
       return fulfill(200, makeEnvelope("report_timeseries", { from, to, bucket_seconds: 1, buckets }));
     }
@@ -892,33 +860,10 @@ export function makeAdminApiFixture() {
         generated_at: now,
         entitlements: reportEntitlements,
         customers: { total: customers.length, active: customers.filter((item) => item.status === "active").length, disabled: customers.filter((item) => item.status === "disabled").length },
-        account_tokens: { active: 0 },
         licenses: { total: 0 },
         fulfillment: { accepted: 0, processed: 0, superseded: 0, rejected: 0, stale_accepted: 0, events_24h: 0, events_7d: 0 },
         customer_suspensions_7d: 0,
       }));
-    }
-    // Workstream F — force-release the live seats on a dead machine (admin-only WRITE).
-    const releaseMatch = /^\/api\/admin\/entitlements\/([^/]+)\/release-seats$/.exec(path);
-    if (method === "POST" && releaseMatch !== null) {
-      const body = await jsonBody(request);
-      requests.releaseSeats.push({
-        id: releaseMatch[1],
-        reason: body.reason ?? "",
-        rawBody: request.postData() ?? "",
-        idempotencyKey: request.headers()["idempotency-key"] ?? null,
-      });
-      behavior.releaseSeatTargetId = releaseMatch[1];
-      if (behavior.releaseSeatsResponses.length > 0) {
-        const response = behavior.releaseSeatsResponses.shift();
-        return fulfill(response.status ?? 200, fixtureResponseBody(response));
-      }
-      if (behavior.releaseSeatsResponse !== null) {
-        const response = behavior.releaseSeatsResponse;
-        behavior.releaseSeatsResponse = null;
-        return fulfill(200, response);
-      }
-      return fulfill(200, makeEnvelope("seats_released", { released: 2, seat_ids: ["seat_1", "seat_2"] }));
     }
     // Fulfillment tab's order list (the bar spark reuses the timeseries; this feeds the table/cards).
     if (method === "GET" && path === "/api/admin/orders") {
@@ -981,7 +926,7 @@ export function makeAdminApiFixture() {
     if(method === "GET" && protectedListMatch) return fulfill(200,makeEnvelope("customer_bindings",{
       customer:{id:decodeURIComponent(protectedListMatch[1]),status:"active"},operator:{subject:"test-admin",actor_type:"access",role:"admin"},server_time:now,capacity:[],denied:[],items:[],next_cursor:null,
     }));
-    const workspaceMatch = /^\/api\/admin\/customers\/([^/]+)\/(apps|access|resources)$/.exec(path);
+    const workspaceMatch = /^\/api\/admin\/customers\/([^/]+)\/(apps|access)$/.exec(path);
     if (method === "GET" && workspaceMatch) {
       const customerId = decodeURIComponent(workspaceMatch[1]);
       const detail = customerDetail(customerId);
@@ -989,7 +934,7 @@ export function makeAdminApiFixture() {
       const owned = entitlements.filter(item => item.customer_id === customerId && (!url.searchParams.has("project") || item.project === url.searchParams.get("project")));
       const view = workspaceMatch[2];
       requests.customerWorkspaceReads.push(`${view}${url.search}`);
-      const items = view === "access" ? owned.map(publicRecord) : view === "resources" ? [] : [...new Set(owned.map(item => item.project))].sort().map(project => {
+      const items = view === "access" ? owned.map(publicRecord) : [...new Set(owned.map(item => item.project))].sort().map(project => {
         const grants = owned.filter(item => item.project === project);
         const expiries = grants.map(item => item.valid_until).filter(value => value !== null);
         return { project, grant_count: grants.length, enabled_count: grants.filter(item => item.status === "active").length,
@@ -998,7 +943,7 @@ export function makeAdminApiFixture() {
       });
       const offset = Number(url.searchParams.get("cursor") || 0);
       const limit = Number(url.searchParams.get("limit") || 100);
-      return fulfill(200, makeEnvelope(view === "apps" ? "customer_apps" : view === "access" ? "entitlements_listed" : "customer_resources", {
+      return fulfill(200, makeEnvelope(view === "apps" ? "customer_apps" : "entitlements_listed", {
         items: items.slice(offset, offset + limit), next_cursor: items.length > offset + limit ? String(offset + limit) : null,
         ...(view === "access" ? {} : { customer: detail.customer, server_time: now }),
       }));
@@ -1008,7 +953,7 @@ export function makeAdminApiFixture() {
       const detail = customerDetail(decodeURIComponent(customerDetailMatch[1]));
       if (behavior.customerDetailFailure === "nested-null") {
         behavior.customerDetailFailure = null;
-        detail.account_tokens = [null];
+        detail.licenses = [null];
       }
       return fulfill(200, makeEnvelope("customer", detail));
     }
@@ -1094,7 +1039,6 @@ export function makeAdminApiFixture() {
     const entitlementDetailMatch = /^\/api\/admin\/entitlements\/([^/]+)$/.exec(path);
     if (method === "GET" && entitlementDetailMatch !== null) {
       const id = decodeURIComponent(entitlementDetailMatch[1]);
-      requests.entitlementDetailReads.push(id);
       const row = findById(id);
       if (row === undefined) return fulfill(404, { ok: false, code: "not_found", request_id: "ui-e2e-entitlement-missing" });
       return fulfill(200, makeEnvelope("entitlement", publicRecord(row)));
@@ -1150,11 +1094,7 @@ export function makeAdminApiFixture() {
         const nextCursor = nextOffset < filteredEntitlements.length ? String(nextOffset) : null;
         return fulfill(200, makeEnvelope("entitlements_listed", { items: page, next_cursor: nextCursor }));
       }
-      const releaseTargetOnSecondPage = behavior.releaseSeatTargetOnSecondPage && behavior.releaseSeatTargetId !== null;
-      const items = releaseTargetOnSecondPage
-        ? filteredEntitlements.filter((item) => item.id !== behavior.releaseSeatTargetId).map(publicRecord)
-        : filteredEntitlements.map(publicRecord);
-      return fulfill(200, makeEnvelope("entitlements_listed", { items, next_cursor: releaseTargetOnSecondPage ? "release-target-page-2" : null }));
+      return fulfill(200, makeEnvelope("entitlements_listed", { items: filteredEntitlements.map(publicRecord), next_cursor: null }));
     }
     // The Entitlements and Plans tabs load active policies for policy selectors.
     if (method === "GET" && path === "/api/admin/policies") {
@@ -1178,6 +1118,9 @@ export function makeAdminApiFixture() {
       const body = await jsonBody(request);
       requests.policyCreates.push(body);
       await deferMutation("policy-create");
+      if (!namesOnly(body, ["project", "name", "type", ...POLICY_PATCHABLE_FIELDS]) || !["trial", "node_locked", "subscription"].includes(body.type)) {
+        return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-policy-invalid" });
+      }
       if (policies.some((policy) => policy.project === body.project && policy.name === body.name)) {
         return fulfill(409, { ok: false, code: "policy_name_conflict", request_id: "ui-e2e-policy-conflict" });
       }
@@ -1190,18 +1133,12 @@ export function makeAdminApiFixture() {
         status: "active",
         valid_from_offset_sec: body.valid_from_offset_sec ?? null,
         duration_sec: body.duration_sec ?? null,
-        assertion_ttl_seconds: body.assertion_ttl_seconds,
-        pool_size: body.pool_size,
-        max_active_devices: body.max_active_devices,
-        max_borrow_sec: body.max_borrow_sec,
-        meter_quota: body.meter_quota,
-        meter_period_sec: body.meter_period_sec,
-        expiry_strategy: body.expiry_strategy,
-        trial_expiration_basis: body.trial_expiration_basis,
-        trial_duration_sec: body.trial_duration_sec,
-        trial_one_per_device: body.trial_one_per_device,
-        trial_require_device_proof: body.trial_require_device_proof,
-        notes: body.notes,
+        max_active_devices: body.max_active_devices ?? 1,
+        expiry_strategy: body.expiry_strategy ?? "fixed_window",
+        trial_expiration_basis: body.trial_expiration_basis ?? "from_issue",
+        trial_duration_sec: body.trial_duration_sec ?? 0,
+        trial_one_per_device: body.trial_one_per_device ?? 0,
+        notes: body.notes ?? "",
         created_at: now,
         updated_at: now,
       };
@@ -1214,7 +1151,7 @@ export function makeAdminApiFixture() {
       requests.policyPatches.push({ id: decodeURIComponent(policyDetailMatch[1]), body, idempotencyKey: request.headers()["idempotency-key"] ?? null });
       const policy = policies.find((item) => item.id === decodeURIComponent(policyDetailMatch[1]));
       if (policy === undefined) return fulfill(404, { ok: false, code: "not_found", request_id: "ui-e2e-policy-missing" });
-      if (["project", "name", "type", "status"].some((field) => field in body)) return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-policy-identity" });
+      if (!namesOnly(body, POLICY_PATCHABLE_FIELDS)) return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-policy-identity" });
       now += 1;
       Object.assign(policy, body, { updated_at: now });
       return fulfill(200, makeEnvelope("policy_patched", { ...policy }));
@@ -1581,7 +1518,7 @@ export function makeAdminApiFixture() {
           description: plan.description,
           status: plan.status,
           version: plan.version,
-          features: rows.map(({ project, feature_key, feature_inclusion, addon_key, policy_id, status, display_order, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec }) => ({
+          features: rows.map(({ project, feature_key, feature_inclusion, addon_key, policy_id, status, display_order, max_active_devices }) => ({
             project,
             feature_key,
             feature_inclusion,
@@ -1589,12 +1526,7 @@ export function makeAdminApiFixture() {
             policy_id,
             status,
             display_order,
-            assertion_ttl_seconds,
-            pool_size,
             max_active_devices,
-            max_borrow_sec,
-            meter_quota,
-            meter_period_sec,
           })),
         }],
       }));
@@ -1655,6 +1587,9 @@ export function makeAdminApiFixture() {
         const body = await jsonBody(request);
         requests.catalogPlanFeatures.push({ plan_id: planId, ...body });
         await deferMutation("catalog-plan-feature-save");
+        if (!namesOnly(body, ["project", "feature_key", "feature_inclusion", "addon_key", "policy_id", "status", "display_order", "max_active_devices"])) {
+          return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-plan-feature-invalid" });
+        }
         const plan = catalogPlans.find((item) => item.id === planId);
         const feature = catalogFeatures.find((item) => item.project === body.project && item.feature_key === body.feature_key);
         if (plan === undefined || feature === undefined) {
@@ -1672,12 +1607,7 @@ export function makeAdminApiFixture() {
           policy_id: body.policy_id ?? null,
           status: body.status ?? "active",
           display_order: body.display_order ?? 0,
-          assertion_ttl_seconds: body.assertion_ttl_seconds ?? null,
-          pool_size: body.pool_size ?? null,
           max_active_devices: body.max_active_devices ?? null,
-          max_borrow_sec: body.max_borrow_sec ?? null,
-          meter_quota: body.meter_quota ?? null,
-          meter_period_sec: body.meter_period_sec ?? null,
           created_at: now,
           updated_at: now,
         };
@@ -1705,31 +1635,21 @@ export function makeAdminApiFixture() {
         status: "active",
         valid_from: null,
         valid_until: body.support_until ?? null,
-        assertion_ttl_seconds: 600,
-        max_borrow_sec: 0,
-        meter_quota: 0,
-        meter_period_sec: 2592000,
       };
       const selectedAddons = new Set(body.addons ?? []);
       const planRows = catalogPlanFeatures
         .filter((item) => item.plan_id === plan.id && item.status === "active")
         .filter((item) => item.feature_inclusion === "included" || selectedAddons.has(item.addon_key));
       const willCreate = planRows.map((row) => {
-        const poolSize = row.pool_size ?? 0;
-        const maxActiveDevices = row.max_active_devices ?? (poolSize > 0 ? poolSize : 1);
+        const policy = policies.find((item) => item.id === row.policy_id);
         return {
           ...base,
           feature: row.feature_key,
           policy_id: row.policy_id,
           source: row.feature_inclusion,
           addon_key: row.addon_key,
-          license_mode: poolSize > 0 ? "floating" : "node_locked",
-          pool_size: poolSize,
-          max_active_devices: maxActiveDevices,
-          max_borrow_sec: row.max_borrow_sec ?? 0,
-          assertion_ttl_seconds: row.assertion_ttl_seconds ?? base.assertion_ttl_seconds,
-          meter_quota: row.meter_quota ?? base.meter_quota,
-          meter_period_sec: row.meter_period_sec ?? base.meter_period_sec,
+          license_mode: policy?.type === "trial" ? "trial" : "node_locked",
+          max_active_devices: row.max_active_devices ?? policy?.max_active_devices ?? 1,
         };
       });
       return {
@@ -1793,7 +1713,7 @@ export function makeAdminApiFixture() {
           license_fingerprint: item.license_fingerprint,
           device_hash: "",
           status: "active",
-          assertion_ttl_seconds: item.assertion_ttl_seconds,
+          assertion_ttl_seconds: 300,
           revocation_seq: 1,
           valid_from: item.valid_from,
           valid_until: item.valid_until,
@@ -1811,12 +1731,12 @@ export function makeAdminApiFixture() {
           max_active_devices: item.max_active_devices,
           lease_seconds: 0,
           rebind_window_sec: 0,
-          pool_size: item.pool_size,
+          pool_size: 0,
           heartbeat_grace_sec: 300,
-          max_borrow_sec: item.max_borrow_sec,
+          max_borrow_sec: 0,
           allow_overdraft: 0,
-          meter_quota: item.meter_quota,
-          meter_period_sec: item.meter_period_sec,
+          meter_quota: 0,
+          meter_period_sec: 2_592_000,
           license_mode: item.license_mode,
           created_at: now,
           updated_at: now,
@@ -1835,17 +1755,19 @@ export function makeAdminApiFixture() {
       requests.creates += 1;
       await new Promise((resolve) => setTimeout(resolve, 100));
       const body = await jsonBody(request);
+      if (REFUSED_ENTITLEMENT_FIELDS.some((field) => Object.hasOwn(body, field))) {
+        return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-entitlement-refused-field" });
+      }
       now += 1;
-      const capacity = floatingCapacity(body.feature, body.pool_size);
       const row = {
         id: `ent-${nextEntitlementId}`,
         enforcement_mode: body.enforcement_mode ?? "device_bound_v1",
         project: body.project,
         feature: body.feature,
         license_fingerprint: body.license_fingerprint,
-        device_hash: body.device_hash ?? "",
+        device_hash: "",
         status: body.status ?? "active",
-        assertion_ttl_seconds: body.assertion_ttl_seconds ?? 300,
+        assertion_ttl_seconds: 300,
         revocation_seq: 1,
         valid_from: body.valid_from ?? null,
         valid_until: body.valid_until ?? null,
@@ -1861,15 +1783,15 @@ export function makeAdminApiFixture() {
         trial_started_at: null,
         trial_device_hash: null,
         max_active_devices: body.max_active_devices ?? 1,
-        lease_seconds: body.lease_seconds ?? 0,
-        rebind_window_sec: body.rebind_window_sec ?? 0,
-        pool_size: capacity.pool_size,
-        heartbeat_grace_sec: body.heartbeat_grace_sec ?? 300,
-        max_borrow_sec: body.max_borrow_sec ?? 0,
-        allow_overdraft: body.allow_overdraft ?? 0,
-        meter_quota: body.meter_quota ?? 0,
-        meter_period_sec: body.meter_period_sec ?? 2592000,
-        license_mode: capacity.license_mode,
+        lease_seconds: 0,
+        rebind_window_sec: 0,
+        pool_size: 0,
+        heartbeat_grace_sec: 300,
+        max_borrow_sec: 0,
+        allow_overdraft: 0,
+        meter_quota: 0,
+        meter_period_sec: 2_592_000,
+        license_mode: "node_locked",
         created_at: now,
         updated_at: now,
       };
@@ -1877,80 +1799,6 @@ export function makeAdminApiFixture() {
       entitlements.push(row);
       addEvent("create", row);
       return fulfill(200, makeEnvelope("entitlement_saved", publicRecord(row)));
-    }
-
-    const meterMatch = /^\/api\/admin\/entitlements\/([^/]+)\/meter$/.exec(path);
-    if (method === "GET" && meterMatch !== null) {
-      const entitlementId = decodeURIComponent(meterMatch[1]);
-      const parent = findById(entitlementId);
-      requests.meterReads.push(entitlementId);
-      await deferRead(`meter:${entitlementId}`);
-      if (parent === undefined) {
-        return fulfill(404, { ok: false, code: "not_found", request_id: "ui-e2e-meter-missing" });
-      }
-      const periodSeconds = parent.meter_period_sec > 0 ? parent.meter_period_sec : 2_592_000;
-      const consumed = Number(entitlementId.replace(/\D/g, "")) * 10;
-      return fulfill(200, makeEnvelope("meter_status", {
-        meter_quota: parent.meter_quota,
-        meter_period_sec: periodSeconds,
-        period_start: now,
-        period_end: now + periodSeconds,
-        units_consumed: consumed,
-        server_time: now,
-      }));
-    }
-
-    const devicesMatch = /^\/api\/admin\/entitlements\/([^/]+)\/devices(?:\/([^/]+)\/(disable|reenable|revoke))?$/.exec(path);
-    if (devicesMatch !== null) {
-      const entitlementId = decodeURIComponent(devicesMatch[1]);
-      const parent = findById(entitlementId);
-      const deviceHash = entitlementId === "ent-1" ? "b" : "c";
-      const defaultDevice = {
-        project: parent?.project ?? "DEFAULT",
-        feature: parent?.feature ?? "float",
-        license_fingerprint: parent?.license_fingerprint ?? "d".repeat(64),
-        device_key_id: `sha256:${deviceHash.repeat(64)}`,
-        status: "active", created_at: now, updated_at: now, last_seen_at: now, notes: "",
-      };
-      if (method === "GET" && devicesMatch[2] === undefined) {
-        requests.deviceReads.push(entitlementId);
-        await deferRead(`devices:${entitlementId}`);
-        const deviceRefreshFailure = behavior.deviceRefreshFailures.shift() ?? behavior.deviceRefreshFailure;
-        behavior.deviceRefreshFailure = null;
-        if (behavior.deferDeviceRefresh) {
-          await new Promise((resolve) => { behavior.releaseDeviceRefresh = resolve; });
-        }
-        if (deviceRefreshFailure === "abort") {
-          return route.abort("failed");
-        }
-        if (deviceRefreshFailure === "malformed") {
-          return route.fulfill({ status: 200, contentType: "application/json", body: "not-json" });
-        }
-        if (deviceRefreshFailure === "response-error") {
-          return fulfill(503, { ok: false, code: "devices_unavailable", request_id: "ui-e2e-devices-unavailable" });
-        }
-        if (deviceRefreshFailure === "missing-data") {
-          return fulfill(200, { ok: true, code: "devices_listed", request_id: "ui-e2e-devices-missing-data" });
-        }
-        return fulfill(200, makeEnvelope("devices_listed", { items: [defaultDevice] }));
-      }
-      if (method === "POST" && devicesMatch[2] !== undefined && devicesMatch[3] !== undefined) {
-        const body = await jsonBody(request);
-        requests.deviceTransitions.push({ entitlement_id: entitlementId, device_key_id: decodeURIComponent(devicesMatch[2]), action: devicesMatch[3], reason: body.reason ?? "" });
-        if (parent !== undefined) {
-          if (typeof behavior.deviceTransitionResponse === "function") {
-            const response = behavior.deviceTransitionResponse(parent, devicesMatch[3]);
-            behavior.deviceTransitionResponse = null;
-            return fulfill(200, response);
-          }
-          now += 1;
-          parent.revocation_seq += 1;
-          parent.updated_at = now;
-          addEvent(`device_${devicesMatch[3]}`, parent, body.reason ?? "");
-          return fulfill(200, makeEnvelope(`device_${devicesMatch[3]}d`, publicRecord(parent)));
-        }
-        return fulfill(200, makeEnvelope(`device_${devicesMatch[3]}d`, {}));
-      }
     }
 
     const match = /^\/api\/admin\/entitlements\/([^/]+)(?:\/(disable|reenable|revoke))?$/.exec(path);
@@ -1962,6 +1810,9 @@ export function makeAdminApiFixture() {
       if (method === "PATCH" && match[2] === undefined) {
         const body = await jsonBody(request);
         requests.patches.push(body);
+        if (REFUSED_ENTITLEMENT_FIELDS.some((field) => Object.hasOwn(body, field))) {
+          return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-entitlement-refused-field" });
+        }
         // The device limit is patched alone, and a protected grant keeps room for its connected devices.
         if (body.max_active_devices !== undefined) {
           if (Object.keys(body).some((field) => !["max_active_devices", "expected_customer_id", "expected_revocation_seq"].includes(field))) {
@@ -1977,8 +1828,6 @@ export function makeAdminApiFixture() {
         }
         now += 1;
         Object.assign(row, {
-          device_hash: body.device_hash ?? row.device_hash,
-          assertion_ttl_seconds: body.assertion_ttl_seconds ?? row.assertion_ttl_seconds,
           valid_from: body.valid_from === undefined ? row.valid_from : body.valid_from,
           valid_until: body.valid_until === undefined ? row.valid_until : body.valid_until,
           notes: body.notes ?? row.notes,

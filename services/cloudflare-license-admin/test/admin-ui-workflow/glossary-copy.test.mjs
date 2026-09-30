@@ -16,8 +16,12 @@ const SOURCE_EXTENSIONS = new Set([".ts", ".tsx"]);
 const RETIRED_TERMS = [
   { name: "'Binding:' identifier label (protected binding)", pattern: /\bBinding:/, useInstead: '"Connection ID:"' },
   { name: "'Retire connection' action (protected binding)", pattern: /Retire connection/, useInstead: '"Disconnect"' },
-  { name: "'Registered nodes' list label (legacy device)", pattern: /Registered nodes/, useInstead: '"Activated devices"' },
-  { name: "'Floating sessions' list label (floating seat)", pattern: /Floating sessions/, useInstead: '"Floating seats"' },
+  // The console shows protected connections only: the legacy-device and seat views are gone, and
+  // so is every label either one ever had (matched in any case).
+  { name: "'Registered nodes' list label (removed legacy-device view)", pattern: /Registered nodes/i, useInstead: '"Connected devices"' },
+  { name: "activated-device list label (removed legacy-device view)", pattern: /activated devices?/i, useInstead: '"Connected devices"' },
+  { name: "'Floating sessions' list label (removed seat view)", pattern: /Floating sessions/i, useInstead: "nothing: the console has no seat view" },
+  { name: "floating-seat list label (removed seat view)", pattern: /floating seats?/i, useInstead: "nothing: the console has no seat view" },
   { name: '\'"enabled"\' as a displayed status', pattern: /"enabled"/, useInstead: '"active"' },
   // Quoted (not bare) so this never matches the lowercase `row.state==='retiring'` comparison
   // value — only a capitalized, quoted display string such as `?'Retiring':...`.

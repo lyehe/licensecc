@@ -7,20 +7,7 @@ export interface EntitlementKey {
 export type EntitlementStatus = "active" | "disabled" | "revoked";
 /** A grant is protected, so it is a trial or node-locked; it never has a seat pool. */
 export type LicenseMode = "trial" | "node_locked";
-export type DeviceStatus = "active" | "revoked" | "disabled";
 export type EntitlementEventType = "create" | "update" | "disable" | "reenable" | "revoke";
-
-export interface EntitlementDeviceRecord {
-  project: string;
-  feature: string;
-  license_fingerprint: string;
-  device_key_id: string;
-  status: DeviceStatus;
-  created_at: number;
-  updated_at: number;
-  last_seen_at: number | null;
-  notes: string;
-}
 
 export interface EntitlementRecord {
   id: string;

@@ -1,4 +1,5 @@
-import type { AdminEntitlementCreateInput, EntitlementRecord, Policy, ProtectedCreateReason } from "../../../shared/api.js";
+import type { AdminEntitlementCreateInput, EntitlementRecord, ProtectedCreateReason } from "../../../shared/api.js";
+import type { Policy } from "@licensecc/licensing-domain/entitlements/policy";
 import type { Env } from "../../env.js";
 import type { ReplayAdmission } from "../../idempotency.js";
 import { envelope } from "../../responses.js";

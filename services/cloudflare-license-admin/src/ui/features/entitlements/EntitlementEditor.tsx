@@ -7,7 +7,7 @@ import { ReadNotice } from "../../shared/ReadNotice";
 import { DeviceLimitForm } from "./DeviceLimitForm";
 import { EntitlementRelationships } from "./EntitlementRelationships";
 import { generateLicenseFingerprint, isProtectedProject } from "./protectedCreate";
-import { DEVICE_LIMIT_RULE, entitlementFormErrors, policiesForProject, policyGrant, policyOptionLabel, type EntitlementEditState, type EntitlementFormState } from "./workflow";
+import { DEVICE_LIMIT_RULE, entitlementFormErrors, policiesForProject, policyOptionLabel, type EntitlementEditState, type EntitlementFormState } from "./workflow";
 
 interface EditorProps {
   form: EntitlementFormState | EntitlementEditState;
@@ -67,9 +67,8 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
 
   const errorFor = (field: string): React.ReactElement | null => errors[field] ? <span id={`entitlement-${field}-error`} role="alert">{errors[field]}</span> : null;
   const describedBy = (field: string): string | undefined => errors[field] ? `entitlement-${field}-error` : undefined;
-  // A chosen policy owns capacity: its device limit, or for a floating policy its seat pool.
-  const grant = chosenPolicy === undefined ? undefined : policyGrant(chosenPolicy);
-  const policyLimitLabel = `${grant?.label ?? "Device limit"} (from policy ${chosenPolicy?.name ?? (isCreate ? form.policy_id : "")})`;
+  // A chosen policy owns the device limit.
+  const policyLimitLabel = `Device limit (from policy ${chosenPolicy?.name ?? (isCreate ? form.policy_id : "")})`;
   return <section ref={editorRef} className="editorLayout" aria-label={title}>
     <div className="editorHeader"><div><h3 tabIndex={-1}>{title}</h3><p>{isCreate ? "Grant access to a project and feature." : `${item?.project} / ${item?.feature}`}</p></div><button type="button" disabled={busy} onClick={onCancel}>Back to entitlements</button></div>
     {locked && <p className="readState">{lockMessage ?? "Resolve the notice at the bottom of the page before changing this draft."}</p>}
@@ -81,9 +80,9 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
         <label>Feature (required)<input aria-label="Feature" name="feature" required aria-invalid={!!errors.feature} aria-describedby={describedBy("feature")} value={form.feature} onChange={(event) => change("feature", event.target.value)} />{errorFor("feature")}</label>
         <label className="wide">License fingerprint (required)<input aria-label="License fingerprint" name="license_fingerprint" required aria-invalid={!!errors.license_fingerprint} aria-describedby={describedBy("license_fingerprint")} value={form.license_fingerprint} onChange={(event) => change("license_fingerprint", event.target.value)} />{errorFor("license_fingerprint")}<span className="muted">{protectedCreate ? "The exact 64-character lowercase hexadecimal fingerprint. A new protected license can use a generated one." : "The full 64-character hexadecimal fingerprint."}</span></label>
         {protectedCreate && <div className="wide"><button type="button" onClick={() => change("license_fingerprint", generateLicenseFingerprint())}>Generate fingerprint</button></div>}
-        <div className="wide"><ReadNotice loading={!policiesReady && policiesError === null} error={policiesError} hasData={policies.length > 0} label="active policies" onRetry={onRetryPolicies} /><label>Policy (optional)<select aria-label="Policy (optional)" disabled={!policiesReady} value={form.policy_id} onChange={(event) => change("policy_id", event.target.value)}><option value="">No policy · use fields below</option>{projectPolicies.map((policy) => <option key={policy.id} value={policy.id}>{policyOptionLabel(policy)}</option>)}</select></label>{onCreatePolicy && !locked && !busy && <p><a href="#/policies" onClick={(event) => { event.preventDefault(); onCreatePolicy(); }}>Create policy…</a> <span className="muted">Opens the policy form for {form.project || "this project"}; this draft is kept and gets the new policy.</span></p>}{inheritsDates && <p className="muted">Blank validity dates inherit this policy’s defaults. The default assertion TTL value also inherits the policy lifetime.</p>}</div>
+        <div className="wide"><ReadNotice loading={!policiesReady && policiesError === null} error={policiesError} hasData={policies.length > 0} label="active policies" onRetry={onRetryPolicies} /><label>Policy (optional)<select aria-label="Policy (optional)" disabled={!policiesReady} value={form.policy_id} onChange={(event) => change("policy_id", event.target.value)}><option value="">No policy · use fields below</option>{projectPolicies.map((policy) => <option key={policy.id} value={policy.id}>{policyOptionLabel(policy)}</option>)}</select></label>{onCreatePolicy && !locked && !busy && <p><a href="#/policies" onClick={(event) => { event.preventDefault(); onCreatePolicy(); }}>Create policy…</a> <span className="muted">Opens the policy form for {form.project || "this project"}; this draft is kept and gets the new policy.</span></p>}{inheritsDates && <p className="muted">Blank validity dates inherit this policy’s defaults.</p>}</div>
         {inheritsDates
-          ? <label>{policyLimitLabel}<input aria-label={policyLimitLabel} name="max_active_devices" readOnly value={grant?.count ?? ""} /><span className="muted">{grant?.label === "Seats" ? "The policy sets a floating pool of seats." : "The policy sets the device limit."}</span></label>
+          ? <label>{policyLimitLabel}<input aria-label={policyLimitLabel} name="max_active_devices" readOnly value={chosenPolicy?.max_active_devices ?? ""} /><span className="muted">The policy sets the device limit.</span></label>
           : <label>Device limit<input aria-label="Device limit" name="max_active_devices" type="number" min={1} max={MAX_DEVICE_LIMIT} step={1} placeholder="1" value={form.max_active_devices} aria-invalid={!!errors.max_active_devices} aria-describedby={describedBy("max_active_devices")} onChange={(event) => change("max_active_devices", event.target.value === "" ? "" : Number(event.target.value))} />{errorFor("max_active_devices")}<span className="muted">Blank: a new license (entitlement) gets 1; an existing one keeps its limit.</span></label>}
       </>}
       {!isCreate && <p className="wide muted">Project, feature, and fingerprint identify this entitlement and cannot be edited. {extendValidity ? "Update Valid until to extend access." : "Save changes updates the existing entitlement."}</p>}
@@ -95,11 +94,6 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
       {!isCreate && <p className="wide muted">Protection: Protected devices</p>}
       {(errors.customer_id || errors.license_id) && <p className="wide" role="alert">{errors.customer_id || errors.license_id}</p>}
       <label className="wide">Notes<textarea aria-label="Notes" name="notes" maxLength={1000} value={form.notes} aria-invalid={!!errors.notes} aria-describedby={describedBy("notes")} onChange={(event) => change("notes", event.target.value)} />{errorFor("notes")}</label>
-      <details><summary>Advanced settings</summary><div className="summaryCards">
-        <label>Device hash<input aria-label="Device hash" name="device_hash" value={form.device_hash} aria-invalid={!!errors.device_hash} aria-describedby={describedBy("device_hash")} onChange={(event) => change("device_hash", event.target.value)} /><span className="muted">Optional 64-character hexadecimal device restriction.</span>{errorFor("device_hash")}</label>
-        <label>Assertion TTL (seconds)<input aria-label="Assertion TTL (seconds)" name="assertion_ttl_seconds" type="number" min={1} max={3600} step={1} value={form.assertion_ttl_seconds} aria-invalid={!!errors.assertion_ttl_seconds} aria-describedby={`entitlement-ttl-help${errors.assertion_ttl_seconds ? " entitlement-assertion_ttl_seconds-error" : ""}`} onChange={(event) => change("assertion_ttl_seconds", Number(event.target.value))} />{errorFor("assertion_ttl_seconds")}</label>
-        <p id="entitlement-ttl-help" className="wide muted">Signed assertion lifetime: 1–3600 seconds. Entitlement expiration is controlled by Valid until.{inheritsDates ? " The default value of 300 uses the selected policy’s TTL." : ""}</p>
-      </div></details>
       <div className="editorActions"><button className="primary" disabled={busy} type="submit">{isCreate ? "Create entitlement" : "Save changes"}</button><button disabled={busy} type="button" onClick={onCancel}>Cancel</button></div>
     </fieldset></form>
     {!isCreate && item && <DeviceLimitForm item={item} locked={locked} />}

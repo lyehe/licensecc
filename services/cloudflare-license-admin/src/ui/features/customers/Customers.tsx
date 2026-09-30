@@ -8,7 +8,7 @@ import type { CustomerSection, NavigationIntent } from "../../app/types";
 import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
 import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { TechnicalDetails } from "../../shared/FeedbackText";
-import { formatEpoch, formatUtcDate, shortHash } from "../../shared/format";
+import { formatEpoch, shortHash } from "../../shared/format";
 import { apiFailureFeedback, codeFeedback, refusalOutcome } from "../../shared/messages";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { hasCustomerDetailData, hasCustomerListData, hasCustomerTransitionData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
@@ -51,39 +51,15 @@ interface CustomerDetail {
     revocation_seq: number;
     updated_at: number;
   }>;
-  account_tokens: Array<{
-    id: string;
-    token_prefix: string;
-    name: string;
-    status: string;
-    scopes_json: string;
-    expires_at: number | null;
-    last_used_at: number | null;
-    created_at: number;
-  }>;
   licenses: Array<{ id: string; project: string; label: string; created_at: number; updated_at: number }>;
   orders: Array<{ subscription_id: string; project: string; feature: string; license_fingerprint: string; last_seq: number; order_epoch: number; updated_at: number }>;
   events: Array<{ id: number; event_type: string; prev_status: string; next_status: string; actor: string; actor_type: string; reason: string; created_at: number }>;
 }
 
-const customerSections: ReadonlyArray<CustomerSection> = ["access", "history", "tokens"];
+const customerSections: ReadonlyArray<CustomerSection> = ["access", "history", "account"];
 
 function customerDisplayName(customer: Pick<CustomerListItem, "id" | "name" | "email">): string {
   return customer.name.trim() || customer.email.trim() || customer.id;
-}
-
-function readableScopes(scopes: string): string {
-  try {
-    const parsed: unknown = JSON.parse(scopes);
-    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return Object.entries(parsed as Record<string, unknown>)
-        .map(([key, value]) => `${key.replaceAll("_", " ")}: ${Array.isArray(value) ? value.join(", ") : String(value)}`)
-        .join(" · ") || "No scopes recorded";
-    }
-  } catch {
-    // Older records can contain a non-JSON scope representation. Keep it readable.
-  }
-  return scopes || "No scopes recorded";
 }
 
 function safeMetadata(metadata: string): string {
@@ -296,7 +272,7 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
   const detailLoading = selectedCustomerId !== null && !customerDetailFence.isSettled() && detailFailure === null;
   const sectionLabel: Record<CustomerSection, string> = {
     overview: "Apps & access", access: "Apps & access", licenses: "Apps & access",
-    tokens: "Account", orders: "Activity", history: "Activity",
+    account: "Account", orders: "Activity", history: "Activity",
   };
   const primarySection = customerSection === "overview" || customerSection === "licenses" ? "access"
     : customerSection === "orders" ? "history" : customerSection;
@@ -325,16 +301,14 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
           </nav>
           {primarySection === "access" && <div className="actions"><button type="button" onClick={() => setCustomerSection(customerSection === "licenses" ? "access" : "licenses")}>{customerSection === "licenses" ? "Back to app access" : "Issued license records"}</button></div>}
           {primarySection === "history" && <div className="actions"><button type="button" onClick={() => setCustomerSection(customerSection === "orders" ? "history" : "orders")}>{customerSection === "orders" ? "Back to activity" : "Orders"}</button></div>}
-          {customerSection === "tokens" && <section className="customerAccountDetails">
+          {customerSection === "account" && <section className="customerAccountDetails" aria-labelledby="customer-account-title">
+            <h3 id="customer-account-title">Account details</h3>
             {customerDetail.customer.login_email && <p>Login email: {customerDetail.customer.login_email}</p>}
             <details><summary>Technical details</summary><dl className="recordMeta"><div><dt>Customer ID</dt><dd><code>{customerDetail.customer.id}</code></dd></div><div><dt>External reference</dt><dd>{customerDetail.customer.external_ref || "—"}</dd></div><div><dt>Created</dt><dd>{formatEpoch(customerDetail.customer.created_at)}</dd></div><div><dt>Updated</dt><dd>{formatEpoch(customerDetail.customer.updated_at)}</dd></div></dl><pre>{safeMetadata(customerDetail.customer.metadata_json)}</pre></details>
           </section>}
           {(customerSection === "access" || customerSection === "overview") && <CustomerAccess key={customerDetail.customer.id} customerId={customerDetail.customer.id} />}
           {customerSection === "licenses" && <DetailTable caption="Customer licenses" empty="No licenses are shown for this customer." limit="100" headers={["License", "Project", "Label", "Created", "Open"]}>
             {customerDetail.licenses.map((license) => <tr key={license.id}><td><code>{license.id}</code></td><td>{license.project}</td><td>{license.label || "—"}</td><td>{formatEpoch(license.created_at)}</td><td><button type="button" onClick={() => navigate({ tab: "licenses", filter: { project: license.project, customer_id: customerDetail.customer.id, q: license.id } })}>View licenses</button></td></tr>)}
-          </DetailTable>}
-          {customerSection === "tokens" && <DetailTable caption="Account tokens" empty="No account tokens are shown for this customer." limit="100" headers={["Prefix", "Name", "Status", "Scopes", "Expires", "Last used"]}>
-            {customerDetail.account_tokens.map((token) => <tr key={token.id}><td><code>{token.token_prefix}</code></td><td>{token.name || "—"}</td><td><span className={`status ${token.status}`}>{token.status === "disabled" ? "suspended" : token.status}</span></td><td><span>{readableScopes(token.scopes_json)}</span><details><summary>Raw scopes</summary><code>{token.scopes_json}</code></details></td><td>{formatUtcDate(token.expires_at)}</td><td>{formatEpoch(token.last_used_at)}</td></tr>)}
           </DetailTable>}
           {customerSection === "orders" && <DetailTable caption="Customer orders" empty="No orders are shown for this customer." limit="100" headers={["Subscription", "Project", "Feature", "Fingerprint", "Sequence", "Updated"]}>
             {customerDetail.orders.map((order) => <tr key={`${order.subscription_id}/${order.project}/${order.feature}`}><td>{order.subscription_id}</td><td>{order.project}</td><td>{order.feature}</td><td><code>{shortHash(order.license_fingerprint)}</code></td><td>{order.last_seq}</td><td>{formatEpoch(order.updated_at)}</td></tr>)}

@@ -24,7 +24,6 @@ const relativePath = (path) => relative(serviceRoot, path).split("\\").join("/")
 // The actions each `${prefix}${action}d` success code is built from (the route's action union).
 const TEMPLATE_ACTIONS = {
   entitlement_: ["disable", "reenable", "revoke"],
-  device_: ["disable", "reenable", "revoke"],
   customer_: ["disable", "reenable"],
   policy_: ["disable", "reenable"],
   webhook_: ["disable", "reenable"],
@@ -126,7 +125,7 @@ function collectClientCodes() {
  */
 const DATA_ONLY_CODES = new Map([
   ["entitlements_listed", "entitlement list rows (Entitlements, CustomerAccess)"],
-  ["entitlement", "one entitlement re-read after a seat release"],
+  ["entitlement", "entitlement detail read; the console lists entitlements instead"],
   ["policies_listed", "policy list rows and policy selectors"],
   ["policy", "policy detail read; the console lists policies instead"],
   ["webhooks_listed", "webhook endpoint rows"],

@@ -113,7 +113,9 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await createForm.getByLabel("Project").fill("DEFAULT");
   await createForm.getByLabel("Feature").fill("pro");
   await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
-  await createForm.getByText("Advanced settings", { exact: true }).click();
+  // A protected grant has no device hash or assertion TTL, so the form offers neither.
+  await expect(createForm.getByText("Advanced settings", { exact: true })).toHaveCount(0);
+  await expect(createForm.getByLabel(/device hash|assertion ttl/i)).toHaveCount(0);
   // Valid from / until are <input type="date"> (YYYY-MM-DD -> UTC-midnight epoch).
   await createForm.getByLabel("Valid from").fill("2024-03-09");
   await createForm.getByLabel("Valid until").fill("");
@@ -132,14 +134,14 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await expect.poll(() => api.requests.creates).toBe(1);
   const createdRow = page.locator(".desktopRecords tbody tr").filter({ hasText: "cus_e2e" });
   await createdRow.getByText("Technical details", { exact: true }).click();
-  // A protected grant takes no assertion TTL from the console, so it keeps the default.
-  await expect(createdRow).toContainText("300 seconds");
+  // The record's details name no device restriction, assertion TTL or borrowing.
+  await expect(createdRow).not.toContainText(/device restriction|assertion ttl|borrow/i);
   await expect(createdRow).toContainText("cus_e2e");
   await expect(createdRow).toContainText("lic_e2e");
 
   await page.getByRole("button", { name: "Edit" }).click();
   const editForm = page.locator("section.editorLayout form");
-  await editForm.getByText("Advanced settings", { exact: true }).click();
+  await expect(editForm.getByLabel(/device hash|assertion ttl/i)).toHaveCount(0);
   await editForm.getByLabel("Valid until").fill("2024-07-03");
   await editForm.getByText("Enter customer ID manually", { exact: true }).click();
   await editForm.getByLabel("Customer ID").fill("");
@@ -160,7 +162,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   });
   const patchedRow = page.locator(".desktopRecords tbody tr").filter({ hasText: "DEFAULT" });
   await patchedRow.getByText("Technical details", { exact: true }).click();
-  await expect(patchedRow).toContainText("300 seconds");
+  await expect(patchedRow).not.toContainText(/device restriction|assertion ttl|borrow/i);
   await expect(patchedRow).toContainText("ent-1");
 
   const entitlementActions = page.locator(".desktopRecords tbody tr").first();
@@ -408,8 +410,8 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   const api = makeAdminApiFixture();
   // Plan-feature policy IDs must resolve against the complete active-policy
   // selector, just as they do in the Worker contract.
-  api.seed.policy("pol_node", "Node policy");
-  api.seed.policy("pol_float", "Capacity policy");
+  api.seed.policy("pol_node", "Node policy", { type: "node_locked" });
+  api.seed.policy("pol_team", "Team policy", { max_active_devices: 2 });
   await page.route("**/api/admin/**", api.route);
 
   await page.goto("/");
@@ -452,25 +454,26 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await planFeatureForm.getByLabel("Feature key").fill("team");
   await planFeatureForm.getByLabel("Inclusion").selectOption("addon");
   await planFeatureForm.getByLabel("Add-on key").fill("team_seats");
-  await planFeatureForm.getByLabel("Policy", { exact: true }).selectOption("pol_float");
-  await planFeatureForm.getByLabel("Pool size").fill("6");
+  await planFeatureForm.getByLabel("Policy", { exact: true }).selectOption("pol_team");
+  // A plan feature grants a device limit only: the form has no seat, borrowing, meter or TTL field.
+  await expect(planFeatureForm.getByLabel(/pool size|max borrow|meter|ttl/i)).toHaveCount(0);
   await planFeatureForm.getByLabel("Device limit").fill("6");
-  await planFeatureForm.getByLabel("Max borrow").fill("172800");
   await planFeatureForm.getByRole("button", { name: "Save plan feature" }).click();
   await expect.poll(() => api.requests.catalogPlanFeatures.length).toBe(2);
-  expect(api.requests.catalogPlanFeatures[1]).toMatchObject({
+  expect(api.requests.catalogPlanFeatures[1]).toEqual({
     plan_id: "plan_pro",
+    project: "DEFAULT",
     feature_key: "team",
     feature_inclusion: "addon",
     addon_key: "team_seats",
-    policy_id: "pol_float",
-    pool_size: 6,
+    policy_id: "pol_team",
+    status: "active",
+    display_order: 0,
     max_active_devices: 6,
-    max_borrow_sec: 172800,
   });
   await page.getByRole("button", { name: "Back to plans", exact: true }).click();
   await page.getByRole("row", { name: /Pro pro/ }).getByRole("button", { name: "View plan", exact: true }).click();
-  await expect(page.getByRole("row", { name: /Team Seats team addon team_seats pol_float/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Team Seats team addon team_seats pol_team device limit 6/ })).toBeVisible();
   await expect(page.getByRole("cell", { name: "team_seats", exact: true })).toBeVisible();
 
   await openCatalogView(page, "Features");
@@ -505,7 +508,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await page.getByRole("button", { name: "Back to plans", exact: true }).click();
 
   await page.getByRole("row", { name: /Pro Annual pro/ }).getByRole("button", { name: "View plan", exact: true }).click();
-  const planFeatureRow = page.getByRole("row", { name: /Team Seats team addon team_seats pol_float/ });
+  const planFeatureRow = page.getByRole("row", { name: /Team Seats team addon team_seats pol_team/ });
   await clickAction(planFeatureRow.getByRole("button", { name: "Disable", includeHidden: true }));
   await page.getByLabel("Reason (required)").fill("hide add-on");
   await page.getByRole("button", { name: "Confirm" }).click();
@@ -625,7 +628,10 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await expect(page.getByRole("heading", { name: "Create" })).toBeVisible();
   await expect(page.getByRole("cell", { name: "core", exact: true })).toBeVisible();
   await expect(page.getByRole("cell", { name: "team", exact: true })).toBeVisible();
-  await expect(page.getByText("floating")).toBeVisible();
+  // Each item is a protected grant: the trial policy's row is a trial, the other is node-locked,
+  // and each shows its device limit.
+  await expect(page.getByRole("row", { name: /^team trial pol_team .* 6 team_seats$/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /^core node_locked pol_node .* 1 included$/ })).toBeVisible();
 
   const applyButton = form.getByRole("button", { name: "Apply" });
   await expect(applyButton).toBeEnabled();
@@ -770,7 +776,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await page.getByRole("link", { name: "License access", exact: true }).click();
   await expect(page.getByRole("cell", { name: /DEFAULT\s+core/ })).toBeVisible();
   await expect(page.getByRole("cell", { name: /DEFAULT\s+team/ })).toBeVisible();
-  await expect(page.locator(".desktopRecords").getByText("floating", { exact: true })).toBeVisible();
+  await expect(page.locator(".desktopRecords tbody tr").filter({ hasText: "team" }).first()).toContainText("Device limit 6");
   const projectedEntitlement = page.locator(".desktopRecords tbody tr").filter({ hasText: "core" }).first();
   await projectedEntitlement.getByText("Technical details", { exact: true }).click();
   await expect(projectedEntitlement).toContainText("License ID");
@@ -799,8 +805,12 @@ test("an operator edits a policy's device limit without touching its identity", 
   const [patch] = api.requests.policyPatches;
   expect(patch.id).toBe("pol_edit");
   expect(patch.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
-  expect(patch.body).toMatchObject({ max_active_devices: 5, notes: "tier", pool_size: 0 });
-  for (const field of ["project", "name", "type", "status"]) expect(Object.hasOwn(patch.body, field)).toBe(false);
+  expect(patch.body).toMatchObject({ max_active_devices: 5, notes: "tier" });
+  // A PATCH names only patchable fields: never the identity, and never a seat, borrowing, meter,
+  // TTL or device-proof field, which the Worker refuses.
+  for (const field of ["project", "name", "type", "status", "pool_size", "max_borrow_sec", "meter_quota", "meter_period_sec", "assertion_ttl_seconds", "trial_require_device_proof"]) {
+    expect(Object.hasOwn(patch.body, field)).toBe(false);
+  }
   await expect(row).toContainText("Max devices 5");
   await expect(editor).toHaveCount(0);
 });

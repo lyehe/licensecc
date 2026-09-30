@@ -158,7 +158,7 @@ test("a create without a policy sends its device limit, and a chosen policy show
   const api = makeAdminApiFixture();
   api.seed.policy("pol_pro", "Pro", { project: "APP", type: "node_locked", max_active_devices: 3 });
   api.seed.policy("pol_other", "Other app", { project: "OTHER", type: "node_locked", max_active_devices: 9 });
-  api.seed.policy("pol_team", "Team", { project: "APP", type: "floating", pool_size: 5, max_active_devices: 1 });
+  api.seed.policy("pol_team", "Team", { project: "APP", type: "subscription", max_active_devices: 1 });
   await page.route("**/api/admin/**", api.route);
   const writes = [];
   await page.route("**/api/admin/entitlements", async route => {
@@ -170,9 +170,8 @@ test("a create without a policy sends its device limit, and a chosen policy show
   await form.getByLabel("Feature", { exact: true }).fill("PRO");
   await form.getByLabel("License fingerprint", { exact: true }).fill("a".repeat(64));
   const policy = form.getByLabel("Policy (optional)", { exact: true });
-  // Only this project's policies are offered, each with what it grants; a floating policy grants
-  // seats, which a protected create never offers, so "Team" is excluded even though it is APP's.
-  await expect(policy.locator("option")).toHaveText(["No policy · use fields below", "Pro · 3 devices · APP"]);
+  // Only this project's policies are offered, each with the device limit it grants.
+  await expect(policy.locator("option")).toHaveText(["No policy · use fields below", "Pro · 3 devices · APP", "Team · 1 device · APP"]);
   // Blank sends nothing, so a new grant gets 1 and an existing one keeps the limit it already has.
   const own = form.getByLabel("Device limit", { exact: true });
   await expect(own).toHaveValue("");

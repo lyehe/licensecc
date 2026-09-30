@@ -10,17 +10,15 @@ export type AdminTab =
   | "fulfillment"
   | "reports";
 
-export type CustomerSection = "overview" | "access" | "licenses" | "tokens" | "orders" | "history";
+export type CustomerSection = "overview" | "access" | "licenses" | "account" | "orders" | "history";
 export type CatalogView = "plans" | "features" | "import";
-export type CustomerAccessView = "grants" | "nodes" | "sessions";
 
 /**
- * A customer's drill-down into one app's records. `manage` marks the Manage access entry: the
+ * A customer's drill-down into one app's access grants. `manage` marks the Manage access entry: the
  * address carries only that marker, while the grant it opened stays in the in-memory history entry.
  */
 export interface CustomerAccessRoute {
   app: string;
-  view: CustomerAccessView;
   manage: boolean;
 }
 

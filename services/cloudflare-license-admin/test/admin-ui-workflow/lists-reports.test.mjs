@@ -113,9 +113,8 @@ test("admin UI workflow builds the timeseries path with a from/to window for a l
   assert.deepEqual(workflow.TIMESERIES_RANGE_DAYS, [7, 30, 90]);
 });
 
-test("admin UI workflow builds the expiring + release-seats paths", async () => {
+test("admin UI workflow builds the expiring paths", async () => {
   const reports = await loadWorkflowModule("features/reports/workflow.ts");
-  const entitlements = await loadWorkflowModule("features/entitlements/workflow.ts");
   const urls = await loadWorkflowModule("shared/urls.ts");
   assert.equal(reports.expiringPath(30), "/api/admin/report/expiring?within_days=30");
   assert.equal(reports.expiringPath(7), "/api/admin/report/expiring?within_days=7");
@@ -123,7 +122,6 @@ test("admin UI workflow builds the expiring + release-seats paths", async () => 
     urls.withCursor(reports.expiringPath(90), "50"),
     "/api/admin/report/expiring?within_days=90&cursor=50",
   );
-  assert.equal(entitlements.releaseSeatsPath("ent-123"), "/api/admin/entitlements/ent-123/release-seats");
 });
 
 test("admin UI workflow classifies entitlement health by status + valid_until window", async () => {

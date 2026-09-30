@@ -71,13 +71,12 @@ export function DeviceLimitForm({ item, locked }: { item: EntitlementRecord; loc
     });
   }
 
-  const protectedGrant = item.enforcement_mode === "device_bound_v1";
   return <form className="wide" aria-label="Device limit" noValidate onSubmit={(event) => void save(event)}><fieldset disabled={locked}>
     <label>Device limit<input aria-label="Device limit" name="max_active_devices" type="number" min={1} max={MAX_DEVICE_LIMIT} step={1} value={draft}
       aria-invalid={error !== null} aria-describedby={`device-limit-help${error === null ? "" : " device-limit-error"}`}
       onChange={(event) => { setError(null); setDraft(Number(event.target.value)); }} /></label>
     {error !== null && <span id="device-limit-error" role="alert">{error}</span>}
-    <p id="device-limit-help" className="muted">The most devices this license (entitlement) can have connected at once. It is saved on its own{protectedGrant ? " and can't drop below the devices already connected" : ""}.</p>
+    <p id="device-limit-help" className="muted">The most devices this license (entitlement) can have connected at once. It is saved on its own and can't drop below the devices already connected.</p>
     <button type="submit" disabled={busy || operationLocked}>Save device limit</button>
   </fieldset></form>;
 }

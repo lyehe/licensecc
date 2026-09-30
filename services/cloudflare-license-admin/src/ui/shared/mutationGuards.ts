@@ -46,11 +46,6 @@ export function documentedMutationPolicy(...initial: readonly MutationFailureRul
 
 const invalidRequest = ["invalid_idempotency_key", "invalid_json", "invalid_request"] as const;
 const reasonedRequest = [...invalidRequest, "reason_required"] as const;
-// Device and force-release routes reject malformed identifiers/bodies, but
-// their documented 400 envelopes intentionally do not include the generic
-// `invalid_request` code used by other mutation families.
-const deviceInvalidRequest = ["invalid_idempotency_key", "invalid_json"] as const;
-const deviceReasonedRequest = [...deviceInvalidRequest, "reason_required"] as const;
 
 /** Exact Worker/OpenAPI failure matrix for every keyed admin UI mutation. */
 export const mutationFailurePolicies = {
@@ -90,26 +85,6 @@ export const mutationFailurePolicies = {
     ),
     revoke: documentedMutationPolicy(
       { status: 400, codes: ["invalid_idempotency_key", "invalid_json", "invalid_request", "entitlement_batch_too_large", "reason_required"] },
-    ),
-  },
-  releaseSeats: documentedMutationPolicy(
-    { status: 400, codes: ["invalid_entitlement_id", ...deviceReasonedRequest] },
-  ),
-  deviceTransition: {
-    disable: documentedMutationPolicy(
-      { status: 400, codes: ["invalid_entitlement_id", "invalid_device_key_id", ...deviceReasonedRequest] },
-      { status: 404, codes: ["not_found", "device_not_found"] },
-      { status: 409, codes: ["device_is_terminal"] },
-    ),
-    reenable: documentedMutationPolicy(
-      { status: 400, codes: ["invalid_entitlement_id", "invalid_device_key_id", ...deviceInvalidRequest] },
-      { status: 404, codes: ["not_found", "device_not_found"] },
-      { status: 409, codes: ["device_is_terminal"] },
-    ),
-    revoke: documentedMutationPolicy(
-      { status: 400, codes: ["invalid_entitlement_id", "invalid_device_key_id", ...deviceReasonedRequest] },
-      { status: 404, codes: ["not_found", "device_not_found"] },
-      { status: 409, codes: ["device_is_terminal"] },
     ),
   },
   customerTransition: {
@@ -277,10 +252,6 @@ function integerInRangeField(value: UnknownRecord, field: string, min: number, m
   return numberField(value, field) && (value[field] as number) >= min && (value[field] as number) <= max;
 }
 
-function finiteNumberInRangeField(value: UnknownRecord, field: string, min: number, max: number): boolean {
-  return typeof value[field] === "number" && Number.isFinite(value[field]) && value[field] >= min && value[field] <= max;
-}
-
 function nullableIntegerField(value: UnknownRecord, field: string): boolean {
   return value[field] === null || numberField(value, field);
 }
@@ -341,7 +312,7 @@ export function parseMutationResponse<T>(
 
 const ENTITLEMENT_STATUSES = ["active", "disabled", "revoked"] as const;
 const LICENSE_MODES = ["trial", "node_locked", "floating"] as const;
-const DEVICE_STATUSES = ["active", "disabled", "revoked"] as const;
+const POLICY_TYPES = ["trial", "node_locked", "subscription"] as const;
 const CATALOG_STATUSES = ["active", "disabled"] as const;
 const MAX_DURATION_SECONDS = 3_153_600_000;
 const MAX_CAPACITY = 1_000_000;
@@ -378,7 +349,7 @@ export function hasCustomerTransitionData(value: unknown, id: string, expectedSt
 
 export function hasPolicyTransitionData(value: unknown, id: string, expectedStatus: string): boolean {
   const data = record(value);
-  return data !== null && data.id === id && stringField(data, "project") && stringField(data, "name") && enumField(data, "type", ["trial", "node_locked", "floating", "subscription"] as const) && enumField(data, "status", CATALOG_STATUSES) && statusField(data, expectedStatus) && nullableIntegerInRangeField(data, "valid_from_offset_sec", -MAX_DURATION_SECONDS, MAX_DURATION_SECONDS) && nullableIntegerInRangeField(data, "duration_sec", 0, MAX_DURATION_SECONDS) && integerInRangeField(data, "assertion_ttl_seconds", 1, 3600) && integerInRangeField(data, "pool_size", 0, MAX_CAPACITY) && integerInRangeField(data, "max_active_devices", 0, MAX_CAPACITY) && integerInRangeField(data, "max_borrow_sec", 0, MAX_DURATION_SECONDS) && integerInRangeField(data, "meter_quota", 0, MAX_METER_QUOTA) && integerInRangeField(data, "meter_period_sec", 0, MAX_DURATION_SECONDS) && enumField(data, "expiry_strategy", ["fixed_window", "non_expiring"] as const) && enumField(data, "trial_expiration_basis", ["from_issue", "from_first_activation", "from_first_use"] as const) && integerInRangeField(data, "trial_duration_sec", 0, MAX_DURATION_SECONDS) && binaryFlagField(data, "trial_one_per_device") && binaryFlagField(data, "trial_require_device_proof") && typeof data.notes === "string" && nonNegativeIntegerField(data, "created_at") && nonNegativeIntegerField(data, "updated_at");
+  return data !== null && data.id === id && stringField(data, "project") && stringField(data, "name") && enumField(data, "type", POLICY_TYPES) && enumField(data, "status", CATALOG_STATUSES) && statusField(data, expectedStatus) && nullableIntegerInRangeField(data, "valid_from_offset_sec", -MAX_DURATION_SECONDS, MAX_DURATION_SECONDS) && nullableIntegerInRangeField(data, "duration_sec", 0, MAX_DURATION_SECONDS) && integerInRangeField(data, "max_active_devices", 0, MAX_CAPACITY) && enumField(data, "expiry_strategy", ["fixed_window", "non_expiring"] as const) && enumField(data, "trial_expiration_basis", ["from_issue", "from_first_activation", "from_first_use"] as const) && integerInRangeField(data, "trial_duration_sec", 0, MAX_DURATION_SECONDS) && binaryFlagField(data, "trial_one_per_device") && typeof data.notes === "string" && nonNegativeIntegerField(data, "created_at") && nonNegativeIntegerField(data, "updated_at");
 }
 
 export function hasWebhookTransitionData(value: unknown, id: string, expectedStatus: string): boolean {
@@ -398,20 +369,7 @@ export function hasCatalogPlanTransitionData(value: unknown, id: string, expecte
 
 export function hasCatalogPlanFeatureTransitionData(value: unknown, planId: string, featureKey: string, expectedStatus: string): boolean {
   const data = record(value);
-  return data !== null && data.plan_id === planId && data.feature_key === featureKey && stringField(data, "project") && stringField(data, "plan_key") && stringField(data, "feature_name") && enumField(data, "feature_inclusion", ["included", "addon"] as const) && nullableStringField(data, "addon_key") && (data.feature_inclusion !== "addon" || stringField(data, "addon_key")) && nullableStringField(data, "policy_id") && enumField(data, "status", CATALOG_STATUSES) && statusField(data, expectedStatus) && integerInRangeField(data, "display_order", 0, MAX_CAPACITY) && nullableIntegerInRangeField(data, "assertion_ttl_seconds", 0, 3600) && nullableIntegerInRangeField(data, "pool_size", 0, MAX_CAPACITY) && nullableIntegerInRangeField(data, "max_active_devices", 0, MAX_CAPACITY) && nullableIntegerInRangeField(data, "max_borrow_sec", 0, MAX_DURATION_SECONDS) && nullableIntegerInRangeField(data, "meter_quota", 0, MAX_METER_QUOTA) && nullableIntegerInRangeField(data, "meter_period_sec", 0, MAX_DURATION_SECONDS) && nonNegativeIntegerField(data, "created_at") && nonNegativeIntegerField(data, "updated_at");
-}
-
-export function hasDeviceTransitionData(value: unknown, expected: { id: string; project: string; feature: string; license_fingerprint: string; status: string; revocation_seq: number }): boolean {
-  const data = record(value);
-  return hasEntitlementRecordData(data) && data !== null && data.id === expected.id && data.project === expected.project && data.feature === expected.feature && data.license_fingerprint === expected.license_fingerprint && statusField(data, expected.status) && (data.revocation_seq as number) > expected.revocation_seq;
-}
-
-export function hasReleaseSeatsData(value: unknown): value is { released: number; seat_ids: string[] } {
-  const data = record(value);
-  const released = data?.released;
-  const seatIds = data?.seat_ids;
-  const uniqueSeatIds = Array.isArray(seatIds) ? new Set(seatIds) : null;
-  return data !== null && typeof released === "number" && Number.isSafeInteger(released) && released >= 0 && Array.isArray(seatIds) && uniqueSeatIds !== null && seatIds.length === released && uniqueSeatIds.size === released && seatIds.every((id) => typeof id === "string" && id !== "");
+  return data !== null && data.plan_id === planId && data.feature_key === featureKey && stringField(data, "project") && stringField(data, "plan_key") && stringField(data, "feature_name") && enumField(data, "feature_inclusion", ["included", "addon"] as const) && nullableStringField(data, "addon_key") && (data.feature_inclusion !== "addon" || stringField(data, "addon_key")) && nullableStringField(data, "policy_id") && enumField(data, "status", CATALOG_STATUSES) && statusField(data, expectedStatus) && integerInRangeField(data, "display_order", 0, MAX_CAPACITY) && nullableIntegerInRangeField(data, "max_active_devices", 0, MAX_CAPACITY) && nonNegativeIntegerField(data, "created_at") && nonNegativeIntegerField(data, "updated_at");
 }
 
 export function hasBatchResultsData(value: unknown, expectedIds: readonly string[], expectedCode: string): value is { results: Array<{ id: string; ok: boolean; code: string }> } {
@@ -447,36 +405,12 @@ export function hasEntitlementListData(value: unknown): boolean {
   return data !== null && cursorField(data) && Array.isArray(data.items) && data.items.every((item) => hasEntitlementRecordData(item));
 }
 
-export function hasDeviceListData(value: unknown): boolean {
-  const data = record(value);
-  return data !== null && Array.isArray(data.items) && data.items.every((item) => {
-    const row = record(item);
-    return row !== null && stringField(row, "project") && stringField(row, "feature") && stringField(row, "license_fingerprint") && stringField(row, "device_key_id") && enumField(row, "status", DEVICE_STATUSES) && nonNegativeIntegerField(row, "created_at") && nonNegativeIntegerField(row, "updated_at") && nullableIntegerInRangeField(row, "last_seen_at", 0, Number.MAX_SAFE_INTEGER) && typeof row.notes === "string";
-  });
-}
-
-export function hasMeterStatusData(value: unknown): boolean {
-  const data = record(value);
-  return data !== null &&
-    integerInRangeField(data, "meter_quota", 0, MAX_METER_QUOTA) &&
-    integerInRangeField(data, "meter_period_sec", 0, MAX_DURATION_SECONDS) &&
-    nonNegativeIntegerField(data, "period_start") &&
-    nonNegativeIntegerField(data, "period_end") &&
-    (data.period_end as number) >= (data.period_start as number) &&
-    nonNegativeIntegerField(data, "units_consumed") &&
-    nonNegativeIntegerField(data, "server_time");
-}
-
 export function hasCustomerDetailData(value: unknown, id?: string): boolean {
   const data = record(value);
   const customer = record(data?.customer);
   const customerEntitlements = data !== null && Array.isArray(data.entitlements) && data.entitlements.every((item) => {
     const row = record(item);
     return row !== null && stringField(row, "project") && stringField(row, "feature") && stringField(row, "license_fingerprint") && enumField(row, "status", ENTITLEMENT_STATUSES) && nullableIntegerInRangeField(row, "valid_from", 0, Number.MAX_SAFE_INTEGER) && nullableIntegerInRangeField(row, "valid_until", 0, Number.MAX_SAFE_INTEGER) && nonNegativeIntegerField(row, "revocation_seq") && nonNegativeIntegerField(row, "updated_at");
-  });
-  const accountTokens = data !== null && Array.isArray(data.account_tokens) && data.account_tokens.every((item) => {
-    const row = record(item);
-    return row !== null && stringField(row, "id") && stringField(row, "token_prefix") && typeof row.name === "string" && enumField(row, "status", ["active", "disabled", "revoked"] as const) && typeof row.scopes_json === "string" && nullableIntegerInRangeField(row, "expires_at", 0, Number.MAX_SAFE_INTEGER) && nullableIntegerInRangeField(row, "last_used_at", 0, Number.MAX_SAFE_INTEGER) && nonNegativeIntegerField(row, "created_at");
   });
   const licenses = data !== null && Array.isArray(data.licenses) && data.licenses.every((item) => {
     const row = record(item);
@@ -490,7 +424,7 @@ export function hasCustomerDetailData(value: unknown, id?: string): boolean {
     const row = record(item);
     return row !== null && nonNegativeIntegerField(row, "id") && stringField(row, "event_type") && typeof row.prev_status === "string" && typeof row.next_status === "string" && stringField(row, "actor") && stringField(row, "actor_type") && typeof row.reason === "string" && nonNegativeIntegerField(row, "created_at");
   });
-  return data !== null && customer !== null && (id === undefined || customer.id === id) && stringField(customer, "id") && typeof customer.name === "string" && typeof customer.email === "string" && enumField(customer, "status", ["active", "disabled"] as const) && typeof customer.external_ref === "string" && typeof customer.metadata_json === "string" && nonNegativeIntegerField(customer, "created_at") && nonNegativeIntegerField(customer, "updated_at") && customerEntitlements && accountTokens && licenses && orders && events;
+  return data !== null && customer !== null && (id === undefined || customer.id === id) && stringField(customer, "id") && typeof customer.name === "string" && typeof customer.email === "string" && enumField(customer, "status", ["active", "disabled"] as const) && typeof customer.external_ref === "string" && typeof customer.metadata_json === "string" && nonNegativeIntegerField(customer, "created_at") && nonNegativeIntegerField(customer, "updated_at") && customerEntitlements && licenses && orders && events;
 }
 
 export function hasCustomerListData(value: unknown): boolean {
@@ -510,7 +444,7 @@ export function hasPolicyListData(value: unknown): boolean {
   const data = record(value);
   return data !== null && cursorField(data) && Array.isArray(data.items) && data.items.every((item) => {
     const row = record(item);
-    return row !== null && stringField(row, "id") && stringField(row, "project") && stringField(row, "name") && enumField(row, "type", ["trial", "node_locked", "floating", "subscription"] as const) && enumField(row, "status", CATALOG_STATUSES) && nullableIntegerInRangeField(row, "valid_from_offset_sec", -MAX_DURATION_SECONDS, MAX_DURATION_SECONDS) && nullableIntegerInRangeField(row, "duration_sec", 0, MAX_DURATION_SECONDS) && integerInRangeField(row, "assertion_ttl_seconds", 1, 3600) && integerInRangeField(row, "pool_size", 0, MAX_CAPACITY) && integerInRangeField(row, "max_active_devices", 0, MAX_CAPACITY) && integerInRangeField(row, "max_borrow_sec", 0, MAX_DURATION_SECONDS) && integerInRangeField(row, "meter_quota", 0, MAX_METER_QUOTA) && integerInRangeField(row, "meter_period_sec", 0, MAX_DURATION_SECONDS) && enumField(row, "expiry_strategy", ["fixed_window", "non_expiring"] as const) && enumField(row, "trial_expiration_basis", ["from_issue", "from_first_activation", "from_first_use"] as const) && integerInRangeField(row, "trial_duration_sec", 0, MAX_DURATION_SECONDS) && binaryFlagField(row, "trial_one_per_device") && binaryFlagField(row, "trial_require_device_proof") && typeof row.notes === "string" && nonNegativeIntegerField(row, "created_at") && nonNegativeIntegerField(row, "updated_at");
+    return row !== null && stringField(row, "id") && stringField(row, "project") && stringField(row, "name") && enumField(row, "type", POLICY_TYPES) && enumField(row, "status", CATALOG_STATUSES) && nullableIntegerInRangeField(row, "valid_from_offset_sec", -MAX_DURATION_SECONDS, MAX_DURATION_SECONDS) && nullableIntegerInRangeField(row, "duration_sec", 0, MAX_DURATION_SECONDS) && integerInRangeField(row, "max_active_devices", 0, MAX_CAPACITY) && enumField(row, "expiry_strategy", ["fixed_window", "non_expiring"] as const) && enumField(row, "trial_expiration_basis", ["from_issue", "from_first_activation", "from_first_use"] as const) && integerInRangeField(row, "trial_duration_sec", 0, MAX_DURATION_SECONDS) && binaryFlagField(row, "trial_one_per_device") && typeof row.notes === "string" && nonNegativeIntegerField(row, "created_at") && nonNegativeIntegerField(row, "updated_at");
   });
 }
 
@@ -572,7 +506,7 @@ export function hasCatalogPlanFeatureListData(value: unknown): boolean {
   const data = record(value);
   return data !== null && Array.isArray(data.items) && data.items.every((item) => {
     const row = record(item);
-    return row !== null && stringField(row, "project") && stringField(row, "plan_id") && stringField(row, "plan_key") && stringField(row, "feature_key") && stringField(row, "feature_name") && enumField(row, "feature_inclusion", ["included", "addon"] as const) && nullableStringField(row, "addon_key") && (row.feature_inclusion !== "addon" || stringField(row, "addon_key")) && nullableStringField(row, "policy_id") && enumField(row, "status", CATALOG_STATUSES) && integerInRangeField(row, "display_order", 0, MAX_CAPACITY) && nullableIntegerInRangeField(row, "assertion_ttl_seconds", 0, 3600) && nullableIntegerInRangeField(row, "pool_size", 0, MAX_CAPACITY) && nullableIntegerInRangeField(row, "max_active_devices", 0, MAX_CAPACITY) && nullableIntegerInRangeField(row, "max_borrow_sec", 0, MAX_DURATION_SECONDS) && nullableIntegerInRangeField(row, "meter_quota", 0, MAX_METER_QUOTA) && nullableIntegerInRangeField(row, "meter_period_sec", 0, MAX_DURATION_SECONDS) && nonNegativeIntegerField(row, "created_at") && nonNegativeIntegerField(row, "updated_at");
+    return row !== null && stringField(row, "project") && stringField(row, "plan_id") && stringField(row, "plan_key") && stringField(row, "feature_key") && stringField(row, "feature_name") && enumField(row, "feature_inclusion", ["included", "addon"] as const) && nullableStringField(row, "addon_key") && (row.feature_inclusion !== "addon" || stringField(row, "addon_key")) && nullableStringField(row, "policy_id") && enumField(row, "status", CATALOG_STATUSES) && integerInRangeField(row, "display_order", 0, MAX_CAPACITY) && nullableIntegerInRangeField(row, "max_active_devices", 0, MAX_CAPACITY) && nonNegativeIntegerField(row, "created_at") && nonNegativeIntegerField(row, "updated_at");
   });
 }
 
@@ -635,8 +569,7 @@ export function hasCatalogImportManifestData(value: unknown): boolean {
     return row !== null && stringField(row, "project") && stringField(row, "feature_key") && typeof row.name === "string" &&
       typeof row.description === "string" && typeof row.category === "string" && enumField(row, "status", CATALOG_STATUSES);
   };
-  // A manifest plan feature names its policy and optional device limit; it has no seat, borrowing,
-  // meter or TTL field.
+  // A manifest plan feature names its policy and optional device limit.
   const planFeatureInput = (item: unknown): boolean => {
     const row = record(item);
     if (row === null || !stringField(row, "project") || !stringField(row, "feature_key") ||
@@ -660,11 +593,9 @@ function hasPlanProjectionItemData(value: unknown): boolean {
   const item = record(value);
   if (item === null || !stringField(item, "project") || !stringField(item, "feature") || !stringField(item, "license_fingerprint") ||
     !nullableStringField(item, "policy_id") || !enumField(item, "source", ["included", "addon"] as const) || !nullableStringField(item, "addon_key") ||
-    !enumField(item, "license_mode", LICENSE_MODES) || !enumField(item, "status", ENTITLEMENT_STATUSES) ||
+    !enumField(item, "license_mode", ["trial", "node_locked"] as const) || !enumField(item, "status", ENTITLEMENT_STATUSES) ||
     !nullableIntegerInRangeField(item, "valid_from", 0, Number.MAX_SAFE_INTEGER) || !nullableIntegerInRangeField(item, "valid_until", 0, Number.MAX_SAFE_INTEGER) ||
-    !integerInRangeField(item, "assertion_ttl_seconds", 1, 3600) || !integerInRangeField(item, "pool_size", 0, MAX_CAPACITY) ||
-    !integerInRangeField(item, "max_active_devices", 0, MAX_CAPACITY) || !integerInRangeField(item, "max_borrow_sec", 0, MAX_DURATION_SECONDS) ||
-    !integerInRangeField(item, "meter_quota", 0, MAX_METER_QUOTA) || !integerInRangeField(item, "meter_period_sec", 0, MAX_DURATION_SECONDS)) {
+    !integerInRangeField(item, "max_active_devices", 0, MAX_CAPACITY)) {
     return false;
   }
   if (item.source === "addon" && !stringField(item, "addon_key")) return false;
@@ -804,13 +735,12 @@ export function hasReportData(value: unknown): boolean {
   const data = record(value);
   const entitlements = record(data?.entitlements);
   const customers = record(data?.customers);
-  const tokens = record(data?.account_tokens);
   const licenses = record(data?.licenses);
   const fulfillment = record(data?.fulfillment);
-  if (data === null || entitlements === null || customers === null || tokens === null || licenses === null || fulfillment === null || !nonNegativeIntegerField(data, "generated_at") || !nonNegativeIntegerField(data, "customer_suspensions_7d") ||
+  if (data === null || entitlements === null || customers === null || licenses === null || fulfillment === null || !nonNegativeIntegerField(data, "generated_at") || !nonNegativeIntegerField(data, "customer_suspensions_7d") ||
     !nonNegativeIntegerField(entitlements, "total") || !nonNegativeIntegerField(entitlements, "active") || !nonNegativeIntegerField(entitlements, "revoked") || !nonNegativeIntegerField(entitlements, "disabled") ||
     !nonNegativeIntegerField(customers, "total") || !nonNegativeIntegerField(customers, "active") || !nonNegativeIntegerField(customers, "disabled") ||
-    !nonNegativeIntegerField(tokens, "active") || !nonNegativeIntegerField(licenses, "total") || !hasFulfillmentSummary(fulfillment) ||
+    !nonNegativeIntegerField(licenses, "total") || !hasFulfillmentSummary(fulfillment) ||
     !nonNegativeIntegerField(fulfillment, "events_24h") || !nonNegativeIntegerField(fulfillment, "events_7d")) {
     return false;
   }
@@ -838,7 +768,7 @@ export function hasTimeseriesData(value: unknown): boolean {
   return data.buckets.every((item) => {
     const bucket = record(item);
     if (bucket === null || !nonNegativeIntegerField(bucket, "start") || (bucket.start as number) < (data.from as number) || (bucket.start as number) >= (data.to as number) || (bucket.start as number) <= previousStart ||
-      !nonNegativeIntegerField(bucket, "checkouts") || !nonNegativeIntegerField(bucket, "releases") || !nonNegativeIntegerField(bucket, "denials") || !finiteNumberInRangeField(bucket, "denial_rate", 0, 1) || !nonNegativeIntegerField(bucket, "fulfillment_events")) {
+      !nonNegativeIntegerField(bucket, "denials") || !nonNegativeIntegerField(bucket, "fulfillment_events")) {
       return false;
     }
     previousStart = bucket.start as number;

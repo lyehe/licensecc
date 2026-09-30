@@ -17,7 +17,7 @@ test("admin navigation resolves root and every supported domain without side eff
 
 test("admin customer addresses round trip full opaque identifiers and supported sections", async () => {
   const navigation = await loadWorkflowModule("app/navigationState.ts");
-  for (const section of ["overview", "access", "licenses", "tokens", "orders", "history"]) {
+  for (const section of ["overview", "access", "licenses", "account", "orders", "history"]) {
     const route = { tab: "customers", customerId: "cus/space é?&#", section, filter: { status: "disabled" } };
     const hash = navigation.hashForRoute(route);
     assert.match(hash, /^#\/customers\/cus%2Fspace%20%C3%A9%3F%26%23\?/u);
@@ -86,25 +86,19 @@ test("admin catalog URLs expose only the supported Plans, Features, and Import v
   }
 });
 
-test("customer app drill-downs round trip the app and record view, omitting the default grants view", async () => {
+test("customer app drill-downs round trip the app, which shows only its access grants", async () => {
   const navigation = await loadWorkflowModule("app/navigationState.ts");
   const base = { tab: "customers", customerId: "cus_1", section: "access", filter: {} };
   const cases = [
-    [{ ...base, access: { app: "CAD", view: "grants", manage: false } }, "#/customers/cus_1?section=access&app=CAD"],
-    [{ ...base, access: { app: "CAD", view: "nodes", manage: false } }, "#/customers/cus_1?section=access&app=CAD&view=nodes"],
-    [{ ...base, access: { app: "CAD", view: "sessions", manage: false } }, "#/customers/cus_1?section=access&app=CAD&view=sessions"],
-    [{ ...base, filter: { status: "disabled" }, access: { app: "App/é &?#", view: "nodes", manage: false } }, "#/customers/cus_1?status=disabled&section=access&app=App%2F%C3%A9+%26%3F%23&view=nodes"],
+    [{ ...base, access: { app: "CAD", manage: false } }, "#/customers/cus_1?section=access&app=CAD"],
+    [{ ...base, filter: { status: "disabled" }, access: { app: "App/é &?#", manage: false } }, "#/customers/cus_1?status=disabled&section=access&app=App%2F%C3%A9+%26%3F%23"],
     // Manage access leaves only a marker in the address; the grant it opened stays in memory.
-    [{ ...base, access: { app: "CAD", view: "grants", manage: true } }, "#/customers/cus_1?section=access&app=CAD&manage=1"],
+    [{ ...base, access: { app: "CAD", manage: true } }, "#/customers/cus_1?section=access&app=CAD&manage=1"],
   ];
   for (const [route, hash] of cases) {
     assert.equal(navigation.hashForRoute(route), hash);
     assert.deepEqual(navigation.parseAdminHash(hash), { route, invalid: false }, hash);
   }
-  // An explicit default view is accepted and written back without it.
-  const explicit = navigation.parseAdminHash("#/customers/cus_1?section=access&app=CAD&view=grants");
-  assert.deepEqual(explicit, { route: cases[0][0], invalid: false });
-  assert.equal(navigation.hashForRoute(explicit.route), cases[0][1]);
   // The all-apps view keeps its existing address.
   assert.deepEqual(navigation.parseAdminHash("#/customers/cus_1?section=access"), { route: base, invalid: false });
 });
@@ -133,6 +127,10 @@ test("admin navigation rejects app, record-view, Manage access, and plan combina
     `${customer}?view=nodes`,
     `${customer}?section=access&view=nodes`,
     `${customer}?section=access&view=grants`,
+    // An app shows its access grants only; no address names another record view, even the grants.
+    `${customer}?section=access&app=CAD&view=grants`,
+    `${customer}?section=access&app=CAD&view=nodes`,
+    `${customer}?section=access&app=CAD&view=sessions`,
     `${customer}?section=access&app=CAD&view=unknown`,
     `${customer}?section=access&app=CAD&view=`,
     `${customer}?section=access&app=`,
@@ -159,7 +157,7 @@ test("admin navigation rejects app, record-view, Manage access, and plan combina
 
 test("serializing a drill-down never writes a combination the parser rejects", async () => {
   const navigation = await loadWorkflowModule("app/navigationState.ts");
-  const access = { app: "CAD", view: "nodes", manage: false };
+  const access = { app: "CAD", manage: false };
   assert.equal(navigation.hashForRoute({ tab: "customers", customerId: "cus_1", section: "history", filter: {}, access }), "#/customers/cus_1?section=history");
   assert.equal(navigation.hashForRoute({ tab: "customers", customerId: null, section: "overview", filter: {}, access }), "#/customers");
   assert.equal(navigation.hashForRoute({ tab: "plans", view: "features", filter: {}, plan: "plan_pro" }), "#/plans?view=features");

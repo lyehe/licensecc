@@ -260,8 +260,8 @@ test("useConfirmDialog renders an accessible native dialog and retains a key onl
   const runs = [];
   const action = {
     title: "Revoke license",
-    body: "Activated devices stop validating.",
-    details: React.createElement("p", null, "2 activated devices lose access."),
+    body: "Connected devices stop renewing.",
+    details: React.createElement("p", null, "2 connected devices lose access."),
     requiresReason: true,
     run: async ({ idempotencyKey }) => {
       runs.push(idempotencyKey);
@@ -294,7 +294,7 @@ test("useConfirmDialog renders an accessible native dialog and retains a key onl
     assert.doesNotMatch(blank.markup, /modalOverlay/u);
     const labelledBy = blank.markup.match(/aria-labelledby="([^"]+)"/u)[1];
     assert.ok(blank.markup.includes(`<h2 id="${labelledBy}">Revoke license</h2>`));
-    assert.match(blank.markup, /<section class="modalDetails" aria-label="Action consequences"><p>2 activated devices lose access\.<\/p><\/section>/u);
+    assert.match(blank.markup, /<section class="modalDetails" aria-label="Action consequences"><p>2 connected devices lose access\.<\/p><\/section>/u);
     assert.match(blank.markup, /Reason \(required\)<input/u);
     assert.match(blank.markup, /<button type="button" class="danger" disabled="">Confirm<\/button>/u, "Confirm waits for a reason");
     assert.equal(blank.confirm.currentReason(), "");
