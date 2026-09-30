@@ -15,7 +15,7 @@ import { loadSecretMap } from "@licensecc/cloudflare-runtime/auth/secret_map";
 
 /** @typedef {import("../worker/env.js").Env} PortalEnv */
 /** @typedef {{ [key: string]: Uint8Array }} PepperMap */
-/** @typedef {{ customerId?: string, userAgent?: string, now?: number, authMethod?: "legacy" | "otp" | "oauth" | "password", passwordHash?: string }} MintSessionOptions */
+/** @typedef {{ customerId?: string, userAgent?: string, now?: number, authMethod: "otp" | "oauth" | "password", passwordHash?: string }} MintSessionOptions */
 /** @typedef {{ id?: string, customer_id?: string, status?: string, expires_at: number }} SessionRow */
 
 const SESSION_PREFIX = "lccp_";
@@ -66,8 +66,10 @@ function newSessionId() {
 }
 
 /**
- * mintSession(env, { customerId, userAgent?, now? }) -> { ok, raw?, code }
+ * mintSession(env, { customerId, authMethod, userAgent?, now? }) -> { ok, raw?, code }
  *
+ *   { ok:false, code:"invalid_session_method" }   authMethod is missing or not one of
+ *                                                 "otp" | "oauth" | "password".
  *   { ok:false, code:"config_error" }   session peppers unset.
  *   { ok:true,  raw, code:"ok" }        the opaque cookie value to Set-Cookie (returned ONCE; only
  *                                       its HMAC is persisted — the plaintext is never stored).
@@ -75,8 +77,11 @@ function newSessionId() {
  * The caller binds the cookie via setSessionCookie(raw). raw is the ONLY copy of the session token
  * and never lands in the DB or a log.
  */
-/** @param {PortalEnv} env @param {MintSessionOptions} [options] */
-export async function mintSession(env, { customerId, userAgent = "", now = Math.floor(Date.now() / 1000), authMethod = "legacy", passwordHash } = {}) {
+/** @param {PortalEnv} env @param {MintSessionOptions} options */
+export async function mintSession(env, { customerId, userAgent = "", now = Math.floor(Date.now() / 1000), authMethod, passwordHash }) {
+  if (authMethod !== "otp" && authMethod !== "oauth" && authMethod !== "password") {
+    return { ok: false, code: "invalid_session_method" };
+  }
   const peppers = loadSessionPeppers(env);
   if (peppers === null) return { ok: false, code: "config_error" };
   const activeId = activePepperId(peppers);

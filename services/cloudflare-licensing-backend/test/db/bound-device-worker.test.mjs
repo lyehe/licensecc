@@ -83,7 +83,7 @@ for(const trial of [false,true])test(`actual local Worker and D1 execute ${trial
   const publicConsent=await mf.dispatchFetch("https://public.test/api/portal/device-authorizations/approve",{method:"POST",headers:{"x-customer-id":"customer"},body:"{}"});
   assert.equal(publicConsent.status,404);
   const approvalInput={attempt_handle:attempt.data.attempt_handle,entitlement_id:inspect.data.entitlements[0].id,expected_attempt_revision:0,operation_id:boundRandomId(32)};
-  const session=await mintSession({DB:db,PORTAL_SESSION_PEPPERS:sessionPeppers},{customerId:"customer"});
+  const session=await mintSession({DB:db,PORTAL_SESSION_PEPPERS:sessionPeppers},{customerId:"customer",authMethod:"otp"});
   assert.equal(session.ok,true);
   async function portalCall(op,body,headers={}) {
     return caller.fetch("https://test-only-caller/",{method:"POST",body:JSON.stringify({portal:true,op,input:body,headers:{"content-type":"application/json",origin:"https://portal.example.test",cookie:`lccp_session=${session.raw}`,"x-expected-customer-id":"customer","idempotency-key":approvalInput.operation_id,...headers}})});

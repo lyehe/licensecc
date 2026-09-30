@@ -42,7 +42,7 @@ function baseEnv(overrides = {}) {
 }
 
 // A stub DB. Step-0 gates that reject before mutation must never call .batch.
-// nonceState controls the (key_id,event_id) replay nonce spend result:
+// nonceState controls the (key_id,request_nonce_id) replay nonce spend result:
 //   "fresh"   -> INSERT ... RETURNING yields a row,
 //   "replayed"-> yields null,
 //   "error"   -> the prepare/first throws.
@@ -65,9 +65,9 @@ function stubDb({ nonceState = "fresh", failBatch = true, existingEvent = null, 
               const nonceId = `${boundValues[0]}:${boundValues[1]}`;
               if (seenNonceIds.has(nonceId)) return null;
               seenNonceIds.add(nonceId);
-              return { event_id: nonceId };
+              return { request_nonce_id: nonceId };
             }
-            return nonceState === "replayed" ? null : { event_id: "x" };
+            return nonceState === "replayed" ? null : { request_nonce_id: "x" };
           }
           if (sql.includes("FROM order_events WHERE event_id")) {
             return existingEvent;

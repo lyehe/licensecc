@@ -20,7 +20,10 @@ type RequestOtpResult = { ok: true; code: string; secret?: string; retryAfter?: 
 type RedeemOtpResult = { ok: true; code: string; customerId: string; retryAfter?: number } | { ok: false; code: string; retryAfter?: number };
 type RequestOtp = (env: Env, options: Record<string, unknown>) => Promise<RequestOtpResult>;
 type RedeemOtp = (env: Env, options: Record<string, unknown>) => Promise<RedeemOtpResult>;
-type MintSession = (env: Env, options: Record<string, unknown>) => Promise<{ ok: true; raw: string } | { ok: false }>;
+type MintSession = (
+  env: Env,
+  options: import("../../auth/portal_session.mjs").MintSessionOptions,
+) => Promise<{ ok: true; raw: string } | { ok: false }>;
 type ResolveSession = (env: Env, raw: string, now: number) => Promise<
   | { ok: true; session: { id: string; customer_id: string } }
   | { ok: false; code: string }

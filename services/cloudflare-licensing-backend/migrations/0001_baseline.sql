@@ -401,12 +401,12 @@ CREATE TABLE IF NOT EXISTS order_events (
 );
 
 CREATE TABLE IF NOT EXISTS order_ingest_nonces (
-  key_id      TEXT NOT NULL,
-  event_id    TEXT NOT NULL,
-  timestamp   INTEGER NOT NULL,
-  consumed_at INTEGER NOT NULL,
-  expires_at  INTEGER NOT NULL,
-  PRIMARY KEY (key_id, event_id)
+  key_id           TEXT NOT NULL,
+  request_nonce_id TEXT NOT NULL,
+  timestamp        INTEGER NOT NULL,
+  consumed_at      INTEGER NOT NULL,
+  expires_at       INTEGER NOT NULL,
+  PRIMARY KEY (key_id, request_nonce_id)
 );
 
 CREATE TABLE IF NOT EXISTS orders (
@@ -504,8 +504,8 @@ CREATE TABLE IF NOT EXISTS portal_sessions (
   user_agent       TEXT NOT NULL DEFAULT '',
   created_at       INTEGER NOT NULL,
   last_used_at     INTEGER NULL,
-  expires_at       INTEGER NOT NULL, auth_method TEXT NOT NULL DEFAULT 'legacy'
-  CHECK (auth_method IN ('legacy', 'otp', 'oauth', 'password')),
+  expires_at       INTEGER NOT NULL, auth_method TEXT NOT NULL
+  CHECK (auth_method IN ('otp', 'oauth', 'password')),
   FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
 );
 

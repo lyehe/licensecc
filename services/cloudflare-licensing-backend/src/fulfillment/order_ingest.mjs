@@ -234,17 +234,17 @@ function signerScopeViolation(scopes, keyId, order) {
 // --- nonce spend (Step 0, runs LAST, fail-closed) ----------------------------
 
 /**
- * Spend one authenticated signed-attempt nonce. The existing `(key_id,event_id)` table remains
- * rollout-compatible by storing a bounded `signed_timestamp:raw_body_digest` attempt
- * identity in its legacy `event_id` column. An exact signed retry is rejected as a replay, while a
- * later freshly signed retry of the same logical event reaches the exactly-once cache/redrive path.
+ * Spend one authenticated signed-attempt nonce. The `(key_id,request_nonce_id)` table stores a
+ * bounded `signed_timestamp:raw_body_digest` attempt identity in its `request_nonce_id` column. An
+ * exact signed retry is rejected as a replay, while a later freshly signed retry of the same
+ * logical event reaches the exactly-once cache/redrive path.
  * A DB error fails closed. TTL = 2*maxSkew so the row outlives the accepted skew window.
  */
 async function spendOrderNonce(env, keyId, requestNonceId, signedTimestamp, now, maxSkewSeconds) {
   const expiresAt = now + maxSkewSeconds * 2;
   try {
     const row = await env.DB.prepare(
-      "INSERT INTO order_ingest_nonces (key_id, event_id, timestamp, consumed_at, expires_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(key_id, event_id) DO NOTHING RETURNING event_id",
+      "INSERT INTO order_ingest_nonces (key_id, request_nonce_id, timestamp, consumed_at, expires_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(key_id, request_nonce_id) DO NOTHING RETURNING request_nonce_id",
     )
       .bind(keyId, requestNonceId, signedTimestamp, now, expiresAt)
       .first();

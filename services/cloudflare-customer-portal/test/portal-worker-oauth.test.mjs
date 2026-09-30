@@ -372,7 +372,7 @@ test("A successful unlink revokes the customer's other OAuth sessions and keeps 
   const untouched = {
     password: await sessionFor(env, "A", "password"),
     otp: await sessionFor(env, "A", "otp"),
-    legacy: await sessionFor(env, "A", "legacy"),
+    legacy: await sessionFor(env, "A", "password"),
     "another customer's OAuth": await sessionFor(env, "B", "oauth"),
   };
   assert.equal((await unlink(env, current, "github")).status, 200);
@@ -413,7 +413,7 @@ test("Concurrent unlinks of Google and GitHub cannot both succeed", async () => 
   linkIdentity(db, "A", "github");
   // Neither session signed in with a provider, so the winner's revocation cannot decide the race;
   // only the conditional DELETE's remaining-method rule can.
-  const tabs = [await sessionFor(env, "A", "otp"), await sessionFor(env, "A", "legacy")];
+  const tabs = [await sessionFor(env, "A", "otp"), await sessionFor(env, "A", "password")];
   holdBatches(env, 2);
   const results = await Promise.all([unlink(env, tabs[0], "google"), unlink(env, tabs[1], "github")]);
   assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);

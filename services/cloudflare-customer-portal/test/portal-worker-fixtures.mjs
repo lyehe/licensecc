@@ -22,7 +22,10 @@ export const FP_B = "b".repeat(64);
 // --- session helpers (mint a real session cookie for a customer) ----------------------------------
 
 export async function cookieFor(env, customerId) {
-  const minted = await mintSession(env, { customerId, now: NOW });
+  // "password" is not a "verified" method (routes/password.ts treats only otp/oauth within 600s as
+  // verified), so no suite silently gains verified status just by minting a session through this
+  // fixture.
+  const minted = await mintSession(env, { customerId, authMethod: "password", now: NOW });
   return `lccp_session=${minted.raw}`;
 }
 

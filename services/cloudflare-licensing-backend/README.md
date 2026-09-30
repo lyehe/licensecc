@@ -278,7 +278,7 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   cross-environment replay and is asserted non-empty. `ORDER_MAX_SKEW_SECONDS`
   bounds timestamp skew (default 300, cap 3600). A signed-attempt identity
   `(key_id, authenticated_timestamp, sha256(exact_raw_body_bytes))` is spent
-  LAST (after verify+skew) in the compatibility `order_ingest_nonces` store;
+  LAST (after verify+skew) in the `order_ingest_nonces` store;
   an exact signed replay is `401 replayed`, while a freshly signed same-event
   retry can reach the durable event cache. A nonce-store error is a
   fail-closed `503`.
