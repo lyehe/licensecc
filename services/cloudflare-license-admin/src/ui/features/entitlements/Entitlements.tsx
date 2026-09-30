@@ -297,7 +297,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       refresh: async () => await refreshCore(true),
       onUnapplied: (parsed) => {
         if (!isCurrent()) return;
-        if (parsed.code !== "stale_transition") { setFeedback(failureFeedback(parsed.code, parsed.requestId)); return; }
+        if (parsed.code !== "stale_transition") { const refusal = protectedCreateFailureMessage(parsed); setFeedback(refusal === null ? failureFeedback(parsed.code, parsed.requestId) : feedbackWith(refusal, parsed.code, parsed.requestId)); return; }
         // A stale expectation wrote nothing: reload the entitlement so the next save carries its
         // current state, keep the operator's draft, and say it was reloaded only once it was.
         const settle = (reloaded: boolean): void => { if (isListCurrent()) setFeedback(feedbackWith(reloaded ? ENTITLEMENT_RELOADED_AFTER_STALE : ENTITLEMENT_NOT_RELOADED_AFTER_STALE, parsed.code, parsed.requestId)); };

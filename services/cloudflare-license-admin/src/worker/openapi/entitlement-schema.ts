@@ -88,8 +88,8 @@ const patchFields = {
   valid_from: { type: ["integer", "null"], minimum: 0 },
   valid_until: { type: ["integer", "null"], minimum: 0 },
   notes: { type: "string", maxLength: 1000 },
-  customer_id: { type: "string", minLength: 1, maxLength: 128, description: "Moves the grant to another customer. Every grant has an owner, so null or an empty string returns 400 invalid_request." },
-  license_id: { type: ["string", "null"], maxLength: 128 },
+  customer_id: { type: "string", minLength: 1, maxLength: 128, description: "Moves the grant to another customer. Every grant has a real owner: null, an empty, blank or padded value returns 400 invalid_request, and an unknown or suspended customer returns 409 protected_creation_conflict (customer_inactive)." },
+  license_id: { type: ["string", "null"], maxLength: 128, description: "Moves the grant to another license, or clears it (null). A license that is set or kept must exist and belong to the grant's owner for this project, or the PATCH returns 409 protected_creation_conflict (license_missing or license_customer_mismatch)." },
 };
 
 export const entitlementPatchSchema = {

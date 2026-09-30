@@ -29,9 +29,11 @@ export const deviceLimitComponents: LabeledComponentFragment = {
   ]]],
 };
 
-// The capacity refusal carries data; every other conflict keeps the plain envelope. Its code is
-// excluded from the plain branch so the documented oneOf stays mutually exclusive.
-export function capacityConflictResponse(description: string, ...codes: ReadonlyArray<string>): Record<string, unknown> {
+// An entitlement PATCH conflict: a device-limit refusal carries its count, and a move to another
+// owner or license that breaks a protected owner rule names that rule (data.reason, the protected
+// create's reasons). Both codes are excluded from the plain branch so the oneOf stays exclusive.
+export function entitlementPatchConflictResponse(description: string, ...codes: ReadonlyArray<string>): Record<string, unknown> {
+  const withData = new Set(["capacity_in_use", "protected_creation_conflict"]);
   return {
     description,
     content: {
@@ -41,16 +43,19 @@ export function capacityConflictResponse(description: string, ...codes: Readonly
             {
               allOf: [
                 { $ref: "#/components/schemas/ErrorEnvelope" },
-                { type: "object", required: ["code"], properties: { code: { enum: codes.filter((code) => code !== "capacity_in_use") } } },
+                { type: "object", required: ["code"], properties: { code: { enum: codes.filter((code) => !withData.has(code)) } } },
               ],
             },
             { $ref: "#/components/schemas/CapacityInUseError" },
+            { $ref: "#/components/schemas/ProtectedCreationConflictError" },
           ],
         },
         examples: Object.fromEntries(codes.map((code) => [code, {
           value: code === "capacity_in_use"
             ? { ok: false, code, request_id: "1a2b3c-1", data: { devices_in_use: 3 } }
-            : { ok: false, code, request_id: "1a2b3c-1" },
+            : code === "protected_creation_conflict"
+              ? { ok: false, code, request_id: "1a2b3c-1", data: { reason: "customer_inactive" } }
+              : { ok: false, code, request_id: "1a2b3c-1" },
         }])),
       },
     },

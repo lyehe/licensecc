@@ -57,7 +57,7 @@ export const mutationFailurePolicies = {
   entitlementPatch: documentedMutationPolicy(
     { status: 400, codes: ["invalid_entitlement_id", ...invalidRequest] },
     { status: 404, codes: ["not_found"] },
-    { status: 409, codes: ["revoked_entitlement_is_terminal", "capacity_in_use", "stale_transition"] },
+    { status: 409, codes: ["revoked_entitlement_is_terminal", "capacity_in_use", "stale_transition", "protected_creation_conflict"] },
   ),
   entitlementTransition: {
     disable: documentedMutationPolicy(

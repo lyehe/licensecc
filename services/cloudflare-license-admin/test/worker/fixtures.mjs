@@ -487,6 +487,15 @@ MockD1.prototype.first = function first(sql, values) {
     const row = this.entitlements.get(keyOf(values[0], values[1], values[2]));
     return row === undefined ? null : clone(row);
   }
+  if (sql.startsWith("WITH e(project, customer_id, license_id)")) {
+    // The owner and license rules a PATCH that moves a grant meets, in the create checks' order.
+    const [project, customerId, licenseId] = values;
+    if (this.customers.get(customerId)?.status !== "active") return { reason: "customer_inactive" };
+    if (licenseId === null) return { reason: null };
+    const license = this.licenses.get(licenseId);
+    if (license === undefined) return { reason: "license_missing" };
+    return { reason: license.customer_id === customerId && license.project === project ? null : "license_customer_mismatch" };
+  }
   throw new Error(`unexpected first SQL: ${sql}`);
 };
 

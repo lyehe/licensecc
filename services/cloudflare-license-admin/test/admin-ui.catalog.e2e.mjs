@@ -372,6 +372,7 @@ test("admin UI clears its bound preview for stale and fingerprint-conflict Apply
   const projectionForm = page.getByRole("form", { name: "Plan projection" });
   await projectionForm.getByLabel("License ID").fill("lic_stale");
   await projectionForm.getByLabel("Fingerprint").fill("d".repeat(64));
+  await projectionForm.getByLabel("Customer ID").fill("cus_stale");
   await projectionForm.getByLabel("Plan key").fill("pro");
   await projectionForm.getByRole("button", { name: "Preview" }).click();
   const applyButton = projectionForm.getByRole("button", { name: "Apply" });
@@ -457,6 +458,7 @@ test("admin UI opens a confirm dialog before a plan projection Apply that would 
   const projectionForm = page.getByRole("form", { name: "Plan projection" });
   await projectionForm.getByLabel("License ID").fill("lic_disable_test");
   await projectionForm.getByLabel("Fingerprint").fill(fingerprint);
+  await projectionForm.getByLabel("Customer ID").fill("cus_disable_test");
   await projectionForm.getByLabel("Plan key").fill("pro");
   await projectionForm.getByRole("button", { name: "Preview" }).click();
   await expect.poll(() => lastPreviewBody !== null).toBe(true);
@@ -513,6 +515,7 @@ test("an applied plan projection or catalog import leaves no unsaved-changes pro
   const projectionForm = page.getByRole("form", { name: "Plan projection" });
   await projectionForm.getByLabel("License ID").fill("lic_applied_then_leave");
   await projectionForm.getByLabel("Fingerprint").fill("a".repeat(64));
+  await projectionForm.getByLabel("Customer ID").fill("cus_applied_then_leave");
   await projectionForm.getByLabel("Plan key").fill("pro");
   await projectionForm.getByRole("button", { name: "Preview" }).click();
   const applyProjection = projectionForm.getByRole("button", { name: "Apply" });

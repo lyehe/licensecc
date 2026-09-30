@@ -23,7 +23,7 @@ import {
   transitionOkResponse,
 } from "../components.js";
 import { protectedCreationConflictResponse } from "../protected-onboarding.js";
-import { capacityConflictResponse } from "../device-limit.js";
+import { entitlementPatchConflictResponse } from "../device-limit.js";
 
 const expectedState = {
   type: "object",
@@ -107,10 +107,10 @@ export const entitlementPaths: LabeledPathFragment = {
       responses: {
         "200": okResponse("Entitlement updated.", "#/components/schemas/EntitlementRecord", "entitlement_patched"),
 
-        "400": errorResponse("Invalid request / json / id / idempotency key, a null or empty customer_id or expected_customer_id (every grant has an owner), a field a PATCH does not read, or max_active_devices outside 1-1,000,000 or sent with another patch field.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request"),
+        "400": errorResponse("Invalid request / json / id / idempotency key, a null, empty, blank or padded customer_id or expected_customer_id (every grant has a real owner), a field a PATCH does not read, or max_active_devices outside 1-1,000,000 or sent with another patch field.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No entitlement with that id.", "not_found"),
-        "409": capacityConflictResponse("Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry), or a protected grant has more connected devices than the requested device limit (data.devices_in_use; disconnect devices first).", "revoked_entitlement_is_terminal", "stale_transition", "capacity_in_use"),
+        "409": entitlementPatchConflictResponse("Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry), or a protected grant has more connected devices than the requested device limit (data.devices_in_use; disconnect devices first), or a move to another owner or license breaks a protected owner rule before any write (protected_creation_conflict; data.reason is customer_inactive, license_missing or license_customer_mismatch, as for a create).", "revoked_entitlement_is_terminal", "stale_transition", "capacity_in_use", "protected_creation_conflict"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },

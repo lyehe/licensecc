@@ -40,6 +40,7 @@ export function planProjectionFieldForCode(code: string): string | null {
   return fieldForCode(code, ["license_id", "customer_id", "plan_id", "plan_key", "support_until"], {
     plan_id_or_plan_key_required: "plan_key",
     license_id_required: "license_id",
+    customer_id_required: "customer_id",
     addon_must_be_at_most_128_chars: "addons",
     unknown_addon: "addons",
     notes_must_be_at_most_1000_chars: "notes",

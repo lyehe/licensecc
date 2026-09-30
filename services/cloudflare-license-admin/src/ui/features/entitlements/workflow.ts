@@ -144,7 +144,7 @@ export function editFormFromEntitlement(item: EntitlementRecord): EntitlementEdi
     valid_from: epochToDateInput(item.valid_from),
     valid_until: epochToDateInput(item.valid_until),
     notes: item.notes,
-    customer_id: item.customer_id ?? "",
+    customer_id: item.customer_id,
     license_id: item.license_id ?? "",
   };
 }

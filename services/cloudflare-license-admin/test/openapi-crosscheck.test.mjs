@@ -271,6 +271,7 @@ test("the device limit is documented on create and PATCH, with the capacity conf
   assert.deepEqual(patch.dependentSchemas.max_active_devices, { not: { anyOf: otherFields.map((field) => ({ required: [field] })) } });
   assert.equal(schemas.EntitlementRecord.properties.max_active_devices.type, "integer");
 
+  // A move to another owner or license that breaks a protected owner rule names that rule too.
   const conflict = openApiDocument.paths["/api/admin/entitlements/{id}"].patch.responses["409"].content["application/json"];
   assert.deepEqual(conflict.schema.oneOf, [
     {
@@ -280,6 +281,7 @@ test("the device limit is documented on create and PATCH, with the capacity conf
       ],
     },
     { $ref: "#/components/schemas/CapacityInUseError" },
+    { $ref: "#/components/schemas/ProtectedCreationConflictError" },
   ]);
   assert.deepEqual(schemas.CapacityInUseData.required, ["devices_in_use"]);
   assert.equal(schemas.CapacityInUseData.additionalProperties, false);

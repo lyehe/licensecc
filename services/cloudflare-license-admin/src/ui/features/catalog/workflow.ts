@@ -346,12 +346,12 @@ export function normalizePlanProjectionForm(form: PlanProjectionFormState): Plan
     project: form.project,
     license_id: parseNullableIdentifier(form.license_id, "license_id") ?? "",
     license_fingerprint: form.license_fingerprint,
-    customer_id: parseNullableIdentifier(form.customer_id, "customer_id"),
+    customer_id: parseNullableIdentifier(form.customer_id, "customer_id") ?? "",
     addons: splitCsvIdentifiers(form.addons, "addon"),
     notes: parseNotes(form.notes),
   };
-  if (body.license_id === "") {
-    throw new Error("license_id_required");
+  if (body.license_id === "" || body.customer_id === "") {
+    throw new Error(body.license_id === "" ? "license_id_required" : "customer_id_required");
   }
   if (planId !== null) body.plan_id = planId;
   if (planKey !== null) body.plan_key = planKey;

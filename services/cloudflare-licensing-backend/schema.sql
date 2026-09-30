@@ -301,7 +301,7 @@ CREATE TABLE IF NOT EXISTS entitlements (
   valid_from INTEGER NULL,
   valid_until INTEGER NULL,
   notes TEXT NOT NULL DEFAULT '',
-  customer_id TEXT NOT NULL,
+  customer_id TEXT NOT NULL CHECK (length(trim(customer_id)) > 0),
   license_id TEXT NULL,
   max_active_devices INTEGER NOT NULL DEFAULT 1,
   lease_seconds INTEGER NOT NULL DEFAULT 86400,

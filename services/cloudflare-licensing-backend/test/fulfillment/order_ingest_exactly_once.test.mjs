@@ -310,7 +310,7 @@ test("case 1: fresh subscription.active apply (active, clamp, fingerprint, floor
 
 // =============================================================================
 // Protected grants: every order names its customer, and an active order creates or
-// refreshes a device_bound_v1 grant owned by that customer.
+// refreshes a protected grant owned by that customer.
 // =============================================================================
 test("an order creates a protected grant owned by its customer", async (t) => {
   const { db, env } = freshEnv(); t.after(() => db.close());
@@ -1387,8 +1387,8 @@ test("a withdrawal for a subscription with no grant creates nothing", async () =
 
 // =============================================================================
 // Grant ownership: an order may act only on a grant its own customer already owns, or
-// create a new one. A grant owned by another customer, or by no one, refuses every
-// intent, withdrawals included, and the refused order writes nothing.
+// create a new one. A grant owned by another customer refuses every intent,
+// withdrawals included, and the refused order writes nothing.
 // =============================================================================
 const FOREIGN_FP = "f".repeat(64);
 const SCOPED_TO_A = {

@@ -112,7 +112,7 @@ export function writeEntitlementWithAudit(
 
 /**
  * Creates or updates a grant; every grant is protected, so the input names no mode. Every grant has
- * an owner: an input naming no customer_id, or an empty one, is refused with invalid_patch.
+ * an owner: an input naming no customer_id, or an empty, blank or padded one, is refused with invalid_patch.
  */
 export function createEntitlement(
   env: MutationEnv,
@@ -124,7 +124,7 @@ export function createEntitlement(
   extraStatements?: D1PreparedStatementLike[],
 ): Promise<MutationResult<EntitlementRecord> | null>;
 
-/** Patches a grant's body. A patch cannot clear the owner: a null or empty customer_id is refused with invalid_patch. */
+/** Patches a grant's body. A patch cannot clear the owner: a null, empty, blank or padded customer_id is refused with invalid_patch. */
 export function patchEntitlement(
   env: MutationEnv,
   key: EntitlementKey,

@@ -177,6 +177,8 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   plan_id_or_plan_key_required: failed("Enter a plan key or a plan ID."),
   license_id_required: failed("Enter a license ID."),
   customer_id_required: failed("Choose the customer who owns this license."),
+  // A plan preview's reason for blocking a grant, shown beside that grant.
+  owner_required: failed("Blocked: no customer is named, and every license (entitlement) needs one. Enter the customer ID and preview again."),
   invalid_date: failed("Enter a valid date."),
   notes_must_be_at_most_1000_chars: failed("Use one line of at most 1000 characters."),
   url_must_be_a_single_https_url: failed("Enter a single https:// URL without spaces."),

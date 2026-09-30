@@ -43,6 +43,16 @@ export function nullableSafeString(value: unknown, maxLength: number): string | 
   return safeString(value, maxLength);
 }
 
+/**
+ * A grant's owner: a safe identifier that is neither blank nor padded with whitespace. Every grant has
+ * one (customer_id is NOT NULL), so anything else names no customer and is refused. The shared
+ * runtime writers apply the same rule (requiredOwner).
+ */
+export function ownerId(value: unknown): string | null {
+  const id = safeString(value, 128);
+  return id === null || id.trim() === "" || id.trim() !== id ? null : id;
+}
+
 export function boundedInt(value: unknown, min: number, max: number): number | undefined {
   if (value === undefined) {
     return undefined;
@@ -105,8 +115,8 @@ export function validateEntitlementInput(value: unknown): EntitlementInput | nul
   const validFrom = input.valid_from === undefined ? null : nullableEpoch(input.valid_from);
   const validUntil = input.valid_until === undefined ? null : nullableEpoch(input.valid_until);
   const notes = input.notes === undefined ? "" : safeNotes(input.notes);
-  // Every grant has an owner (customer_id is NOT NULL): a body naming none, null or "" is refused here.
-  const customerId = safeString(input.customer_id, 128);
+  // Every grant has an owner (customer_id is NOT NULL): a body naming none, or a blank or padded one, is refused here.
+  const customerId = ownerId(input.customer_id);
   const licenseId = input.license_id === undefined ? null : nullableSafeString(input.license_id, 128);
   if (
     project === null || feature === null || licenseFingerprint === null ||
@@ -165,8 +175,8 @@ export function validateEntitlementPatch(value: unknown): AdminEntitlementPatch 
     patch.notes = notes;
   }
   if (input.customer_id !== undefined) {
-    // A PATCH can move a grant to another customer but never clear its owner.
-    const customerId = safeString(input.customer_id, 128);
+    // A PATCH can move a grant to another customer but never clear its owner or blank it.
+    const customerId = ownerId(input.customer_id);
     if (customerId === null) {
       return null;
     }

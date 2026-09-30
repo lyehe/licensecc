@@ -733,11 +733,16 @@ unsaved-draft protection and idempotent recovery. Browse apps in the catalog rea
 complete configuration/business-record inventory, including apps with no plans.
 
 Entitlement PATCH, individual disable/reenable/revoke, and batch transition rows each
-require the pair expected_customer_id (the observed owner; every grant has one, so it
-is never null or empty) and expected_revocation_seq (nonnegative integer). A missing,
-null or empty field returns 400 invalid_request before any read. A PATCH may move a
-grant to another customer, but a null or empty customer_id returns 400
-invalid_request: the owner is never cleared, and the editor requires a customer.
+require the pair expected_customer_id (the observed owner; every grant has a real one,
+so it is never null, empty, blank or padded with whitespace) and expected_revocation_seq
+(nonnegative integer). A missing or malformed field returns 400 invalid_request before
+any read. A PATCH may move a grant to another customer or license, but a null, empty,
+blank or padded customer_id returns 400 invalid_request: the owner is never cleared,
+and the editor requires a customer. A move must meet the protected create's owner
+rules before any write: an unknown or suspended customer, or a license that is missing
+or owned by another customer or project, returns 409 protected_creation_conflict with
+data.reason customer_inactive, license_missing or license_customer_mismatch. A PATCH
+that changes neither owner nor license is not checked against them.
 A mismatched owner or revision returns 409 stale_transition before any write.
 Successful same-key retries return the original result; they do not initiate a new
 operation. The UI sends this pair for edits, individual lifecycle transitions, and

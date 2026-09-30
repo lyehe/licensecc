@@ -142,6 +142,22 @@ export async function protectedCreateReason(env: Env, input: CreateInput, policy
   }
 }
 
+// The owner and license rules a PATCH that moves a grant must meet, as a protected create does: a
+// real, active customer, and a license that exists and that customer owns for this project. They
+// are the create's own checks, named by the same reasons. A PATCH may leave a grant without a
+// license, so the license rules hold when it names or keeps none.
+const OWNER_RULES: ReadonlySet<ProtectedCreateReason> = new Set(["customer_inactive", "license_missing", "license_customer_mismatch"]);
+
+/** The first owner or license rule the grant a PATCH would leave breaks, or null when every one holds. */
+export async function protectedOwnerReason(env: Env, row: CreateInput & { license_id: string | null }): Promise<ProtectedCreateReason | null> {
+  const checks = protectedCreateChecks(row).filter((check) => OWNER_RULES.has(check.reason));
+  const holds = (check: ProtectedCheck): string => check.reason === "customer_inactive" ? `(${check.sql})` : `(e.license_id IS NULL OR (${check.sql}))`;
+  const result = await env.DB.prepare(`WITH e(project, customer_id, license_id) AS (SELECT ?, ?, ?)
+    SELECT CASE ${checks.map((check) => `WHEN NOT coalesce(${holds(check)}, 0) THEN '${check.reason}'`).join(" ")} END AS reason FROM e`)
+    .bind(row.project, row.customer_id, row.license_id, ...checks.flatMap((check) => check.binds)).first<{ reason: unknown }>();
+  return PROTECTED_CREATE_REASONS.find((reason) => reason === result?.reason) ?? null;
+}
+
 /**
  * A create refused with capacity_in_use broke one of two schema triggers: moving a grant with
  * connected devices to another customer (tr_bound_owner_change, which the upsert fires before any

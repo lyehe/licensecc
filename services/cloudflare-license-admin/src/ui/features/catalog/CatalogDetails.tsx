@@ -2,6 +2,7 @@ import React from "react";
 
 import type { CatalogImportEffect, CatalogImportPreviewResponse, CatalogPlanFeature, PlanProjectionItem } from "../../../shared/api";
 import { formatEpoch, formatUtcDate } from "../../shared/format";
+import { describeCode } from "../../shared/messages";
 import { catalogImportEffectValueLabel, catalogImportTargetFields, catalogImportTargetKey } from "./workflow";
 
 export function ProjectionRows({ title, items }: { title: string; items: PlanProjectionItem[] }): React.ReactElement | null {
@@ -16,7 +17,7 @@ export function ProjectionRows({ title, items }: { title: string; items: PlanPro
             <td>{item.feature}</td><td>{item.license_mode}</td><td>{item.policy_id ?? "-"}</td>
             <td>{item.valid_until === null ? "open" : formatUtcDate(item.valid_until)}</td>
             <td>{item.max_active_devices}</td>
-            <td>{item.addon_key ?? item.source}{item.reason ? ` / ${item.reason}` : ""}</td>
+            <td>{item.addon_key ?? item.source}{item.reason ? ` / ${describeCode(item.reason)?.text ?? item.reason}` : ""}</td>
           </tr>
         ))}</tbody>
       </table></div>

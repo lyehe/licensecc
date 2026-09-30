@@ -15,9 +15,10 @@ export function assertExpectedEntitlement(row, ctx) {
 }
 
 /** The owner a grant write stores. Every grant has one (entitlements.customer_id is NOT NULL), so a
- * write naming none, or an empty one, is refused as invalid_patch before it reaches the database. */
+ * write naming none, a blank one, or one padded with whitespace is refused as invalid_patch before
+ * it reaches the database. The admin Worker applies the same rule. */
 export function requiredOwner(customerId) {
-  if (typeof customerId !== "string" || customerId === "") {
+  if (typeof customerId !== "string" || customerId.trim() === "" || customerId.trim() !== customerId) {
     throw new Error("invalid_patch");
   }
   return customerId;

@@ -1,5 +1,5 @@
 import { INVALID_IDEMPOTENCY_KEY, mutationResponse, readIdempotencyKey } from "../../idempotency.js";
-import { createReplayAdmission, createWithEnforcement, validateEntitlementCreate } from "./create-enforcement.js";
+import { createReplayAdmission, createWithEnforcement, protectedPatchRefusal, validateEntitlementCreate } from "./create-enforcement.js";
 import { patchDeviceLimit } from "./device-limit.js";
 import { envelope } from "../../responses.js";
 import {
@@ -26,7 +26,7 @@ import type { Env } from "../../env.js";
 import { requireAdmin } from "../../auth.js";
 import { parseJsonBody, safeNotes } from "../../request.js";
 import { safeString } from "@licensecc/cloudflare-runtime/http/kit";
-import { MAX_FEATURE_SIZE, MAX_PROJECT_SIZE, nullableEpoch, nullableSafeString, validateEntitlementPatch } from "./validation.js";
+import { MAX_FEATURE_SIZE, MAX_PROJECT_SIZE, nullableEpoch, nullableSafeString, ownerId, validateEntitlementPatch } from "./validation.js";
 import { clientIp } from "../../support.js";
 import { CSV_ROW_CAP, boundedCursor, boundedEventsCursor, csvResponse, encodeEventsCursor, epochQueryParam, wantsCsv } from "../../query.js";
 
@@ -38,11 +38,11 @@ function policyStampOn(env: Env): boolean {
 
 // The owner and revocation-sequence precondition every grant mutation now requires: the
 // customer_id and revocation_seq the caller observed before it decided to write. Every grant has
-// an owner, so a missing, null, empty or malformed field is refused before any row is read.
+// an owner, so a missing, null, blank, padded or malformed field is refused before any row is read.
 function parseExpectedEntitlement(candidate: Record<string, unknown>): { customer_id: string; revocation_seq: number } | null {
-  const { expected_customer_id: customerId, expected_revocation_seq: revocationSeq } = candidate;
-  if (typeof customerId !== "string" || customerId === "" || customerId.length > 128 ||
-    !Number.isSafeInteger(revocationSeq) || Number(revocationSeq) < 0) {
+  const customerId = ownerId(candidate.expected_customer_id);
+  const revocationSeq = candidate.expected_revocation_seq;
+  if (customerId === null || !Number.isSafeInteger(revocationSeq) || Number(revocationSeq) < 0) {
     return null;
   }
   return { customer_id: customerId, revocation_seq: revocationSeq as number };
@@ -285,8 +285,8 @@ export async function handleMutation(request: Request, env: Env, actor: Actor, r
       return mutationResponse(request, env, ctx, "entitlement_patched", (idempotency) =>
         patchDeviceLimit(env, key, limit, guardedCtx, idempotency));
     }
-    return mutationResponse(request, env, ctx, "entitlement_patched", (idempotency) =>
-      patchEntitlement(env, key, fields, guardedCtx, idempotency));
+    return mutationResponse(request, env, ctx, "entitlement_patched", async (idempotency) =>
+      await protectedPatchRefusal(env, key, fields, guardedCtx) ?? patchEntitlement(env, key, fields, guardedCtx, idempotency));
   }
   if (request.method === "POST" && action !== undefined) {
     const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";

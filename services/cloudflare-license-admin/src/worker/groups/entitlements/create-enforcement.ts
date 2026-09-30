@@ -1,11 +1,11 @@
-import type { AdminEntitlementCreateInput, EntitlementRecord, ProtectedCreateReason } from "../../../shared/api.js";
+import type { AdminEntitlementCreateInput, EntitlementPatch, EntitlementRecord, ProtectedCreateReason } from "../../../shared/api.js";
 import type { Policy } from "@licensecc/licensing-domain/entitlements/policy";
 import type { Env } from "../../env.js";
 import type { ReplayAdmission } from "../../idempotency.js";
 import { envelope } from "../../responses.js";
 import { deviceLimit, ENTITLEMENT_CREATE_FIELDS, ENTITLEMENT_POLICY_CREATE_FIELDS, namesOnly, validateEntitlementInput } from "./validation.js";
-import { protectedCapacityReason, protectedCreateAssertion, protectedCreateReason } from "./protected-checks.js";
-import { createEntitlement, syncEntitlement, type MutationContext, type MutationResult, type IdempotencyCommit, type D1PreparedStatementLike } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
+import { protectedCapacityReason, protectedCreateAssertion, protectedCreateReason, protectedOwnerReason } from "./protected-checks.js";
+import { createEntitlement, findEntitlement, syncEntitlement, type EntitlementKey, type GuardedMutationContext, type MutationContext, type MutationResult, type IdempotencyCommit, type D1PreparedStatementLike } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import { buildDeviceLimitStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
 
 /** Protected project IDs; license creation applies the same rule so its records can back a grant. */
@@ -44,6 +44,23 @@ export function syncWithEnforcement(env: Env, input: AdminEntitlementCreateInput
   idempotency: IdempotencyCommit | null): Promise<MutationResult<EntitlementRecord> | Response | null> {
   return createWithEnforcement(env, input, ctx, idempotency, [], undefined,
     (extra) => syncEntitlement(env, input, reason, ctx, idempotency, extra));
+}
+
+/**
+ * A PATCH that moves a grant to another customer or license is refused before any write, with the
+ * protected create's reason, when the owner or license it would leave breaks a rule: an unknown or
+ * suspended customer, or a license that is missing or another customer's. A PATCH that changes
+ * neither is unaffected. It reads the grant it observed; a grant that is gone or has changed since
+ * is left to the PATCH itself, which reports not_found or stale_transition.
+ */
+export async function protectedPatchRefusal(env: Env, key: EntitlementKey, patch: EntitlementPatch, ctx: GuardedMutationContext): Promise<Response | null> {
+  if (patch.customer_id === undefined && patch.license_id === undefined) return null;
+  const current = await findEntitlement(env, key);
+  if (current === null || current.customer_id !== ctx.expectedEntitlement.customer_id || current.revocation_seq !== ctx.expectedEntitlement.revocation_seq) return null;
+  const next = { ...key, customer_id: patch.customer_id ?? current.customer_id, license_id: patch.license_id !== undefined ? patch.license_id : current.license_id };
+  if (next.customer_id === current.customer_id && next.license_id === current.license_id) return null;
+  const reason = await protectedOwnerReason(env, next);
+  return reason === null ? null : protectedCreationConflict(ctx, reason);
 }
 
 // The status and code are unchanged; data.reason names the rule. Like every per-resource error

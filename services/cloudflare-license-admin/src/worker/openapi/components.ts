@@ -271,7 +271,7 @@ export const ADMIN_MUTATION_AUTH_ERRORS = {
 } as const;
 
 // The precondition every grant mutation requires, shared by paths/entitlements.ts and BatchTransitionInput below.
-export const EXPECTED_ENTITLEMENT_PROPERTIES = { expected_customer_id: { type: "string", minLength: 1, maxLength: 128, description: "The owner observed on the grant. Every grant has one, so null or an empty string returns 400 invalid_request." }, expected_revocation_seq: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER } };
+export const EXPECTED_ENTITLEMENT_PROPERTIES = { expected_customer_id: { type: "string", minLength: 1, maxLength: 128, description: "The owner observed on the grant. Every grant has a real one, so null or an empty, blank or padded value returns 400 invalid_request." }, expected_revocation_seq: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER } };
 
 export const openApiComponents: LabeledComponentFragment = {
   label: "admin-components",
@@ -338,7 +338,7 @@ export const openApiComponents: LabeledComponentFragment = {
           valid_from: { type: ["integer", "null"], minimum: 0, default: null, description: "Epoch seconds; must be < valid_until when both set." },
           valid_until: { type: ["integer", "null"], minimum: 0, default: null, description: "Epoch seconds; must be > valid_from when both set." },
           notes: { type: "string", maxLength: 1000, default: "" },
-          customer_id: { type: "string", minLength: 1, maxLength: 128, description: "The customer who owns the grant. Every grant has one; a body naming none, null or an empty string returns 400 invalid_request." },
+          customer_id: { type: "string", minLength: 1, maxLength: 128, description: "The customer who owns the grant. Every grant has a real one; a body naming none, or null or an empty, blank or padded value, returns 400 invalid_request." },
           license_id: { type: ["string", "null"], maxLength: 128, default: null },
         },
       }],
