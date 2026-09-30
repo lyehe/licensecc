@@ -681,6 +681,29 @@ test("case 8b: a late superseded fraud event cannot emit a false revoke audit", 
 });
 
 // =============================================================================
+// CASE 9 — orthogonal axis: seq5 quantity.changed + seq6 renewed both survive
+// =============================================================================
+test("case 9: a device-limit change and a later renew on disjoint axes both survive", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  const create = makeOrder({ seq: 1, event_id: "evt_1", quantity: { max_active_devices: 10 }, current_period_end: NOW + 30 * 86400 });
+  const fp = await fpOf(create);
+  assert.equal((await submit(env, create)).body.code, "applied");
+  assert.equal(entRow(db, fp).max_active_devices, 10);
+
+  const qty = makeOrder({ seq: 5, event_id: "evt_5", intent: "quantity.changed", quantity: { max_active_devices: 25 } });
+  assert.equal((await submit(env, qty)).body.code, "applied");
+  assert.equal(entRow(db, fp).max_active_devices, 25, "device-limit change applied");
+  const windowAfterQuantity = entRow(db, fp).valid_until;
+  assert.equal(windowAfterQuantity, NOW + 30 * 86400, "a device-limit change leaves the window alone");
+
+  const renew = makeOrder({ seq: 6, event_id: "evt_6", intent: "subscription.renewed", current_period_end: NOW + 90 * 86400 });
+  assert.equal((await submit(env, renew)).body.code, "applied");
+  assert.equal(entRow(db, fp).valid_until, NOW + 90 * 86400, "renew window applied");
+  assert.equal(entRow(db, fp).max_active_devices, 25, "the seq5 device limit survives the seq6 renew (disjoint axes)");
+  assert.equal(entRow(db, fp).last_applied_order_seq, 6);
+});
+
+// =============================================================================
 // CASE 10 — seq reset: low seq with no epoch bump is stale_ignored; with an order_epoch
 // bump it applies.
 // =============================================================================
@@ -1536,5 +1559,98 @@ test("a same-customer order on its own grant still works and never changes the o
     assert.equal(row.status, status, intent);
     assert.equal(row.customer_id, "cus_A", intent);
     assert.equal(row.enforcement_mode, "device_bound_v1", intent);
+  }
+});
+
+// =============================================================================
+// A grant no order has applied yet (an operator-made grant) sits below every order on
+// the apply floor, so the first order at (epoch 0, seq 0) applies; and an audit row is
+// written only when the order's entitlement write actually lands.
+// =============================================================================
+async function operatorGrantAndOrder(db, env, order) {
+  const fp = await fpOf(order);
+  db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_order','Owner',1,1);
+    INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,enforcement_mode,max_active_devices,notes,created_at,updated_at)
+      VALUES('${PROJECT}','${FEATURE}','${fp}','active','cus_order','device_bound_v1',2,'operator grant',1,1);`);
+  return fp;
+}
+
+function auditRows(db, eventId) {
+  return db.prepare("SELECT event_type, status FROM entitlement_events WHERE request_id = ?").all(eventId)
+    .map(({ event_type, status }) => ({ event_type, status }));
+}
+
+for (const [intent, status] of WITHDRAWALS) {
+  test(`a first ${intent} at seq 0 applies to the owner's operator-made grant with one audit row`, async (t) => {
+    const { db, env } = freshEnv(); t.after(() => db.close());
+    const order = makeOrder({ seq: 0, event_id: "evt_first", intent });
+    const fp = await operatorGrantAndOrder(db, env, order);
+    const outcome = await submit(env, order);
+    assert.equal(outcome.status, 200);
+    assert.equal(outcome.body.code, "applied");
+    const row = entRow(db, fp);
+    assert.equal(row.status, status);
+    assert.equal(row.customer_id, "cus_order");
+    assert.equal(row.last_applied_order_epoch, 0);
+    assert.equal(row.last_applied_order_seq, 0);
+    const audits = auditRows(db, order.event_id);
+    assert.equal(audits.length, 1);
+    assert.equal(audits[0].status, status);
+  });
+}
+
+test("a first subscription.active at seq 0 refreshes the same customer's operator-made grant", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  const order = makeOrder({ seq: 0, event_id: "evt_first", quantity: { max_active_devices: 4 }, license_id: "lic_order" });
+  const fp = await operatorGrantAndOrder(db, env, order);
+  db.exec(`UPDATE entitlements SET status='disabled' WHERE license_fingerprint='${fp}'`);
+  const outcome = await submit(env, order);
+  assert.equal(outcome.status, 200);
+  assert.equal(outcome.body.code, "applied");
+  const row = entRow(db, fp);
+  assert.equal(row.status, "active", "the order's state wins over the operator's");
+  assert.equal(row.valid_until, NOW + 30 * 86400);
+  assert.equal(row.max_active_devices, 4);
+  assert.equal(row.license_id, "lic_order");
+  assert.equal(row.customer_id, "cus_order", "the owner is unchanged");
+  assert.equal(row.notes, "operator grant", "the operator's notes are kept");
+  assert.equal(row.enforcement_mode, "device_bound_v1");
+  assert.equal(row.last_applied_order_seq, 0);
+  assert.deepEqual(auditRows(db, order.event_id), [{ event_type: "update", status: "active" }]);
+
+  const renewal = makeOrder({ seq: 1, event_id: "evt_renewal", intent: "subscription.renewed", current_period_end: NOW + 60 * 86400 });
+  assert.equal((await submit(env, renewal)).body.code, "applied");
+  assert.equal(entRow(db, fp).valid_until, NOW + 60 * 86400);
+});
+
+test("an owner change racing a seq-0 order on an operator-made grant leaves no audit row", async (t) => {
+  for (const intent of ["subscription.active", "subscription.renewed", "quantity.changed", "fraud.confirmed", "chargeback"]) {
+    const { db, env } = freshEnv(); t.after(() => db.close());
+    const order = makeOrder({ seq: 0, event_id: "evt_race", intent, ...(intent === "quantity.changed" ? { quantity: { max_active_devices: 7 } } : {}) });
+    const fp = await operatorGrantAndOrder(db, env, order);
+    db.prepare(
+      "INSERT INTO orders (subscription_id, project, feature, license_fingerprint, customer_id, last_seq, order_epoch, fingerprint_origin, created_at, updated_at) VALUES (?, ?, ?, ?, 'cus_order', -1, 0, 'derived', ?, ?)",
+    ).run("sub_A", PROJECT, FEATURE, fp, NOW, NOW);
+    await env.DB.batch(buildAcceptBatch(env, order, KEY_ID, digestOf(order), JSON.stringify(order), NOW, fp, "derived"));
+    const realDb = env.DB;
+    const racingEnv = {
+      ...env,
+      DB: {
+        prepare(sql) { return realDb.prepare(sql); },
+        async batch(statements) {
+          db.exec(`INSERT OR IGNORE INTO customers(id,name,created_at,updated_at) VALUES('cus_moved','Moved',1,1);
+            UPDATE entitlements SET customer_id='cus_moved' WHERE license_fingerprint='${fp}';`);
+          return realDb.batch(statements);
+        },
+      },
+    };
+    const grant = { ...entRow(db, fp), customer_id: "cus_moved" };
+    assertOwnerRefusal(await applyOrderEvent(racingEnv, order, fp, "derived", NOW), intent);
+    assert.deepEqual(auditRows(db, order.event_id), [], `${intent} writes no audit or webhook row`);
+    const after = entRow(db, fp);
+    for (const field of ["customer_id", "status", "revocation_seq", "valid_until", "max_active_devices", "last_applied_order_seq"]) {
+      assert.equal(after[field], grant[field], `${intent} ${field}`);
+    }
+    assert.equal(eventRow(db, order.event_id).status, "rejected", intent);
   }
 });
