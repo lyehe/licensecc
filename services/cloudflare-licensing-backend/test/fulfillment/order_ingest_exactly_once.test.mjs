@@ -189,7 +189,7 @@ function base64(bytes) {
   return btoa(String.fromCharCode(...bytes));
 }
 
-async function ingest(env, body) {
+async function ingest(env, body, extraEnv = {}) {
   const bodyText = JSON.stringify(body);
   const timestamp = String(Math.floor(Date.now() / 1000));
   const key = await crypto.subtle.importKey("raw", HMAC_SECRET, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -205,6 +205,7 @@ async function ingest(env, body) {
     ORDER_HMAC_SECRETS: JSON.stringify({ [HMAC_KEY_ID]: base64(HMAC_SECRET) }),
     ORDER_INGEST_AUDIENCE: HMAC_AUDIENCE,
     ORDER_INGEST_MODE: "required",
+    ...extraEnv,
   });
   return { status: response.status, body: await response.json() };
 }
@@ -1290,9 +1291,9 @@ test("case 16: intent coverage (disable reversible, resume, quantity-only, fraud
 });
 
 // =============================================================================
-// Withdrawals (disable, revoke and cancel-at-period-end) always apply. They still name
-// the customer, but no customer status, owner or elapsed period refuses them, and they
-// never write the grant's owner or license.
+// Withdrawals (disable, revoke and cancel-at-period-end) always apply for the grant's
+// own customer. They still name the customer, but no customer status or elapsed period
+// refuses them, and they never write the grant's owner or license.
 // =============================================================================
 const WITHDRAWALS = [
   ["subscription.past_due", "disabled"],
@@ -1304,21 +1305,18 @@ const WITHDRAWALS = [
 ];
 
 for (const [intent, status] of WITHDRAWALS) {
-  test(`${intent} applies to a grant whose owner is disabled or moved, and keeps the stored owner`, async (t) => {
+  test(`${intent} applies when its customer is disabled and a device is bound, and keeps the owner`, async (t) => {
     const { db, env } = freshEnv(); t.after(() => db.close());
     const identity = { customer: { id: "cus_order" }, license_id: "lic_order" };
     const active = makeOrder({ seq: 1, event_id: "evt_active", ...identity });
     const fp = await fpOf(active);
     assert.equal((await submit(env, active)).body.code, "applied");
-    // An operator moved the grant to another customer, a device is bound to it, and both
-    // customers are now disabled. Writing the owner back would also trip the bound-owner guard.
-    db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_moved','Moved',1,1);
-      UPDATE entitlements SET customer_id='cus_moved' WHERE license_fingerprint='${fp}';
-      INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
-        VALUES('device','cus_moved','${PROJECT}','key','synthetic-public',1,1);
+    // A device is bound to the grant and its customer is now disabled.
+    db.exec(`INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
+        VALUES('device','cus_order','${PROJECT}','key','synthetic-public',1,1);
       INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,generation,revision,hold_until,created_at,updated_at)
         VALUES('binding','${PROJECT}','${FEATURE}','${fp}','device','active',1,1,0,1,1);
-      UPDATE customers SET status='disabled' WHERE id IN ('cus_order','cus_moved');`);
+      UPDATE customers SET status='disabled' WHERE id='cus_order';`);
 
     const withdrawal = makeOrder({ seq: 2, event_id: "evt_withdrawal", intent, ...identity });
     const outcome = await submit(env, withdrawal);
@@ -1326,7 +1324,7 @@ for (const [intent, status] of WITHDRAWALS) {
     assert.equal(outcome.body.code, "applied");
     const row = entRow(db, fp);
     assert.equal(row.status, status);
-    assert.equal(row.customer_id, "cus_moved", "a withdrawal never moves the owner");
+    assert.equal(row.customer_id, "cus_order");
     assert.equal(row.license_id, "lic_order");
     assert.equal(row.last_applied_order_seq, 2);
     assert.equal(eventRow(db, withdrawal.event_id).status, "processed");
@@ -1373,5 +1371,177 @@ test("a withdrawal for a subscription with no grant creates nothing", async () =
     assert.equal(countRows(db, "entitlements"), 0, intent);
     assert.equal(eventRow(db, order.event_id).status, "processed", intent);
     db.close();
+  }
+});
+
+// =============================================================================
+// Grant ownership: an order may act only on a grant its own customer already owns, or
+// create a new one. A grant owned by another customer, or by no one, refuses every
+// intent, withdrawals included, and the refused order writes nothing.
+// =============================================================================
+const FOREIGN_FP = "f".repeat(64);
+const SCOPED_TO_A = {
+  ORDER_SIGNER_SCOPE_MODE: "required",
+  ORDER_SIGNER_SCOPES: JSON.stringify({ [HMAC_KEY_ID]: { customer_id: "cus_A" } }),
+};
+const OTHER_INTENTS = [
+  ["subscription.renewed", {}],
+  ["subscription.resumed", {}],
+  ["quantity.changed", { quantity: { max_active_devices: 9 } }],
+  ["subscription.past_due", {}],
+  ["subscription.paused", {}],
+  ["subscription.payment_failed", {}],
+  ["subscription.canceled_at_period_end", {}],
+  ["fraud.confirmed", {}],
+  ["chargeback", {}],
+];
+
+// An operator-made grant at FOREIGN_FP, owned by `owner` (NULL for an unowned grant).
+function seedGrant(db, owner) {
+  db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_B','B',1,1);
+    INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,enforcement_mode,max_active_devices,notes,created_at,updated_at)
+      VALUES('${PROJECT}','${FEATURE}','${FOREIGN_FP}','active',${owner === null ? "NULL" : `'${owner}'`},'device_bound_v1',2,'operator grant',1,1);`);
+}
+
+function orderState(db) {
+  return ["entitlements", "entitlement_events", "orders", "order_events", "customers", "licenses", "device_bound_bindings"]
+    .map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+}
+
+function assertOwnerRefusal(outcome, label) {
+  assert.equal(outcome.status, 409, label);
+  assert.equal(outcome.body.code, "entitlement_owner_mismatch", label);
+}
+
+test("a signer scoped to customer A cannot activate customer B's grant through its fingerprint", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  seedGrant(db, "cus_B");
+  const before = orderState(db);
+  const takeover = wireOrder({ event_id: "evt_takeover", customer: { id: "cus_A" }, license_fingerprint: FOREIGN_FP });
+  assertOwnerRefusal(await ingest(env, takeover, SCOPED_TO_A), "subscription.active");
+  assert.deepEqual(orderState(db), before, "the refused order writes nothing");
+  assert.equal(entRow(db, FOREIGN_FP).customer_id, "cus_B");
+});
+
+test("a signer scoped to customer A cannot revoke or change customer B's grant with any other intent", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  seedGrant(db, "cus_B");
+  const before = orderState(db);
+  for (const [seq, [intent, extra]] of OTHER_INTENTS.entries()) {
+    const order = wireOrder({ event_id: `evt_${intent}`, seq: seq + 1, intent, customer: { id: "cus_A" }, license_fingerprint: FOREIGN_FP, ...extra });
+    assertOwnerRefusal(await ingest(env, order, SCOPED_TO_A), intent);
+    assert.deepEqual(orderState(db), before, `${intent} writes nothing`);
+  }
+  assert.equal(entRow(db, FOREIGN_FP).status, "active");
+});
+
+test("a grant with no owner refuses every order", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  seedGrant(db, null);
+  const before = orderState(db);
+  for (const [seq, [intent, extra]] of [["subscription.active", {}], ...OTHER_INTENTS].entries()) {
+    const order = wireOrder({ event_id: `evt_${intent}`, seq: seq + 1, intent, customer: { id: "cus_A" }, license_fingerprint: FOREIGN_FP, ...extra });
+    assertOwnerRefusal(await ingest(env, order), intent);
+  }
+  assert.deepEqual(orderState(db), before);
+  assert.equal(entRow(db, FOREIGN_FP).customer_id, null);
+});
+
+test("after an admin reassigns a grant, orders naming the old customer are refused instead of moving it back", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  const active = makeOrder({ seq: 1, event_id: "evt_active" });
+  const fp = await fpOf(active);
+  assert.equal((await submit(env, active)).body.code, "applied");
+  // An operator moves the grant to cus_moved, and a device is then bound to it.
+  db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_moved','Moved',1,1);
+    UPDATE entitlements SET customer_id='cus_moved' WHERE license_fingerprint='${fp}';
+    INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
+      VALUES('device','cus_moved','${PROJECT}','key','synthetic-public',1,1);
+    INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,generation,revision,hold_until,created_at,updated_at)
+      VALUES('binding','${PROJECT}','${FEATURE}','${fp}','device','active',1,1,0,1,1);`);
+  const before = orderState(db);
+
+  const renewal = makeOrder({ seq: 2, event_id: "evt_renewal", intent: "subscription.renewed", current_period_end: NOW + 90 * 86400 });
+  assertOwnerRefusal(await submit(env, renewal), "renewal");
+  assert.deepEqual(orderState(db), before, "a refused renewal writes nothing and is not a retryable 503");
+  for (const [seq, intent] of [[3, "subscription.active"], [4, "fraud.confirmed"], [5, "subscription.canceled_at_period_end"]]) {
+    assertOwnerRefusal(await submit(env, makeOrder({ seq, event_id: `evt_${intent}`, intent })), intent);
+  }
+  assert.deepEqual(orderState(db), before);
+  assert.equal(entRow(db, fp).customer_id, "cus_moved");
+  assert.equal(orderRow(db, "sub_A").last_seq, 1, "a refused order does not consume the floor");
+});
+
+test("an accepted order redriven after an admin reassignment is refused without touching the grant", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  const active = makeOrder({ seq: 1, event_id: "evt_active" });
+  const fp = await fpOf(active);
+  assert.equal((await submit(env, active)).body.code, "applied");
+  const renewal = makeOrder({ seq: 2, event_id: "evt_renewal", intent: "subscription.renewed", current_period_end: NOW + 90 * 86400 });
+  await env.DB.batch(buildAcceptBatch(env, renewal, KEY_ID, digestOf(renewal), JSON.stringify(renewal), NOW, fp, "derived"));
+  db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_moved','Moved',1,1);
+    UPDATE entitlements SET customer_id='cus_moved' WHERE license_fingerprint='${fp}';`);
+  const grant = entRow(db, fp);
+
+  const outcome = await submit(env, renewal);
+  assertOwnerRefusal(outcome, "redriven renewal");
+  assert.deepEqual(entRow(db, fp), grant);
+  assert.equal(eventRow(db, renewal.event_id).status, "rejected");
+  assert.equal(JSON.parse(eventRow(db, renewal.event_id).result_json).code, "entitlement_owner_mismatch");
+  assertOwnerRefusal(await submit(env, renewal), "cached retry");
+});
+
+test("an owner change between the read and the write refuses the order atomically", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  const active = makeOrder({ seq: 1, event_id: "evt_active" });
+  const fp = await fpOf(active);
+  assert.equal((await submit(env, active)).body.code, "applied");
+  for (const [seq, intent] of [[2, "subscription.renewed"], [3, "subscription.active"], [4, "quantity.changed"], [5, "fraud.confirmed"]]) {
+    db.exec(`UPDATE entitlements SET customer_id='cus_order' WHERE license_fingerprint='${fp}'`);
+    const order = makeOrder({ seq, event_id: `evt_race_${intent}`, intent, ...(intent === "quantity.changed" ? { quantity: { max_active_devices: 7 } } : {}) });
+    await env.DB.batch(buildAcceptBatch(env, order, KEY_ID, digestOf(order), JSON.stringify(order), NOW, fp, "derived"));
+    const realDb = env.DB;
+    const racingEnv = {
+      ...env,
+      DB: {
+        prepare(sql) { return realDb.prepare(sql); },
+        async batch(statements) {
+          // The operator reassigns the grant after the apply read it, before its batch runs.
+          db.exec(`UPDATE entitlements SET customer_id='cus_moved' WHERE license_fingerprint='${fp}'`);
+          return realDb.batch(statements);
+        },
+      },
+    };
+    const grant = { ...entRow(db, fp), customer_id: "cus_moved" };
+    const outcome = await applyOrderEvent(racingEnv, order, fp, "derived", NOW);
+    assertOwnerRefusal(outcome, intent);
+    const after = entRow(db, fp);
+    assert.equal(after.customer_id, "cus_moved", intent);
+    for (const field of ["status", "revocation_seq", "valid_until", "max_active_devices", "last_applied_order_seq"]) {
+      assert.equal(after[field], grant[field], `${intent} ${field}`);
+    }
+    assert.equal(eventRow(db, order.event_id).status, "rejected", intent);
+    assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events WHERE request_id = ?").get(order.event_id).c, 0, intent);
+  }
+});
+
+test("a same-customer order on its own grant still works and never changes the owner", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  seedGrant(db, "cus_A");
+  const identity = { customer: { id: "cus_A" }, license_fingerprint: FOREIGN_FP };
+  for (const [seq, intent, status] of [
+    [1, "subscription.active", "active"],
+    [2, "subscription.renewed", "active"],
+    [3, "subscription.past_due", "disabled"],
+    [4, "subscription.resumed", "active"],
+    [5, "fraud.confirmed", "revoked"],
+  ]) {
+    const outcome = await ingest(env, wireOrder({ event_id: `evt_${intent}`, seq, intent, ...identity }), SCOPED_TO_A);
+    assert.equal(outcome.status, 200, intent);
+    assert.equal(outcome.body.code, "applied", intent);
+    const row = entRow(db, FOREIGN_FP);
+    assert.equal(row.status, status, intent);
+    assert.equal(row.customer_id, "cus_A", intent);
+    assert.equal(row.enforcement_mode, "device_bound_v1", intent);
   }
 });

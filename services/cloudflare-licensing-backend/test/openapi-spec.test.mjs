@@ -213,8 +213,9 @@ test("order ingest documents distinct config/write failures and raw-wire body se
   );
   assert.deepEqual(
     Object.keys(operation.responses["409"].content["application/json"].examples).sort(),
-    ["entitlement_revoked", "event_id_conflict", "fingerprint_owned", "seq_conflict"],
+    ["entitlement_owner_mismatch", "entitlement_revoked", "event_id_conflict", "fingerprint_owned", "seq_conflict"],
   );
+  assert.match(operation.responses["409"].description, /entitlement_owner_mismatch/);
   const order503 = operation.responses["503"];
   const examples = order503.content["application/json"].examples;
   assert.deepEqual(Object.keys(examples).sort(), ["config_error", "write_failed"]);
