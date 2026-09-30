@@ -335,6 +335,53 @@ test("retirement revisions cannot be reset and trial authority changes invalidat
   }
 });
 
+test("entitlement authority revision advances for every authority column", t => {
+  const f=fixture(); t.after(()=>f.sql.close());
+  f.sql.exec("INSERT INTO customers(id,name,created_at,updated_at) VALUES('second','Second',1000,1000)");
+  const revision=()=>f.sql.prepare("SELECT authority_revision FROM entitlements").get().authority_revision;
+  const authority=[["status","'disabled'"],["customer_id","'second'"],["valid_from","900"],["valid_until","5000"],
+    ["max_active_devices","2"],["lease_seconds","86400"],["revocation_seq","1"],["is_trial","1"],["trial_started_at","1000"],
+    ["trial_duration_sec","604800"],["trial_expiration_basis","'from_first_activation'"],["trial_one_per_device","1"],
+    ["trial_device_hash",`'${"b".repeat(64)}'`]];
+  for (const [column,value] of authority) {
+    const before=revision();
+    f.sql.exec(`UPDATE entitlements SET ${column}=${value}`);
+    assert.equal(revision(),before+1,column);
+  }
+  const before=revision();
+  f.sql.exec("UPDATE entitlements SET notes='operator note'");
+  assert.equal(revision(),before,"notes");
+});
+
+// The exact column lists: any seat, meter, TTL or device-hash column left in
+// the baseline makes these fail, without the test naming those columns.
+const ENTITLEMENT_COLUMNS=["authority_revision","created_at","customer_id","enforcement_mode","feature","is_trial",
+  "last_applied_order_epoch","last_applied_order_seq","lease_seconds","license_fingerprint","license_id","max_active_devices",
+  "notes","policy_id","project","revocation_seq","status","trial_device_hash","trial_duration_sec","trial_expiration_basis",
+  "trial_one_per_device","trial_started_at","updated_at","valid_from","valid_until"];
+function columns(f,table) { return f.sql.prepare(`PRAGMA table_info(${table})`).all().map(c=>c.name).sort(); }
+
+test("the entitlements table has no seat, meter, TTL or device-hash column", t => {
+  const f=fixture(); t.after(()=>f.sql.close());
+  assert.deepEqual(columns(f,"entitlements"),ENTITLEMENT_COLUMNS);
+});
+
+test("policies, catalog plan features and entitlement events have no seat, meter, TTL or device-hash column", t => {
+  const f=fixture(); t.after(()=>f.sql.close());
+  assert.deepEqual(columns(f,"entitlement_policies"),["created_at","duration_sec","expiry_strategy","id","max_active_devices",
+    "name","notes","project","status","trial_duration_sec","trial_expiration_basis","trial_one_per_device","type","updated_at",
+    "valid_from_offset_sec"]);
+  assert.deepEqual(columns(f,"catalog_plan_features"),["addon_key","created_at","display_order","feature_inclusion","feature_key",
+    "max_active_devices","plan_id","policy_id","project","status","updated_at"]);
+  assert.deepEqual(columns(f,"entitlement_events"),["actor","actor_type","created_at","detail","event_type","feature","id",
+    "idempotency_key","ip","license_fingerprint","next_json","prev_json","project","reason","request_id","revocation_seq",
+    "source","status"]);
+  const policy=type=>f.sql.exec(`INSERT INTO entitlement_policies(id,project,name,type,created_at,updated_at)
+    VALUES('pol-${type}','APP','${type} policy','${type}',1000,1000)`);
+  for (const type of ["trial","node_locked","subscription"]) policy(type);
+  assert.throws(()=>policy("floating"),/CHECK/);
+});
+
 test("renewal cannot commit if its verified-contact write is omitted", async () => {
   const f=fixture(),c=candidate(); seed(f,c); await commitBoundDeviceLease(f.db,c);
   const before=f.sql.prepare("SELECT * FROM device_bound_bindings").get();
