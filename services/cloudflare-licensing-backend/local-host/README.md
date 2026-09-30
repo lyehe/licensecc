@@ -127,7 +127,7 @@ Then verify from Bash:
 
 ```bash
 curl -s http://127.0.0.1:8787/health
-# {"ok":true,"service":"licensecc-online-verifier"}
+# HTTP 503: {"ok":false,"service":"licensecc-online-verifier","protected_device_ready":false,...}
 
 curl -s -X POST http://127.0.0.1:8787/v1/verify \
   -H 'content-type: application/json' \
@@ -138,7 +138,7 @@ curl -s -X POST http://127.0.0.1:8787/v1/verify \
 Or verify from PowerShell:
 
 ```powershell
-Invoke-RestMethod -Uri http://127.0.0.1:8787/health
+Invoke-RestMethod -Uri http://127.0.0.1:8787/health -SkipHttpErrorCheck
 
 $body = @{
   project = "DEFAULT"
@@ -152,8 +152,11 @@ Invoke-RestMethod -Uri http://127.0.0.1:8787/v1/verify `
   -Method Post -ContentType "application/json" -Body $body
 ```
 
-The health response reports `ok` and the service name. The verification
-response reports `ok`, `code = entitlement_ok`, and a signed `assertion`.
+The health response reports the service name and `protected_device_ready`.
+This host does not pass the protected device configuration through, so health
+answers HTTP **503** with `protected_device_ready: false`; that readiness does
+not gate `/v1/verify`. (`-SkipHttpErrorCheck` needs PowerShell 7.) The
+verification response reports `ok`, `code = entitlement_ok`, and a signed `assertion`.
 
 A request for a license fingerprint with no active entitlement returns
 `{"ok":false,"code":"entitlement_denied"}` with HTTP **200** (a denial, not an

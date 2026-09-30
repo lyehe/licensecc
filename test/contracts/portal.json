@@ -2000,7 +2000,7 @@
       },
       "/health": {
         "get": {
-          "description": "Invariant 7: the portal is only healthy when the backend enforces full account isolation.",
+          "description": "The portal is healthy only when the backend's own /health returns ok and protected_device_ready. Any missing, malformed, mismatched, non-200 or unreachable backend answer fails closed.",
           "operationId": "health",
           "responses": {
             "200": {
@@ -2018,12 +2018,12 @@
                       },
                       "data": {
                         "properties": {
-                          "account_token_mode_required": {
+                          "backend_protected_ready": {
                             "const": true
                           }
                         },
                         "required": [
-                          "account_token_mode_required"
+                          "backend_protected_ready"
                         ],
                         "type": "object"
                       }
@@ -2031,7 +2031,7 @@
                   }
                 }
               },
-              "description": "Healthy (ACCOUNT_TOKEN_MODE=required)."
+              "description": "Healthy: the backend reports protected licensing ready."
             },
             "503": {
               "content": {
@@ -2044,17 +2044,28 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "account_token_mode_not_required"
+                        "const": "backend_not_ready"
+                      },
+                      "data": {
+                        "properties": {
+                          "backend_protected_ready": {
+                            "const": false
+                          }
+                        },
+                        "required": [
+                          "backend_protected_ready"
+                        ],
+                        "type": "object"
                       }
                     }
                   }
                 }
               },
-              "description": "ACCOUNT_TOKEN_MODE != \"required\" — the portal is not healthy because backend account isolation is not enforced."
+              "description": "The backend did not prove protected licensing ready, so the portal is not healthy."
             }
           },
           "security": [],
-          "summary": "Health check. 200 only if ACCOUNT_TOKEN_MODE=required (backend account isolation enforced).",
+          "summary": "Health check. 200 only if the backend reports protected licensing ready.",
           "tags": [
             "ops"
           ]

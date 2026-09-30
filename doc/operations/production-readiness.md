@@ -147,6 +147,13 @@ the exact candidate.
   isolated staging resources.
 - Every deploy records a changed deployment ID and a new sole version receiving
   100% of traffic within the bounded post-deploy poll.
+- Backend `/health` returns `200` with `protected_device_ready: true`, and
+  portal `/health` returns `200 healthy` with `data.backend_protected_ready:
+  true`; any other answer is a readiness failure. Right after the Worker
+  deploy, the protected smoke also requires an unauthenticated challenge for an
+  unknown attempt to return `404 authorization_unavailable`, and retains its
+  redacted evidence. Health proves local protected configuration only; the
+  staging drill below and native live qualification prove issuance and renewal.
 - A synthetic tenant completes the backend, operator, customer, and recovery
   paths without touching production data.
 - The admin drill proves unauthenticated and malformed-token denial, real

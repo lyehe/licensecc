@@ -379,9 +379,11 @@ duplicate check as crash-redrive evidence.
   `ORDER_SIGNER_SCOPE_MODE` accept only their documented lowercase values.
   An unset/empty value keeps its legacy `off` default; any other non-empty
   value fails closed with `503 config_error`. `/health` stays callable: a
-  healthy `200` reports normalized `account_token_mode` plus optional
-  names-only `config_warnings`; invalid configuration returns `503
-  config_error` with selector names only. Static `/openapi.json` and `/docs`
+  healthy `200` reports `protected_device_ready: true` plus optional
+  names-only `config_warnings`; a protected device configuration that fails
+  its local readiness checks returns `503` with `protected_device_ready:
+  false`, and invalid configuration returns `503 config_error` with selector
+  names only. Static `/openapi.json` and `/docs`
   remain available so operators can inspect this contract during a readiness
   failure.
 - `required` request-proof mode expects `request_signature_version=1`,
@@ -775,9 +777,17 @@ Configure `BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM` as an independently purpos
 Worker secret and `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM` with its public key.
 The pair must use RSA-3072/SHA-256; the key ID is derived from public SPKI. There
 is no fallback to v201/online-assertion keys. Keep the private key out of local
-tracked configuration and client artifacts. Existing health/secret-inventory
-checks cover legacy readiness; they do not yet certify this staged v2 rollout.
-Follow the [protected key rotation runbook](../../doc/operations/device-bound-key-rotation.md)
+tracked configuration and client artifacts. `BOUND_DEVICE_CONFIG` and
+`BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM` are deploy-config vars, and the
+protected deploy materializer refuses a backend config without a valid registry
+and an RSA-3072 PEM public key. `/health` certifies protected readiness:
+`protected_device_ready` is true only when the registry parses, the signer pair
+signs and verifies, the approval key ring seals and opens, and
+`BOUND_GLOBAL_RATE_LIMIT` is valid. The check runs once per Worker isolate. After
+a production deploy, `npm run validate:protected-smoke -- --url <backend-origin>`
+requires that readiness and an `authorization_unavailable` denial for an
+unauthenticated challenge naming an unknown attempt; it prints redacted JSON
+evidence. Neither proves a live issuance or renewal. Follow the [protected key rotation runbook](../../doc/operations/device-bound-key-rotation.md)
 before switching signers. Old public keys can still be required to load saved
 checkpoints after their leases expire; lease expiry alone is not a removal rule.
 

@@ -181,8 +181,9 @@ npm run dry-run --workspace @licensecc/cloudflare-customer-portal
 Browser smoke tests require the explicit one-time setup command
 `npm run setup:browsers`, followed by `npm run test:e2e`.
 
-The deployed portal drill also verifies that the built UI shell and health
-endpoint load before authenticating. With an existing session cookie and the
+The deployed portal drill also verifies that the built UI shell loads and that
+`/health` reports the backend as protected-ready (`data.backend_protected_ready:
+true`) before authenticating. With an existing session cookie and the
 protected device variables left unset, it is safe for a production post-deploy
 read gate:
 

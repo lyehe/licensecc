@@ -136,18 +136,17 @@
           "type": "object"
         },
         "HealthConfigError": {
+          "dependentRequired": {
+            "code": [
+              "invalid_config_modes"
+            ],
+            "invalid_config_modes": [
+              "code"
+            ]
+          },
           "properties": {
-            "account_token_mode": {
-              "description": "Normalized ACCOUNT_TOKEN_MODE; invalid indicates this selector is one of invalid_config_modes.",
-              "enum": [
-                "off",
-                "soft",
-                "required",
-                "invalid"
-              ],
-              "type": "string"
-            },
             "code": {
+              "description": "Present only with invalid_config_modes.",
               "enum": [
                 "config_error"
               ],
@@ -180,6 +179,10 @@
               ],
               "type": "boolean"
             },
+            "protected_device_ready": {
+              "description": "False when the protected device configuration fails a local readiness check; the failing check is never named.",
+              "type": "boolean"
+            },
             "service": {
               "enum": [
                 "licensecc-online-verifier"
@@ -190,23 +193,12 @@
           "required": [
             "ok",
             "service",
-            "code",
-            "account_token_mode",
-            "invalid_config_modes"
+            "protected_device_ready"
           ],
           "type": "object"
         },
         "HealthSuccess": {
           "properties": {
-            "account_token_mode": {
-              "description": "Normalized ACCOUNT_TOKEN_MODE; raw configuration values are never returned.",
-              "enum": [
-                "off",
-                "soft",
-                "required"
-              ],
-              "type": "string"
-            },
             "config_warnings": {
               "description": "Optional names-only operator warnings for paired security material configured with a non-enforcing normalized mode.",
               "items": {
@@ -215,6 +207,13 @@
               "type": "array"
             },
             "ok": {
+              "enum": [
+                true
+              ],
+              "type": "boolean"
+            },
+            "protected_device_ready": {
+              "description": "The protected device registry, dedicated RSA-3072 signer pair, approval key ring and global rate limit all passed their local checks. No configuration value is returned.",
               "enum": [
                 true
               ],
@@ -230,7 +229,7 @@
           "required": [
             "ok",
             "service",
-            "account_token_mode"
+            "protected_device_ready"
           ],
           "type": "object"
         },
@@ -1113,8 +1112,8 @@
                   "examples": {
                     "ok": {
                       "value": {
-                        "account_token_mode": "off",
                         "ok": true,
+                        "protected_device_ready": true,
                         "service": "licensecc-online-verifier"
                       }
                     }
@@ -1124,7 +1123,7 @@
                   }
                 }
               },
-              "description": "Service healthy. account_token_mode is the normalized enforcement decision; config_warnings is present only for names-only paired-material consistency warnings."
+              "description": "Service healthy and protected_device_ready: the protected device configuration passed its local readiness checks. config_warnings is present only for names-only paired-material consistency warnings."
             },
             "503": {
               "content": {
@@ -1132,12 +1131,19 @@
                   "examples": {
                     "config_error": {
                       "value": {
-                        "account_token_mode": "invalid",
                         "code": "config_error",
                         "invalid_config_modes": [
                           "REQUEST_SIGNATURE_MODE"
                         ],
                         "ok": false,
+                        "protected_device_ready": true,
+                        "service": "licensecc-online-verifier"
+                      }
+                    },
+                    "protected_not_ready": {
+                      "value": {
+                        "ok": false,
+                        "protected_device_ready": false,
                         "service": "licensecc-online-verifier"
                       }
                     }
@@ -1147,11 +1153,11 @@
                   }
                 }
               },
-              "description": "config_error: one or more security rollout selectors is invalid. Health remains callable and returns selector names only, never raw configuration values or secrets."
+              "description": "Not ready. protected_device_ready is false when the protected device configuration fails a local readiness check; config_error with invalid_config_modes means one or more security rollout selectors is invalid. Health remains callable and returns names and booleans only, never raw configuration values or secrets."
             }
           },
           "security": [],
-          "summary": "Health check.",
+          "summary": "Health and protected-licensing readiness check.",
           "tags": [
             "meta"
           ]

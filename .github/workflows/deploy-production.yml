@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       backend_url:
-        description: Canonical HTTPS URL used for the public-verifier post-deploy drill
+        description: Canonical HTTPS URL used for the protected smoke and public-verifier post-deploy drill
         required: true
         type: string
       admin_url:
@@ -131,6 +131,10 @@ jobs:
           node scripts/run-protected-wrangler.mjs --operation deploy --worker backend
           node scripts/run-protected-wrangler.mjs --operation deploy --worker admin
           node scripts/run-protected-wrangler.mjs --operation deploy --worker portal
+      - name: Run protected post-deploy smoke
+        env:
+          BACKEND_URL: ${{ inputs.backend_url }}
+        run: npm --silent run validate:protected-smoke --workspace @licensecc/cloudflare-licensing-backend -- --url "$BACKEND_URL" > "$RUNNER_TEMP/licensecc-deployment-evidence/backend-protected-smoke.json"
       - name: Run proof-authenticated backend post-deploy drill
         env:
           BACKEND_URL: ${{ inputs.backend_url }}

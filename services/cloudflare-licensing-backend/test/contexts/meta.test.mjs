@@ -35,11 +35,11 @@ test("health reports protected_device_ready false and 503 without BOUND_DEVICE_C
   }
 });
 
-test("health no longer reports an account-token mode", async () => {
+test("health reports the same readiness body whatever ACCOUNT_TOKEN_MODE is", async () => {
   for (const ACCOUNT_TOKEN_MODE of ["required", "soft", "off", undefined]) {
     const result = await health({ ...PROTECTED, ACCOUNT_TOKEN_MODE });
     assert.equal(result.status, 200);
-    assert.equal(Object.hasOwn(result.body, "account_token_mode"), false);
+    assert.deepEqual(result.body, { ok: true, service: "licensecc-online-verifier", protected_device_ready: true });
   }
 });
 

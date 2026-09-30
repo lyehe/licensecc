@@ -31,7 +31,7 @@ export { constantTimeEqual } from "@licensecc/cloudflare-runtime/auth/primitives
 const DEFAULT_LAST_USED_THROTTLE_SEC = 300;
 
 /**
- * Resolve ACCOUNT_TOKEN_MODE for health/readiness. The runtime fallback is 'off'
+ * Resolve ACCOUNT_TOKEN_MODE (health no longer reports it). The runtime fallback is 'off'
  * (legacy bearer + shadow-eval); an unknown non-empty value is reported as
  * 'invalid' and accountAuth fails closed. Production MUST set 'required' (see
  * wrangler.example.toml); the safe cutover is off -> soft (observe) -> required.

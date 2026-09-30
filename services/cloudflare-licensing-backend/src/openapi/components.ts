@@ -141,14 +141,14 @@ export const openApiComponents: LabeledComponentFragment = {
       }],
       ["HealthSuccess", {
         type: "object",
-        required: ["ok", "service", "account_token_mode"],
+        required: ["ok", "service", "protected_device_ready"],
         properties: {
           ok: { type: "boolean", enum: [true] },
           service: { type: "string", enum: ["licensecc-online-verifier"] },
-          account_token_mode: {
-            type: "string",
-            enum: ["off", "soft", "required"],
-            description: "Normalized ACCOUNT_TOKEN_MODE; raw configuration values are never returned.",
+          protected_device_ready: {
+            type: "boolean",
+            enum: [true],
+            description: "The protected device registry, dedicated RSA-3072 signer pair, approval key ring and global rate limit all passed their local checks. No configuration value is returned.",
           },
           config_warnings: {
             type: "array",
@@ -159,16 +159,16 @@ export const openApiComponents: LabeledComponentFragment = {
       }],
       ["HealthConfigError", {
         type: "object",
-        required: ["ok", "service", "code", "account_token_mode", "invalid_config_modes"],
+        required: ["ok", "service", "protected_device_ready"],
+        dependentRequired: { code: ["invalid_config_modes"], invalid_config_modes: ["code"] },
         properties: {
           ok: { type: "boolean", enum: [false] },
           service: { type: "string", enum: ["licensecc-online-verifier"] },
-          code: { type: "string", enum: ["config_error"] },
-          account_token_mode: {
-            type: "string",
-            enum: ["off", "soft", "required", "invalid"],
-            description: "Normalized ACCOUNT_TOKEN_MODE; invalid indicates this selector is one of invalid_config_modes.",
+          protected_device_ready: {
+            type: "boolean",
+            description: "False when the protected device configuration fails a local readiness check; the failing check is never named.",
           },
+          code: { type: "string", enum: ["config_error"], description: "Present only with invalid_config_modes." },
           invalid_config_modes: {
             type: "array",
             minItems: 1,

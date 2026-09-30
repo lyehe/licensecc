@@ -79,7 +79,7 @@ test("protected smoke fails when health reports protected_device_ready false", a
   const cases = [
     ["503 not ready", () => json(NOT_READY, 503)],
     ["200 not ready", () => json({ ...READY, protected_device_ready: false })],
-    ["legacy account-token readiness", () => json({ ok: true, service: "licensecc-online-verifier", account_token_mode: "required" })],
+    ["readiness flag missing", () => json({ ok: true, service: "licensecc-online-verifier" })],
     ["string readiness", () => json({ ...READY, protected_device_ready: "true" })],
     ["wrong service", () => json({ ...READY, service: "other-worker" })],
     ["redirect", () => new Response(null, { status: 302, headers: { location: "https://attacker.test/health" } })],

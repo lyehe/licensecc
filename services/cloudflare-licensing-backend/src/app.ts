@@ -17,8 +17,8 @@ type RouteHandler = (request: Request, env: Env, ctx?: ExecutionContextLike) => 
 
 // Dispatch table built from the canonical route inventory (src/routes.ts). Each thunk preserves the
 // exact wiring the old if/else chain used. Emergency break-glass is NOT in this table — it is a
-// PREFIX gate in fetch() so it can never collide with a literal route. The doc/meta thunks must stay
-// env-free: the crosscheck test calls them with an empty env.
+// PREFIX gate in fetch() so it can never collide with a literal route. Doc thunks stay env-free (the
+// crosscheck calls them with an empty env); /health answers an empty env with 503, never a throw.
 const DISPATCH: Record<string, RouteHandler> = {
   "GET /openapi.json": () => handleOpenApi(),
   "GET /docs": () => handleDocs(),

@@ -13,8 +13,8 @@ async function withFetchStub(fetchStub, run) {
   }
 }
 
-function backendHealth({ service = "licensecc-online-verifier", ok = true, protectedDeviceReady, extra = {}, status = 200 } = {}) {
-  const body = { ok, service, ...extra };
+function backendHealth({ service = "licensecc-online-verifier", ok = true, protectedDeviceReady, status = 200 } = {}) {
+  const body = { ok, service };
   if (protectedDeviceReady !== undefined) body.protected_device_ready = protectedDeviceReady;
   return new Response(JSON.stringify(body), {
     status,
@@ -112,8 +112,7 @@ test("portal health is healthy only when the backend reports protected readiness
       ["ready flag false", { protectedDeviceReady: false }],
       ["backend not ok", { ok: false, protectedDeviceReady: true }],
       ["ready flag is not a boolean", { protectedDeviceReady: "true" }],
-      ["legacy account-token readiness", { extra: { account_token_mode: "required" } }],
-      ["legacy account-token readiness beside a false flag", { protectedDeviceReady: false, extra: { account_token_mode: "required" } }],
+      ["readiness flag missing", {}],
     ]) {
       const unhealthy = await withFetchStub(async () => backendHealth(backend), () => call(env, "GET", "/health", {}));
       assert.equal(unhealthy.status, 503, label);

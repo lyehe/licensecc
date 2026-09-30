@@ -1,9 +1,13 @@
+import { createPublicKey } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { experimental_readRawConfig as readRawWranglerConfig } from "wrangler";
+
+// The protected device registry shape is backend-owned; validate it with the backend's own parser.
+import { boundDeviceConfig } from "../services/cloudflare-licensing-backend/src/device/bound_config.mjs";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
@@ -365,6 +369,26 @@ function validateBackend(config, target, profile, profileName) {
     if (!/^\d{1,4}$/u.test(String(vars[key] ?? "")) || Number(vars[key]) < 1 || Number(vars[key]) > 3600) {
       fail(target, `must set vars.${key} to an integer in [1, 3600]`);
     }
+  }
+  // Protected licensing is non-secret deployment configuration: the client registry and the public
+  // half of the dedicated RSA-3072 lease signer. The private half stays a Worker secret.
+  try {
+    boundDeviceConfig(vars);
+  } catch {
+    fail(target, "must set vars.BOUND_DEVICE_CONFIG to a valid protected device registry");
+  }
+  const leasePublicKeyPem = vars.BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM;
+  let leasePublicKey = null;
+  if (typeof leasePublicKeyPem === "string" && leasePublicKeyPem.length <= 8192
+      && /^-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=\r\n]+\r?\n-----END PUBLIC KEY-----\r?\n?$/u.test(leasePublicKeyPem)) {
+    try {
+      leasePublicKey = createPublicKey({ key: leasePublicKeyPem, format: "pem" });
+    } catch {
+      // Reported below without reflecting the value.
+    }
+  }
+  if (leasePublicKey?.asymmetricKeyType !== "rsa" || leasePublicKey.asymmetricKeyDetails?.modulusLength !== 3072) {
+    fail(target, "must set vars.BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM to an RSA-3072 PEM PUBLIC KEY");
   }
   const databaseId = validateD1(config, target, profile, "migrations");
   const limiters = arrayValue(config.ratelimits, target, "ratelimits");

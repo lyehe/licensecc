@@ -408,6 +408,33 @@ an empty string — fails `checks.global_rate_limit`). Output contains only safe
 check results and explicitly says live issuance/renewal were not run. This
 command currently accepts JSON configuration, not TOML or JSONC.
 
+The protected deploy materializer also refuses a backend Wrangler config whose
+`vars` lack a valid `BOUND_DEVICE_CONFIG` or an RSA-3072 PEM
+`BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM`. Put both in the deploy config
+`vars`; the private signer and the approval key ring stay Worker secrets.
+
+The deployed backend runs the same check for `GET /health`, once per Worker
+isolate. A healthy `200` carries `protected_device_ready: true`; a failed check
+returns `503` with `protected_device_ready: false` and never names the failing
+check or any value. Portal `/health` is healthy (`200`, `data.backend_protected_ready:
+true`) only when the backend reports that readiness, and otherwise returns `503
+backend_not_ready`. The rollback health check requires both.
+
+After the Worker deploy, the production workflow runs a backend-only protected
+smoke with no credential:
+
+```sh
+npm --silent run validate:protected-smoke --workspace @licensecc/cloudflare-licensing-backend -- \
+  --url https://<backend-origin>
+```
+
+It requires `/health` to report `protected_device_ready: true` and an
+unauthenticated `POST /v2/device-challenges` naming a fresh random attempt to
+return `404 authorization_unavailable`. That denial proves the protected route,
+its configuration and its schema serve without creating a challenge. The smoke
+prints redacted JSON evidence and exits non-zero on any other answer. It
+enrolls no device and does not prove a live issuance or renewal.
+
 The baseline schema accepts pending attempts with no requested feature and
 makes feature intent immutable once recorded. Deploy the backend before
 releasing the new native clients; older backends correctly reject the new

@@ -201,14 +201,15 @@ test("health documents protected readiness, warnings, and invalid-mode config er
   assert.deepEqual(failure.required, ["ok", "service", "protected_device_ready"]);
   assert.equal(failure.properties.protected_device_ready.type, "boolean");
   assert.deepEqual(failure.dependentRequired, { code: ["invalid_config_modes"], invalid_config_modes: ["code"] });
-  for (const schema of [healthy, failure]) assert.equal(schema.properties.account_token_mode, undefined);
+  assert.deepEqual(Object.keys(healthy.properties).sort(), ["config_warnings", "ok", "protected_device_ready", "service"]);
+  assert.deepEqual(Object.keys(failure.properties).sort(), ["code", "config_warnings", "invalid_config_modes", "ok", "protected_device_ready", "service"]);
 
   const healthOperation = openApiSpec.paths["/health"].get;
   assert.ok(healthOperation.responses["503"]);
   assert.match(JSON.stringify(healthOperation.responses["503"]), /config_error/);
   assert.deepEqual(Object.keys(healthOperation.responses["503"].content["application/json"].examples).sort(), ["config_error", "protected_not_ready"]);
   assert.equal(healthOperation.responses["503"].content["application/json"].schema.$ref, "#/components/schemas/HealthConfigError");
-  assert.doesNotMatch(JSON.stringify(healthOperation), /account_token_mode/);
+  assert.doesNotMatch(JSON.stringify(healthOperation), /account_token/);
 });
 
 test("order ingest documents distinct config/write failures and raw-wire body semantics", () => {

@@ -608,7 +608,7 @@ test("portal drill failure diagnostics do not echo response data", async () => {
 });
 
 test("portal drill requires the portal health to certify backend protected readiness", async () => {
-  for (const data of [{ account_token_mode_required: true }, { backend_protected_ready: false }, { backend_protected_ready: "true" }, undefined]) {
+  for (const data of [{}, { backend_protected_ready: false }, { backend_protected_ready: "true" }, undefined]) {
     const calls = [];
     const fallback = makeFetch(calls);
     const fetchFn = async (url, init) => {

@@ -34,7 +34,8 @@ DEVICE_PROOF_MODE = "off"
 # Dedicated Worker secret: BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM.
 # Separate consent recovery secret: BOUND_APPROVAL_ENCRYPTION_KEYS (JSON key ring).
 # Matching public configuration: BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM.
-# Browser consent/native integration and v2 release-readiness gates are pending.
+# Protected deploy configs must set BOUND_DEVICE_CONFIG and the public key in [vars];
+# /health answers 503 protected_device_ready:false until all four values are valid.
 # --- Slice 1 order-ingest (POST /v1/orders): signed, exactly-once subscription fulfillment ---
 # Mode: required (default; reject unsigned/replayed) | soft (verify + observe, NEVER mutate) |
 # off (dev-only; the endpoint 404s). Roll out off -> soft -> required.

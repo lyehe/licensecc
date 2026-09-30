@@ -231,7 +231,7 @@ function validateBackendHealth(result) {
   if (
     result.body.ok !== true ||
     result.body.service !== "licensecc-online-verifier" ||
-    result.body.account_token_mode !== "required" ||
+    result.body.protected_device_ready !== true ||
     (warnings !== undefined && (!Array.isArray(warnings) || warnings.length !== 0))
   ) {
     fail("READINESS_CONTRACT_FAILED", "backend", "health");
@@ -251,7 +251,7 @@ function validatePortalHealth(result) {
     result.body.ok !== true ||
     result.body.code !== "healthy" ||
     !isRecord(result.body.data) ||
-    result.body.data.account_token_mode_required !== true
+    result.body.data.backend_protected_ready !== true
   ) {
     fail("READINESS_CONTRACT_FAILED", "portal", "health");
   }

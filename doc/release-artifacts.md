@@ -166,9 +166,11 @@ config secrets named `LICENSECC_<BACKEND|ADMIN|PORTAL|BACKUP>_WRANGLER_CONFIG_B6
 Those configs remain ignored and runner-local; the materializer rejects
 development modes, placeholder domains, unsafe bindings, embedded Worker
 application secrets, split D1 identities, mismatched routes/origins, incomplete
-Access or asset configuration, disabled invocation logs, and incomplete backup
-wiring. It binds every D1 binding, every present top-level Worker account ID,
-the backup export account, and each credential-bearing drill URL to the exact
+Access or asset configuration, disabled invocation logs, incomplete backup
+wiring, and a backend config without a valid `BOUND_DEVICE_CONFIG` registry and
+RSA-3072 `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM` in its `vars`. It binds
+every D1 binding, every present top-level Worker account ID, the backup export
+account, and each credential-bearing drill URL to the exact
 protected account, D1 ID, and validated Worker route. The environment also
 supplies `BACKUP_TRIGGER_TOKEN`, a short-lived
 `LICENSECC_ADMIN_ACCESS_JWT`, an authenticated
@@ -186,7 +188,11 @@ the backup Worker first, then starts a backup and waits for an exact completed
 Workflow result with the expected D1 identity, snapshot timestamp, and
 SQL/manifest object pair.
 Only after that gate succeeds does it apply backend-owned D1 migrations and
-deploy backend → admin → portal with the lockfile-pinned Wrangler. The final
+deploy backend → admin → portal with the lockfile-pinned Wrangler. A
+credential-free protected smoke then requires backend `/health` to report
+`protected_device_ready: true` and an unauthenticated challenge for an unknown
+attempt to return `404 authorization_unavailable`, and retains its redacted
+evidence as `backend-protected-smoke.json`. The final
 gate checks the public verifier, an authenticated read-only admin UI/API path,
 an authenticated read-only customer portal UI/API path, and backup health,
 secrets, and Workflow registration. A bounded post-deploy poll requires a new
@@ -408,10 +414,11 @@ completed identities plus the failing Worker's pre-state.
 After every selected deployment reaches its target, a separate fail-closed
 postcheck probes all four services, not only the selected subset. It performs
 bounded, timed, redirect-disabled `GET` requests only: backend readiness must
-prove required account isolation; the Access-authenticated admin summary must
-be readable; portal readiness must prove the backend's required account-token
-mode; and backup readiness must return `backup_ready`. Backend, admin, and
-portal must also serve a nonempty OpenAPI 3.1 contract. The protected
+report `protected_device_ready: true`; the Access-authenticated admin summary
+must be readable; portal readiness must report that the backend is protected
+ready (`data.backend_protected_ready: true`); and backup readiness must return
+`backup_ready`. Backend, admin, and portal must also serve a nonempty OpenAPI
+3.1 contract. The protected
 `LICENSECC_ADMIN_ACCESS_JWT` is sent only to the admin origin and is never
 written to evidence. A failed status, malformed or oversized body, redirect,
 contract mismatch, missing credential, or unavailable service fails the job.

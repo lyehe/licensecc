@@ -619,6 +619,9 @@ async function runStagingPortalDrill(options, dependencies = {}) {
     throw new Error(`portal UI failed: ${JSON.stringify({ status: ui.status, content_type: ui.contentType })}`);
   }
   const health = assertEnvelope(await requestJson(runtime, "/health"), "healthy", "portal health");
+  if (health.data?.backend_protected_ready !== true) {
+    throw new Error("portal health did not certify backend protected readiness");
+  }
   const unauthenticated = await requestJson({ ...runtime, cookieJar: new CookieJar() }, "/api/portal/me");
   assertUnauthorized(unauthenticated, "portal unauthenticated read denial");
   const sessionCookiePolicyChecked = await authenticate(runtime);

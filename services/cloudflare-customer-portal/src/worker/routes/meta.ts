@@ -13,7 +13,6 @@ export const META_DISPATCH = {
 };
 
 const BACKEND_SERVICE = "licensecc-online-verifier";
-const REQUIRED_ACCOUNT_TOKEN_MODE = "required";
 const READINESS_TIMEOUT_MS = 2_000;
 const READINESS_MAX_JSON_BYTES = 4_096;
 
@@ -21,11 +20,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function provesRequiredAccountTokenMode(value: unknown): boolean {
+function provesProtectedReadiness(value: unknown): boolean {
   return isRecord(value) &&
     value.ok === true &&
     value.service === BACKEND_SERVICE &&
-    value.account_token_mode === REQUIRED_ACCOUNT_TOKEN_MODE;
+    value.protected_device_ready === true;
 }
 
 function readChunkWithAbort(reader: ReadableStreamDefaultReader<Uint8Array>, signal: AbortSignal): Promise<ReadableStreamReadResult<Uint8Array>> {
@@ -99,7 +98,9 @@ async function cancelResponseBody(response: Response): Promise<void> {
   }
 }
 
-async function backendRequiresAccountTokenMode(env: Env): Promise<boolean> {
+// True only when the backend's own /health proves protected readiness. Every missing, malformed,
+// mismatched, non-200 or unreachable backend answer fails closed as not ready.
+async function backendProtectedReady(env: Env): Promise<boolean> {
   const origin = backendOrigin(env);
   if (origin === null) return false;
   const controller = new AbortController();
@@ -118,7 +119,7 @@ async function backendRequiresAccountTokenMode(env: Env): Promise<boolean> {
       await cancelResponseBody(response);
       return false;
     }
-    return provesRequiredAccountTokenMode(await readBoundedJson(response, controller.signal));
+    return provesProtectedReadiness(await readBoundedJson(response, controller.signal));
   } catch {
     return false;
   } finally {
@@ -132,15 +133,12 @@ export async function handleHealth(
   _ctx: ExecutionContextLike | undefined,
   reqId: string,
 ): Promise<Response> {
-  // The existing envelope is retained for callers. `account_token_mode_required:true` now means
-  // the portal verified the backend's actual resolved mode; every missing, malformed, mismatched,
-  // off, or unreachable backend state fails closed as false/503.
-  const required = await backendRequiresAccountTokenMode(env);
+  const ready = await backendProtectedReady(env);
   return envelope(
     reqId,
-    required ? "healthy" : "account_token_mode_not_required",
-    { account_token_mode_required: required },
-    required ? 200 : 503,
+    ready ? "healthy" : "backend_not_ready",
+    { backend_protected_ready: ready },
+    ready ? 200 : 503,
   );
 }
 
