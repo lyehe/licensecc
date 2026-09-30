@@ -103,6 +103,19 @@ test("a create naming a field it does not read is refused before any write", asy
   assert.deepEqual(f.snapshot(), before);
 });
 
+// A policy create stamps an active grant from the policy, so it reads no status of its own. A body
+// naming one, even "active", is refused before any write rather than answered with an active grant.
+test("a policy create naming a status is refused before any write", async t => {
+  const f = fixture(t), before = f.snapshot();
+  for (const status of ["disabled", "revoked", "active"]) {
+    const refused = await f.send({ ...input, policy_id: "policy", status }, `policy-${status}`);
+    assert.equal(refused.status, 400, status); assert.equal((await refused.json()).code, "invalid_request", status);
+  }
+  assert.deepEqual(f.snapshot(), before);
+  const stamped = await f.send({ ...input, policy_id: "policy" }, "policy");
+  assert.equal(stamped.status, 200); assert.equal((await stamped.json()).data.status, "active");
+});
+
 test("policy creation copies standard and trial settings and retries after policy disable", async t => {
   for (const type of ["node_locked", "trial"]) {
     const f = fixture(t);

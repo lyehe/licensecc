@@ -357,6 +357,17 @@ const ENTITLEMENT_COLUMNS=["authority_revision","created_at","customer_id","enfo
   "trial_one_per_device","trial_started_at","updated_at","valid_from","valid_until"];
 function columns(f,table) { return f.sql.prepare(`PRAGMA table_info(${table})`).all().map(c=>c.name).sort(); }
 
+test("a grant inserted without enforcement_mode is protected by default", async t => {
+  const f=fixture(); t.after(()=>f.sql.close());
+  f.sql.exec(`INSERT INTO entitlements(project,feature,license_fingerprint,status,created_at,updated_at,customer_id,max_active_devices)
+    VALUES('APP','DEFAULTED','${fp}','active',1000,1000,'customer',1)`);
+  assert.equal(f.sql.prepare("SELECT enforcement_mode FROM entitlements WHERE feature='DEFAULTED'").get().enforcement_mode,"device_bound_v1");
+  const c={...candidate("defaulted"),feature:"DEFAULTED"}; seed(f,c);
+  await commitBoundDeviceLease(f.db,c);
+  assert.deepEqual(f.sql.prepare("SELECT feature,state FROM device_bound_bindings").all().map(r=>({...r})),[{feature:"DEFAULTED",state:"active"}]);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_leases").get().n,1);
+});
+
 test("the entitlements table has no seat, meter, TTL or device-hash column", t => {
   const f=fixture(); t.after(()=>f.sql.close());
   assert.deepEqual(columns(f,"entitlements"),ENTITLEMENT_COLUMNS);

@@ -30,20 +30,32 @@ test("entitlement routes have direct owners and reject anonymous access", async 
   await assertRouteGroupRejectsUnauthenticated("entitlements");
 });
 
-test("admin create without enforcement_mode is refused", async () => {
+// Every create is protected, so a body cannot name a mode at all, not even the protected one.
+test("admin create with an enforcement_mode key is refused", async () => {
+  const { env, request } = protectedCreateFixture();
+  const body = { project: "APP", feature: "PRO", license_fingerprint: "c".repeat(64), customer_id: "cus_1", license_id: "lic_1" };
+  for (const mode of ["device_bound_v1", "legacy", "", null]) {
+    for (const create of [{ ...body, enforcement_mode: mode }, { ...body, policy_id: "pol_1", enforcement_mode: mode }]) {
+      const response = await request("/api/admin/entitlements", create);
+      assert.equal(response.status, 400, JSON.stringify(create));
+      assert.equal((await response.json()).code, "invalid_request", JSON.stringify(create));
+    }
+  }
+  assert.equal(env.DB.entitlements.size, 0);
+  assert.equal(env.DB.events.length, 0);
+});
+
+test("admin create without enforcement_mode creates a protected grant", async () => {
   const { env, request } = protectedCreateFixture();
   const body = { project: "APP", feature: "PRO", license_fingerprint: "c".repeat(64), customer_id: "cus_1", license_id: "lic_1" };
   const response = await request("/api/admin/entitlements", body);
-  assert.equal(response.status, 400);
-  assert.equal((await response.json()).code, "invalid_request");
-  assert.equal(env.DB.entitlements.size, 0);
-});
-
-test("admin create with enforcement_mode legacy is refused", async () => {
-  const { request } = protectedCreateFixture();
-  const response = await request("/api/admin/entitlements", { project: "APP", feature: "PRO", license_fingerprint: "c".repeat(64),
-    customer_id: "cus_1", license_id: "lic_1", enforcement_mode: "legacy" });
-  assert.equal(response.status, 400);
+  assert.equal(response.status, 200);
+  const { data } = await response.json();
+  assert.equal(data.enforcement_mode, "device_bound_v1");
+  assert.equal(data.customer_id, "cus_1");
+  assert.equal(data.license_id, "lic_1");
+  assert.equal(env.DB.entitlements.size, 1);
+  assert.equal(env.DB.events.length, 1);
 });
 
 // A create reads exactly its grant fields, its mode, and a policy or its own device limit. A body
