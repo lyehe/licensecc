@@ -64,3 +64,27 @@ test("structured logs classify error_type through a closed safe taxonomy", () =>
   assert.doesNotMatch(customLine, /authorization|must-not-appear/u);
   assert.equal(JSON.parse(knownLine).error_type, "TypeError");
 });
+
+test("structured logs drop fields that no remaining event emits", () => {
+  const line = capture("log", () => logEvent("info", "device.cleanup_completed", {
+    source: "lease",
+    target: "leases",
+    affected_rows: 0,
+    limit_reached: false,
+    detail: "dropped",
+    event_type: "dropped",
+    method: "POST",
+    mode: "dropped",
+    result: "dropped",
+    revocation_seq: 1,
+    success: true,
+  }))[0];
+  assert.deepEqual(JSON.parse(line), {
+    event: "device.cleanup_completed",
+    severity: "info",
+    source: "lease",
+    target: "leases",
+    affected_rows: 0,
+    limit_reached: false,
+  });
+});

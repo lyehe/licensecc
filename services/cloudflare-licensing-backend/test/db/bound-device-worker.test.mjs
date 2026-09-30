@@ -225,3 +225,28 @@ for(const trial of [false,true])test(`actual local Worker and D1 execute ${trial
   assert.deepEqual((await db.prepare('SELECT id,state,generation,revision,hold_until FROM device_bound_bindings ORDER BY id').all()).results,heldBefore);
   assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM device_bound_events').first('n'),eventsBefore);
 });
+
+test("registration is edge-limited through BOUND_REGISTRATION_RATE_LIMITER",async t=>{
+  const bundled=await build({entryPoints:[fileURLToPath(new URL("../../src/index.ts",import.meta.url))],bundle:true,external:["cloudflare:workers"],write:false,format:"esm",platform:"browser",target:"es2022",logLevel:"silent"});
+  const config={issuer:"https://licenses.example.test/",audience:"desktop",authorization_url:"https://portal.example.test/connect",
+    clients:[{client_id:"desktop",project:"APP",display_name:"Example app",callbacks:[{host:"127.0.0.1",path:"/callback"}]}]};
+  // The fake limiter is a named RPC entrypoint, so the real bundled Worker calls
+  // env.BOUND_REGISTRATION_RATE_LIMITER.limit({key}) exactly as it calls a Cloudflare binding.
+  const mf=new Miniflare(convertV4MiniflareOptions({workers:[
+    {name:"device-http",modules:true,script:bundled.outputFiles[0].text,compatibilityDate:"2026-08-01",d1Databases:{DB:"device-http"},
+      bindings:{BOUND_DEVICE_CONFIG:JSON.stringify(config)},
+      serviceBindings:{BOUND_REGISTRATION_RATE_LIMITER:{name:"fake-limiter",entrypoint:"FakeLimiter"}}},
+    {name:"fake-limiter",modules:true,compatibilityDate:"2026-08-01",script:`import {WorkerEntrypoint} from "cloudflare:workers";
+      const seen=[];
+      export class FakeLimiter extends WorkerEntrypoint {async limit({key}){seen.push(key);return {success:false};}}
+      export default {async fetch(){return Response.json(seen);}};`},
+  ]}));
+  t.after(()=>mf.dispose());
+  const response=await mf.dispatchFetch("https://untrusted-host.test/v2/device-authorizations",{method:"POST",
+    headers:{"content-type":"application/json","cf-connecting-ip":"192.0.2.80"},body:"{}"});
+  assert.equal(response.status,429);
+  assert.equal(response.headers.get("retry-after"),"60");
+  assert.equal((await response.json()).code,"rate_limited");
+  const seen=await (await (await mf.getWorker("fake-limiter")).fetch("https://fake-limiter.test/")).json();
+  assert.deepEqual(seen,[`device-v2:${await boundSecretHash("192.0.2.80")}`]);
+});

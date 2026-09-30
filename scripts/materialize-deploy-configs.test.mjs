@@ -512,6 +512,50 @@ test("the backend cron is labelled maintenance and no lease or emergency secret 
   }
 });
 
+test("backend config must bind BOUND_REGISTRATION_RATE_LIMITER and BOUND_SESSION_RATE_LIMITER", () => {
+  const limiter = (name, namespaceId = "1001", limit = 20, period = 60) =>
+    `[[ratelimits]]\nname = "${name}"\nnamespace_id = "${namespaceId}"\nsimple = { limit = ${limit}, period = ${period} }\n`;
+  const withLimiters = (...blocks) => (source) => source.replace(/\[\[ratelimits\]\][\s\S]*$/u, blocks.join("\n"));
+  const registration = limiter("BOUND_REGISTRATION_RATE_LIMITER", "1001", 20, 60);
+  const session = limiter("BOUND_SESSION_RATE_LIMITER", "1002", 600, 60);
+  for (const [name, mutation] of [
+    ["registration then session", withLimiters(registration, session)],
+    ["session then registration", withLimiters(session, registration)],
+  ]) {
+    const root = mkdtempSync(join(tmpdir(), "licensecc-deploy-configs-limiters-ok-"));
+    try {
+      const environment = validEnvironment();
+      mutateBackend(environment, mutation);
+      assert.equal(materializeDeploymentConfigs({ root, environment, profile: "production" }).length, 4, name);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+  const cases = [
+    ["no limiters", (source) => source.replace(/\[\[ratelimits\]\][\s\S]*$/u, ""), /ratelimits/u],
+    ["registration limiter missing", withLimiters(session), /BOUND_REGISTRATION_RATE_LIMITER/u],
+    ["session limiter missing", withLimiters(registration), /BOUND_SESSION_RATE_LIMITER/u],
+    ["registration limiter renamed", withLimiters(limiter("OTHER_LIMITER"), session), /exactly one BOUND_REGISTRATION_RATE_LIMITER/u],
+    ["registration limiter twice", withLimiters(registration, registration), /exactly one BOUND_REGISTRATION_RATE_LIMITER/u],
+    ["a third limiter", withLimiters(registration, session, limiter("EXTRA_LIMITER", "1003")), /exactly two/u],
+    ["registration namespace zero", withLimiters(limiter("BOUND_REGISTRATION_RATE_LIMITER", "0"), session), /namespace_id/u],
+    ["session namespace missing", withLimiters(registration, session.replace(/^namespace_id = .*\n/mu, "")), /namespace_id/u],
+    ["session limit zero", withLimiters(registration, limiter("BOUND_SESSION_RATE_LIMITER", "1002", 0, 60)), /positive integer rate-limit/u],
+    ["registration period zero", withLimiters(limiter("BOUND_REGISTRATION_RATE_LIMITER", "1001", 20, 0), session), /positive integer rate-limit/u],
+  ];
+  for (const [name, mutation, pattern] of cases) {
+    const root = mkdtempSync(join(tmpdir(), "licensecc-deploy-configs-limiters-"));
+    try {
+      const environment = validEnvironment();
+      mutateBackend(environment, mutation);
+      assert.throws(() => materializeDeploymentConfigs({ root, environment, profile: "production" }), pattern, name);
+      assertNoConfigsWritten(root, name);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("consent binding cannot cross deployment profiles or select another capability", () => {
   const mutations=[
     config=>{config.services[0].service="licensecc-online-verifier";},
