@@ -88,8 +88,9 @@ function protectedEnv(publicPem) {
 }
 
 // A fake backend and portal consent service that enforce the real request shapes and verify
-// every device proof against the public key the drill registered.
-function protectedService({ signingKey, claimedKeyId }) {
+// every device proof against the public key the drill registered. `renewalSigningKey`, when
+// given, signs only the renewal lease.
+function protectedService({ signingKey, claimedKeyId, renewalSigningKey = signingKey }) {
   const now = Math.floor(Date.now() / 1000);
   const attempt = { handle: randomId(32), code: randomId(32), state: null, challenge: null };
   const binding = { id: randomId(16), revision: 0, generation: 1 };
@@ -148,7 +149,8 @@ function protectedService({ signingKey, claimedKeyId }) {
       "renew-after": now + 1800,
       "expires-at": now + 3600,
     });
-    const signature = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", signingKey, deviceLeaseSigningInput(payload)));
+    const key = service.leases.length === 0 ? signingKey : renewalSigningKey;
+    const signature = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, deviceLeaseSigningInput(payload)));
     const token = encodeDeviceLeaseEnvelope(payload, signature);
     service.leases.push(token);
     binding.revision += 1;
@@ -416,6 +418,31 @@ test("portal staging drill accepts an existing session cookie without logging it
   assert.equal(calls.some((call) => call.path === "/portal/v1/auth/logout"), false);
 });
 
+test("portal staging drill rejects an insecure session cookie policy", async () => {
+  const calls = [];
+  const fallback = makeFetch(calls);
+  const fetchFn = async (url, init) => {
+    if (new URL(String(url)).pathname === "/portal/v1/auth/magic-redeem") {
+      return json(
+        { ok: true, code: "signed_in", data: { customer_id: "cust_1" } },
+        200,
+        { "set-cookie": "lccp_session=insecure; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400" },
+      );
+    }
+    return fallback(url, init);
+  };
+
+  await assert.rejects(
+    runStagingPortalDrill(validateOptions({
+      STAGING_PORTAL_BASE_URL: PORTAL,
+      STAGING_PORTAL_EMAIL: "customer@example.com",
+      STAGING_PORTAL_BOOTSTRAP_BEARER: "break-glass",
+      STAGING_PORTAL_ACCESS_JWT: "access-jwt",
+    }), { fetchFn }),
+    /did not issue the required secure session cookie policy/u,
+  );
+});
+
 test("the staging portal drill completes a protected enrollment, exchange and renewal and retires the binding", async (t) => {
   const [trusted, other] = await Promise.all([leaseSigner(), leaseSigner()]);
   const sign = crypto.subtle.sign;
@@ -501,6 +528,25 @@ test("the staging portal drill completes a protected enrollment, exchange and re
   );
   assert.equal(forged.leases.length, 1);
   assert.equal(forgedCalls.some((call) => call.path === "/v2/device-leases/renew" || call.path === "/api/portal/device-bindings/retire"), false);
+});
+
+test("the protected drill rejects a renewal lease that the configured lease key did not sign", async () => {
+  const [trusted, other] = await Promise.all([leaseSigner(), leaseSigner()]);
+  const calls = [];
+  const service = protectedService({ signingKey: trusted.privateKey, claimedKeyId: trusted.keyId, renewalSigningKey: other.privateKey });
+  await assert.rejects(
+    runStagingPortalDrill(validateOptions({
+      LICENSECC_PORTAL_URL: PORTAL,
+      LICENSECC_PORTAL_SESSION_COOKIE: "lccp_session=lccp_existing",
+      ...protectedEnv(trusted.publicPem),
+    }), { fetchFn: makeFetch(calls, service) }),
+    (error) => error instanceof Error
+      && /protected device renewal lease signature did not verify/u.test(error.message)
+      && [...service.leases, ...service.proofSignatures, service.spki, "lccp_existing"].every((secret) => !error.message.includes(secret)),
+  );
+  assert.equal(service.leases.length, 2);
+  assert.equal(calls.some((call) => call.path === "/v2/device-leases/renew"), true);
+  assert.equal(calls.some((call) => call.path.startsWith("/api/portal/device-bindings")), false);
 });
 
 test("the drill skips the protected journey when the protected variables are absent", async () => {

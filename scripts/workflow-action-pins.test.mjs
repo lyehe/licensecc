@@ -328,6 +328,21 @@ function activeWorkflowDirectives(job) {
   return [job.properties, ...job.steps.map((step) => step.properties)].flatMap((properties) => [...properties.values()].filter((property) => workflowGuardKeys.has(property.key)).map((property) => ({ key: property.key, line: property.line })));
 }
 
+// Keys of the env maps every step of the job inherits: the workflow's top-level env and the
+// job's own env. An inherited env that is not a block mapping cannot be inspected, so it fails.
+function inheritedEnvKeys(content, job, label) {
+  const keys = [];
+  for (const [lines, indent] of [[content.split(/\r?\n/), 0], [job.rawLines, 4]]) {
+    lines.forEach((line, index) => {
+      const mapping = yamlMapping(line);
+      if (!mapping || mapping.listItem || mapping.indent !== indent || mapping.key !== "env") return;
+      assert.equal(mapping.value, "", `${label}: an inherited env must be a block mapping`);
+      keys.push(...nestedProperties(lines, index + 1, lines.length, indent).properties.keys());
+    });
+  }
+  return keys;
+}
+
 function assertNoTopLevelWorkflowDefaults(content, label) {
   for (const line of content.split(/\r?\n/)) {
     const mapping = yamlMapping(line);
@@ -580,8 +595,15 @@ test("production deployment is manual, confirmed, serialized, and uses only mate
   assert.match(productionVerifier.properties.get("run")?.value ?? "", /backend-public-verifier-drill\.json/u);
   const remainingProductionDrills = namedWorkflowStep(job, "Run remaining service post-deploy drills", ".github/workflows/deploy-production.yml");
   assert.equal(remainingProductionDrills.children.get("env")?.has("LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM"), false);
-  // The production portal drill is read-only: no protected-journey input may reach it, so it never enrolls a device.
-  assert.deepEqual([...(remainingProductionDrills.children.get("env")?.keys() ?? [])].filter((key) => PROTECTED_PORTAL_DRILL_INPUT.test(key)), []);
+  // The production portal drill is read-only: no protected-journey input may reach it, either
+  // from its own env or inherited from the job or workflow, so it never enrolls a device.
+  assert.deepEqual(
+    [
+      ...(remainingProductionDrills.children.get("env")?.keys() ?? []),
+      ...inheritedEnvKeys(workflow, job, ".github/workflows/deploy-production.yml"),
+    ].filter((key) => PROTECTED_PORTAL_DRILL_INPUT.test(key)),
+    [],
+  );
   assert.doesNotMatch(workflow, /LICENSECC_STAGING_(?:DEVICE_|BOUND_LEASE_PUBLIC_KEY_SPKI_PEM)/u);
   assert.match(workflow, /validate:access-admin[^\n]*--read-only/u);
   assert.match(workflow, /validate:staging-portal/u);
