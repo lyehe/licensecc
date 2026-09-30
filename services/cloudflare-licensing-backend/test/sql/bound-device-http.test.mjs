@@ -1,8 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { createPublicKey, verify } from "node:crypto";
+import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import worker from "../../dist/app.js";
 import { boundRandomId, boundSecretHash } from "../../src/device/bound_enrollment.mjs";
 import { expireBoundRecovery, purgeExpiredBoundLeases } from "../../src/device/bound_cleanup.mjs";
@@ -18,6 +22,19 @@ const publicPem = pem("PUBLIC KEY",await crypto.subtle.exportKey("spki",signer.p
 const fingerprint="a".repeat(64);
 const config={issuer:"https://licenses.example.test/",audience:"desktop",authorization_url:"https://portal.example.test/connect",
   clients:[{client_id:"desktop",project:"APP",display_name:"Example app",callbacks:[{host:"127.0.0.1",path:"/callback"}]}]};
+
+const wranglerRequire=createRequire(createRequire(import.meta.url).resolve("wrangler/package.json"));
+// Bundles the admin worker's bindings reader fresh from its current TypeScript source (never a
+// possibly stale dist-worker build), so this backend suite always exercises the admin's current
+// "recent refused connections" query against the exact row this fixture just wrote.
+async function adminBindingsModule() {
+  const {build}=wranglerRequire("esbuild");
+  const bundled=await build({entryPoints:[fileURLToPath(new URL("../../../cloudflare-license-admin/src/worker/groups/customers/bindings.ts",import.meta.url))],
+    bundle:true,write:false,format:"esm",platform:"node",target:"es2022",logLevel:"silent"});
+  const dir=mkdtempSync(join(tmpdir(),"licensecc-admin-bindings-")),file=join(dir,"bindings.mjs");
+  writeFileSync(file,bundled.outputFiles[0].text);
+  try { return await import(pathToFileURL(file).href); } finally { rmSync(dir,{recursive:true,force:true}); }
+}
 
 function fixture(t) {
   const sql=new DatabaseSync(":memory:"); t.after(()=>sql.close());
@@ -250,16 +267,16 @@ test("HTTP concurrent activation cannot oversubscribe the last device slot",asyn
 });
 
 // The admin console must be able to show operators recent refused connections. Every
-// device_limit_reached refusal records a best-effort usage_events row, deduped for 15 minutes so a
-// retrying client cannot flood the audit trail with one ongoing refusal.
-test("HTTP capacity refusal records a best-effort denial with a 15-minute dedupe",async t=>{
+// device_limit_reached refusal records a best-effort device_bound_denials row, deduped for 15
+// minutes so a retrying client cannot flood the audit trail with one ongoing refusal.
+test("a device-limit refusal writes one device_bound_denials row per 15 minutes and the admin lists it",async t=>{
   const f=fixture(t),first=await enrollment(f),second=await enrollment(f);
   assert.equal((await f.call("/v2/device-authorizations/exchange",await signed(f,first,"exchange"))).status,200);
-  const denialRows=()=>f.sql.prepare("SELECT project,feature,license_fingerprint,event_type,device_key_id,reason,ts FROM usage_events").all().map(row=>({...row}));
+  const denialRows=()=>f.sql.prepare("SELECT project,feature,license_fingerprint,key_id,reason,ts FROM device_bound_denials").all().map(row=>({...row}));
 
   const denied=await f.call("/v2/device-authorizations/exchange",await signed(f,second,"exchange"));
   assert.equal(denied.status,409); assert.equal(denied.body.code,"device_limit_reached");
-  assert.deepEqual(denialRows(),[{project:"APP",feature:"DEFAULT",license_fingerprint:fingerprint,event_type:"denied",device_key_id:second.keyId,reason:"device_limit_reached",ts:1000}]);
+  assert.deepEqual(denialRows(),[{project:"APP",feature:"DEFAULT",license_fingerprint:fingerprint,key_id:second.keyId,reason:"device_limit_reached",ts:1000}]);
 
   const repeat=await f.call("/v2/device-authorizations/exchange",await signed(f,second,"exchange"));
   assert.equal(repeat.status,409); assert.equal(repeat.body.code,"device_limit_reached");
@@ -273,6 +290,19 @@ test("HTTP capacity refusal records a best-effort denial with a 15-minute dedupe
   const rows=denialRows();
   assert.equal(rows.length,2,"a refusal past the 15-minute window writes a new row");
   assert.equal(rows[1].ts,1901);
+
+  // Reuse the admin bindings reader (the same query the admin protected-bindings suite drives)
+  // against this exact D1-like session: the two denial rows above must surface as the customer's
+  // most recent refused connections, newest first.
+  const {adminBindings}=await adminBindingsModule();
+  const response=await adminBindings(new Request("https://admin.example/api/admin/customers/customer/bindings"),
+    {DB:f.db},{subject:"dev",actorType:"dev",role:"admin"},"customer","rid-1");
+  assert.equal(response.status,200);
+  const page=(await response.json()).data;
+  assert.deepEqual(page.denied,[
+    {project:"APP",feature:"DEFAULT",license_fingerprint:fingerprint,device_key_id:second.keyId,ts:1901},
+    {project:"APP",feature:"DEFAULT",license_fingerprint:fingerprint,device_key_id:second.keyId,ts:1000},
+  ]);
 });
 
 test("HTTP capacity refusal still returns device_limit_reached when the best-effort denial insert fails",async t=>{
