@@ -18,7 +18,10 @@ async function newEntitlementForm(page) {
 
 async function newWebhookForm(page) {
   await page.getByRole("button", { name: "New endpoint", exact: true }).click();
-  return page.locator("aside.editorLayout form");
+  const form = page.locator("aside.editorLayout form");
+  // Every endpoint names its scope; these flows create operator-wide ones.
+  await form.getByLabel("Scope", { exact: true }).selectOption("global");
+  return form;
 }
 
 async function newPolicyForm(page) {
@@ -1013,7 +1016,7 @@ test("admin UI retains an ambiguous keyed ordinary mutation and replays its immu
       status: 200,
       body: makeEnvelope("webhook_created", {
         id: "wh_recovered", url: "https://hooks.example.test/recovered", event_types: "", status: "active", description: "",
-        scope_project: null, scope_customer_id: null, created_at: 1_760_000_001, updated_at: 1_760_000_001,
+        scope_kind: "global", scope_project: null, scope_customer_id: null, created_at: 1_760_000_001, updated_at: 1_760_000_001,
       }),
     },
   );
@@ -1050,7 +1053,7 @@ test("admin UI keeps an exact ordinary success in GET-only recovery after a 5xx 
     status: 200,
     body: makeEnvelope("webhook_created", {
       id: "wh_exact_refresh", url: "https://hooks.example.test/exact-refresh", event_types: "", status: "active", description: "",
-      scope_project: null, scope_customer_id: null, created_at: 1_760_000_001, updated_at: 1_760_000_001,
+      scope_kind: "global", scope_project: null, scope_customer_id: null, created_at: 1_760_000_001, updated_at: 1_760_000_001,
     }),
   });
   await page.route("**/api/admin/**", api.route);

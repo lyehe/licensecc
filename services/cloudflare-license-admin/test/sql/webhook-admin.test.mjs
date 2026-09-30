@@ -7,6 +7,8 @@
 // is mocked.
 //
 // Covers: create + the https-only URL gate (a non-https URL is 400 invalid_url, persists nothing);
+// the explicit scope (create requires scope_kind; a PATCH checks the whole scope it leaves) and the
+// schema's own scope CHECK and event-type triggers;
 // event_types csv normalization; list + status filter + cursor; detail (endpoint + recent deliveries)
 // + 404; patch (and the not-patchable status rejection); disable/reenable guard + 409 on a stale status;
 // the test_send audit row an operator test send leaves (and none for a refused send);
@@ -179,9 +181,10 @@ async function body(response) {
   return response.json();
 }
 
-// Create a webhook endpoint through the worker and return its row.
+// Create a webhook endpoint through the worker and return its row. Every endpoint names its scope;
+// unless the payload says otherwise, it is operator-wide.
 async function createWebhook(env, payload) {
-  const res = await worker.fetch(devReq("/api/admin/webhooks", { method: "POST", body: JSON.stringify(payload) }), env);
+  const res = await worker.fetch(devReq("/api/admin/webhooks", { method: "POST", body: JSON.stringify({ scope_kind: "global", ...payload }) }), env);
   assert.equal(res.status, 200, `create webhook: ${await res.clone().text()}`);
   return (await body(res)).data;
 }
@@ -215,36 +218,54 @@ test("webhook: defaults applied for omitted event_types/description", async () =
   const created = await createWebhook(env, { url: "https://hooks.example.com/all" });
   assert.equal(created.event_types, ""); // '' = all event types
   assert.equal(created.description, "");
+  assert.deepEqual([created.scope_kind, created.scope_project, created.scope_customer_id], ["global", null, null]);
 });
 
-test("webhook: create/patch reject both project and customer scopes", async () => {
+test("webhook: create requires an explicit scope, and a PATCH checks the whole scope it leaves", async () => {
   const db = freshDb();
   const env = devEnv(db);
 
-  const badCreate = await worker.fetch(devReq("/api/admin/webhooks", {
-    method: "POST",
-    body: JSON.stringify({ url: "https://hooks.example.com/lcc", scope_project: "DEFAULT", scope_customer_id: "cus_1" }),
-  }), env);
-  assert.equal(badCreate.status, 400);
-  assert.equal((await body(badCreate)).code, "invalid_request");
+  for (const scope of [
+    {},
+    { scope_project: "DEFAULT" },
+    { scope_kind: "project" },
+    { scope_kind: "global", scope_customer_id: "cus_1" },
+    { scope_kind: "project", scope_project: "DEFAULT", scope_customer_id: "cus_1" },
+  ]) {
+    const badCreate = await worker.fetch(devReq("/api/admin/webhooks", {
+      method: "POST",
+      body: JSON.stringify({ url: "https://hooks.example.com/lcc", ...scope }),
+    }), env);
+    assert.equal(badCreate.status, 400, JSON.stringify(scope));
+    assert.equal((await body(badCreate)).code, "invalid_request", JSON.stringify(scope));
+  }
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM webhook_endpoints").get().c, 0);
 
-  const ep = await createWebhook(env, { url: "https://hooks.example.com/customer", scope_customer_id: "cus_1" });
-  const badPatch = await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}`, {
-    method: "PATCH",
-    body: JSON.stringify({ scope_project: "DEFAULT" }),
-  }), env);
-  assert.equal(badPatch.status, 400);
-  assert.equal((await body(badPatch)).code, "invalid_request");
-  assert.equal(db.prepare("SELECT scope_project FROM webhook_endpoints WHERE id = ?").get(ep.id).scope_project, null);
+  const ep = await createWebhook(env, { url: "https://hooks.example.com/customer", scope_kind: "customer", scope_customer_id: "cus_1" });
+  assert.deepEqual([ep.scope_kind, ep.scope_project, ep.scope_customer_id], ["customer", null, "cus_1"]);
+  const storedScope = () => ({ ...db.prepare("SELECT scope_kind, scope_project, scope_customer_id FROM webhook_endpoints WHERE id = ?").get(ep.id) });
+
+  // A PATCH whose resulting scope does not agree with its kind is refused and writes nothing.
+  for (const patch of [{ scope_project: "DEFAULT" }, { scope_kind: "project", scope_project: "DEFAULT" }, { scope_kind: "global" }, { scope_customer_id: "" }]) {
+    const badPatch = await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}`, { method: "PATCH", body: JSON.stringify(patch) }), env);
+    assert.equal(badPatch.status, 400, JSON.stringify(patch));
+    assert.equal((await body(badPatch)).code, "invalid_request", JSON.stringify(patch));
+  }
+  assert.deepEqual(storedScope(), { scope_kind: "customer", scope_project: null, scope_customer_id: "cus_1" });
 
   const moved = await (await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}`, {
     method: "PATCH",
-    body: JSON.stringify({ scope_customer_id: "", scope_project: "DEFAULT" }),
+    body: JSON.stringify({ scope_kind: "project", scope_customer_id: "", scope_project: "DEFAULT" }),
   }), env)).json();
   assert.equal(moved.code, "webhook_patched");
-  assert.equal(moved.data.scope_project, "DEFAULT");
-  assert.equal(moved.data.scope_customer_id, null);
+  assert.deepEqual([moved.data.scope_kind, moved.data.scope_project, moved.data.scope_customer_id], ["project", "DEFAULT", null]);
+
+  const operatorWide = await (await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ scope_kind: "global", scope_project: "" }),
+  }), env)).json();
+  assert.equal(operatorWide.code, "webhook_patched");
+  assert.deepEqual(storedScope(), { scope_kind: "global", scope_project: null, scope_customer_id: null });
 });
 
 // A raw INSERT straight into webhook_endpoints, bypassing the admin validators, naming only the
@@ -307,7 +328,7 @@ test("webhook: a non-https URL is 400 invalid_url and persists nothing", async (
   const db = freshDb();
   const env = devEnv(db);
   for (const url of ["http://hooks.example.com/x", "ftp://hooks.example.com/x", "hooks.example.com/x", "https://hooks.example.com/ has space", ""]) {
-    const res = await worker.fetch(devReq("/api/admin/webhooks", { method: "POST", body: JSON.stringify({ url }) }), env);
+    const res = await worker.fetch(devReq("/api/admin/webhooks", { method: "POST", body: JSON.stringify({ url, scope_kind: "global" }) }), env);
     assert.equal(res.status, 400, `url=${JSON.stringify(url)} should be 400`);
     assert.equal((await body(res)).code, "invalid_url");
   }
@@ -388,6 +409,12 @@ test("webhook: patch updates url/event_types/description; status is not patchabl
   assert.equal(badUrl.status, 400);
   assert.equal((await body(badUrl)).code, "invalid_url");
   assert.equal(db.prepare("SELECT url FROM webhook_endpoints WHERE id = ?").get(ep.id).url, "https://e.example.com/h2");
+
+  // an unknown event type in a patch -> 400 invalid_event_types, persists nothing.
+  const badEventTypes = await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}`, { method: "PATCH", body: JSON.stringify({ event_types: "revoke,bogus" }) }), env);
+  assert.equal(badEventTypes.status, 400);
+  assert.equal((await body(badEventTypes)).code, "invalid_event_types");
+  assert.equal(db.prepare("SELECT event_types FROM webhook_endpoints WHERE id = ?").get(ep.id).event_types, "revoke");
 
   // unknown id -> 404.
   const missing = await worker.fetch(devReq("/api/admin/webhooks/nope", { method: "PATCH", body: JSON.stringify({ description: "x" }) }), env);
@@ -550,7 +577,7 @@ test("webhook: reader can read but cannot run any webhook write", async (t) => {
   // Admin seeds an endpoint + a failed delivery.
   const createRes = await worker.fetch(accessReq("/api/admin/webhooks", admin, {
     method: "POST",
-    body: JSON.stringify({ url: "https://rbac.example.com/h" }),
+    body: JSON.stringify({ url: "https://rbac.example.com/h", scope_kind: "global" }),
   }), env);
   assert.equal(createRes.status, 200);
   const epId = (await body(createRes)).data.id;
@@ -563,7 +590,7 @@ test("webhook: reader can read but cannot run any webhook write", async (t) => {
 
   // Reader CANNOT create / patch / disable / reenable / redrive.
   const denied = [
-    accessReq("/api/admin/webhooks", reader, { method: "POST", body: JSON.stringify({ url: "https://nope.example.com/h" }) }),
+    accessReq("/api/admin/webhooks", reader, { method: "POST", body: JSON.stringify({ url: "https://nope.example.com/h", scope_kind: "global" }) }),
     accessReq(`/api/admin/webhooks/${epId}`, reader, { method: "PATCH", body: JSON.stringify({ description: "x" }) }),
     accessReq(`/api/admin/webhooks/${epId}/disable`, reader, { method: "POST", body: "{}" }),
     accessReq(`/api/admin/webhooks/${epId}/reenable`, reader, { method: "POST", body: "{}" }),
@@ -584,9 +611,9 @@ test("webhook: idempotency-key replays the create response without a second row"
   const db = freshDb();
   const env = devEnv(db);
   const key = "idem-create-1";
-  const first = await (await worker.fetch(devReq("/api/admin/webhooks", { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify({ url: "https://i.example.com/h" }) }), env)).json();
+  const first = await (await worker.fetch(devReq("/api/admin/webhooks", { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify({ url: "https://i.example.com/h", scope_kind: "global" }) }), env)).json();
   assert.equal(first.code, "webhook_created");
-  const second = await (await worker.fetch(devReq("/api/admin/webhooks", { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify({ url: "https://i.example.com/h" }) }), env)).json();
+  const second = await (await worker.fetch(devReq("/api/admin/webhooks", { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify({ url: "https://i.example.com/h", scope_kind: "global" }) }), env)).json();
   assert.equal(second.data.id, first.data.id);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM webhook_endpoints").get().c, 1);
 });

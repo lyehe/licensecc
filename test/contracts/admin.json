@@ -3236,7 +3236,7 @@
               "type": "string"
             },
             "event_types": {
-              "description": "CSV event-type filter; empty string means all event types.",
+              "description": "CSV filter of known event types; empty string means all event types.",
               "maxLength": 1024,
               "type": "string"
             },
@@ -3244,15 +3244,24 @@
               "type": "string"
             },
             "scope_customer_id": {
-              "description": "Per-tenant scope (audit R2.2). null/'' = global; matches customer events. Set one dimension, not both.",
+              "description": "The customer a customer-scoped endpoint receives events for; null for every other kind.",
               "maxLength": 128,
               "type": [
                 "string",
                 "null"
               ]
             },
+            "scope_kind": {
+              "description": "Which events the endpoint receives: global = every event (operator-wide); project = only the entitlement/order events of scope_project; customer = only the customer events of scope_customer_id.",
+              "enum": [
+                "global",
+                "project",
+                "customer"
+              ],
+              "type": "string"
+            },
             "scope_project": {
-              "description": "Per-tenant scope (audit R2.2). null/'' = global; matches entitlement/order events. Set one dimension, not both.",
+              "description": "The project a project-scoped endpoint receives events for; null for every other kind.",
               "maxLength": 128,
               "type": [
                 "string",
@@ -3278,7 +3287,8 @@
           "type": "object"
         },
         "WebhookEndpointInput": {
-          "description": "Create body. `url` is required and MUST be https. event_types / description / scope_* take the column default ('').",
+          "additionalProperties": false,
+          "description": "Create body. `url` (https) and `scope_kind` are required; a body without scope_kind, whose scope values do not match its kind, or naming any other field returns 400 invalid_request. event_types / description take the column default ('').",
           "properties": {
             "description": {
               "default": "",
@@ -3293,13 +3303,22 @@
             },
             "scope_customer_id": {
               "default": "",
-              "description": "Per-tenant scope (audit R2.2). '' = global. Set one dimension, not both.",
+              "description": "Required for scope_kind customer; must be absent or '' for every other kind.",
               "maxLength": 128,
+              "type": "string"
+            },
+            "scope_kind": {
+              "description": "global names no scope value; project requires scope_project; customer requires scope_customer_id.",
+              "enum": [
+                "global",
+                "project",
+                "customer"
+              ],
               "type": "string"
             },
             "scope_project": {
               "default": "",
-              "description": "Per-tenant scope (audit R2.2). '' = global. Set one dimension, not both.",
+              "description": "Required for scope_kind project; must be absent or '' for every other kind.",
               "maxLength": 128,
               "type": "string"
             },
@@ -3310,12 +3329,14 @@
             }
           },
           "required": [
-            "url"
+            "url",
+            "scope_kind"
           ],
           "type": "object"
         },
         "WebhookEndpointPatch": {
-          "description": "All fields optional; only provided fields are updated. status / id are NOT patchable (status flips only via disable/reenable).",
+          "additionalProperties": false,
+          "description": "All fields optional; only provided fields are updated. status / id (or any other field) are NOT patchable (status flips only via disable/reenable). The row the PATCH leaves must still name a valid scope (else 400 invalid_request) and only known event types, including a stored event_types value the PATCH leaves out (else 400 invalid_event_types).",
           "properties": {
             "description": {
               "maxLength": 500,
@@ -3327,12 +3348,21 @@
               "type": "string"
             },
             "scope_customer_id": {
-              "description": "Per-tenant scope (audit R2.2). '' clears it (global).",
+              "description": "'' clears it.",
               "maxLength": 128,
               "type": "string"
             },
+            "scope_kind": {
+              "description": "Moving to another kind also clears the old kind's value ('').",
+              "enum": [
+                "global",
+                "project",
+                "customer"
+              ],
+              "type": "string"
+            },
             "scope_project": {
-              "description": "Per-tenant scope (audit R2.2). '' clears it (global).",
+              "description": "'' clears it.",
               "maxLength": 128,
               "type": "string"
             },
@@ -16137,7 +16167,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / idempotency key, a URL that is not an https address on a public host name (no credentials, IP address, single-label or internal name, or trailing dot), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list)."
+              "description": "Invalid request / json / idempotency key (including a missing scope_kind, scope values that do not match it, or an unknown field), a URL that is not an https address on a public host name (no credentials, IP address, single-label or internal name, or trailing dot), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list)."
             },
             "401": {
               "content": {
@@ -16252,7 +16282,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Create a webhook endpoint (admin-only, https URL required)",
+          "summary": "Create a webhook endpoint (admin-only, https URL and explicit scope required)",
           "tags": [
             "admin:webhooks"
           ]
@@ -16493,7 +16523,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / idempotency key, a URL that is not an https address on a public host name (no credentials, IP address, single-label or internal name, or trailing dot; status/id are not patchable), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list)."
+              "description": "Invalid request / json / idempotency key (status/id or any other unknown field, or a resulting scope whose values do not match its kind), a URL that is not an https address on a public host name (no credentials, IP address, single-label or internal name, or trailing dot), or an event_types token outside the known entitlement/customer/order set, in the PATCH or still stored when the PATCH leaves event_types out (data.allowed lists the grouped allow-list)."
             },
             "401": {
               "content": {
@@ -16627,7 +16657,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Update a webhook endpoint's url / event_types / description (admin-only)",
+          "summary": "Update a webhook endpoint's url / event_types / description / scope (admin-only)",
           "tags": [
             "admin:webhooks"
           ]

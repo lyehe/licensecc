@@ -127,7 +127,7 @@ test("a policy validation error sits beside its field, and a name conflict marks
   await expect(form.locator(".feedbackDetails")).toHaveCount(0);
 });
 
-test("a webhook URL error sits beside the URL, and a whole-form rule stays with the form", async ({ page }) => {
+test("a webhook URL error sits beside the URL, and a missing scope beside the scope selector", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/#/webhooks");
@@ -139,11 +139,12 @@ test("a webhook URL error sits beside the URL, and a whole-form rule stays with 
   await expectFieldError(url, "The URL must start with https://.");
   await expect(page.locator(".activityMessage")).toHaveCount(0);
 
+  // A new endpoint starts with no scope: the operator must choose one before anything is sent.
   await url.fill("https://hooks.example.test/scoped");
-  await form.getByLabel("Scope: project (blank = all)").fill("DEFAULT");
-  await form.getByLabel("Scope: customer id (blank = all)").fill("cus_acme");
+  const scope = form.getByLabel("Scope", { exact: true });
+  await expect(scope).toHaveValue("");
   await form.getByRole("button", { name: "Create endpoint", exact: true }).click();
-  await expect(form.getByRole("alert")).toContainText("Set a project scope or a customer scope, not both.");
+  await expectFieldError(scope, "Choose which events this endpoint receives.");
   await expect(url).not.toHaveAttribute("aria-invalid", "true");
   await expect(page.locator(".activityMessage")).toHaveCount(0);
   expect(api.requests.webhookCreates).toHaveLength(0);
@@ -218,6 +219,7 @@ test("creating a record opens it: policy, webhook, plan, feature and entitlement
   await page.getByRole("button", { name: "New endpoint", exact: true }).click();
   form = page.getByRole("form", { name: "New webhook endpoint", exact: true });
   await form.getByLabel("URL (required)").fill("https://hooks.example.test/opened");
+  await form.getByLabel("Scope", { exact: true }).selectOption("global");
   await form.getByRole("button", { name: "Create endpoint", exact: true }).click();
   const webhookEditor = page.getByRole("form", { name: "Edit webhook endpoint", exact: true });
   await expect(webhookEditor.getByLabel("URL (required)")).toHaveValue("https://hooks.example.test/opened");

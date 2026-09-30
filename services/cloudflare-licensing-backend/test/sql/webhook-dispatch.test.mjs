@@ -144,15 +144,16 @@ function freshDb() {
   return db;
 }
 
+// Every endpoint names its scope; unless a test says otherwise, it is operator-wide.
 function addEndpoint(
   db,
   id,
-  { url = `https://hook.test/${id}`, eventTypes = "", status = "active", scopeProject = null, scopeCustomer = null } = {},
+  { url = `https://hook.test/${id}`, eventTypes = "", status = "active", scopeKind = "global", scopeProject = null, scopeCustomer = null } = {},
 ) {
   db.prepare(
-    "INSERT INTO webhook_endpoints (id, url, event_types, status, description, created_at, updated_at, scope_project, scope_customer_id) " +
-      "VALUES (?,?,?,?,'',?,?,?,?)",
-  ).run(id, url, eventTypes, status, 1000, 1000, scopeProject, scopeCustomer);
+    "INSERT INTO webhook_endpoints (id, url, event_types, status, description, created_at, updated_at, scope_kind, scope_project, scope_customer_id) " +
+      "VALUES (?,?,?,?,'',?,?,?,?,?)",
+  ).run(id, url, eventTypes, status, 1000, 1000, scopeKind, scopeProject, scopeCustomer);
 }
 
 function addEntitlementEvent(db, eventType, createdAt) {
@@ -214,13 +215,13 @@ test("enqueue is exactly-once across re-runs (the UNIQUE + cursor)", async () =>
   db.close();
 });
 
-test("endpoint scope filters events to the matching tenant dimension (R2.2)", async () => {
+test("endpoint scope filters events to the matching tenant dimension", async () => {
   const db = freshDb();
   const env = { DB: new D1Like(db) };
-  addEndpoint(db, "global"); // both scope columns null -> every event (back-compat)
-  addEndpoint(db, "projP", { scopeProject: "P" }); // only project-P entitlement/order events
-  addEndpoint(db, "projX", { scopeProject: "X" }); // project X -> nothing here
-  addEndpoint(db, "custC", { scopeCustomer: "cust_1" }); // only customer_events for cust_1
+  addEndpoint(db, "global", { scopeKind: "global" }); // operator-wide -> every event
+  addEndpoint(db, "projP", { scopeKind: "project", scopeProject: "P" }); // only project-P entitlement/order events
+  addEndpoint(db, "projX", { scopeKind: "project", scopeProject: "X" }); // project X -> nothing here
+  addEndpoint(db, "custC", { scopeKind: "customer", scopeCustomer: "cust_1" }); // only customer_events for cust_1
 
   addEntitlementEvent(db, "create", 100); // project P
   addOrderEvent(db, "evt_1", "subscription.active", 101); // project P

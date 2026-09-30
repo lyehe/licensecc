@@ -16,6 +16,7 @@ test("an operator creates a webhook via grouped event-type checkboxes and then e
   await page.getByRole("button", { name: "New endpoint", exact: true }).click();
   const createForm = page.getByRole("form", { name: "New webhook endpoint", exact: true });
   await createForm.getByLabel("URL", { exact: false }).fill("https://hooks.example.test/e4");
+  await createForm.getByLabel("Scope", { exact: true }).selectOption("global");
 
   // One token from each group, plus the shared disable/reenable token via its Entitlement box.
   await createForm.getByLabel("Entitlement create", { exact: true }).check();
@@ -34,10 +35,14 @@ test("an operator creates a webhook via grouped event-type checkboxes and then e
   expect(api.requests.webhookCreates[0]).toMatchObject({
     url: "https://hooks.example.test/e4",
     event_types: "create,disable,subscription.active",
+    scope_kind: "global",
+    scope_project: "",
+    scope_customer_id: "",
   });
 
   const row = page.locator("tr").filter({ hasText: "https://hooks.example.test/e4" });
   await expect(row).toContainText("create,disable,subscription.active");
+  await expect(row).toContainText("operator-wide");
 
   // Edit the endpoint the create just produced: the PATCH form pre-fills from the row and reuses
   // the existing PATCH /api/admin/webhooks/{id} route.
@@ -65,31 +70,38 @@ test("an operator creates a webhook via grouped event-type checkboxes and then e
   await expect(page.getByRole("form", { name: "Edit webhook endpoint", exact: true })).toHaveCount(0);
 });
 
-// webhook_endpoints.event_types has no database CHECK, so an existing row
-// can already hold a token outside today's closed set. The PATCH form must never re-validate that
-// legacy value just because some OTHER field changed, or such an endpoint could never be edited.
-test("editing only the URL of an endpoint with a legacy event type still succeeds, and the legacy note names it", async ({ page }) => {
+// Every endpoint names its scope, and the scope changes as a whole: the editor shows only the
+// chosen kind's value, a scoped kind needs its value before anything is sent, and moving to
+// another kind sends the kind and both values, so the old kind's value is cleared.
+test("moving an endpoint to another scope kind sends the whole scope", async ({ page }) => {
   const api = makeAdminApiFixture();
-  api.seed.webhook("wh_legacy", "https://hooks.example.test/legacy", { event_types: "legacy_unknown_type" });
+  api.seed.webhook("wh_project", "https://hooks.example.test/project", { event_types: "create", scope_kind: "project", scope_project: "DEFAULT" });
   await page.route("**/api/admin/**", api.route);
 
   await page.goto("/#/webhooks");
-  const row = page.locator("tr").filter({ hasText: "https://hooks.example.test/legacy" });
+  const row = page.locator("tr").filter({ hasText: "https://hooks.example.test/project" });
+  await expect(row).toContainText("project:DEFAULT");
   await row.getByRole("button", { name: "Edit", exact: true }).click();
   const editForm = page.getByRole("form", { name: "Edit webhook endpoint", exact: true });
-  await expect(editForm.getByText("Legacy event types not in the current list: legacy_unknown_type. Changing event types will remove them.", { exact: true })).toBeVisible();
+  const scope = editForm.getByLabel("Scope", { exact: true });
+  await expect(scope).toHaveValue("project");
+  await expect(editForm.getByLabel("Project", { exact: true })).toHaveValue("DEFAULT");
+  await expect(editForm.getByLabel("Customer ID", { exact: true })).toHaveCount(0);
 
-  await editForm.getByLabel("URL", { exact: false }).fill("https://hooks.example.test/legacy-updated");
+  await scope.selectOption("customer");
+  await expect(editForm.getByLabel("Project", { exact: true })).toHaveCount(0);
+  const customer = editForm.getByLabel("Customer ID", { exact: true });
+  await editForm.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(customer).toHaveAttribute("aria-invalid", "true");
+  await expect(editForm.getByText("Enter the customer ID this endpoint receives events for.", { exact: true })).toBeVisible();
+  expect(api.requests.webhookPatches).toHaveLength(0);
+
+  await customer.fill("cus_acme");
   await editForm.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(page.getByText("Webhook endpoint changes saved.")).toBeVisible();
-
   expect(api.requests.webhookPatches).toHaveLength(1);
-  // event_types was never touched, so the PATCH omits it -- the legacy value is never
-  // re-validated against today's closed set just because the URL changed.
-  expect(api.requests.webhookPatches[0].body).toEqual({ url: "https://hooks.example.test/legacy-updated" });
-
-  const updatedRow = page.locator("tr").filter({ hasText: "https://hooks.example.test/legacy-updated" });
-  await expect(updatedRow).toContainText("legacy_unknown_type");
+  expect(api.requests.webhookPatches[0].body).toEqual({ scope_kind: "customer", scope_project: "", scope_customer_id: "cus_acme" });
+  await expect(row).toContainText("customer:cus_acme");
 });
 
 // A save with nothing changed writes nothing: an empty PATCH would still bump updated_at and

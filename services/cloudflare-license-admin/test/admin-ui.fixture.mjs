@@ -280,7 +280,7 @@ export function makeAdminApiFixture() {
   function seedWebhook(id = "wh_confirm", url = "https://hooks.example.test/confirm", overrides = {}) {
     const endpoint = {
       id, url, event_types: "", status: "active",
-      description: "", scope_project: null, scope_customer_id: null, created_at: now, updated_at: now,
+      description: "", scope_kind: "global", scope_project: null, scope_customer_id: null, created_at: now, updated_at: now,
       ...overrides,
     };
     webhooks.push(endpoint);
@@ -1217,8 +1217,9 @@ export function makeAdminApiFixture() {
         event_types: body.event_types ?? "",
         status: "active",
         description: body.description ?? "",
-        scope_project: body.scope_project === "" ? null : body.scope_project,
-        scope_customer_id: body.scope_customer_id === "" ? null : body.scope_customer_id,
+        scope_kind: body.scope_kind,
+        scope_project: body.scope_project ? body.scope_project : null,
+        scope_customer_id: body.scope_customer_id ? body.scope_customer_id : null,
         created_at: now,
         updated_at: now,
       };
@@ -1236,6 +1237,7 @@ export function makeAdminApiFixture() {
       if ("url" in body) endpoint.url = body.url;
       if ("event_types" in body) endpoint.event_types = body.event_types;
       if ("description" in body) endpoint.description = body.description;
+      if ("scope_kind" in body) endpoint.scope_kind = body.scope_kind;
       if ("scope_project" in body) endpoint.scope_project = body.scope_project === "" ? null : body.scope_project;
       if ("scope_customer_id" in body) endpoint.scope_customer_id = body.scope_customer_id === "" ? null : body.scope_customer_id;
       endpoint.updated_at = now;

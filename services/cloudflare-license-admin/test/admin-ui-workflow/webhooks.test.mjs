@@ -110,7 +110,6 @@ test("the webhook form sends an explicit scope: a chosen kind and only that kind
   assert.equal(workflow.webhookScopeLabel({ scope_kind: "global", scope_project: null, scope_customer_id: null }), "operator-wide");
   assert.equal(workflow.webhookScopeLabel({ scope_kind: "project", scope_project: "DEFAULT", scope_customer_id: null }), "project:DEFAULT");
   assert.equal(workflow.webhookScopeLabel({ scope_kind: "customer", scope_project: null, scope_customer_id: "cus_1" }), "customer:cus_1");
-  assert.equal("unknownWebhookEventTypes" in workflow, false);
 });
 
 test("an edited webhook PATCHes only what changed, and its scope as a whole", async () => {

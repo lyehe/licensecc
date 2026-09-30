@@ -53,7 +53,7 @@ function freshDb(t) {
 
 function addEndpoint(db, id, { url = `https://hooks.test/${id}`, status = "active" } = {}) {
   db.prepare(
-    "INSERT INTO webhook_endpoints (id, url, event_types, status, description, created_at, updated_at) VALUES (?,?,'',?,'',1,1)",
+    "INSERT INTO webhook_endpoints (id, url, event_types, status, description, created_at, updated_at, scope_kind) VALUES (?,?,'',?,'',1,1,'global')",
   ).run(id, url, status);
 }
 

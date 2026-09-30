@@ -561,14 +561,20 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 );
 
 CREATE TABLE IF NOT EXISTS webhook_endpoints (
-  id          TEXT PRIMARY KEY,
-  url         TEXT NOT NULL,
-  event_types TEXT NOT NULL DEFAULT '',
-  status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
-  description TEXT NOT NULL DEFAULT '',
-  created_at  INTEGER NOT NULL,
-  updated_at  INTEGER NOT NULL
-, scope_project TEXT, scope_customer_id TEXT);
+  id                TEXT PRIMARY KEY,
+  url               TEXT NOT NULL,
+  event_types       TEXT NOT NULL DEFAULT '',
+  status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+  description       TEXT NOT NULL DEFAULT '',
+  created_at        INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL,
+  scope_kind        TEXT NOT NULL CHECK (scope_kind IN ('global', 'project', 'customer')),
+  scope_project     TEXT,
+  scope_customer_id TEXT,
+  CHECK ((scope_kind = 'global' AND scope_project IS NULL AND scope_customer_id IS NULL)
+      OR (scope_kind = 'project' AND scope_project IS NOT NULL AND length(scope_project) > 0 AND scope_customer_id IS NULL)
+      OR (scope_kind = 'customer' AND scope_customer_id IS NOT NULL AND length(scope_customer_id) > 0 AND scope_project IS NULL))
+);
 
 CREATE TABLE IF NOT EXISTS "webhook_events" (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1067,3 +1073,21 @@ BEGIN SELECT RAISE(ABORT, 'authorization_feature_mismatch'); END;
 CREATE TRIGGER IF NOT EXISTS tr_bound_requested_feature_update BEFORE UPDATE OF feature,requested_feature ON device_bound_authorizations
 WHEN NEW.feature IS NOT NULL AND NEW.feature <> NEW.requested_feature
 BEGIN SELECT RAISE(ABORT, 'authorization_feature_mismatch'); END;
+
+CREATE TRIGGER IF NOT EXISTS tr_webhook_event_types_known_insert BEFORE INSERT ON webhook_endpoints
+WHEN NEW.event_types <> '' AND EXISTS (
+  SELECT 1 FROM json_each('["' || replace(NEW.event_types, ',', '","') || '"]')
+  WHERE value NOT IN ('create', 'update', 'disable', 'reenable', 'revoke', 'upsert', 'revoked-override',
+    'subscription.active', 'subscription.renewed', 'subscription.past_due', 'subscription.paused',
+    'subscription.payment_failed', 'subscription.canceled_at_period_end', 'subscription.resumed',
+    'quantity.changed', 'fraud.confirmed', 'chargeback'))
+BEGIN SELECT RAISE(ABORT, 'invalid_event_types'); END;
+
+CREATE TRIGGER IF NOT EXISTS tr_webhook_event_types_known_update BEFORE UPDATE OF event_types ON webhook_endpoints
+WHEN NEW.event_types <> '' AND EXISTS (
+  SELECT 1 FROM json_each('["' || replace(NEW.event_types, ',', '","') || '"]')
+  WHERE value NOT IN ('create', 'update', 'disable', 'reenable', 'revoke', 'upsert', 'revoked-override',
+    'subscription.active', 'subscription.renewed', 'subscription.past_due', 'subscription.paused',
+    'subscription.payment_failed', 'subscription.canceled_at_period_end', 'subscription.resumed',
+    'quantity.changed', 'fraud.confirmed', 'chargeback'))
+BEGIN SELECT RAISE(ABORT, 'invalid_event_types'); END;

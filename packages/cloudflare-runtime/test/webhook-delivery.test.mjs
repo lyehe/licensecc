@@ -572,7 +572,7 @@ test("one event-source enqueue failure is observable without blocking later sour
     DB: {
       prepare(sql) {
         if (sql.includes("FROM webhook_endpoints")) {
-          return { all: async () => ({ results: [{ id: "ep1" }] }) };
+          return { all: async () => ({ results: [{ id: "ep1", event_types: "", scope_kind: "global", scope_project: null, scope_customer_id: null }] }) };
         }
         if (sql.includes("FROM webhook_cursor")) {
           return {

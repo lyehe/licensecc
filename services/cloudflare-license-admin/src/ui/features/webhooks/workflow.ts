@@ -1,4 +1,4 @@
-import type { WebhookEndpoint, WebhookEndpointInput, WebhookEndpointPatch } from "../../../shared/api";
+import type { WebhookEndpoint, WebhookEndpointInput, WebhookEndpointPatch, WebhookScopeKind } from "../../../shared/api";
 import { WEBHOOK_EVENT_TYPES } from "@licensecc/cloudflare-runtime/webhooks/event_types";
 import { fieldForCode } from "../../shared/fieldErrors";
 
@@ -15,6 +15,8 @@ export interface WebhookFormState {
   url: string;
   event_types: string;
   description: string;
+  // "" until the operator picks one: every endpoint's scope is an explicit choice.
+  scope_kind: WebhookScopeKind | "";
   scope_project: string;
   scope_customer_id: string;
 }
@@ -25,9 +27,24 @@ export const emptyWebhookForm: WebhookFormState = {
   url: "",
   event_types: "",
   description: "",
+  scope_kind: "",
   scope_project: "",
   scope_customer_id: "",
 };
+
+/** The scope selector's choices, in order. */
+export const WEBHOOK_SCOPE_OPTIONS: ReadonlyArray<{ kind: WebhookScopeKind; label: string }> = [
+  { kind: "global", label: "Every event (operator-wide)" },
+  { kind: "project", label: "One project" },
+  { kind: "customer", label: "One customer" },
+];
+
+/** The endpoint list's Scope cell. */
+export function webhookScopeLabel(endpoint: Pick<WebhookEndpoint, "scope_kind" | "scope_project" | "scope_customer_id">): string {
+  if (endpoint.scope_kind === "project") return `project:${endpoint.scope_project ?? ""}`;
+  if (endpoint.scope_kind === "customer") return `customer:${endpoint.scope_customer_id ?? ""}`;
+  return "operator-wide";
+}
 
 export type WebhookEventSource = "entitlement" | "customer" | "order";
 
@@ -64,21 +81,9 @@ export function isWebhookEventTypeChecked(csv: string, token: string): boolean {
 }
 
 /**
- * Every token in the csv filter that WEBHOOK_EVENT_TYPE_GROUPS does not define -- e.g. a legacy
- * value an existing endpoint already stored before today's closed set existed (there is no
- * database CHECK on webhook_endpoints.event_types). The edit form shows these explicitly rather
- * than ever dropping them without saying so.
- */
-export function unknownWebhookEventTypes(csv: string): string[] {
-  const known = new Set(WEBHOOK_EVENT_TYPE_CANONICAL_ORDER);
-  return webhookEventTypesArray(csv).filter((token) => !known.has(token));
-}
-
-/**
  * Toggle one token's membership in the csv filter, re-serialized in canonical order. A checkbox
- * only ever names a KNOWN token, so this can only add/remove a known one; any token outside
- * WEBHOOK_EVENT_TYPE_GROUPS already present in `csv` (a legacy value) is dropped here -- the edit
- * form's legacy note (unknownWebhookEventTypes) tells the operator that before it happens.
+ * only ever names a known token, and a stored filter only ever holds known tokens (the admin
+ * Worker and the database both refuse any other), so the result is always a canonical filter.
  */
 export function toggleWebhookEventType(csv: string, token: string, checked: boolean): string {
   const tokens = new Set(webhookEventTypesArray(csv));
@@ -129,6 +134,7 @@ export function webhookFormFromEndpoint(endpoint: WebhookEndpoint): WebhookFormS
     url: endpoint.url,
     event_types: endpoint.event_types,
     description: endpoint.description,
+    scope_kind: endpoint.scope_kind,
     scope_project: endpoint.scope_project ?? "",
     scope_customer_id: endpoint.scope_customer_id ?? "",
   };
@@ -151,28 +157,41 @@ export function normalizeWebhookForm(form: WebhookFormState): WebhookEndpointInp
   if (form.description.length > MAX_WEBHOOK_DESCRIPTION_SIZE || hasControlChars(form.description)) {
     throw new Error("description_invalid");
   }
-  const scopeProject = normalizeWebhookScope(form.scope_project, "scope_project");
-  const scopeCustomer = normalizeWebhookScope(form.scope_customer_id, "scope_customer_id");
-  if (scopeProject !== "" && scopeCustomer !== "") {
-    throw new Error("scope_set_project_or_customer_not_both");
-  }
+  const scope = normalizeWebhookScopeChoice(form);
   return {
     url: parsed.href,
     event_types: normalizeWebhookEventTypes(form.event_types),
     description: form.description,
-    scope_project: scopeProject,
-    scope_customer_id: scopeCustomer,
+    ...scope,
   };
 }
 
 /**
+ * The scope the form names: the kind the operator chose and only that kind's value. A value typed
+ * for another kind is sent blank, which also clears it on a PATCH that moves to a new kind.
+ */
+function normalizeWebhookScopeChoice(form: WebhookFormState): Pick<WebhookEndpointInput, "scope_kind" | "scope_project" | "scope_customer_id"> {
+  if (form.scope_kind === "") {
+    throw new Error("scope_kind_required");
+  }
+  const scopeProject = form.scope_kind === "project" ? normalizeWebhookScope(form.scope_project, "scope_project") : "";
+  const scopeCustomer = form.scope_kind === "customer" ? normalizeWebhookScope(form.scope_customer_id, "scope_customer_id") : "";
+  if (form.scope_kind === "project" && scopeProject === "") {
+    throw new Error("scope_project_required");
+  }
+  if (form.scope_kind === "customer" && scopeCustomer === "") {
+    throw new Error("scope_customer_id_required");
+  }
+  return { scope_kind: form.scope_kind, scope_project: scopeProject, scope_customer_id: scopeCustomer };
+}
+
+/**
  * PATCH /api/admin/webhooks/{id}: only the fields that actually differ from `baseline` (the form
- * as it was loaded from the endpoint). This matters beyond bandwidth: webhook_endpoints.event_types
- * has no database CHECK, so an existing row can hold a token outside today's closed set. Always
- * sending event_types (even unchanged) would make the server re-validate that legacy value on
- * every edit and reject it -- an endpoint with a legacy token could then never be edited for ANY
- * field. Comparing against the raw form fields (not the normalized output) means an edit that
- * only reformats a value (e.g. re-typing the identical URL) still counts as unchanged.
+ * as it was loaded from the endpoint), so an unchanged field is never rewritten. The scope travels
+ * as a whole: when its kind or either value changed, the PATCH names the kind and both values, so
+ * the server checks the full scope and a value left from the old kind is cleared. Comparing the
+ * raw form fields (not the normalized output) means an edit that only reformats a value (e.g.
+ * re-typing the identical URL) still counts as unchanged.
  */
 export function normalizeWebhookPatch(form: WebhookFormState, baseline: WebhookFormState): WebhookEndpointPatch {
   const normalized = normalizeWebhookForm(form);
@@ -180,8 +199,11 @@ export function normalizeWebhookPatch(form: WebhookFormState, baseline: WebhookF
   if (form.url !== baseline.url) patch.url = normalized.url;
   if (form.event_types !== baseline.event_types) patch.event_types = normalized.event_types;
   if (form.description !== baseline.description) patch.description = normalized.description;
-  if (form.scope_project !== baseline.scope_project) patch.scope_project = normalized.scope_project;
-  if (form.scope_customer_id !== baseline.scope_customer_id) patch.scope_customer_id = normalized.scope_customer_id;
+  if (form.scope_kind !== baseline.scope_kind || form.scope_project !== baseline.scope_project || form.scope_customer_id !== baseline.scope_customer_id) {
+    patch.scope_kind = normalized.scope_kind;
+    patch.scope_project = normalized.scope_project;
+    patch.scope_customer_id = normalized.scope_customer_id;
+  }
   return patch;
 }
 
@@ -203,6 +225,10 @@ function normalizeWebhookEventTypes(value: string): string {
     if (/\s/.test(token)) {
       throw new Error("event_types_token_has_whitespace");
     }
+  }
+  // Only the event types the dispatcher emits; the checkboxes can pick nothing else.
+  if (tokens.some((token) => !WEBHOOK_EVENT_TYPE_CANONICAL_ORDER.includes(token))) {
+    throw new Error("invalid_event_types");
   }
   return tokens.join(",");
 }
@@ -226,6 +252,9 @@ const WEBHOOK_FIELD_CODES: Readonly<Record<string, keyof WebhookFormState>> = {
   event_types_invalid: "event_types",
   event_types_token_has_whitespace: "event_types",
   invalid_event_types: "event_types",
+  scope_kind_required: "scope_kind",
+  scope_project_required: "scope_project",
+  scope_customer_id_required: "scope_customer_id",
 };
 
 /** The webhook editor field a validation or refusal code belongs to; null keeps it with the whole form. */

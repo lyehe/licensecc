@@ -1,8 +1,9 @@
 // WEBHOOK_EVENT_TYPES: the exact closed set of event_type tokens the webhook dispatcher's three
 // audit-table sources (entitlement_events, customer_events, order_events -- see webhook.mjs's
 // WEBHOOK_EVENT_SOURCES) can ever emit. This is the full allow-list an endpoint's event_types csv
-// filter may reference; the admin console's create/patch validators reject any other token with
-// invalid_event_types.
+// filter may reference: the admin console's create and patch validators reject any other token
+// with invalid_event_types, and the baseline's tr_webhook_event_types_known_insert/_update
+// triggers refuse it in the database too.
 //
 // Deliberately its own module, not added to webhook.mjs (already near its hotspot line budget),
 // so admin validation and the schema-parity test can import this list without growing that file.
@@ -11,7 +12,8 @@
 // mirrors the customer_events.event_type CHECK constraint (schema.sql); order mirrors the
 // order-ingest intents (ORDER_INTENTS) -- the SAME closed set order_event.mjs validates a
 // POST /v1/orders body's `intent` field against. A dedicated test parses schema.sql and asserts
-// the entitlement/customer lists below stay equal to their CHECK constraints, so they cannot drift.
+// the entitlement/customer lists below stay equal to their CHECK constraints, and that the two
+// webhook_endpoints triggers accept exactly the union of all three lists, so none can drift.
 import { ORDER_INTENTS } from "@licensecc/licensing-domain/orders/intents";
 
 export const WEBHOOK_EVENT_TYPES = Object.freeze({

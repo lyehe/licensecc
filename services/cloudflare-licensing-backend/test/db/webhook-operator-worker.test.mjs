@@ -58,7 +58,7 @@ test("the admin Worker sends a signed test event through the backend WebhookOper
   for (const row of ddl) await db.prepare(row.sql).run();
   await db.prepare("CREATE TABLE captured_requests (id INTEGER PRIMARY KEY, url TEXT, method TEXT, signature TEXT, source TEXT, body TEXT)").run();
   for (const [id, path, status] of [["ok", "/ok", "active"], ["moved", "/moved", "active"], ["off", "/off", "disabled"]]) {
-    await db.prepare("INSERT INTO webhook_endpoints (id, url, event_types, status, description, created_at, updated_at) VALUES (?, ?, '', ?, '', 1, 1)")
+    await db.prepare("INSERT INTO webhook_endpoints (id, url, event_types, status, description, created_at, updated_at, scope_kind) VALUES (?, ?, '', ?, '', 1, 1, 'global')")
       .bind(id, `https://hooks.example.test${path}`, status).run();
   }
 

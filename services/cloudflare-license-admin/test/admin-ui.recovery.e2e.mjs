@@ -18,7 +18,10 @@ async function newEntitlementForm(page) {
 
 async function newWebhookForm(page) {
   await page.getByRole("button", { name: "New endpoint", exact: true }).click();
-  return page.locator("aside.editorLayout form");
+  const form = page.locator("aside.editorLayout form");
+  // Every endpoint names its scope; these flows create operator-wide ones.
+  await form.getByLabel("Scope", { exact: true }).selectOption("global");
+  return form;
 }
 
 async function openActionMenu(button) {
@@ -206,7 +209,7 @@ test("admin UI clears known webhook recovery only after an additional current-co
     status: 200,
     body: makeEnvelope("webhook_created", {
       id: "wh_stale_refresh", url: "https://hooks.example.test/stale-refresh", event_types: "", status: "active", description: "",
-      scope_project: null, scope_customer_id: null, created_at: 1_760_000_001, updated_at: 1_760_000_001,
+      scope_kind: "global", scope_project: null, scope_customer_id: null, created_at: 1_760_000_001, updated_at: 1_760_000_001,
     }),
   });
   await page.route("**/api/admin/**", api.route);
@@ -244,7 +247,7 @@ test("admin UI retains known webhook recovery after its current read becomes sta
     status: 200,
     body: makeEnvelope("webhook_created", {
       id: "wh_noop_refresh", url: "https://hooks.example.test/noop-refresh", event_types: "", status: "active", description: "",
-      scope_project: null, scope_customer_id: null, created_at: 1_760_000_002, updated_at: 1_760_000_002,
+      scope_kind: "global", scope_project: null, scope_customer_id: null, created_at: 1_760_000_002, updated_at: 1_760_000_002,
     }),
   });
   await page.route("**/api/admin/**", api.route);

@@ -184,7 +184,9 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   url_must_be_a_single_https_url: failed("Enter a single https:// URL without spaces."),
   url_must_be_https: failed("The URL must start with https://."),
   description_invalid: failed("Use one line of at most 500 characters."),
-  scope_set_project_or_customer_not_both: failed("Set a project scope or a customer scope, not both."),
+  scope_kind_required: failed("Choose which events this endpoint receives."),
+  scope_project_required: failed("Enter the project this endpoint receives events for."),
+  scope_customer_id_required: failed("Enter the customer ID this endpoint receives events for."),
   event_types_invalid: failed("The event type list is too long or contains a line break."),
   event_types_token_has_whitespace: failed("An event type can't contain spaces."),
 };

@@ -20,7 +20,7 @@ const MAX_BACKUP_MANIFEST_BYTES = 16 * 1024;
 const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const MAX_MANIFEST_STRING_LENGTH = 2048;
 const SQL_HASH_CHUNK_BYTES = 64 * 1024;
-const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "c57d6e3d3c0db764b20225992d426ca20abc57075eb280b4d08ab23dc618ee16";
+const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "6faf6913aa9b51354f8da728a6b1ab21e8b10063acf7c5aab095826382660e5a";
 const SNAPSHOT_INVENTORY_ALGORITHM = "d1-export-sql-insert-count-v1";
 const DEFAULT_BACKEND_MIGRATIONS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -223,6 +223,8 @@ const EXPECTED_TRIGGERS = {
   tr_bound_operation_tombstone: "device_bound_operations",
   tr_bound_operation_no_replace: "device_bound_operations",
   tr_bound_owner_change: "entitlements",
+  tr_webhook_event_types_known_insert: "webhook_endpoints",
+  tr_webhook_event_types_known_update: "webhook_endpoints",
 };
 
 function usage(exitCode = 2) {

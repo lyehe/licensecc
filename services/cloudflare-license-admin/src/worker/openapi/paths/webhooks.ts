@@ -52,7 +52,7 @@ export const webhookPaths: LabeledPathFragment = {
     },
     post: {
       tags: ["admin:webhooks"],
-      summary: "Create a webhook endpoint (admin-only, https URL required)",
+      summary: "Create a webhook endpoint (admin-only, https URL and explicit scope required)",
       operationId: "createWebhook",
       security: ADMIN_SECURITY,
       parameters: [idempotencyKeyHeader],
@@ -62,7 +62,7 @@ export const webhookPaths: LabeledPathFragment = {
       },
       responses: {
         "200": okResponse("Webhook endpoint created.", "#/components/schemas/WebhookEndpoint", "webhook_created"),
-        "400": errorResponse("Invalid request / json / idempotency key, a URL that is not an https address on a public host name (no credentials, IP address, single-label or internal name, or trailing dot), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list).", "invalid_idempotency_key", "invalid_json", "invalid_request", "invalid_url", "invalid_event_types"),
+        "400": errorResponse("Invalid request / json / idempotency key (including a missing scope_kind, scope values that do not match it, or an unknown field), a URL that is not an https address on a public host name (no credentials, IP address, single-label or internal name, or trailing dot), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list).", "invalid_idempotency_key", "invalid_json", "invalid_request", "invalid_url", "invalid_event_types"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
@@ -125,7 +125,7 @@ export const webhookPaths: LabeledPathFragment = {
     },
     patch: {
       tags: ["admin:webhooks"],
-      summary: "Update a webhook endpoint's url / event_types / description (admin-only)",
+      summary: "Update a webhook endpoint's url / event_types / description / scope (admin-only)",
       operationId: "patchWebhook",
       security: ADMIN_SECURITY,
       parameters: [idParam, idempotencyKeyHeader],
@@ -135,7 +135,7 @@ export const webhookPaths: LabeledPathFragment = {
       },
       responses: {
         "200": okResponse("Webhook endpoint updated.", "#/components/schemas/WebhookEndpoint", "webhook_patched"),
-        "400": errorResponse("Invalid request / json / idempotency key, a URL that is not an https address on a public host name (no credentials, IP address, single-label or internal name, or trailing dot; status/id are not patchable), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list).", "invalid_idempotency_key", "invalid_json", "invalid_request", "invalid_url", "invalid_event_types"),
+        "400": errorResponse("Invalid request / json / idempotency key (status/id or any other unknown field, or a resulting scope whose values do not match its kind), a URL that is not an https address on a public host name (no credentials, IP address, single-label or internal name, or trailing dot), or an event_types token outside the known entitlement/customer/order set, in the PATCH or still stored when the PATCH leaves event_types out (data.allowed lists the grouped allow-list).", "invalid_idempotency_key", "invalid_json", "invalid_request", "invalid_url", "invalid_event_types"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No webhook endpoint with that id.", "not_found"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),

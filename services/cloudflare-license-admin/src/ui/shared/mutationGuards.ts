@@ -351,7 +351,7 @@ export function hasPolicyTransitionData(value: unknown, id: string, expectedStat
 
 export function hasWebhookTransitionData(value: unknown, id: string, expectedStatus: string): boolean {
   const data = record(value);
-  return data !== null && data.id === id && stringField(data, "url") && typeof data.event_types === "string" && enumField(data, "status", CATALOG_STATUSES) && statusField(data, expectedStatus) && typeof data.description === "string" && nonNegativeIntegerField(data, "created_at") && nonNegativeIntegerField(data, "updated_at") && nullableStringField(data, "scope_project") && nullableStringField(data, "scope_customer_id");
+  return data !== null && data.id === id && stringField(data, "url") && typeof data.event_types === "string" && enumField(data, "status", CATALOG_STATUSES) && statusField(data, expectedStatus) && typeof data.description === "string" && nonNegativeIntegerField(data, "created_at") && nonNegativeIntegerField(data, "updated_at") && enumField(data, "scope_kind", ["global", "project", "customer"] as const) && nullableStringField(data, "scope_project") && nullableStringField(data, "scope_customer_id");
 }
 
 export function hasCatalogFeatureTransitionData(value: unknown, id: string, expectedStatus: string): boolean {
@@ -449,7 +449,7 @@ export function hasWebhookListData(value: unknown): boolean {
   const data = record(value);
   return data !== null && cursorField(data) && Array.isArray(data.items) && data.items.every((item) => {
     const row = record(item);
-    return row !== null && stringField(row, "id") && stringField(row, "url") && typeof row.event_types === "string" && enumField(row, "status", CATALOG_STATUSES) && typeof row.description === "string" && nonNegativeIntegerField(row, "created_at") && nonNegativeIntegerField(row, "updated_at") && nullableStringField(row, "scope_project") && nullableStringField(row, "scope_customer_id");
+    return row !== null && stringField(row, "id") && stringField(row, "url") && typeof row.event_types === "string" && enumField(row, "status", CATALOG_STATUSES) && typeof row.description === "string" && nonNegativeIntegerField(row, "created_at") && nonNegativeIntegerField(row, "updated_at") && enumField(row, "scope_kind", ["global", "project", "customer"] as const) && nullableStringField(row, "scope_project") && nullableStringField(row, "scope_customer_id");
   });
 }
 

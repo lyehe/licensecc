@@ -310,38 +310,43 @@ export interface SearchData {
 // enqueues + delivers; this admin surface only manages the endpoint rows and lets an
 // operator inspect / redrive the webhook_deliveries outbox.
 export type WebhookStatus = "active" | "disabled";
+// Which events an endpoint receives: "global" every event (operator-wide), "project" only the
+// entitlement/order events of scope_project, "customer" only the customer events of scope_customer_id.
+export type WebhookScopeKind = "global" | "project" | "customer";
 
 export interface WebhookEndpoint {
   id: string;
   url: string;
-  event_types: string; // csv filter; "" = all event types
+  event_types: string; // csv filter of known event types; "" = all event types
   status: WebhookStatus;
   description: string;
   created_at: number;
   updated_at: number;
-  // Per-tenant scope (audit R2.2). null/"" = global (all events). When set, the endpoint receives
-  // only events carrying + matching that dimension. Set one dimension, not both (events are single-
-  // dimension): scope_project matches entitlement/order events; scope_customer_id matches customer events.
+  // A scoped kind names its own value; every other scope value is null.
+  scope_kind: WebhookScopeKind;
   scope_project: string | null;
   scope_customer_id: string | null;
 }
 
-// Create body. `url` is required and MUST be https (else 400 invalid_url). event_types
-// (csv filter; "" = all) and description take the column default when omitted. scope_* omitted = global.
+// Create body. `url` (https, else 400 invalid_url) and `scope_kind` with exactly its own value are
+// required. event_types (csv filter; "" = all) and description take the column default when omitted.
 export interface WebhookEndpointInput {
   url: string;
   event_types?: string;
   description?: string;
+  scope_kind: WebhookScopeKind;
   scope_project?: string;
   scope_customer_id?: string;
 }
 
 // Patch body. Only url / event_types / description / scope_* are mutable. status flips only via
-// disable/reenable; id/created_at are immutable. All fields optional.
+// disable/reenable; id/created_at are immutable. All fields optional, and "" clears a scope value;
+// the row the PATCH leaves must still name a valid scope and only known event types.
 export interface WebhookEndpointPatch {
   url?: string;
   event_types?: string;
   description?: string;
+  scope_kind?: WebhookScopeKind;
   scope_project?: string;
   scope_customer_id?: string;
 }

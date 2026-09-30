@@ -468,6 +468,20 @@ Webhooks:
 - `POST /api/admin/webhooks/{id}/reenable`
 - `POST /api/admin/webhooks/{id}/test`
 
+Every webhook endpoint names its scope in `scope_kind`: `global` receives every
+event (operator-wide), `project` only the entitlement and order events of
+`scope_project`, and `customer` only the customer events of `scope_customer_id`.
+A create without `scope_kind`, or whose scope values do not match its kind,
+returns 400 `invalid_request`; there is no default. A PATCH is checked against
+the whole row it would leave, so moving an endpoint to another kind also clears
+the old kind's value (`""`). `event_types` is a comma-separated filter of the
+event types the dispatcher emits (empty receives every type). A token outside
+that set returns 400 `invalid_event_types` on create and on every PATCH,
+including one that resends a stored value unchanged or leaves it out. The
+database refuses both on its own: a `CHECK` on the scope and two triggers on
+`event_types`. Create and PATCH refuse a body naming any other field with 400
+`invalid_request`.
+
 Entitlements:
 
 - `GET /api/admin/entitlements`

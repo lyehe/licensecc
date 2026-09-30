@@ -363,31 +363,31 @@ export async function readWebhookErrorBody(response) {
 /** Load the active endpoints once per tick (cheap; the set is operator-sized, not user-sized). */
 async function loadActiveEndpoints(env) {
   const res = await env.DB.prepare(
-    "SELECT id, url, event_types, scope_project, scope_customer_id FROM webhook_endpoints WHERE status = 'active'",
+    "SELECT id, url, event_types, scope_kind, scope_project, scope_customer_id FROM webhook_endpoints WHERE status = 'active'",
   ).all();
   return res.results ?? [];
 }
 
 /**
- * Per-tenant scope filter (audit R2.2). A global endpoint (both scope columns null/empty) receives
- * every event (back-compat). An endpoint scoped on a dimension receives ONLY events that carry AND
- * match that dimension: entitlement/order events carry `project`; customer events carry `customer_id`.
- * An endpoint scoped on a dimension the event does not carry (e.g. a project-scoped endpoint vs a
- * customer event) does not match, so a webhook no longer fans every tenant's row snapshots out to
- * every endpoint. (Note: entitlement_events carry project but not customer_id, so a customer-scoped
- * endpoint receives customer_events only, not that customer's entitlement changes.)
+ * Per-tenant scope filter, decided by the endpoint's explicit scope_kind. 'global' (operator-wide)
+ * receives every event; 'project' ONLY entitlement/order events whose `project` is scope_project;
+ * 'customer' ONLY customer events whose `customer_id` is scope_customer_id (entitlement_events carry
+ * no customer_id, so not that customer's entitlement changes). Any other kind, or a scoped kind
+ * without its value, receives nothing: an endpoint is never global by omission.
  */
 function endpointScopeMatches(endpoint, source, row) {
   const scopeProject = endpoint.scope_project;
   const scopeCustomer = endpoint.scope_customer_id;
-  const hasProjectScope = typeof scopeProject === "string" && scopeProject.length > 0;
-  const hasCustomerScope = typeof scopeCustomer === "string" && scopeCustomer.length > 0;
-  if (!hasProjectScope && !hasCustomerScope) return true; // global endpoint
-  const eventProject = source === "customer" ? null : row.project ?? null;
-  const eventCustomer = source === "customer" ? row.customer_id ?? null : null;
-  if (hasProjectScope && eventProject !== scopeProject) return false;
-  if (hasCustomerScope && eventCustomer !== scopeCustomer) return false;
-  return true;
+  switch (endpoint.scope_kind) {
+    case "global":
+      return true;
+    case "project":
+      return source !== "customer" && typeof scopeProject === "string" && scopeProject !== "" && row.project === scopeProject;
+    case "customer":
+      return source === "customer" && typeof scopeCustomer === "string" && scopeCustomer !== "" && row.customer_id === scopeCustomer;
+    default:
+      return false;
+  }
 }
 
 /** Read the per-source cursor high-water mark (0 if never run). */
