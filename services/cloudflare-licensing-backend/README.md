@@ -235,7 +235,9 @@ duplicate check as crash-redrive evidence.
   caller-provided sequence values. It runs mutations through `npx wrangler d1 execute
   --file`, which is transactional on both local (`db.batch()`) and remote (the D1
   import path), so the entitlement write and its audit event commit atomically or
-  not at all — there is no path that writes the row without the event.
+  not at all — there is no path that writes the row without the event. An option
+  the command does not use exits 2 with `unknown option --<name>`, so a removed
+  or misspelled flag is never silently dropped.
 - Revoked entitlements are terminal for v1. `upsert`, `disable`, and `reenable`
   are guarded by `status != 'revoked'` and will not change a revoked row. A
   guarded mutation is a NO-OP: it changes zero rows and writes no audit event. On

@@ -678,8 +678,8 @@ check again; a revoked grant stays terminal.
 Repeated identical projections return the current row without advancing
 `revocation_seq`.
 
-CLI smoke example (`--customer-id` and `--license-id` are required;
-`--device-hash` and `--assertion-ttl` are refused):
+CLI smoke example (`--customer-id` and `--license-id` are required; any option
+the CLI does not list exits 2 with `unknown option --<name>`):
 
 ```sh
 LICENSECC_SYNC_TOKEN=<secret> npm run sync:entitlement -- \

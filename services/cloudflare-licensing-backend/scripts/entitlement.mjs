@@ -25,8 +25,35 @@ notes:
   'upsert --allow-revoked-override --reason <text>' to intentionally reactivate a revoked entitlement;
   it requires --reason and records a distinct 'revoked-override' audit event. Every upsert is a protected
   grant: --customer-id and --license-id are required, and neither is cleared or reassigned
-  on a later conflict. The CLI bypasses Cloudflare Access and stamps actor_type='cli', source='cli'.`);
+  on a later conflict. An option the command does not list is refused. The CLI bypasses
+  Cloudflare Access and stamps actor_type='cli', source='cli'.`);
   process.exit(2);
+}
+
+// The options each command reads, plus the connection options every command accepts. Anything
+// else is refused rather than silently dropped, so a removed flag (a protected grant carries no
+// device hash) or an option meant for another command fails loudly.
+const CONNECTION_OPTIONS = ["database", "config", "remote", "local"];
+const TRANSITION_OPTIONS = ["fingerprint", "actor", "reason", "project", "feature"];
+const COMMAND_OPTIONS = {
+  upsert: ["fingerprint", "actor", "customer-id", "license-id", "project", "feature", "status", "valid-from", "valid-until", "reason", "allow-revoked-override"],
+  revoke: TRANSITION_OPTIONS,
+  disable: TRANSITION_OPTIONS,
+  reenable: TRANSITION_OPTIONS,
+  get: ["fingerprint", "project", "feature"],
+  list: ["project", "feature"],
+};
+
+function refuseUnknownOptions(command, options) {
+  const known = COMMAND_OPTIONS[command];
+  if (known === undefined) {
+    return;
+  }
+  for (const option of Object.keys(options)) {
+    if (!known.includes(option) && !CONNECTION_OPTIONS.includes(option)) {
+      throw new Error(`unknown option --${option} for ${command}`);
+    }
+  }
 }
 
 function parseArgs(argv) {
@@ -135,6 +162,7 @@ function nextInsertedRevocationSeqSql(fields) {
 }
 
 function sqlFor(command, options) {
+  refuseUnknownOptions(command, options);
   if (command === "upsert") {
     const fields = baseFields(options);
     const status = options.status ?? "active";

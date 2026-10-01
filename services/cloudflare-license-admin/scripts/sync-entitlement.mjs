@@ -9,7 +9,7 @@ function usage() {
   node scripts/sync-entitlement.mjs --url <admin-worker-url> --fingerprint <64-hex> --customer-id <id> --license-id <id> [--token <secret>] [--project DEFAULT] [--feature DEFAULT] [--status active] [--valid-from <epoch>] [--valid-until <epoch>] [--notes <text>] [--reason <text>] [--idempotency-key <key>]
 
 Every synced grant is protected: it names the customer who owns it and that customer's license.
-Token defaults to the LICENSECC_SYNC_TOKEN environment variable.`);
+Any other option is refused. Token defaults to the LICENSECC_SYNC_TOKEN environment variable.`);
   process.exit(2);
 }
 
@@ -65,13 +65,17 @@ function optionalEpoch(value, label) {
   return parsed;
 }
 
-// A protected grant carries no device hash (its device key proves the device) and no assertion TTL.
-const REFUSED_OPTIONS = ["device-hash", "assertion-ttl"];
+// Every option the CLI reads. Anything else is refused rather than silently dropped, so a removed
+// flag (a protected grant carries no device hash or assertion TTL) or a typo fails loudly.
+const KNOWN_OPTIONS = new Set([
+  "url", "token", "idempotency-key", "fingerprint", "customer-id", "license-id", "project", "feature",
+  "status", "valid-from", "valid-until", "notes", "reason",
+]);
 
 export function buildSyncPayload(options) {
-  for (const option of REFUSED_OPTIONS) {
-    if (options[option] !== undefined) {
-      throw new Error(`--${option} is not a sync field: a protected grant carries no device hash or assertion TTL`);
+  for (const option of Object.keys(options)) {
+    if (!KNOWN_OPTIONS.has(option)) {
+      throw new Error(`unknown option --${option}`);
     }
   }
   const status = options.status ?? "active";
