@@ -28,8 +28,13 @@ test("order activity says in words why an order was refused and keeps the code u
     message: "The order's email already belongs to another customer.",
     detail: { code: "customer_email_conflict", requestId: null },
   });
+  assert.deepEqual(fulfillment.orderRefusalFeedback("capacity_in_use"), {
+    tone: "error",
+    message: "This order would allow fewer devices than are connected. Disconnect devices, then resend the order.",
+    detail: { code: "capacity_in_use", requestId: null },
+  });
   // Every refusal the backend records reads as a sentence, never as its code.
-  for (const code of ["invalid_order", "entitlement_revoked", "entitlement_owner_mismatch", "customer_email_conflict", "a_future_refusal"]) {
+  for (const code of ["invalid_order", "entitlement_revoked", "entitlement_owner_mismatch", "customer_email_conflict", "capacity_in_use", "a_future_refusal"]) {
     const feedback = fulfillment.orderRefusalFeedback(code);
     assert.doesNotMatch(feedback.message, /\b[a-z0-9]+_[a-z0-9_]+\b/, code);
     assert.match(feedback.message, /[.!?]$/, code);

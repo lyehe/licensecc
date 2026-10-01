@@ -247,45 +247,67 @@ function eventRow(db, eventId) {
 // =============================================================================
 // CASE 1 — fresh apply
 // =============================================================================
+// A store order that would set the device limit below the devices holding a slot (active, or
+// retiring until its hold ends) cannot succeed on a retry, so it is refused terminally with
+// 409 capacity_in_use instead of a 503 the store would resend for ever. Both intents that
+// write the limit can do it: quantity.changed and a subscription.active refresh.
+function countBatches(env) {
+  const counter = { batches: 0 };
+  const realBatch = env.DB.batch.bind(env.DB);
+  env.DB.batch = async (statements) => { counter.batches += 1; return realBatch(statements); };
+  return counter;
+}
+
 for (const state of ["active", "retiring"]) {
-  test(`protected ${state} capacity failure remains recoverable without processed-order or authority corruption`, async t => {
-    const { db, env } = freshEnv(); t.after(() => db.close());
-    const rejected = makeOrder({ seq: 1, intent: "quantity.changed", quantity: { max_active_devices: 0 } });
-    const fingerprint = await fpOf(rejected);
-    db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_order','Owner',1,1);
-      INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,max_active_devices,created_at,updated_at)
-        VALUES('${PROJECT}','${FEATURE}','${fingerprint}','active','cus_order',1,1,1);
-      INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
-        VALUES('device','cus_order','${PROJECT}','key','synthetic-public',1,1);
-      INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,generation,revision,hold_until,created_at,updated_at)
-        VALUES('binding','${PROJECT}','${FEATURE}','${fingerprint}','device','${state}',2,3,4102444800,1,1);`);
-    const authority = () => ["entitlements", "device_bound_bindings", "entitlement_events"]
-      .map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
-    const before = authority();
-    for (let retry = 0; retry < 2; retry += 1) {
-      const response = await submit(env, rejected, { now: NOW + retry });
-      assert.equal(response.status, 503);
-      assert.equal(response.body.code, "write_failed");
-      assert.equal(eventRow(db, rejected.event_id).status, "accepted");
+  for (const intent of ["quantity.changed", "subscription.active"]) {
+    test(`a ${intent} below ${state === "active" ? "an" : "a"} ${state} connected device is refused terminally without processed-order or authority corruption`, async t => {
+      const { db, env } = freshEnv(); t.after(() => db.close());
+      const rejected = makeOrder({ seq: 1, intent, quantity: { max_active_devices: 0 } });
+      const fingerprint = await fpOf(rejected);
+      db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_order','Owner',1,1);
+        INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,max_active_devices,created_at,updated_at)
+          VALUES('${PROJECT}','${FEATURE}','${fingerprint}','active','cus_order',1,1,1);
+        INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
+          VALUES('device','cus_order','${PROJECT}','key','synthetic-public',1,1);
+        INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,generation,revision,hold_until,created_at,updated_at)
+          VALUES('binding','${PROJECT}','${FEATURE}','${fingerprint}','device','${state}',2,3,4102444800,1,1);`);
+      const authority = () => ["entitlements", "device_bound_bindings", "entitlement_events"]
+        .map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+      const before = authority();
+      const counter = countBatches(env);
+      const refused = await submit(env, rejected, { now: NOW });
+      assert.equal(refused.status, 409);
+      assert.deepEqual(refused.body, { ok: false, code: "capacity_in_use", license_fingerprint: fingerprint, fingerprint_origin: "derived" });
+      const event = eventRow(db, rejected.event_id);
+      assert.equal(event.status, "rejected", "the refusal is recorded");
+      assert.deepEqual(JSON.parse(event.result_json), refused.body);
+      assert.equal(event.processed_at, NOW);
       assert.deepEqual(authority(), before);
-    }
-    const permitted = makeOrder({ seq: 2, intent: "quantity.changed", quantity: { max_active_devices: 2 } });
-    const applied = await submit(env, permitted, { now: NOW + 2 });
-    assert.equal(applied.status, 200); assert.equal(applied.body.code, "applied");
-    const row = entRow(db, fingerprint);
-    assert.equal(row.customer_id, "cus_order");
-    assert.equal(row.max_active_devices, 2);
-    assert.equal(row.authority_revision, 1);
-    assert.equal(row.last_applied_order_seq, 2);
-    assert.deepEqual(authority()[1], before[1]);
-    assert.equal(authority()[2].length, 1);
-    const committed = authority();
-    const replay = await submit(env, permitted, { now: NOW + 3 });
-    assert.equal(replay.status, 200); assert.deepEqual(authority(), committed);
-    const superseded = await submit(env, rejected, { now: NOW + 4 });
-    assert.equal(superseded.status, 200); assert.deepEqual(authority(), committed);
-    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
-  });
+      // Not retried: a resend is the stored refusal and never reaches the guarded write again.
+      const writes = counter.batches;
+      const resent = await submit(env, rejected, { now: NOW + 1 });
+      assert.deepEqual([resent.status, resent.body], [409, refused.body]);
+      assert.equal(counter.batches, writes);
+      assert.deepEqual(authority(), before);
+
+      const permitted = makeOrder({ seq: 2, intent: "quantity.changed", quantity: { max_active_devices: 2 } });
+      const applied = await submit(env, permitted, { now: NOW + 2 });
+      assert.equal(applied.status, 200); assert.equal(applied.body.code, "applied");
+      const row = entRow(db, fingerprint);
+      assert.equal(row.customer_id, "cus_order");
+      assert.equal(row.max_active_devices, 2);
+      assert.equal(row.authority_revision, 1);
+      assert.equal(row.last_applied_order_seq, 2);
+      assert.deepEqual(authority()[1], before[1]);
+      assert.equal(authority()[2].length, 1);
+      const committed = authority();
+      const replay = await submit(env, permitted, { now: NOW + 3 });
+      assert.equal(replay.status, 200); assert.deepEqual(authority(), committed);
+      const stored = await submit(env, rejected, { now: NOW + 4 });
+      assert.deepEqual([stored.status, stored.body], [409, refused.body]); assert.deepEqual(authority(), committed);
+      assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+    });
+  }
 }
 
 test("case 1: fresh subscription.active apply (active, clamp, fingerprint, floor seq)", async () => {
@@ -1810,4 +1832,28 @@ test("an email-conflict refusal moves the order floor exactly like an existing t
   assert.equal(applied.body.code, "applied");
   assert.equal(entRow(db, await fpOf(corrected)).last_applied_order_seq, 5);
   assert.equal(db.prepare("SELECT email FROM customers WHERE id = 'cus_store'").get().email, "store-buyer@example.test");
+});
+
+test("a device-limit refusal moves the order floor exactly like an existing terminal refusal", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  const first = makeOrder({ subscription_id: "sub_C", event_id: "evt_C1", seq: 1, quantity: { max_active_devices: 2 } });
+  assert.equal((await submit(env, first)).body.code, "applied");
+  const fingerprint = await fpOf(first);
+  for (const device of ["one", "two"]) {
+    db.exec(`INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
+        VALUES('device_${device}','cus_order','${PROJECT}','key_${device}','synthetic-public',1,1);
+      INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,generation,revision,hold_until,created_at,updated_at)
+        VALUES('binding_${device}','${PROJECT}','${FEATURE}','${fingerprint}','device_${device}','active',1,1,4102444800,1,1);`);
+  }
+  const lowered = makeOrder({ subscription_id: "sub_C", event_id: "evt_C4", seq: 4, intent: "quantity.changed", quantity: { max_active_devices: 1 } });
+  await assertTerminalRefusalFloor(db, env, lowered, "capacity_in_use", NOW + 10);
+  assert.equal(entRow(db, fingerprint).last_applied_order_seq, 1, "the refused order never moves the grant floor");
+  assert.equal(entRow(db, fingerprint).max_active_devices, 2);
+
+  // A later order within the connected devices is admitted and applies.
+  const raised = makeOrder({ subscription_id: "sub_C", event_id: "evt_C5", seq: 5, intent: "quantity.changed", quantity: { max_active_devices: 3 } });
+  const applied = await submit(env, raised, { now: NOW + 20 });
+  assert.equal(applied.body.code, "applied");
+  assert.equal(entRow(db, fingerprint).max_active_devices, 3);
+  assert.equal(entRow(db, fingerprint).last_applied_order_seq, 5);
 });
