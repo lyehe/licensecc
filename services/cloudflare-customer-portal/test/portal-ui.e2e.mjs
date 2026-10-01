@@ -378,8 +378,8 @@ test("a linked-provider confirmation under Account is not coloured like an error
 });
 
 // Connect Google/GitHub with a session older than ten minutes comes back to Account with
-// auth_error=reauth_required. Account says why and offers the existing sign-out and sign-in, which
-// lands back on Account, where Connect now works.
+// auth_error=reauth_required. Account says why and offers the existing sign-out; signing back in
+// with an email code lands back on Account, where Connect now works.
 test("connecting a provider with an old session asks to sign in again and returns to Account", async ({ page }) => {
   const api = makePortalApiFixture();
   await signIn(page, api);

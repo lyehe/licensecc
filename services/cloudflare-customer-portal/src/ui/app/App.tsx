@@ -148,8 +148,9 @@ function PortalShell(): React.ReactElement {
     if (document.contains(target) && !target.hasAttribute("disabled")) target.focus();
   }, [busy, message]);
 
-  // `destination` is where the next sign-in lands: Apps, or Account when signing in again to connect
-  // a provider.
+  // `destination` is the page left open after sign-out, so the next email-code or password sign-in
+  // lands there: Apps, or Account when signing in again to connect a provider. Provider and emailed
+  // sign-in links redirect to Apps on their own.
   async function logout(destination = "/#/apps"): Promise<void> {
     await auth.logout(() => {
       clearPortalData();

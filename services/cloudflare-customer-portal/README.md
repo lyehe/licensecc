@@ -313,8 +313,10 @@ sign-in from the last ten minutes. The portal checks the session's age when
 the connection starts and again when the provider returns, before it exchanges
 the provider code. An older session links nothing and returns to Account with
 `auth_error=reauth_required`; Account says "For your security, sign in again
-to connect Google." (or GitHub) and offers Sign in again, which signs out and
-returns to Account after the next sign-in. Signing in with a provider and
+to connect Google." (or GitHub) and offers Sign in again, which signs out.
+Signing back in with an email code or a password returns to Account; signing
+in with Google or GitHub, or through an emailed sign-in link, lands on Apps,
+and the customer opens Account from there. Signing in with a provider and
 disconnecting one need no recent sign-in.
 
 Customers can disconnect a provider from Account

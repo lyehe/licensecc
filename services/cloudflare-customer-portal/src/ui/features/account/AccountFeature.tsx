@@ -10,8 +10,8 @@ const LAST_SIGN_IN_METHOD = "You can't disconnect your only sign-in method. Set 
 
 export function AccountFeature({ customerId, onSignInAgain }: {
   customerId: string | null;
-  // Signs out and comes back to Account after the next sign-in (offered when a Connect was refused
-  // because the session is too old to connect a provider).
+  // Signs out, leaving the app on Account so an email-code or password sign-in returns there
+  // (offered when a Connect was refused because the session is too old to connect a provider).
   onSignInAgain(): void;
 }): React.ReactElement {
   const { providers, failed, retry } = useProviders();

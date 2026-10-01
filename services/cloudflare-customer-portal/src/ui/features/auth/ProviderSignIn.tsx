@@ -69,7 +69,7 @@ export function stripProviderResult(): void {
 }
 
 // `onSignInAgain` (Account only) offers the way out of reauth_required: sign out, then sign in
-// again, coming back to Account.
+// again; an email-code or password sign-in comes back to Account.
 export function ProviderResult({ onSignInAgain }: { onSignInAgain?: () => void } = {}): React.ReactElement | null {
   // This one status slot renders real auth failures (account_suspended, link_expired,
   // sign_in_cancelled, link_failed, reauth_required, sign_in_failed, provider_unavailable,
