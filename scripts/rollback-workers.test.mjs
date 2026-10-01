@@ -12,8 +12,7 @@ import {
   rollbackWorkers,
   safeFailureEvidence,
 } from "./rollback-workers.mjs";
-import { parseSanitizedDeployment } from "./assert-worker-deployment.mjs";
-import { captureDeploymentTransition, parseTransitionArguments } from "./capture-worker-deployment-transition.mjs";
+import { captureDeploymentTransition, parseSanitizedDeployment, parseTransitionArguments } from "./capture-worker-deployment-transition.mjs";
 import { parseProtectedWranglerArguments, runProtectedWrangler } from "./run-protected-wrangler.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");

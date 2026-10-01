@@ -68,7 +68,6 @@
         "scripts/release/cpp-source-archive.mjs",
         "scripts/release/output-boundary.mjs",
         "scripts/release/worker-bundle.mjs",
-        "scripts/assert-worker-deployment.mjs",
         "scripts/capture-worker-deployment-transition.mjs",
         "scripts/rollback-workers.mjs",
         "scripts/rollback-workers.test.mjs",
