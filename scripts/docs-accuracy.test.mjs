@@ -511,6 +511,20 @@ test("architecture documentation derives the SDK inventory and current measureme
   }
 });
 
+test("the Cloudflare setup guide names every staging drill variable and dispatch input", () => {
+  const workflow = source(".github/workflows/deploy-staging.yml");
+  const guide = source("doc/operations/cloudflare-setup.md");
+  const variables = [...new Set([...workflow.matchAll(/\bvars\.(LICENSECC_STAGING_[A-Z0-9_]+)\b/gu)].map((match) => match[1]))];
+
+  assert.ok(variables.length >= 6, "the staging workflow must still read its protected drill variables");
+  assert.match(workflow, /\binputs\.portal_protected_entitlement_id\b/u);
+  for (const name of [...variables, "portal_protected_entitlement_id"]) {
+    assert.ok(guide.includes(`\`${name}\``), `the setup guide must name ${name}`);
+  }
+  assert.match(guide, /device\s+limit of at least 20/u);
+  assert.match(guide, /^### Secrets and variables no longer read$/mu);
+});
+
 test("admin browser instructions and the PR gate keep docs checks honest", () => {
   const adminReadme = source("services/cloudflare-license-admin/README.md");
   const packageJson = JSON.parse(source("package.json"));

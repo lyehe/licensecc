@@ -323,6 +323,36 @@ enrolls a software P-256 key, which does not exercise a native client; run the
 protected native journey separately. Apply all applicable production-readiness
 gates before promoting a staging success to production.
 
+### Staging drill prerequisites
+
+The staging workflow's portal drill runs the protected device journey: it
+creates a device authorization on the backend, approves it through the portal
+consent routes, exchanges the approval, renews the lease and retires the
+binding. Set up these once, before the first staging dispatch:
+
+- In the `staging` GitHub environment, the variables
+  `LICENSECC_STAGING_DEVICE_CLIENT_ID`, `LICENSECC_STAGING_DEVICE_PROJECT`,
+  `LICENSECC_STAGING_DEVICE_FEATURE`, `LICENSECC_STAGING_DEVICE_REDIRECT_URI`,
+  `LICENSECC_STAGING_DEVICE_AUDIENCE` and
+  `LICENSECC_STAGING_BOUND_LEASE_PUBLIC_KEY_SPKI_PEM`. The last is the staging
+  backend's RSA-3072 lease public key in SPKI PEM form, the same key as its
+  `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM`.
+- A synthetic protected grant for that project and feature, owned by the
+  portal test customer (the `portal_test_email` dispatch input), with a device
+  limit of at least 20. A retired binding keeps its device slot until its hold
+  ends (at most 24 hours plus 120 seconds), so each run holds one slot for up to
+  a day. Pass the grant's id as the `portal_protected_entitlement_id` dispatch
+  input.
+- A registration in the staging backend's `BOUND_DEVICE_CONFIG` for the drill's
+  client id, project and loopback redirect URI, with the same `audience` as
+  `LICENSECC_STAGING_DEVICE_AUDIENCE`.
+
+Nothing checks these before the deploy. A dispatch without them still deploys
+the Workers, then fails at its synthetic drill step and names the missing
+variables. The
+[portal drill reference](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-customer-portal/README.md#local-checks)
+describes the journey, its inputs and what its evidence records.
+
 ## 10. Upgrade and recover
 
 The schema is a single baseline that is edited in place until the first
@@ -360,6 +390,29 @@ inspection return `temporarily_unavailable` (503).
 Keep device audit events until an explicit retention policy is adopted. Do not
 remove persistent identities, checkpoints or capacity holds as a shortcut for
 recovering a failed deployment.
+
+### Secrets and variables no longer read
+
+The Workers no longer read the configuration below, and nothing refuses it:
+the deploy materializer accepts variables it does not know, and the backend
+secret inventory checks only the names it requires. An existing Cloudflare
+deployment therefore keeps these values silently. Delete them from every
+existing staging and production deployment: Worker secrets with Wrangler's
+`secret delete` command, and variables from the live Wrangler configuration,
+the `LICENSECC_*_WRANGLER_CONFIG_B64` deploy configurations and any dashboard
+variables that `keep_vars` retains.
+
+| Owner | Names | Action |
+| --- | --- | --- |
+| Backend secrets | Online signer: `ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM`, `ONLINE_SIGNING_KEY_ID`. Account tokens: `ACCOUNT_TOKEN_PEPPERS`. Lease issuance: `LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM`, `LEASE_SIGNING_KEY_ID`, `LEASE_ISSUE_BEARER`. Emergency operator: `EMERGENCY_OPERATOR_BEARER` | Delete |
+| Backend variables | The rollout selectors `REQUEST_SIGNATURE_MODE`, `DEVICE_PROOF_MODE`, `ORDER_INGEST_MODE`, `ORDER_SIGNER_SCOPE_MODE` and `ACCOUNT_TOKEN_MODE`; `REQUEST_SIGNATURE_MAX_SKEW_SECONDS`, `ACCOUNT_TOKEN_ACTIVE_PEPPER_ID`, `ACCOUNT_TOKEN_LAST_USED_THROTTLE_SEC`, `MAX_ASSERTION_TTL_SECONDS`, `MAX_CACHE_TTL_SECONDS`, `LOG_RATE_LIMIT_DECISIONS`, `LEASE_SKEW_DAYS`; every `D1_*RATE_LIMIT*` variable | Delete |
+| Backend rate-limit binding | `VERIFY_RATE_LIMITER` | Rename it to `BOUND_REGISTRATION_RATE_LIMITER`, and add `BOUND_SESSION_RATE_LIMITER` if it is missing. The materializer requires both, each with a positive `namespace_id`, limit and period |
+| Portal | The `ACCOUNT_TOKEN_PEPPERS` secret and the `ACCOUNT_TOKEN_ACTIVE_PEPPER_ID` variable | Delete |
+| GitHub environments | Every `LICENSECC_STAGING_LEASE_*`, `LICENSECC_PUBLIC_VERIFIER_*` and `LICENSECC_CAPACITY_*` secret or variable | Delete; no workflow reads them |
+
+`ORDER_SIGNER_SCOPES` is now mandatory. Order HMAC and signer scope are always
+enforced, so without it every order returns 503 `config_error`, and `/health`
+reports it among its `config_warnings`.
 
 ## Troubleshooting
 
