@@ -24,20 +24,19 @@ test("throttles with no limiter configuration (invariant 5)", async () => {
 
 test("counter is per-key: a different key starts fresh", async () => {
   const e = env();
-  for (let i = 0; i < 4; i += 1) await portalRateLimit(e, "verify:cust:A:ip:1.1.1.1", 3, 900, NOW);
-  const a = await portalRateLimit(e, "verify:cust:A:ip:1.1.1.1", 3, 900, NOW);
-  assert.equal(a.limited, true, "A's IP is over the cap");
-  const b = await portalRateLimit(e, "verify:cust:B:ip:2.2.2.2", 3, 900, NOW);
-  assert.equal(b.limited, false, "B's IP is independent and under the cap");
+  for (let i = 0; i < 4; i += 1) await portalRateLimit(e, "verify:ip:1.1.1.1", 3, 900, NOW);
+  const a = await portalRateLimit(e, "verify:ip:1.1.1.1", 3, 900, NOW);
+  assert.equal(a.limited, true, "the first client is over the cap");
+  const b = await portalRateLimit(e, "verify:ip:2.2.2.2", 3, 900, NOW);
+  assert.equal(b.limited, false, "another client is independent and under the cap");
 });
 
-test("the per-(customer,IP) verify counter is independent of a per-row attempt cap", async () => {
-  // The verify RL key encodes both customer and IP; a single row's attempt_count cap (5) is a
-  // separate ceiling. Here the RL key tracks 10 verify attempts -> trips at its own cap of 8.
+test("a key trips at its own limit, whatever the key", async () => {
+  // The per-email verify key has its own ceiling, separate from any per-code attempt cap.
   const e = env();
   let limited = false;
   for (let i = 0; i < 10; i += 1) {
-    const r = await portalRateLimit(e, "verify:cust:A:ip:9.9.9.9", 8, 900, NOW);
+    const r = await portalRateLimit(e, "verify:email:a@x.com", 8, 900, NOW);
     limited = r.limited;
   }
   assert.equal(limited, true);

@@ -65,7 +65,9 @@ export const authPaths: LabeledPathFragment = {
         summary: "Redeem an 8-digit numeric code + email and mint an opaque session.",
         description:
           "Email-bound: a wrong code and an unknown OTP are byte-identical (invalid_otp, no oracle on " +
-          "the reason). Single-use atomic claim (consumed_at). On success sets the lccp_session cookie.",
+          "the reason). Single-use atomic claim (consumed_at). Every wrong code for an email counts " +
+          "against that email's live code; after 5 wrong codes it is refused even with the right code " +
+          "or its magic link. On success sets the lccp_session cookie.",
         security: [],
         requestBody: {
           required: true,
@@ -105,7 +107,7 @@ export const authPaths: LabeledPathFragment = {
           "401": errorResponse("Invalid OTP (wrong/consumed/expired/over-cap code), or unauthorized config_error from redeemOtp. Byte-identical for all failure reasons.", "invalid_otp"),
           "403": ERR_CROSS_SITE,
           "413": ERR_BODY_TOO_LARGE,
-          "429": rateLimited("Rate limited (per-IP verify 30/900s). Answers with a retry-after header giving the exact seconds left in the fixed window."),
+          "429": rateLimited("Rate limited (per-IP verify 30/900s, per-email verify 10/900s). Answers with a retry-after header giving the exact seconds left in the fixed window."),
           "503": errorResponse("PORTAL_OTP_PEPPERS or PORTAL_SESSION_PEPPERS unset.", "config_error"),
         },
       },

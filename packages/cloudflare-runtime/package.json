@@ -8,6 +8,10 @@
       "types": "./src/http/unsigned_json.d.ts",
       "default": "./src/http/unsigned_json.mjs"
     },
+    "./http/source_identity": {
+      "types": "./src/http/source_identity.d.ts",
+      "default": "./src/http/source_identity.mjs"
+    },
     "./d1/audit_digest": {
       "types": "./src/d1/audit_digest.d.ts",
       "default": "./src/d1/audit_digest.mjs"

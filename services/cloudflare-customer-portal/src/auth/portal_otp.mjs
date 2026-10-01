@@ -16,7 +16,8 @@
 //   - requestOtp NEVER returns the secret (only operator bootstrap does, in the worker).
 //   - Always-on rate-limit BEFORE any write (invariant 5 / portal_ratelimit).
 //   - redeem: candidate HMAC under EVERY live pepper; wrong-code is byte-identical to no-OTP (no
-//     oracle); attempt_count is bumped ONLY when a live row actually matched.
+//     oracle). Every wrong code for an email counts against that email's live code, which dies
+//     after MAX_ATTEMPTS wrong guesses; each email also has its own verify budget.
 //
 // Worker-safe: no node:/Buffer; only Web Crypto + standard globals.
 
@@ -30,7 +31,12 @@ import { portalRateLimit } from "./portal_ratelimit.mjs";
 /** @typedef {{ email?: unknown, code?: unknown, secret?: unknown, clientIp?: string, now?: number }} RedeemOtpOptions */
 
 const OTP_TTL_SEC = 600; // 10 minutes (blueprint (a)).
+// Wrong guesses a live code survives: after this many, even the right code or link is refused.
 const MAX_ATTEMPTS = 5;
+// Verify attempts per client address (an IPv4 address or an IPv6 /64) and per email, per window.
+const VERIFY_PER_CLIENT = 30;
+const VERIFY_PER_EMAIL = 10;
+const VERIFY_WINDOW_SEC = 900;
 const SECRET_BYTES = 32;
 const textEncoder = new TextEncoder();
 const EMAIL_DELIVERY_ERROR_TYPES = new Set(["unconfigured", "send_failed", "rejected", "invalid_result"]);
@@ -168,7 +174,8 @@ function activePepperId(peppers) {
  * unknown email: burns an equal-cost dummy HMAC and returns ok without writing or emailing.
  *
  * `sendEmailFn` is injected (the worker passes its sendEmail seam) so this module stays fetch-free
- * and unit-testable. `clientIp` is the per-IP RL identity.
+ * and unit-testable. `clientIp` is the per-client RL identity (the worker's clientIp(): an IPv4
+ * address, or an IPv6 address reduced to its /64).
  *
  * `returnSecret` is the OPERATOR BOOTSTRAP escape hatch (blueprint (e)): the ONLY way the secret is
  * returned to the caller. The worker gates this behind a constant-time bearer + network gate + audit;
@@ -257,8 +264,9 @@ export async function requestOtp(env, { email, clientIp = "", sendEmailFn, email
  * redeemOtp(env, { email?, code?, secret?, clientIp?, now? }) -> { ok, customerId?, code, retryAfter? }
  *
  *   { ok:false, code:"config_error" }   peppers unset (worker -> 503).
- *   { ok:false, code:"rate_limited", retryAfter }   always-on verify RL tripped; retryAfter is the
- *                                       seconds left in the fixed window that tripped.
+ *   { ok:false, code:"rate_limited", retryAfter }   always-on verify RL tripped (per client, and
+ *                                       per email for a code); retryAfter is the seconds left in
+ *                                       the fixed window that tripped.
  *   { ok:false, code:"invalid_otp" }    wrong code / unknown secret / consumed / expired / capped
  *                                       — all BYTE-IDENTICAL (no oracle on WHY).
  *   { ok:true,  customerId, code:"ok" } the atomic single-use claim matched a live row.
@@ -268,20 +276,31 @@ export async function requestOtp(env, { email, clientIp = "", sendEmailFn, email
  *   - magic redemption: requires { secret }; the secret_hmac is email-independent.
  * Either way we compute the candidate HMAC under EVERY live pepper and run ONE atomic UPDATE that
  * claims the row (sets consumed_at) only if it is unconsumed, unexpired, and under the attempt cap,
- * RETURNING the customer_id. attempt_count is bumped ONLY when a live row matched but the claim
- * predicate was otherwise satisfiable — handled by the worker's verify counter + this row guard.
+ * RETURNING the customer_id.
+ *
+ * Brute-force limits on code redemption, all applied the same way whether or not the email has an
+ * account or a live code:
+ *   - per client: VERIFY_PER_CLIENT attempts per window (an IPv6 client counts per /64);
+ *   - per email: VERIFY_PER_EMAIL attempts per window, counted before the claim so concurrent
+ *     guesses cannot overshoot it (a success counts too; each one needs a freshly requested code);
+ *   - per live code: a claim that misses always runs a second UPDATE that adds one to
+ *     attempt_count on that email's live code(s). Each wrong guess runs it exactly once, and it
+ *     matches only rows the claim could still take, so it cannot count twice; at MAX_ATTEMPTS the
+ *     claim predicate refuses the row, so the right code and the same row's link secret both fail.
+ * A magic secret has 256 bits and no email to count against; the per-client limit applies to it.
  */
 /** @param {PortalEnv} env @param {RedeemOtpOptions} [options] */
 export async function redeemOtp(env, { email, code, secret, clientIp = "", now = Math.floor(Date.now() / 1000) } = {}) {
   const peppers = loadOtpPeppers(env);
   if (peppers === null) return { ok: false, code: "config_error" };
 
-  // Always-on verify rate-limit (per IP). The worker also throttles per (customer,IP) once known.
-  const ipRl = await portalRateLimit(env, `verify:ip:${clientIp}`, 30, 900, now);
+  const ipRl = await portalRateLimit(env, `verify:ip:${clientIp}`, VERIFY_PER_CLIENT, VERIFY_WINDOW_SEC, now);
   if (ipRl.limited) return { ok: false, code: "rate_limited", retryAfter: ipRl.retryAfter };
 
   const candidates = [];
   let column;
+  /** @type {string | null} the email whose live code a wrong guess counts against (code mode only) */
+  let guessedEmail = null;
   if (typeof secret === "string" && secret.length > 0) {
     column = "secret_hmac";
     for (const id of Object.keys(peppers)) {
@@ -294,7 +313,11 @@ export async function redeemOtp(env, { email, code, secret, clientIp = "", now =
       // Malformed input is indistinguishable from a wrong code.
       return { ok: false, code: "invalid_otp" };
     }
+    // Keyed on the normalized email, like the per-email request limit.
+    const emailRl = await portalRateLimit(env, `verify:email:${emailLower}`, VERIFY_PER_EMAIL, VERIFY_WINDOW_SEC, now);
+    if (emailRl.limited) return { ok: false, code: "rate_limited", retryAfter: emailRl.retryAfter };
     column = "code_hmac";
+    guessedEmail = emailLower;
     for (const id of Object.keys(peppers)) {
       const pepperBytes = /** @type {Uint8Array} */ (peppers[id]);
       candidates.push(await hmac(pepperBytes, `${emailLower}:${code}`));
@@ -313,10 +336,15 @@ export async function redeemOtp(env, { email, code, secret, clientIp = "", now =
   ).bind(now, ...candidates, now).first();
 
   if (claimed === null || claimed.customer_id === undefined) {
-    // No live row claimed. To bump attempt_count on a row that EXISTS but was wrong-cap-adjacent we
-    // would need a second matching SELECT; the atomic claim above already increments attempt_count
-    // on the row it touched. A pure miss (wrong code) touches nothing — which is exactly the no-OTP
-    // shape (no oracle). The IP verify counter is the brute-force ceiling.
+    if (guessedEmail !== null) {
+      // A wrong guess: count it against the email's live code. Runs on every miss, including an
+      // email with no account or no live code (it then matches nothing), so all of those cases do
+      // the same work and give the same answer.
+      await env.DB.prepare(
+        `UPDATE portal_otp SET attempt_count = attempt_count + 1 ` +
+          `WHERE email_lower = ? AND consumed_at IS NULL AND expires_at > ? AND attempt_count < ${MAX_ATTEMPTS}`,
+      ).bind(guessedEmail, now).run();
+    }
     return { ok: false, code: "invalid_otp" };
   }
   return { ok: true, customerId: claimed.customer_id, code: "ok" };

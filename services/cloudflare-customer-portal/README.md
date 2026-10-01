@@ -118,6 +118,15 @@ signing in through their existing method. Email-code login remains available
 when email delivery is configured. Protected application enrollment uses the
 Connect approval flow. Configured capacity is not presented as available capacity.
 
+An email code has eight digits and expires after ten minutes. Every wrong code
+entered for an address counts against that address's current code; after five,
+the code and its sign-in link stop working and the customer requests a new one.
+Each address allows ten code checks per 15 minutes, and each client allows 30.
+Every portal rate limit that counts per client treats an IPv6 client as its
+/64 prefix and an IPv4 client as its own address. An unknown address, an
+address without a current code, a wrong code and a used-up code all get the same
+answer.
+
 | Goal | Start here | Side effects |
 | --- | --- | --- |
 | Validate code locally | [Local checks](#local-checks) | Local build/test output only |

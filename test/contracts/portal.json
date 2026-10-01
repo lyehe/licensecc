@@ -215,7 +215,7 @@
       }
     },
     "info": {
-      "description": "Self-serve customer portal: email-OTP / magic-link, password and provider sign-in, read-only session-scoped entitlement views, and protected device consent and connected-device retirement through the licensing backend's DeviceConsent entrypoint. Every authenticated route binds the session-derived customer_id; no client-supplied customer_id or fingerprint reaches a mutation chokepoint. This document describes the routes the Worker actually serves and is pinned to the source by a build-time cross-check test.",
+      "description": "Self-serve customer portal: email-OTP / magic-link, password and provider sign-in, read-only session-scoped entitlement views, and protected device consent and connected-device retirement through the licensing backend's DeviceConsent entrypoint. Every authenticated route binds the session-derived customer_id; no client-supplied customer_id or fingerprint reaches a mutation chokepoint. This document describes the routes the Worker actually serves and is pinned to the source by a build-time cross-check test. Every per-IP rate limit counts an IPv6 client per /64 prefix and an IPv4 client per address.",
       "title": "licensecc Customer Portal Worker",
       "version": "0.1.0-rc.2"
     },
@@ -4649,7 +4649,7 @@
       },
       "/portal/v1/auth/verify": {
         "post": {
-          "description": "Email-bound: a wrong code and an unknown OTP are byte-identical (invalid_otp, no oracle on the reason). Single-use atomic claim (consumed_at). On success sets the lccp_session cookie.",
+          "description": "Email-bound: a wrong code and an unknown OTP are byte-identical (invalid_otp, no oracle on the reason). Single-use atomic claim (consumed_at). Every wrong code for an email counts against that email's live code; after 5 wrong codes it is refused even with the right code or its magic link. On success sets the lccp_session cookie.",
           "operationId": "authVerifyOtp",
           "requestBody": {
             "content": {
@@ -4808,7 +4808,7 @@
                   }
                 }
               },
-              "description": "Rate limited (per-IP verify 30/900s). Answers with a retry-after header giving the exact seconds left in the fixed window.",
+              "description": "Rate limited (per-IP verify 30/900s, per-email verify 10/900s). Answers with a retry-after header giving the exact seconds left in the fixed window.",
               "headers": {
                 "retry-after": {
                   "description": "Seconds until portalRateLimit's current fixed window resets. The UI reads this to show \"Try again in {n} minutes.\"",

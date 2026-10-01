@@ -3,6 +3,7 @@
 import type { ApiEnvelope } from "../shared/api";
 import type { Env } from "./env.js";
 import { bearerToken, constantTimeEqual, readTextBody } from "@licensecc/cloudflare-runtime/http/kit";
+import { sourceIdentity } from "@licensecc/cloudflare-runtime/http/source_identity";
 
 export { bearerToken, constantTimeEqual };
 
@@ -68,8 +69,10 @@ export function withPortalEntitlement<Row extends Omit<OwnedEntitlement, "id" | 
   };
 }
 
+// The client address every portal rate limit keys on. One IPv6 subscriber usually controls a whole
+// /64, so an IPv6 address is reduced to that prefix; an IPv4 address is kept as sent.
 export function clientIp(request: Request): string {
-  return request.headers.get("cf-connecting-ip") ?? "";
+  return sourceIdentity(request.headers.get("cf-connecting-ip") ?? "");
 }
 
 // Cross-site rejection for state-changing POSTs: a same-origin app sends Origin == PORTAL_PUBLIC_ORIGIN

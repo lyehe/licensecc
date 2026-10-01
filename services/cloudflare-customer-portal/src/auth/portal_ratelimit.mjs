@@ -18,7 +18,7 @@ function fixedWindowStart(nowSeconds, periodSeconds) {
  *
  * ALWAYS increments the per-(namespace,key,window) counter and returns whether the post-increment
  * count exceeds `limit`. `key` should already encode the namespace + identity (e.g.
- * "request:email:foo@bar" or "verify:cust:A:ip:1.2.3.4"). The caller MUST throttle BEFORE any write
+ * "request:email:foo@bar" or "verify:ip:2001:db8:1:2::/64"). The caller MUST throttle BEFORE any write
  * (blueprint (a)): a request that is rate-limited never reaches the OTP/session mutation.
  *
  * `retryAfter` is the seconds left in the CURRENT fixed window (windowStart + period - now), so a

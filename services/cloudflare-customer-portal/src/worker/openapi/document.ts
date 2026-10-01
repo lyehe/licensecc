@@ -38,7 +38,8 @@ export const openApiDocument: OpenApiDocument = {
       "Every authenticated route binds the session-derived customer_id; no " +
       "client-supplied customer_id or fingerprint reaches a mutation chokepoint. This document " +
       "describes the routes the Worker actually serves and is pinned to the source by a " +
-      "build-time cross-check test.",
+      "build-time cross-check test. Every per-IP rate limit counts an IPv6 client per /64 prefix " +
+      "and an IPv4 client per address.",
   },
   servers: [{ url: "/" }],
   tags: [
