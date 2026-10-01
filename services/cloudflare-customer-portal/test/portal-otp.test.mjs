@@ -367,11 +367,102 @@ test("unknown email, no live code, wrong code and dead code answer identically a
   };
   const [first, ...rest] = Object.entries(cases);
   assert.deepEqual(first[1].result, { ok: false, code: "invalid_otp" });
-  assert.ok(first[1].statements.length >= 2, "a failed verify both tries the claim and counts the guess");
+  assert.equal(first[1].statements.length, 1, "a code check counts and claims in one statement");
+  assert.match(first[1].statements[0], /attempt_count = attempt_count \+ 1/);
+  assert.match(first[1].statements[0], /consumed_at = CASE/);
   for (const [name, outcome] of rest) {
     assert.deepEqual(outcome.result, first[1].result, `${name}: same response as ${first[0]}`);
     assert.deepEqual(outcome.statements, first[1].statements, `${name}: same code statements as ${first[0]}`);
   }
+});
+
+// A D1 stand-in for concurrent requests: it holds every portal_otp statement, then runs all the
+// held ones back to back in arrival order before any request sees its own result, as statements
+// from simultaneous requests reach D1 before their answers come back.
+function heldOtpStatements(real) {
+  const held = [];
+  const waiters = [];
+  let open = false;
+  function hold(execute) {
+    if (open) return execute();
+    return new Promise((resolve, reject) => {
+      held.push({ execute, resolve, reject });
+      for (const waiter of waiters.filter(({ count }) => held.length >= count)) waiter.resolve();
+    });
+  }
+  const wrap = (statement) => ({
+    bind: (...values) => wrap(statement.bind(...values)),
+    first: (...args) => hold(() => statement.first(...args)),
+    run: (...args) => hold(() => statement.run(...args)),
+    all: (...args) => hold(() => statement.all(...args)),
+  });
+  return {
+    db: { prepare: (sql) => (/portal_otp/.test(sql) ? wrap(real.prepare(sql)) : real.prepare(sql)) },
+    held: (count) => (held.length >= count ? Promise.resolve() : new Promise((resolve) => waiters.push({ count, resolve }))),
+    release() {
+      open = true;
+      // node:sqlite runs each statement synchronously when the adapter method is called, so every
+      // held statement has run, in order, before the first answer is delivered.
+      const answers = held.map(({ execute }) => execute());
+      held.forEach(({ resolve, reject }, index) => answers[index].then(resolve, reject));
+    },
+  };
+}
+
+// Ten simultaneous checks for one address, the right code at `position` (1-based) in the order
+// the checks reach the database.
+async function concurrentChecks(position) {
+  const db = freshDb();
+  seedCustomer(db, "A", "a@x.com");
+  const e = env(db);
+  const { code } = await issueCode(e, "a@x.com");
+  const gate = heldOtpStatements(e.DB);
+  const concurrentEnv = { ...e, DB: gate.db };
+  const results = [];
+  for (let i = 1; i <= 10; i += 1) {
+    results.push(redeemOtp(concurrentEnv, { email: "a@x.com", code: i === position ? code : wrongCode(code, i), clientIp: `192.0.2.${i}`, now: NOW }));
+    // This check's statement is waiting at the database before the next check starts.
+    await gate.held(i);
+  }
+  gate.release();
+  const settled = await Promise.all(results);
+  return { right: settled[position - 1], attemptCount: db.prepare("SELECT attempt_count FROM portal_otp").get().attempt_count };
+}
+
+test("concurrent checks cannot get past the five-check cap: the right code as the 6th or 10th check is refused", async () => {
+  for (const position of [6, 10]) {
+    const { right, attemptCount } = await concurrentChecks(position);
+    assert.deepEqual(right, { ok: false, code: "invalid_otp" }, `the right code as concurrent check ${position} is refused`);
+    assert.equal(attemptCount, 5, "no more than five checks ever counted against the code");
+  }
+});
+
+test("concurrent checks still let the right code in as the 5th check", async () => {
+  const { right, attemptCount } = await concurrentChecks(5);
+  assert.equal(right.ok, true, "the fifth check may still be the right one");
+  assert.equal(right.customerId, "A");
+  assert.equal(attemptCount, 5);
+});
+
+test("two live codes for one address each still sign in, and a wrong check counts against both", async () => {
+  const db = freshDb();
+  seedCustomer(db, "A", "a@x.com");
+  const e = env(db);
+  const first = await issueCode(e, "a@x.com", NOW);
+  const firstId = db.prepare("SELECT id FROM portal_otp").get().id;
+  const second = await issueCode(e, "a@x.com", NOW + 1);
+  // A new request supersedes the earlier code; restore it so the address has two live codes.
+  db.prepare("UPDATE portal_otp SET consumed_at = NULL WHERE id = ?").run(firstId);
+  const counts = () => db.prepare("SELECT attempt_count FROM portal_otp ORDER BY created_at").all().map((row) => row.attempt_count);
+
+  await guessWrong(e, "a@x.com", first.code, 1);
+  assert.deepEqual(counts(), [1, 1], "a wrong check counts against every live code of the address");
+  const byFirst = await redeemOtp(e, { email: "a@x.com", code: first.code, clientIp: "198.51.100.1", now: NOW + 2 });
+  assert.equal(byFirst.ok, true, "the earlier code signs in");
+  assert.equal(byFirst.customerId, "A");
+  const bySecond = await redeemOtp(e, { email: "a@x.com", code: second.code, clientIp: "198.51.100.2", now: NOW + 2 });
+  assert.equal(bySecond.ok, true, "the later code is still live and signs in too");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM portal_otp WHERE consumed_at IS NULL").get().n, 0);
 });
 
 test("the per-email verify budget refuses the 11th attempt for an address, whatever the client address", async () => {
