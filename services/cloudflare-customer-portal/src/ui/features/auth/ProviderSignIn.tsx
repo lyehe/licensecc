@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from "
 import { rateLimitMessage } from "../../portalWorkflow";
 import { api } from "../../shared/api";
 import { SupportContact, SupportContactContext } from "../../shared/SupportContact";
+import { reauthToConnectMessage } from "./authCopy";
 
 type Providers = { google: boolean; github: boolean; email: boolean; password: boolean; support?: string | null };
 type ProvidersState = { providers: Providers | null; failed: boolean; retry(): void };
@@ -57,24 +58,36 @@ const ERRORS: Record<string, React.ReactNode> = {
   link_failed: "Unable to connect this provider. Sign in again and retry from Account.",
   sign_in_failed: "Unable to complete sign-in. Please try again.",
 };
-export function ProviderResult(): React.ReactElement | null {
+// The query parameters a provider redirect leaves behind. Whoever renders them (ProviderResult)
+// or has nowhere to render them (App, off Account) removes all of them together.
+export const PROVIDER_RESULT_PARAMS = ["auth_error", "auth_result", "auth_provider"] as const;
+export function stripProviderResult(): void {
+  const url = new URL(window.location.href);
+  if (!PROVIDER_RESULT_PARAMS.some((name) => url.searchParams.has(name))) return;
+  for (const name of PROVIDER_RESULT_PARAMS) url.searchParams.delete(name);
+  window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+}
+
+// `onSignInAgain` (Account only) offers the way out of reauth_required: sign out, then sign in
+// again, coming back to Account.
+export function ProviderResult({ onSignInAgain }: { onSignInAgain?: () => void } = {}): React.ReactElement | null {
   // This one status slot renders real auth failures (account_suspended, link_expired,
-  // sign_in_cancelled, link_failed, sign_in_failed, provider_unavailable, rate_limited) on the same
-  // screen as the "Sign-in provider connected." confirmation -- track isError alongside the text so
-  // only a genuine failure gets the error colour.
-  const [result] = useState<{ text: React.ReactNode; isError: boolean } | null>(() => {
+  // sign_in_cancelled, link_failed, reauth_required, sign_in_failed, provider_unavailable,
+  // rate_limited) on the same screen as the "Sign-in provider connected." confirmation -- track
+  // isError alongside the text so only a genuine failure gets the error colour.
+  const [result] = useState<{ text: React.ReactNode; isError: boolean; reauth?: boolean } | null>(() => {
     const url = new URL(window.location.href);
     const error = url.searchParams.get("auth_error");
     const linked = url.searchParams.get("auth_result") === "linked";
+    if (error === "reauth_required") return { text: reauthToConnectMessage(url.searchParams.get("auth_provider")), isError: true, reauth: true };
     if (error) return { text: Object.hasOwn(ERRORS, error) ? ERRORS[error] : ERRORS.sign_in_failed, isError: true };
     if (linked) return { text: "Sign-in provider connected.", isError: false };
     return null;
   });
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    if (!url.searchParams.has("auth_error") && !url.searchParams.has("auth_result")) return;
-    url.searchParams.delete("auth_error"); url.searchParams.delete("auth_result");
-    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
-  }, []);
-  return result ? <p role="status" className={result.isError ? "statusline error" : "statusline"}>{result.text}</p> : null;
+  useEffect(stripProviderResult, []);
+  if (!result) return null;
+  return <>
+    <p role="status" className={result.isError ? "statusline error" : "statusline"}>{result.text}</p>
+    {result.reauth && onSignInAgain && <p><button type="button" onClick={onSignInAgain}>Sign in again</button></p>}
+  </>;
 }

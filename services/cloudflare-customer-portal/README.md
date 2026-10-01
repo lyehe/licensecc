@@ -308,6 +308,15 @@ sign in by the existing method and connect the provider from Account. For an
 authorized recovery, use working email delivery or the protected operator
 bootstrap runbook; do not enable a public bootstrap bypass.
 
+Connecting a provider adds a lasting way into the account, so it needs a
+sign-in from the last ten minutes. The portal checks the session's age when
+the connection starts and again when the provider returns, before it exchanges
+the provider code. An older session links nothing and returns to Account with
+`auth_error=reauth_required`; Account says "For your security, sign in again
+to connect Google." (or GitHub) and offers Sign in again, which signs out and
+returns to Account after the next sign-in. Signing in with a provider and
+disconnecting one need no recent sign-in.
+
 Customers can disconnect a provider from Account
 (`POST /portal/v1/auth/identities/unlink`). It is allowed only while another
 sign-in method is usable now: a password while `PORTAL_PASSWORD_ENABLED="1"`,

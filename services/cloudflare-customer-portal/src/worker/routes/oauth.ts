@@ -5,7 +5,7 @@ import { canonicalHttpsOrigin, emailApiOrigin } from "../../auth/portal_destinat
 import { authSession } from "./auth.js";
 import { clientIp, envelope, isCrossSite, readJson, redirect, supportContact } from "../support.js";
 import { digest, exchangeIdentity, providerConfig, randomToken, type Provider } from "../oauth/providers.js";
-import { identityCustomer } from "../oauth/accounts.js";
+import { identityCustomer, recentSignIn } from "../oauth/accounts.js";
 import type { Env, TopRoute } from "../env.js";
 
 const COOKIE = "__Host-lccp_oauth";
@@ -22,6 +22,9 @@ function originFor(request: Request, env: Env): string | null {
   return origin && new URL(request.url).origin === origin ? origin : null;
 }
 const callbackPath = (provider: Provider): string => `/portal/v1/auth/${provider}/callback`;
+// A link refused because the session is too old for it (see recentSignIn): back to Account, which
+// names the provider and offers to sign in again.
+const reauthLocation = (origin: string, provider: Provider): string => `${origin}/?auth_error=reauth_required&auth_provider=${provider}#/account`;
 // identityCustomer() failures that reach the browser as their own auth_error. Anything else it
 // throws (such as link_failed for an identity another customer owns) stays sign_in_failed.
 const CALLBACK_ERRORS = new Set(["account_link_required", "account_suspended"]);
@@ -45,6 +48,7 @@ async function start(request: Request, env: Env, reqId: string, now: number, pro
   if (mode === "link") {
     const session = await authSession(request, env, reqId, now);
     if (session instanceof Response) return session;
+    if (!await recentSignIn(env, session.id, now)) return redirect(reauthLocation(origin, provider));
     linkSessionId = session.id;
   }
   const state = randomToken();
@@ -82,6 +86,9 @@ async function callback(request: Request, env: Env, reqId: string, now: number, 
     if (flow.link_session_id) {
       const current = await authSession(request, env, reqId, now);
       if (current instanceof Response || current.id !== flow.link_session_id) return fail("link_failed");
+      // Checked again here, before the provider code is exchanged: the session may have passed the
+      // limit since the link started.
+      if (!await recentSignIn(env, current.id, now)) return redirect(reauthLocation(origin, provider), [cookie("", 0)]);
     }
     const identity = await exchangeIdentity(env, provider, code, verifier, flow.nonce, origin + callbackPath(provider), now);
     const customerId = await identityCustomer(env, identity, flow.link_session_id, now);

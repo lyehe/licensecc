@@ -3,7 +3,7 @@ import { localMessage, setOnUnauthorized, StatusLine } from "../shared/api";
 import { useSingleFlight } from "../shared/useSingleFlight";
 import { AuthFeature, usePortalAuth } from "../features/auth/AuthFeature";
 import { PasswordAction, capturePasswordAction } from "../features/auth/PasswordAction";
-import { ProvidersScope } from "../features/auth/ProviderSignIn";
+import { ProvidersScope, stripProviderResult } from "../features/auth/ProviderSignIn";
 import { usePortalData } from "../features/data/usePortalData";
 import { DevicesFeature } from "../features/devices/DevicesFeature";
 import { AppsFeature } from "../features/apps/AppsFeature";
@@ -122,10 +122,7 @@ function PortalShell(): React.ReactElement {
   // Account resurfaces it out of context.
   useLayoutEffect(() => {
     if (auth.phase !== "authed" || location.page === "account") return;
-    const url = new URL(window.location.href);
-    if (!url.searchParams.has("auth_error") && !url.searchParams.has("auth_result")) return;
-    url.searchParams.delete("auth_error"); url.searchParams.delete("auth_result");
-    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    stripProviderResult();
   }, [auth.phase, location.page]);
 
   async function refreshPortalData(): Promise<void> {
@@ -151,11 +148,13 @@ function PortalShell(): React.ReactElement {
     if (document.contains(target) && !target.hasAttribute("disabled")) target.focus();
   }, [busy, message]);
 
-  async function logout(): Promise<void> {
+  // `destination` is where the next sign-in lands: Apps, or Account when signing in again to connect
+  // a provider.
+  async function logout(destination = "/#/apps"): Promise<void> {
     await auth.logout(() => {
       clearPortalData();
       clearEnrollment(); setEnrollment(null);
-      window.history.replaceState(null, "", "/#/apps");
+      window.history.replaceState(null, "", destination);
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     });
   }
@@ -191,7 +190,7 @@ function PortalShell(): React.ReactElement {
           <StatusLine message={message} fallback="" />
         </div>
         {location.page === "nodes" && <DevicesFeature key={auth.customerId} customer={auth.customerId??""} busy={controlsBusy} runOnce={runOnce} onSessionExpired={auth.retrySession} project={location.project} entitlements={entitlements} accountDataState={readState} />}
-        {location.page === "account" && <AccountFeature customerId={auth.customerId} />}
+        {location.page === "account" && <AccountFeature customerId={auth.customerId} onSignInAgain={() => void logout("/#/account")} />}
         {location.page === "apps" && (readState !== "ready" ? <section className="emptyState"><h2>{readState === "loading" ? "Loading your account…" : "Account data unavailable"}</h2><p>{readState === "loading" ? "Fetching your licenses and devices." : "We could not refresh your account. Retry to see current access."}</p>{readState === "error" && <button disabled={controlsBusy} onClick={() => void refreshPortalData()}>Retry</button>}</section> : <AppsFeature entitlements={entitlements} project={location.project} email={auth.email} />)}
       </div>
     </main>

@@ -1,8 +1,9 @@
 // Pure, dependency-free copy/formatting helpers scoped to the auth flow. Split out of
 // ../../portalWorkflow.ts (the portal-wide pure module) so that shared module can stay under the
-// repository's hotspot review threshold: these three concerns -- the resend cooldown label, and the
-// configured-only recovery-method list -- are used exclusively by files under features/auth, never
-// by anything portal-wide. Same purity contract as portalWorkflow.ts: no React, no DOM, no node:, so
+// repository's hotspot review threshold: these concerns -- the resend cooldown label, the
+// configured-only recovery-method list and the sign-in-again sentence -- are used exclusively by
+// files under features/auth, never by anything portal-wide. Same purity contract as
+// portalWorkflow.ts: no React, no DOM, no node:, so
 // its own unit test can `ts.transpileModule` + `import()` it directly.
 
 // Client-side-only cooldown: after a code is sent, Resend is disabled for this many seconds and
@@ -24,6 +25,14 @@ export function configuredRecoveryMethods(providers: { google?: boolean; github?
   if (providers?.github) methods.push("GitHub");
   if (providers?.email) methods.push("an email code");
   return methods;
+}
+
+// Connecting Google or GitHub needs a recent sign-in; an older session comes back to Account with
+// auth_error=reauth_required and the provider in auth_provider. Only the two known providers are
+// named; any other value reads as either of them.
+export function reauthToConnectMessage(provider: string | null): string {
+  const name = provider === "google" ? "Google" : provider === "github" ? "GitHub" : "Google or GitHub";
+  return `For your security, sign in again to connect ${name}.`;
 }
 
 // "Google", "Google or GitHub", "Google, GitHub, or an email code" -- an Oxford comma before the

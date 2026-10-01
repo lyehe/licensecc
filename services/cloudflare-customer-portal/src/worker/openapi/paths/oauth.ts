@@ -7,14 +7,14 @@ const redirectResponse = {
 };
 const start = (provider: string): Record<string, unknown> => ({ post: {
   tags: ["auth"], operationId: `authStart${provider}`, summary: `Start ${provider} sign-in or explicit account linking.`,
-  description: "Requires exact configured Origin. Authorization code with S256 PKCE, single-use D1 state and a browser-bound cookie. Link mode requires an active session at start and callback. No email-based automatic linking.",
+  description: "Requires exact configured Origin. Authorization code with S256 PKCE, single-use D1 state and a browser-bound cookie. Link mode requires an active session created within the last 10 minutes, at start and again at callback; an older session redirects to /?auth_error=reauth_required&auth_provider=<provider>#/account and records nothing. No email-based automatic linking.",
   security: [{}, { sessionCookie: [] }],
   parameters: [{ name: "mode", in: "query", required: false, schema: { type: "string", enum: ["link"] } }],
   responses: { "303": redirectResponse, "400": errorResponse("Unknown mode.", "invalid_request"), "401": errorResponse("Linking requires a session.", "unauthorized"), "403": errorResponse("Origin mismatch.", "cross_site_forbidden"), "503": errorResponse("Session configuration unavailable.", "config_error") },
 } });
 const callback = (provider: string): Record<string, unknown> => ({ get: {
   tags: ["auth"], operationId: `authCallback${provider}`, summary: `Complete ${provider} sign-in.`, security: [],
-  description: "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking (auth_error=account_link_required). An identity whose customer is suspended redirects with auth_error=account_suspended and no session. Provider tokens are not persisted.",
+  description: "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking (auth_error=account_link_required). An identity whose customer is suspended redirects with auth_error=account_suspended and no session. A link whose session is now older than 10 minutes redirects with auth_error=reauth_required and auth_provider before the provider code is exchanged, linking nothing and minting no session. Provider tokens are not persisted.",
   parameters: [
     { name: "state", in: "query", required: true, schema: { type: "string" } },
     { name: "code", in: "query", required: false, schema: { type: "string" } },

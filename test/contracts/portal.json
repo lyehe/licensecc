@@ -2274,7 +2274,7 @@
       },
       "/portal/v1/auth/github/callback": {
         "get": {
-          "description": "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking (auth_error=account_link_required). An identity whose customer is suspended redirects with auth_error=account_suspended and no session. Provider tokens are not persisted.",
+          "description": "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking (auth_error=account_link_required). An identity whose customer is suspended redirects with auth_error=account_suspended and no session. A link whose session is now older than 10 minutes redirects with auth_error=reauth_required and auth_provider before the provider code is exchanged, linking nothing and minting no session. Provider tokens are not persisted.",
           "operationId": "authCallbackGitHub",
           "parameters": [
             {
@@ -2349,7 +2349,7 @@
       },
       "/portal/v1/auth/github/start": {
         "post": {
-          "description": "Requires exact configured Origin. Authorization code with S256 PKCE, single-use D1 state and a browser-bound cookie. Link mode requires an active session at start and callback. No email-based automatic linking.",
+          "description": "Requires exact configured Origin. Authorization code with S256 PKCE, single-use D1 state and a browser-bound cookie. Link mode requires an active session created within the last 10 minutes, at start and again at callback; an older session redirects to /?auth_error=reauth_required&auth_provider=<provider>#/account and records nothing. No email-based automatic linking.",
           "operationId": "authStartGitHub",
           "parameters": [
             {
@@ -2473,7 +2473,7 @@
       },
       "/portal/v1/auth/google/callback": {
         "get": {
-          "description": "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking (auth_error=account_link_required). An identity whose customer is suspended redirects with auth_error=account_suspended and no session. Provider tokens are not persisted.",
+          "description": "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking (auth_error=account_link_required). An identity whose customer is suspended redirects with auth_error=account_suspended and no session. A link whose session is now older than 10 minutes redirects with auth_error=reauth_required and auth_provider before the provider code is exchanged, linking nothing and minting no session. Provider tokens are not persisted.",
           "operationId": "authCallbackGoogle",
           "parameters": [
             {
@@ -2548,7 +2548,7 @@
       },
       "/portal/v1/auth/google/start": {
         "post": {
-          "description": "Requires exact configured Origin. Authorization code with S256 PKCE, single-use D1 state and a browser-bound cookie. Link mode requires an active session at start and callback. No email-based automatic linking.",
+          "description": "Requires exact configured Origin. Authorization code with S256 PKCE, single-use D1 state and a browser-bound cookie. Link mode requires an active session created within the last 10 minutes, at start and again at callback; an older session redirects to /?auth_error=reauth_required&auth_provider=<provider>#/account and records nothing. No email-based automatic linking.",
           "operationId": "authStartGoogle",
           "parameters": [
             {

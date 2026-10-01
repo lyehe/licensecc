@@ -8,8 +8,11 @@ type Provider = keyof typeof LABELS;
 type Identity = { provider: Provider; email: string };
 const LAST_SIGN_IN_METHOD = "You can't disconnect your only sign-in method. Set up another way to sign in first.";
 
-export function AccountFeature({ customerId }: {
+export function AccountFeature({ customerId, onSignInAgain }: {
   customerId: string | null;
+  // Signs out and comes back to Account after the next sign-in (offered when a Connect was refused
+  // because the session is too old to connect a provider).
+  onSignInAgain(): void;
 }): React.ReactElement {
   const { providers, failed, retry } = useProviders();
   const [identities, setIdentities] = useState<Identity[] | null>(null);
@@ -56,7 +59,7 @@ export function AccountFeature({ customerId }: {
   // changes, so a screen reader announces the result wherever focus goes next.
   return <div className="accountPage">
     <div className="pageHeading"><div><h1>Account</h1><p>Manage how you sign in.</p></div></div>
-    <ProviderResult />
+    <ProviderResult onSignInAgain={onSignInAgain} />
     {(notice !== null || failed || identityError || !providers || !identities || providers.google || providers.github || identities.length > 0) && <section className="tablePane full"><h2 ref={heading} tabIndex={-1}>Connected accounts</h2>
       <p role="status" className="accountNotice">{notice}</p>
       {(failed || identityError) ? <p>Unable to load sign-in methods. <button onClick={() => { retry(); setAttempt((value) => value + 1); }}>Retry</button></p> : !providers || !identities ? <p>Loading sign-in methods…</p> : <>

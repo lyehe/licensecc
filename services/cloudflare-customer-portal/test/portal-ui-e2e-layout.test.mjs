@@ -29,7 +29,7 @@ test("portal browser specs are discovered by pattern, not by imports", () => {
     titles.push(...localTitles);
   }
   // This counts only top-level test( titles; loop-built and describe-nested tests are not
-  // anchored at column 0, so the Playwright run total (130) is higher than this count.
-  assert.equal(titles.length, 112);
+  // anchored at column 0, so the Playwright run total (132) is higher than this count.
+  assert.equal(titles.length, 114);
   assert.equal(new Set(titles).size, titles.length, "browser scenario titles must be unique");
 });
