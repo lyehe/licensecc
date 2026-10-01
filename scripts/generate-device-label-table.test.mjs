@@ -34,23 +34,39 @@ test("the table holds the code points the backend refuses and maps to separators
   for (const point of [0x5f, 0x2e, 0x41]) assert.ok(!holds(table.separators, point), `not a separator U+${point.toString(16)}`);
 });
 
-test("a hand edit or a stale table is reported, with the command that regenerates it", () => {
-  const edited = committed.replace("\t{0x00AD, 0x00AD},\n", "");
-  const problems = deviceLabelTableDrift(edited);
-  // Same Unicode data: an exact mismatch. Older data in this engine: the assigned soft hyphen.
-  assert.equal(problems.length, 1);
-  assert.match(problems[0], /(?:differs from the backend rule|assigned code points 0x00AD); run node scripts\/generate-device-label-table\.mjs --write/u);
-  assert.match(deviceLabelTableDrift("// not generated")[0], /is not a generated table/u);
-});
+// The table as checked out, and as a Windows checkout with core.autocrlf would carry it.
+const CHECKOUTS = [
+  ["as checked out", committed],
+  ["with CRLF line endings", committed.replace(/\r\n/gu, "\n").replace(/\n/gu, "\r\n")],
+];
 
-test("a table generated with other Unicode data passes only where this engine has not assigned the difference", () => {
-  // The same ranges labelled with another version take the tolerant path and pass.
-  const relabelled = committed.replace(/with Unicode \S+ data\./u, "with Unicode 0.0 data.");
-  assert.deepEqual(deviceLabelTableDrift(relabelled), []);
-  // A difference on an assigned code point fails, as a newer engine's new assignments would.
-  const missingSoftHyphen = relabelled.replace("\t{0x00AD, 0x00AD},\n", "");
-  assert.match(deviceLabelTableDrift(missingSoftHyphen).join("\n"), /refused differs from this engine's Unicode \S+ data on assigned code points 0x00AD/u);
-  // A difference this engine does not assign is what an older engine sees in a newer table.
+// Edits one checkout's text and fails if the edit matched nothing.
+function edit(checkout, from, to) {
+  const edited = checkout.replace(from, to);
+  assert.notEqual(edited, checkout, `the edit ${String(from)} must change the table`);
+  return edited;
+}
+
+for (const [label, checkout] of CHECKOUTS) {
+  test(`a hand edit or a stale table is reported, with the command that regenerates it (${label})`, () => {
+    const problems = deviceLabelTableDrift(edit(checkout, "\t{0x00AD, 0x00AD},\n", ""));
+    // Same Unicode data: an exact mismatch. Older data in this engine: the assigned soft hyphen.
+    assert.equal(problems.length, 1);
+    assert.match(problems[0], /(?:differs from the backend rule|assigned code points 0x00AD); run node scripts\/generate-device-label-table\.mjs --write/u);
+    assert.match(deviceLabelTableDrift("// not generated")[0], /is not a generated table/u);
+  });
+
+  test(`a table generated with other Unicode data passes only where this engine has not assigned the difference (${label})`, () => {
+    // The same ranges labelled with another version take the tolerant path and pass.
+    const relabelled = edit(checkout, /with Unicode \S+ data\./u, "with Unicode 0.0 data.");
+    assert.deepEqual(deviceLabelTableDrift(relabelled), []);
+    // A difference on an assigned code point fails, as a newer engine's new assignments would.
+    const missingSoftHyphen = edit(relabelled, "\t{0x00AD, 0x00AD},\n", "");
+    assert.match(deviceLabelTableDrift(missingSoftHyphen).join("\n"), /refused differs from this engine's Unicode \S+ data on assigned code points 0x00AD/u);
+  });
+}
+
+test("a code point difference the engine has not assigned is what an older engine sees in a newer table", () => {
   assert.deepEqual(unexplainedDifference([[0x10, 0x12]], [[0x10, 0x11]], (point) => point === 0x12), []);
   assert.deepEqual(unexplainedDifference([[0x10, 0x12]], [[0x11, 0x13]], () => false), [0x10, 0x13]);
 });
