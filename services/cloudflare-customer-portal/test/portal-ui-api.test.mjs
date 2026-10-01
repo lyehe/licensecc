@@ -73,7 +73,7 @@ test("api() ignores a straggler 401 whose request started under an OLDER, alread
   // back, simulating a request that has been in flight for a while.
   let resolveFetch;
   globalThis.fetch = () => new Promise((resolve) => { resolveFetch = resolve; });
-  const pending = api.api("/api/portal/heartbeat", { method: "POST" });
+  const pending = api.api("/api/portal/example", { method: "POST" });
 
   // The customer signs in again (a brand-new session) while that old request is still in flight.
   api.beginNewSession();
@@ -92,7 +92,7 @@ test("api() still fires for a 401 sent AFTER the epoch bump (not just before it)
   api.setOnUnauthorized(() => fired.push(true));
   api.beginNewSession();
   globalThis.fetch = async () => jsonResponse(401, { ok: false, code: "unauthorized", request_id: "r3" });
-  await api.api("/api/portal/devices");
+  await api.api("/api/portal/example");
   assert.equal(fired.length, 1, "a request sent in the CURRENT epoch must still fire normally");
 });
 
