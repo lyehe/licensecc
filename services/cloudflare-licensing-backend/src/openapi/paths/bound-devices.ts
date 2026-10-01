@@ -14,7 +14,7 @@ const exchange = object({ attempt_handle: secret, code: secret, code_verifier: s
 const renewal = object({ binding_id: recordId, generation: { ...integer, minimum: 1 }, operation_id: secret, proof });
 const authorization = object({ client_id: project, project, public_key_spki: { type: "string", minLength: 1, maxLength: 512,
   pattern: "^[A-Za-z0-9_-]+$", description: "Canonical DER P-256 SPKI encoded in unpadded base64url; import/re-export equality is enforced." },
-device_label: { type: "string", description: "Trimmed display-only Unicode label, 1–80 code points. Shown beside the comparison code on the approval page, so a label holding a C0 or C1 control or DEL, a line or paragraph separator, a bidi or format control (U+200B–U+200F, U+202A–U+202E, U+2060–U+2064, U+2066–U+2069, U+FEFF) or text shaped like a comparison code (XXXX-XXXX-XXXX in hex digits) is refused with invalid_request." }, redirect_uri: callback,
+device_label: { type: "string", description: "Trimmed display-only Unicode label, 1–80 code points. It is shown beside the comparison code on the approval page, so a label holding a control, format (including bidi), line or paragraph separator, or default-ignorable code point is refused with invalid_request, as is a label whose comparison form (fullwidth ASCII folded to ASCII, every dash and space mapped to a hyphen, runs of hyphens collapsed) contains XXXX-XXXX-XXXX in hex digits." }, redirect_uri: callback,
 state: secret, code_challenge: secret, code_challenge_method: { const: "S256" },
 requested_feature: { type: "string", pattern: "^[A-Za-z0-9_.:-]{1,15}$",
   description: "Feature requested by the application. Required; it pins consent to that feature and is part of the comparison code." } });

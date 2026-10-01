@@ -1,17 +1,12 @@
 import { decodeBase64url } from "@licensecc/licensing-domain/lease/device_protocol";
 
 import { UnsignedJsonError as BoundRequestError, parseUnsignedJson as parseBoundJson, readUnsignedJson as readBoundJson } from "@licensecc/cloudflare-runtime/http/unsigned_json";
+import { isMisleadingDeviceLabel } from "./device_label.mjs";
 export { BoundRequestError, parseBoundJson, readBoundJson };
 /** @returns {never} */
 function invalid() { throw new BoundRequestError(); }
 const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const encoder = new TextEncoder();
-// The approval page shows the label beside the real comparison code, so a label may not hold a
-// C0 or C1 control or DEL, a line or paragraph separator, a bidi or format control, or text
-// shaped like a comparison code that tells the approver which code to match. The native client
-// applies the same rule before it sends a label.
-// eslint-disable-next-line no-control-regex -- control characters are rejected deliberately
-const MISLEADING_LABEL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]|[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}/u;
 
 function exact(value, fields) {
   if (!value || typeof value !== "object" || Array.isArray(value)
@@ -49,7 +44,7 @@ export function validateBoundRequest(operation, value) {
     if (typeof value.device_label !== "string") invalid();
     const label = value.device_label.trim();
     if ([...label].length < 1 || [...label].length > 80 || utf8.decode(encoder.encode(label)) !== label
-        || MISLEADING_LABEL.test(label)) invalid();
+        || isMisleadingDeviceLabel(label)) invalid();
     bytes(value.state, 32); bytes(value.code_challenge, 32);
     if (value.code_challenge_method !== "S256") throw new BoundRequestError("unsupported_protocol");
     callbackSyntax(value.redirect_uri);

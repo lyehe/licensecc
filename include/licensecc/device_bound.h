@@ -101,8 +101,8 @@ typedef struct LccDeviceBoundOptions {
 	char project[128];
 	char feature[16];
 	char client_id[128];
-	char device_label[321]; /**< 1-80 Unicode code points after trimming; no control, line-separator,
-							   bidi or format characters and no comparison-code-shaped text. */
+	char device_label[321]; /**< 1-80 Unicode code points after trimming; no control, format, line-separator
+							   or default-ignorable characters and no comparison-code-shaped text. */
 	char callback_path[256]; /**< Registered loopback path; default /callback. */
 	LccDeviceBoundTrustKey trust_keys[LCC_DEVICE_BOUND_TRUST_MAX];
 } LccDeviceBoundOptions;

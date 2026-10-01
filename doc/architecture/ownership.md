@@ -57,3 +57,12 @@ accept ownership.
   `packages/*/src`, so it does not see this tooling-to-backend edge. A change
   to `bound_config.mjs` must therefore also run
   `npm run test:release-operations`, which exercises the materializer.
+* `scripts/generate-device-label-table.mjs` (Release and CI tooling) imports
+  `services/cloudflare-licensing-backend/src/device/device_label.mjs` and
+  renders `src/library/device_identity/bound_label_table.hpp`, the native
+  client's copy of the device-label rule, from the backend's own Unicode
+  property escapes. The backend owns the rule; the tooling only expands it, and
+  the native library only reads the committed table, so neither build runs the
+  generator. A change to `device_label.mjs` must regenerate the table with
+  `node scripts/generate-device-label-table.mjs --write`; `npm run
+  test:clean-checkout` fails while the committed table is stale.

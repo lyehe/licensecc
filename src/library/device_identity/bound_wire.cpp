@@ -1,6 +1,7 @@
 #include "bound_wire.hpp"
 #include "bound_encoding.hpp"
 #include "bound_json.hpp"
+#include "bound_label_table.hpp"
 #include "bound_lease.hpp"
 #include <algorithm>
 #include <cstdint>
@@ -122,38 +123,59 @@ void quoted(SensitiveVector& out, const std::string& text) {
 	}
 	out.value.push_back('"');
 }
-// The approval page shows the label beside the comparison code, so a label may not hold a C0 or
-// C1 control or DEL, a line or paragraph separator, or a bidi or format control. Matches the
-// backend's device-label rule.
-bool misleading_code_point(std::uint32_t c) {
-	return c < 0x20 || (c >= 0x7f && c <= 0x9f) || c == 0x2028 || c == 0x2029 || (c >= 0x200b && c <= 0x200f) ||
-		   (c >= 0x202a && c <= 0x202e) || (c >= 0x2060 && c <= 0x2064) || (c >= 0x2066 && c <= 0x2069) || c == 0xfeff;
+// The device-label rule, mirrored from the licensing backend (device_label.mjs) through the
+// generated bound_label_table.hpp. The approval page shows the label beside the comparison code, so
+// a label may not hold a control, format, line or paragraph separator, or default-ignorable code
+// point, and its comparison form may not hold anything shaped like a comparison code.
+template <std::size_t N>
+bool in_ranges(const bound_label_table::Range (&ranges)[N], std::uint32_t point) {
+	std::size_t low = 0;
+	std::size_t high = N;
+	while (low < high) {
+		const auto middle = low + (high - low) / 2;
+		if (point < ranges[middle].first)
+			high = middle;
+		else if (point > ranges[middle].last)
+			low = middle + 1;
+		else
+			return true;
+	}
+	return false;
 }
 bool hex_digit(char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
-// Nor any text shaped like a comparison code, XXXX-XXXX-XXXX in hex digits of either case, which
-// could tell the approver which code to match. Those are ASCII, so bytes are compared directly.
-bool holds_comparison_code(std::string_view label) {
+// XXXX-XXXX-XXXX in hex digits of either case, which could tell the approver which code to match.
+bool holds_comparison_code(const std::string& form) {
 	constexpr std::size_t length = 14;
-	for (std::size_t start = 0; start + length <= label.size(); ++start) {
+	for (std::size_t start = 0; start + length <= form.size(); ++start) {
 		bool match = true;
 		for (std::size_t i = 0; i < length && match; ++i)
-			match = (i == 4 || i == 9) ? label[start + i] == '-' : hex_digit(label[start + i]);
+			match = (i == 4 || i == 9) ? form[start + i] == '-' : hex_digit(form[start + i]);
 		if (match) return true;
 	}
 	return false;
 }
-// The label is already valid UTF-8, trimmed only at sequence boundaries.
+// The label is already valid UTF-8, trimmed only at sequence boundaries. The comparison form folds
+// fullwidth ASCII to ASCII, maps every dash and space to '-' and collapses runs of '-'. It keeps
+// only what the code shape can match, so any other code point becomes a non-matching placeholder.
 bool misleading_label(std::string_view label) {
+	namespace table = bound_label_table;
+	std::string form;
 	for (std::size_t i = 0; i < label.size();) {
 		const auto lead = static_cast<unsigned char>(label[i]);
 		const std::size_t size = lead < 0x80 ? 1 : (lead & 0xe0) == 0xc0 ? 2 : (lead & 0xf0) == 0xe0 ? 3 : 4;
 		if (i + size > label.size()) return true;
 		std::uint32_t point = size == 1 ? lead : lead & (0x7f >> size);
 		for (std::size_t k = 1; k < size; ++k) point = (point << 6) | (static_cast<unsigned char>(label[i + k]) & 0x3f);
-		if (misleading_code_point(point)) return true;
 		i += size;
+		if (in_ranges(table::refused, point)) return true;
+		if (point >= table::fullwidth_first && point <= table::fullwidth_last) point -= table::fullwidth_offset;
+		if (in_ranges(table::separators, point)) {
+			if (form.empty() || form.back() != '-') form.push_back('-');
+		} else {
+			form.push_back(point < 0x80 ? static_cast<char>(point) : '\0');
+		}
 	}
-	return holds_comparison_code(label);
+	return holds_comparison_code(form);
 }
 bool device_label(const std::string& input, std::string& out) {
 	if (!bound_encoding::utf8_text(input, 16384)) return false;

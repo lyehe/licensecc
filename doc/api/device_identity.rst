@@ -297,14 +297,24 @@ path and returned attempt handle. It independently recomputes the comparison
 code before publishing browser metadata. Device labels are trimmed with the
 backend's ECMAScript whitespace rules and must contain 1–80 Unicode code points
 after trimming. The approval page shows the label beside the comparison code, so
-the trimmed label must not contain a C0 or C1 control character or DEL, a line or
-paragraph separator (U+2028, U+2029), a bidirectional or format control
-(U+200B–U+200F, U+202A–U+202E, U+2060–U+2064, U+2066–U+2069, U+FEFF), or
-any text shaped like a comparison code (``XXXX-XXXX-XXXX`` in hexadecimal digits
-of either case). Letters, digits, spaces and punctuation in any script remain
-valid. The native client refuses such a label with ``LCC_BOUND_INVALID_ARGUMENT``
-before it sends anything, and the backend refuses it at registration with
-``invalid_request``. Registration retries preserve their original inputs and
+the trimmed label must not contain a control character (``\p{Cc}``), a format
+character such as a bidirectional control (``\p{Cf}``), a line or paragraph
+separator (``\p{Zl}``, ``\p{Zp}``), or a default-ignorable code point such as a
+variation selector, filler or tag character
+(``\p{Default_Ignorable_Code_Point}``). Its comparison form also must not
+contain text shaped like a comparison code, ``XXXX-XXXX-XXXX`` in hexadecimal
+digits of either case. The comparison form folds fullwidth ASCII
+(U+FF01–U+FF5E) to ASCII, maps every dash (``\p{Pd}``) and space (``\p{Zs}``)
+to ``-``, and collapses runs of ``-``, so ``4F2A 0C12 B7E4`` and a code written
+with en dashes or fullwidth digits are refused as well. Letters, digits, spaces
+and punctuation in any script remain valid, for example ``Büro-PC``, ``工作站``
+and ``DESKTOP-7Q2K1AB``. The licensing backend owns the rule
+(``services/cloudflare-licensing-backend/src/device/device_label.mjs``) and
+refuses such a label at registration with ``invalid_request``. The native
+client refuses it with ``LCC_BOUND_INVALID_ARGUMENT`` before it sends anything,
+using ``src/library/device_identity/bound_label_table.hpp``, which
+``scripts/generate-device-label-table.mjs`` generates from the same Unicode
+property escapes. Registration retries preserve their original inputs and
 five-minute inclusive-clock deadline.
 
 The owner accepts exactly one canonical code/state callback for the registered
