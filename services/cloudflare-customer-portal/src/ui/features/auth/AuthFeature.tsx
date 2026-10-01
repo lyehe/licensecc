@@ -49,9 +49,8 @@ export interface PortalAuth {
   submitVerify(event: React.FormEvent): Promise<void>;
   resendCode(): Promise<void>;
   useDifferentEmail(): void;
-  // Returns whether sign-out actually completed, so a caller (App.tsx's logout()) can tell a real
-  // sign-out apart from a failed attempt that leaves the customer signed in -- e.g. to decide whether
-  // overriding the "You're signed out." message with a seat-release summary is even appropriate.
+  // Returns whether sign-out actually completed, so a caller can tell a real sign-out apart from a
+  // failed attempt that leaves the customer signed in.
   logout(afterLogout: () => void): Promise<boolean>;
 }
 

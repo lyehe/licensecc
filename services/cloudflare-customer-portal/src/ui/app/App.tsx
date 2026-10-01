@@ -61,12 +61,12 @@ function PortalShell(): React.ReactElement {
   };
 
   // A mid-session 401 (the server's `unauthorized` code, never a credential failure) must
-  // return the customer to sign-in no matter which api() call -- or the download's raw fetch, via
-  // reportUnauthorized() -- surfaced it. Registered exactly once here; `retrying` is a re-entrancy
-  // guard so several api() calls failing at once (e.g. usePortalData's concurrent reads) collapse into
-  // one retrySession() call rather than one each. retrySession() itself (AuthFeature's loadMe) makes
-  // its own /me check with skipUnauthorizedHook, so that check can never re-enter this handler. Never
-  // touches consent/enrollment state -- a saved consent mutation must survive and resume.
+  // return the customer to sign-in no matter which api() call surfaced it. Registered exactly once
+  // here; `retrying` is a re-entrancy guard so several api() calls failing at once (e.g.
+  // usePortalData's concurrent reads) collapse into one retrySession() call rather than one each.
+  // retrySession() itself (AuthFeature's loadMe) makes its own /me check with skipUnauthorizedHook,
+  // so that check can never re-enter this handler. Never touches consent/enrollment state -- a saved
+  // consent mutation must survive and resume.
   useEffect(() => {
     let retrying = false;
     const handleUnauthorized = (): void => {

@@ -30,9 +30,8 @@ const NEXT_STEP: Partial<Record<LicenseDisplayStatus, React.ReactNode>> = {
   unknown: <><SupportContact />.</>,
 };
 
-// The next step that finishes a status lead, with its leading space, or nothing. Shared with the seat
-// cards on Devices so the same license reads the same on both pages.
-export function LicenseNextStep({ state }: { state: LicenseDisplayStatus }): React.ReactElement | null {
+// The next step that finishes a status lead, with its leading space, or nothing.
+function LicenseNextStep({ state }: { state: LicenseDisplayStatus }): React.ReactElement | null {
   const nextStep = NEXT_STEP[state];
   return nextStep === undefined ? null : <> {nextStep}</>;
 }

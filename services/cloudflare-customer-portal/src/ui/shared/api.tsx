@@ -8,8 +8,7 @@ import type { StatusMessage } from "../types";
 // invalid -- distinct from a credential failure that also answers 401 (`invalid_otp`,
 // `invalid_credentials`, ...), which means "you typed the wrong thing", never "you were signed out".
 // App registers exactly one handler here, once (setOnUnauthorized), so every api() call below routes a
-// real session death through the same recovery path, and reportUnauthorized() lets the download's raw
-// fetch -- it bypasses api() entirely to get the real Response for a blob -- reach that same handler.
+// real session death through the same recovery path.
 type UnauthorizedHandler = () => void;
 let onUnauthorizedHandler: UnauthorizedHandler | null = null;
 
@@ -30,13 +29,7 @@ export function beginNewSession(): void {
   sessionEpoch += 1;
 }
 
-// Lets a caller that bypasses api() (the download's raw fetch) capture the epoch the same way api()
-// captures it internally, at the moment its own request starts.
-export function currentSessionEpoch(): number {
-  return sessionEpoch;
-}
-
-export function reportUnauthorized(status: number, code: string, requestEpoch: number): void {
+function reportUnauthorized(status: number, code: string, requestEpoch: number): void {
   if (status === 401 && code === "unauthorized" && requestEpoch === sessionEpoch) onUnauthorizedHandler?.();
 }
 

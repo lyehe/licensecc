@@ -105,19 +105,17 @@ test("skipUnauthorizedHook bypasses the epoch check entirely (retrySession's own
   assert.equal(fired.length, 0, "the retry's own /me check must never re-enter the handler it is answering");
 });
 
-test("beginNewSession/currentSessionEpoch track one counter, and credential 401s never fire regardless of epoch", async () => {
+test("api() never fires onUnauthorized for a credential 401, even in the current epoch", async () => {
   const api = await loadApiModule();
-  const first = api.currentSessionEpoch();
-  api.beginNewSession();
-  assert.equal(api.currentSessionEpoch(), first + 1);
-  api.beginNewSession();
-  assert.equal(api.currentSessionEpoch(), first + 2);
-
   const fired = [];
   api.setOnUnauthorized(() => fired.push(true));
+  api.beginNewSession();
   // Same (current) epoch, but a credential failure code -- must never fire, epoch match or not.
-  api.reportUnauthorized(401, "invalid_otp", api.currentSessionEpoch());
-  assert.equal(fired.length, 0);
+  globalThis.fetch = async () => jsonResponse(401, { ok: false, code: "invalid_otp", request_id: "r7" });
+  const result = await api.api("/portal/v1/auth/verify", { method: "POST" });
+  assert.equal(result.code, "invalid_otp");
+  assert.equal(fired.length, 0, "a credential failure means a wrong entry, never a signed-out session");
+  api.setOnUnauthorized(null);
 });
 
 // The auth 429s now carry a real retry-after header; api() surfaces it on the envelope so the

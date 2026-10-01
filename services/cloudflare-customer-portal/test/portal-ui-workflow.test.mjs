@@ -203,8 +203,8 @@ test("portal UI workflow gives every StatusLine-reachable result code human copy
   }
 });
 
-// A dropped connection (api()'s own fetch rejection, or the download's raw fetch) and a failed
-// sign-out both need copy the customer actually sees, verbatim.
+// A dropped connection (api()'s own fetch rejection) and a failed sign-out both need copy the
+// customer actually sees, verbatim.
 test("portal UI workflow maps network-failure and failed-logout copy verbatim", async () => {
   const workflow = await loadWorkflowModule();
   assert.equal(
