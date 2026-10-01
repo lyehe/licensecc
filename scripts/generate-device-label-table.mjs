@@ -102,7 +102,9 @@ export function unexplainedDifference(committed, current, isUnassigned = (point)
 }
 
 /** Problems with the committed table text, or an empty list when it matches the rule. */
-export function deviceLabelTableDrift(committedText, unicode = process.versions.unicode) {
+export function deviceLabelTableDrift(checkedOutText, unicode = process.versions.unicode) {
+  // A Windows checkout may carry CRLF line endings; the committed blob is LF.
+  const committedText = checkedOutText.replace(/\r\n/gu, "\n");
   const regenerate = `run node scripts/generate-device-label-table.mjs --write with Unicode ${unicode} data and commit ${TABLE_PATH}`;
   const committed = parseDeviceLabelTable(committedText);
   if (committed.unicode === null || committed.refused === null || committed.separators === null) return [`${TABLE_PATH} is not a generated table; ${regenerate}`];
