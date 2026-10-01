@@ -275,18 +275,18 @@ export async function requestOtp(env, { email, clientIp = "", sendEmailFn, email
  *   - code redemption: requires { email, code }; the code_hmac is email-bound.
  *   - magic redemption: requires { secret }; the secret_hmac is email-independent.
  * Either way we compute the candidate HMAC under EVERY live pepper and run ONE atomic UPDATE that
- * claims the row (sets consumed_at) only if it is unconsumed, unexpired, and under the attempt cap,
- * RETURNING the customer_id.
+ * consumes the matching row only if it is unconsumed, unexpired, and under the attempt cap.
  *
  * Brute-force limits on code redemption, all applied the same way whether or not the email has an
  * account or a live code:
  *   - per client: VERIFY_PER_CLIENT attempts per window (an IPv6 client counts per /64);
  *   - per email: VERIFY_PER_EMAIL attempts per window, counted before the claim so concurrent
  *     guesses cannot overshoot it (a success counts too; each one needs a freshly requested code);
- *   - per live code: a claim that misses always runs a second UPDATE that adds one to
- *     attempt_count on that email's live code(s). Each wrong guess runs it exactly once, and it
- *     matches only rows the claim could still take, so it cannot count twice; at MAX_ATTEMPTS the
- *     claim predicate refuses the row, so the right code and the same row's link secret both fail.
+ *   - per live code: the one code statement adds one to attempt_count on every live code of the
+ *     email and, in the same write, consumes the one whose code matches. Every check, right or
+ *     wrong, counts exactly once and atomically, so checks that arrive together cannot get past
+ *     the cap: at MAX_ATTEMPTS the row no longer qualifies, and the right code and the same row's
+ *     link secret both fail.
  * A magic secret has 256 bits and no email to count against; the per-client limit applies to it.
  */
 /** @param {PortalEnv} env @param {RedeemOtpOptions} [options] */
@@ -297,55 +297,59 @@ export async function redeemOtp(env, { email, code, secret, clientIp = "", now =
   const ipRl = await portalRateLimit(env, `verify:ip:${clientIp}`, VERIFY_PER_CLIENT, VERIFY_WINDOW_SEC, now);
   if (ipRl.limited) return { ok: false, code: "rate_limited", retryAfter: ipRl.retryAfter };
 
-  const candidates = [];
-  let column;
-  /** @type {string | null} the email whose live code a wrong guess counts against (code mode only) */
-  let guessedEmail = null;
   if (typeof secret === "string" && secret.length > 0) {
-    column = "secret_hmac";
-    for (const id of Object.keys(peppers)) {
-      const pepperBytes = /** @type {Uint8Array} */ (peppers[id]);
-      candidates.push(await hmac(pepperBytes, secret));
-    }
-  } else {
-    const emailLower = normalizeEmail(email);
-    if (emailLower.length === 0 || typeof code !== "string" || !/^[0-9]{8}$/.test(code)) {
-      // Malformed input is indistinguishable from a wrong code.
-      return { ok: false, code: "invalid_otp" };
-    }
-    // Keyed on the normalized email, like the per-email request limit.
-    const emailRl = await portalRateLimit(env, `verify:email:${emailLower}`, VERIFY_PER_EMAIL, VERIFY_WINDOW_SEC, now);
-    if (emailRl.limited) return { ok: false, code: "rate_limited", retryAfter: emailRl.retryAfter };
-    column = "code_hmac";
-    guessedEmail = emailLower;
-    for (const id of Object.keys(peppers)) {
-      const pepperBytes = /** @type {Uint8Array} */ (peppers[id]);
-      candidates.push(await hmac(pepperBytes, `${emailLower}:${code}`));
-    }
+    const candidates = await candidateHmacs(peppers, secret);
+    // ATOMIC single-use claim: set consumed_at only if currently unconsumed, unexpired, under the
+    // cap. RETURNING the customer_id proves the claim. A wrong/expired/consumed/capped row matches
+    // 0 rows -> null -> invalid_otp (byte-identical to no-OTP). No separate existence check.
+    const claimed = await env.DB.prepare(
+      `UPDATE portal_otp SET consumed_at = ?, attempt_count = attempt_count + 1 ` +
+        `WHERE id = (SELECT id FROM portal_otp WHERE secret_hmac IN (${placeholdersFor(candidates)}) ` +
+        `AND consumed_at IS NULL AND expires_at > ? AND attempt_count < ${MAX_ATTEMPTS} LIMIT 1) ` +
+        `RETURNING customer_id`,
+    ).bind(now, ...candidates, now).first();
+    if (claimed === null || claimed.customer_id === undefined) return { ok: false, code: "invalid_otp" };
+    return { ok: true, customerId: claimed.customer_id, code: "ok" };
   }
-  const placeholders = candidates.map(() => "?").join(",");
 
-  // ATOMIC single-use claim: set consumed_at only if currently unconsumed, unexpired, under the cap.
-  // RETURNING the customer_id proves the claim. A wrong/expired/consumed/capped row matches 0 rows
-  // -> null -> invalid_otp (byte-identical to no-OTP). No separate existence check (no oracle).
-  const claimed = await env.DB.prepare(
-    `UPDATE portal_otp SET consumed_at = ?, attempt_count = attempt_count + 1 ` +
-      `WHERE id = (SELECT id FROM portal_otp WHERE ${column} IN (${placeholders}) ` +
-      `AND consumed_at IS NULL AND expires_at > ? AND attempt_count < ${MAX_ATTEMPTS} LIMIT 1) ` +
-      `RETURNING customer_id`,
-  ).bind(now, ...candidates, now).first();
-
-  if (claimed === null || claimed.customer_id === undefined) {
-    if (guessedEmail !== null) {
-      // A wrong guess: count it against the email's live code. Runs on every miss, including an
-      // email with no account or no live code (it then matches nothing), so all of those cases do
-      // the same work and give the same answer.
-      await env.DB.prepare(
-        `UPDATE portal_otp SET attempt_count = attempt_count + 1 ` +
-          `WHERE email_lower = ? AND consumed_at IS NULL AND expires_at > ? AND attempt_count < ${MAX_ATTEMPTS}`,
-      ).bind(guessedEmail, now).run();
-    }
+  const emailLower = normalizeEmail(email);
+  if (emailLower.length === 0 || typeof code !== "string" || !/^[0-9]{8}$/.test(code)) {
+    // Malformed input is indistinguishable from a wrong code.
     return { ok: false, code: "invalid_otp" };
   }
+  // Keyed on the normalized email, like the per-email request limit.
+  const emailRl = await portalRateLimit(env, `verify:email:${emailLower}`, VERIFY_PER_EMAIL, VERIFY_WINDOW_SEC, now);
+  if (emailRl.limited) return { ok: false, code: "rate_limited", retryAfter: emailRl.retryAfter };
+  const candidates = await candidateHmacs(peppers, `${emailLower}:${code}`);
+
+  // ONE atomic statement per code check, the same one whatever the outcome: count the check
+  // against every live code of the email and consume the one that matches. An unknown email, an
+  // email with no live code, a wrong code and a dead code all run it and all get invalid_otp; only
+  // a returned row with consumed_at set is a sign-in. (code_hmac is unique, so at most one matches.)
+  const { results } = await env.DB.prepare(
+    `UPDATE portal_otp SET attempt_count = attempt_count + 1, ` +
+      `consumed_at = CASE WHEN code_hmac IN (${placeholdersFor(candidates)}) THEN ? END ` +
+      `WHERE email_lower = ? AND consumed_at IS NULL AND expires_at > ? AND attempt_count < ${MAX_ATTEMPTS} ` +
+      `RETURNING customer_id, consumed_at`,
+  ).bind(...candidates, now, emailLower, now).all();
+  const claimed = results.find((row) => row.consumed_at !== null && row.customer_id !== undefined);
+  if (claimed === undefined) return { ok: false, code: "invalid_otp" };
   return { ok: true, customerId: claimed.customer_id, code: "ok" };
+}
+
+// The candidate HMAC of `message` under every live pepper, so a code or link issued under an older
+// pepper still matches during rotation.
+/** @param {PepperMap} peppers @param {string} message */
+async function candidateHmacs(peppers, message) {
+  const candidates = [];
+  for (const id of Object.keys(peppers)) {
+    const pepperBytes = /** @type {Uint8Array} */ (peppers[id]);
+    candidates.push(await hmac(pepperBytes, message));
+  }
+  return candidates;
+}
+
+/** @param {unknown[]} values */
+function placeholdersFor(values) {
+  return values.map(() => "?").join(",");
 }
