@@ -62,3 +62,15 @@ test("authCopy lists only configured recovery methods, joined in prose", async (
     "Google, GitHub, or an email code",
   );
 });
+
+// Connecting Google or GitHub with a session older than the server allows comes back to Account
+// with auth_error=reauth_required and the provider in auth_provider. The sentence names that
+// provider, and an unexpected value never reaches the page.
+test("authCopy asks the customer to sign in again to connect the named provider", async () => {
+  const authCopy = await loadAuthCopyModule();
+  assert.equal(authCopy.reauthToConnectMessage("google"), "For your security, sign in again to connect Google.");
+  assert.equal(authCopy.reauthToConnectMessage("github"), "For your security, sign in again to connect GitHub.");
+  for (const other of [null, "", "gitlab", "__proto__", "<b>Google</b>"]) {
+    assert.equal(authCopy.reauthToConnectMessage(other), "For your security, sign in again to connect Google or GitHub.", String(other));
+  }
+});

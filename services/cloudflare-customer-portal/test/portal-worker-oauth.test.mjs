@@ -172,6 +172,68 @@ test("Linking requires the initiating session at callback and rejects revoked se
   db.prepare("DELETE FROM portal_sessions WHERE status = 'revoked'").run();
   assert.equal(db.prepare("SELECT count(*) AS n FROM portal_oauth_states").get().n, 0);
 });
+// Linking a provider adds a lasting way in, so it needs a sign-in from the last ten minutes: a
+// stolen or borrowed older session cannot plant its holder's own Google or GitHub account.
+function clockAt(t, seconds) {
+  const clock = { seconds };
+  t.mock.method(Date, "now", () => clock.seconds * 1000);
+  return clock;
+}
+const REAUTH_GITHUB = "https://portal.test/?auth_error=reauth_required&auth_provider=github#/account";
+
+test("Linking with a session older than ten minutes is refused at start and records nothing", async (t) => {
+  const { env, db } = baseFixture(configuration);
+  const calls = githubStub(t);
+  const cookieA = await cookieFor(env, "A"); // created at NOW
+  clockAt(t, NOW + 601);
+  const refused = await call(env, "POST", "/portal/v1/auth/github/start?mode=link", { cookie: cookieA });
+  assert.equal(refused.status, 303);
+  assert.equal(refused.res.headers.get("location"), REAUTH_GITHUB);
+  assert.equal(refused.res.headers.get("set-cookie"), null, "no browser binding is issued");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM portal_oauth_states").get().n, 0, "no link flow is recorded");
+  assert.equal(calls.length, 0);
+  // The session itself is still good for everything else.
+  assert.equal((await call(env, "GET", "/api/portal/me", { cookie: cookieA })).status, 200);
+});
+
+test("A session exactly ten minutes old can still start and complete a link", async (t) => {
+  const { env, db } = baseFixture(configuration);
+  githubStub(t, { email: "a@x.com" });
+  const cookieA = await cookieFor(env, "A");
+  clockAt(t, NOW + 600);
+  const response = await finish(env, await start(env, "github", cookieA));
+  assert.match(response.headers.get("location"), /auth_result=linked/);
+  assert.equal(db.prepare("SELECT customer_id FROM portal_identities").get().customer_id, "A");
+});
+
+test("A link started with a fresh session is refused at the callback once the session is older than ten minutes", async (t) => {
+  const { env, db } = baseFixture(configuration);
+  const calls = githubStub(t, { email: "a@x.com" });
+  const cookieA = await cookieFor(env, "A");
+  const clock = clockAt(t, NOW + 300);
+  const flow = await start(env, "github", cookieA);
+  clock.seconds = NOW + 601; // the link flow itself is still within its own ten minutes
+  const response = await finish(env, flow);
+  assert.equal(response.headers.get("location"), REAUTH_GITHUB);
+  assert.ok(!response.headers.getSetCookie().some((value) => value.startsWith("lccp_session=")), "no session is minted");
+  assert.equal(calls.length, 0, "the provider code is never exchanged");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM portal_identities").get().n, 0, "no identity is linked");
+});
+
+test("An old session keeps plain provider sign-in and disconnecting unchanged", async (t) => {
+  const { env, db } = baseFixture({ ...configuration, PORTAL_PASSWORD_ENABLED: "1" });
+  githubStub(t);
+  const cookieA = await cookieFor(env, "A");
+  db.prepare("INSERT INTO portal_identities (provider, subject, customer_id, email, created_at) VALUES ('google', 'g-a', 'A', 'a@x.com', ?)").run(NOW);
+  db.prepare("INSERT INTO portal_passwords (customer_id, email_lower, password_hash, created_at, updated_at) VALUES ('A', 'a@x.com', 'x', ?, ?)").run(NOW, NOW);
+  clockAt(t, NOW + 3600);
+  const signIn = await finish(env, await start(env, "github", undefined));
+  assert.equal(signIn.headers.get("location"), "https://portal.test/#/apps", "sign-in without mode=link is unaffected");
+  const unlinked = await call(env, "POST", "/portal/v1/auth/identities/unlink", { cookie: cookieA, body: { provider: "google" } });
+  assert.equal(unlinked.status, 200, "disconnecting needs no recent sign-in");
+  assert.equal(unlinked.body.code, "identity_unlinked");
+});
+
 test("Unverified GitHub email never creates customers", async (t) => {
   const { env, db } = baseFixture(configuration);
   githubStub(t, { verified: false });

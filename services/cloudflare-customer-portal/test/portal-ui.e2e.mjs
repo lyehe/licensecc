@@ -377,6 +377,48 @@ test("a linked-provider confirmation under Account is not coloured like an error
   expect(page.url()).not.toContain("auth_result");
 });
 
+// Connect Google/GitHub with a session older than ten minutes comes back to Account with
+// auth_error=reauth_required. Account says why and offers the existing sign-out and sign-in, which
+// lands back on Account, where Connect now works.
+test("connecting a provider with an old session asks to sign in again and returns to Account", async ({ page }) => {
+  const api = makePortalApiFixture();
+  await signIn(page, api);
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  await page.goto("/?auth_error=reauth_required&auth_provider=google#/account");
+  await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+  const reauth = page.getByText("For your security, sign in again to connect Google.", { exact: true });
+  await expect(reauth).toBeVisible();
+  await expect(page.getByText("reauth_required", { exact: false })).toHaveCount(0);
+  expect(page.url()).not.toContain("auth_error");
+  expect(page.url()).not.toContain("auth_provider");
+
+  await page.getByRole("button", { name: "Sign in again", exact: true }).click();
+  await expect(page.getByLabel("Email")).toBeVisible();
+  expect(api.requests.logouts).toBe(1);
+  expect(page.url()).toContain("#/account");
+
+  await page.getByLabel("Email").fill("user@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await page.getByLabel("8-digit code").fill(api.VALID_CODE);
+  await page.getByRole("button", { name: "Verify", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+  await expect(page.getByText("For your security, sign in again to connect Google.", { exact: true })).toHaveCount(0);
+  await expect(page.locator('form[action="/portal/v1/auth/google/start?mode=link"]')).toHaveAttribute("method", "post");
+});
+
+// The same redirect for GitHub, reaching a non-Account page, is stripped there and never resurfaces.
+test("a reauth_required redirect outside Account leaves no stale parameters behind", async ({ page }) => {
+  const api = makePortalApiFixture();
+  await signIn(page, api);
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  await page.goto("/?auth_error=reauth_required&auth_provider=github#/apps");
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  expect(page.url()).not.toContain("auth_error");
+  expect(page.url()).not.toContain("auth_provider");
+  await page.getByRole("link", { name: "Account", exact: true }).click();
+  await expect(page.getByText("For your security, sign in again to connect GitHub.", { exact: true })).toHaveCount(0);
+});
+
 test("an existing-email conflict and an unconfigured portal link the configured support contact", async ({ page }) => {
   let providers = { google: true, github: true, email: false, support: "https://support.example.com/help" };
   await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
