@@ -176,8 +176,9 @@ rounds are noted where a review found something.
   `check:schema-parity` ok; `test:workflow-pins` 20/20;
   `test:security-governance` 5/5; `test:docs-accuracy` 14/14; `check:docs`
   succeeded.
-- Not run: the report does not list surfaces not run; no native or SDK source
-  changed.
+- Not run: native CTest, build purity and the SDK legs (no C++ or SDK source
+  changed); e2e and `check:dry-run` (no UI source, Wrangler configuration or
+  Worker code changed; the three edits to Worker-side modules were comments).
 
 ### Migrations collapsed into one baseline
 
@@ -200,8 +201,11 @@ rounds are noted where a review found something.
   `test:docs-accuracy` 14/14; `check:docs` succeeded; `check:pr` reached the
   known stop, then backend `test:sql` 330/330, `test:admin` 126/126,
   `test:portal` 50/50 and `check:schema-parity` ok.
-- Not run: the report does not list surfaces not run; no native, SDK or UI
-  source changed.
+- Not run: native CTest, build purity and the SDK legs (no C++ or SDK source
+  changed); e2e and `check:dry-run` (only the backup service's restore-drill
+  script, its test and documentation changed, with no Worker code, UI or
+  Wrangler configuration); a restore into a real scratch D1 database (it needs
+  Cloudflare credentials).
 
 ### Online-verification consumers removed: examples, fuzz harness and remote C++ drill
 
@@ -455,8 +459,11 @@ rounds are noted where a review found something.
   `test:architecture` 32/32, `check:hotspots` and `test:docs-accuracy` 14/14
   passed; backend `test:sql` 350/350; admin 171/195/126; portal 170/28/43;
   backup 95/95; parity ok; `check:pr` reached the known stop.
-- Not run: the report does not list surfaces not run; no UI, native or SDK
-  source changed.
+- Not run: native CTest, build purity and the SDK legs (no C++ or SDK source
+  changed); e2e (no UI source changed); `check:dry-run` (the admin Worker
+  change only re-pointed two imports, which the typecheck in `check:pr`
+  covers); `check:docs` (only the system-map totals changed, which
+  `test:docs-accuracy` checks).
 
 ### Admin Worker: legacy fields removed from grants, policies, catalog and reports
 
@@ -490,8 +497,11 @@ rounds are noted where a review found something.
   `check:docs` passed; `check:pr` reached the known stop.
 - Fix round: a stale batch row settles instead of staying unknown, and every
   new rule has a test shown to fail without it.
-- Not run: the report does not list surfaces not run; no native or SDK source
-  changed.
+- Not run: native CTest, build purity and the SDK legs (no C++ or SDK source
+  changed); portal e2e (no portal source changed); backend e2e (the backend's
+  own changes were tests, and its `test` and `test:sql` suites cover the
+  shared runtime change); `check:dry-run` (no Wrangler configuration or
+  Worker entry point changed).
 
 ### Health readiness certifies protected licensing; protected production smoke added
 
@@ -534,11 +544,13 @@ rounds are noted where a review found something.
 - Commits: `29c47553` (failing test first), `4dcea61e`.
 - Commands: materializer 19/19; runtime 47/47; domain 23/23; backend `test`
   313/313, `test:sql` 291/291, openapi 11/11, deployed-readiness 26/26, db
-  28/28; parity ok; `check:capabilities` exit 0. From this change on,
-  `npm run check:pr` exits 0 with every sub-suite passing. e2e: backend 8,
-  admin 195, portal 130.
-- Not run: the report does not list surfaces not run; no native or SDK source
-  changed.
+  28/28; parity ok; `check:capabilities` exit 0; `check:dry-run` exit 0;
+  `check:docs` succeeded. From this change on, `npm run check:pr` exits 0
+  with every sub-suite passing. e2e: backend 8, admin 195, portal 130.
+- Not run: native CTest, build purity and the SDK legs (no C++ or SDK source
+  changed); `test:docs-quickstart` (the documentation changes removed the
+  local online demo, not the native install, issuance or minimal-consumer
+  journey).
 
 ### `/v1/verify` deleted
 
@@ -547,8 +559,9 @@ rounds are noted where a review found something.
   `test:e2e` backend 8, admin 195, portal 130; `check:dry-run` exit 0;
   `test:workflow-pins` 21/21; `test:capabilities` 16/16; `check:hotspots`,
   `test:docs-accuracy` 14/14 and `check:docs` passed.
-- Not run: the report does not list surfaces not run; no native or SDK source
-  changed.
+- Not run: native CTest, build purity and the SDK legs (no C++ or SDK source
+  changed); the edited staging and production deploy workflows against
+  Cloudflare (they need credentials; `test:workflow-pins` checked them).
 
 ### Account tokens, request proof v1, the online signer and legacy selectors deleted; registration limiter renamed
 
@@ -569,7 +582,10 @@ rounds are noted where a review found something.
   `check:dry-run` passed; `check:docs` succeeded; `check:pr` exit 0.
 - Fix round: the protected production smoke fails on any configuration
   warning, and the unreachable `observed` result code is gone.
-- Not run: the report does not list surfaces not run.
+- Not run: native CTest, build purity and the SDK legs (no C++ or SDK source
+  changed); e2e (no UI source changed; the backend's `test` and `test:sql`
+  suites cover the order path); the protected production smoke against a
+  deployed backend (it needs a deployed Worker; its tests ran against fakes).
 
 ### Legacy-only tables and reject triggers dropped from the baseline
 
@@ -579,7 +595,10 @@ rounds are noted where a review found something.
   database; `check:schema-parity` ok; `test:backup` 96/96; `test:services`
   green; `check:dry-run` passed; `test:docs-accuracy` 14/14; `check:docs`
   succeeded; `check:pr` exit 0; e2e green.
-- Not run: the report does not list surfaces not run.
+- Not run: native CTest, build purity and the SDK legs (no C++ or SDK source
+  changed); a restore into a real scratch D1 database (it needs Cloudflare
+  credentials; the signature was recomputed from a local SQLite database
+  instead).
 
 ### `usage_events` replaced by a protected denial table
 
@@ -589,7 +608,11 @@ rounds are noted where a review found something.
   96/96 after the signature update; `test:services` green; `test:e2e` exit 0
   (admin 195, portal 130); admin connections e2e 19/19; `check:dry-run`
   passed; `check:pr` green.
-- Not run: the report does not list surfaces not run.
+- Not run: native CTest, build purity and the SDK legs (no C++ or SDK source
+  changed); `check:docs` (the only Sphinx change was the system-map totals,
+  which `test:docs-accuracy` in `check:pr` checks; `CHANGELOG.md` is not
+  part of the Sphinx build); a restore into a real scratch D1 database (it
+  needs Cloudflare credentials).
 
 ### Admin and portal readers accept rows without the legacy columns
 
@@ -598,7 +621,11 @@ rounds are noted where a review found something.
   `test:docs-accuracy` 14/14; `check:hotspots` passed; contracts unchanged;
   admin e2e 195 (one `ERR_NO_BUFFER_SPACE` failure on the first run passed on
   a clean rerun); portal e2e 130; `check:pr` exit 0.
-- Not run: the report does not list surfaces not run.
+- Not run: native CTest, build purity and the SDK legs (no C++ or SDK source
+  changed); backend e2e (no backend source changed); `check:dry-run` (no
+  Wrangler configuration or Worker entry point changed; the portal Worker
+  edits are covered by its typecheck and Worker tests); `check:docs` (only
+  the system-map totals changed, which `test:docs-accuracy` checks).
 
 ### Legacy grant, policy and catalog columns dropped
 
@@ -607,7 +634,11 @@ rounds are noted where a review found something.
   190/190 and UI 125/125; portal UI 43/43; capacity predicate 3/3; contracts
   8/8; `check:hotspots` and `test:docs-accuracy` passed; root `test:e2e` exit
   0 (8/195/130); `check:dry-run` exit 0; `check:pr` green twice.
-- Not run: the report does not list surfaces not run.
+- Not run: native CTest, build purity and the SDK legs (no C++ or SDK source
+  changed); `check:docs` (the only Sphinx change was the system-map totals,
+  which `test:docs-accuracy` checks; the service READMEs are outside the
+  Sphinx build); a restore into a real scratch D1 database (it needs
+  Cloudflare credentials).
 
 ### Protected is the schema default; no code reads or sends the enforcement mode
 
