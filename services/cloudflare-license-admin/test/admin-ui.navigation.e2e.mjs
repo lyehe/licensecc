@@ -49,7 +49,7 @@ test("direct customer section URLs survive intent consumption and refresh", asyn
   expect(api.requests.customerTransitions).toEqual([]);
 });
 
-test("customer secondary records keep legacy URLs and their primary section", async ({ page }) => {
+test("customer secondary records keep their own URLs and their primary section", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   for (const [section, tab, heading] of [["overview", "Apps & access", "Apps & access"], ["licenses", "Apps & access", "Customer licenses"], ["orders", "Activity", "Customer orders"], ["account", "Account", "Account details"]]) {

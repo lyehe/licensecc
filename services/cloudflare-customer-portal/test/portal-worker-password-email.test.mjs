@@ -34,12 +34,14 @@ async function credential(env, email = "a@x.com") {
   await env.DB.prepare("INSERT INTO portal_passwords (customer_id,email_lower,password_hash,created_at,updated_at) VALUES ('A',?,?,?,?)").bind(email, hash, NOW, NOW).run();
   return hash;
 }
-async function legacy(env, email) {
+// The admin console's set-password create shape: an empty contact address and a known password on an
+// unverified login address.
+async function setPasswordAccount(env, email) {
   await env.DB.prepare("INSERT INTO customers (id,name,email,created_at,updated_at) VALUES ('L','Personal account','',?,?)").bind(NOW, NOW).run();
   await env.DB.prepare("INSERT INTO portal_passwords (customer_id,email_lower,password_hash,created_at,updated_at) VALUES ('L',?,?,?,?)").bind(email, await hashPassword(PASSWORD), NOW, NOW).run();
 }
 // The real admin-invite shape: the seeded hash is for a random secret nobody was ever told, not
-// a chosen/known password like `legacy()` above uses for its other, set-password-style scenarios.
+// a chosen/known password like `setPasswordAccount()` above uses for its scenarios.
 async function inviteShaped(env, email) {
   const secret = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   await env.DB.prepare("INSERT INTO customers (id,name,email,created_at,updated_at) VALUES ('I','Personal account','',?,?)").bind(NOW, NOW).run();
@@ -162,21 +164,21 @@ test("complete over the per-IP cap answers 429 with the exact retry-after for th
   assert.equal(result.res.headers.get("retry-after"), String(window + 900 - NOW));
 });
 
-test("pre-verification password accounts recover and adopt the proven email", async t => {
+test("an admin set-password account recovers and adopts the proven email", async t => {
   const f = fixture(t);
-  await legacy(f.env, "legacy@example.com");
-  assert.equal((await f.request("reset", "legacy@example.com")).status, 202);
+  await setPasswordAccount(f.env, "set-password@example.com");
+  assert.equal((await f.request("reset", "set-password@example.com")).status, 202);
   assert.equal(f.mail.length, 1);
   const result = await f.complete(undefined, NEXT);
   assert.equal(result.status, 200);
   assert.equal(result.body.data.customer_id, "L");
-  assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = 'L'").get().email, "legacy@example.com");
-  assert.equal((await call(f.env, "POST", `${PATH}/login`, { body: { email: "legacy@example.com", password: NEXT } })).status, 200);
+  assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = 'L'").get().email, "set-password@example.com");
+  assert.equal((await call(f.env, "POST", `${PATH}/login`, { body: { email: "set-password@example.com", password: NEXT } })).status, 200);
 });
 
-test("legacy reset stays generic when another customer owns the address", async t => {
+test("a set-password account's reset stays generic when another customer owns the address", async t => {
   const f = fixture(t);
-  await legacy(f.env, "a@x.com");
+  await setPasswordAccount(f.env, "a@x.com");
   assert.equal((await f.request("reset", "a@x.com")).status, 202);
   assert.equal(f.mail.length, 0);
   assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = 'L'").get().email, "");
@@ -262,13 +264,13 @@ test("a committed reset reports success even when the new session cannot be mint
   assert.equal((await call(f.env, "POST", `${PATH}/login`, { body: { email: "a@x.com", password: NEXT } })).status, 200);
 });
 
-test("a legacy reset link cannot adopt an address another customer claimed after it was sent", async t => {
+test("a set-password account's reset link cannot adopt an address another customer claimed after it was sent", async t => {
   const f = fixture(t);
-  await legacy(f.env, "legacy@example.com");
+  await setPasswordAccount(f.env, "set-password@example.com");
   const before = f.db.prepare("SELECT password_hash FROM portal_passwords WHERE customer_id = 'L'").get().password_hash;
-  assert.equal((await f.request("reset", "legacy@example.com")).status, 202);
+  assert.equal((await f.request("reset", "set-password@example.com")).status, 202);
   assert.equal(f.mail.length, 1);
-  f.db.prepare("UPDATE customers SET email = 'legacy@example.com' WHERE id = 'B'").run();
+  f.db.prepare("UPDATE customers SET email = 'set-password@example.com' WHERE id = 'B'").run();
   assert.equal((await f.complete(undefined, NEXT)).body.code, "invalid_link");
   assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = 'L'").get().email, "");
   assert.equal(f.db.prepare("SELECT password_hash FROM portal_passwords WHERE customer_id = 'L'").get().password_hash, before);

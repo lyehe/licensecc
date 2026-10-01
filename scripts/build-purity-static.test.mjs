@@ -224,7 +224,7 @@ test("platform CI actively runs the exact identity suite and installed consumers
   assert.doesNotMatch(windowsCommands.join("\n"), /&\s*dumpbin(?:\.exe)?\b/iu);
 });
 
-test("Windows CI selects matching generators for protected and legacy builds", () => {
+test("Windows CI selects matching generators for the TPM and Windows Server 2022 builds", () => {
   const workflow = source(".github/workflows/windows.yml").replaceAll("\r\n", "\n");
   assert.match(workflow, /CMAKE_GENERATOR: \$\{\{ matrix\.generator \}\}/u);
   for (const preset of ["ci-windows-device-identity-test", "ci-windows-msvc-debug-dynamic-tpm"]) {

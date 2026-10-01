@@ -314,7 +314,7 @@ test("console: reusing an idempotency key across Invite and Set-password modes n
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM customers").get().n, 4, "each pair created exactly one customer, from its first call only");
 });
 
-test("console: customer access pagination exceeds legacy detail cap and cannot change customer scope", async () => {
+test("console: customer access pagination exceeds the customer-detail bundle cap and cannot change customer scope", async () => {
   const db = freshDb(); seed(db); const env = devEnv(db);
   for (let i = 1; i <= 205; i++) await createEntitlementFor(env, "cus_a", i.toString(16).padStart(64, "0"));
   await createEntitlementFor(env, "cus_b", FP_B);
@@ -439,7 +439,7 @@ test("console: summary and report share stored-state counts using one entitlemen
   assert.equal(queries.filter(sql => sql.includes("FROM entitlements")).length, 1);
 });
 
-test("console: project inventory includes empty configured apps and legacy records with stable pages", async () => {
+test("console: project inventory includes empty configured apps and non-catalog records with stable pages", async () => {
   const db = freshDb(); seed(db); const env = devEnv(db);
   db.prepare("INSERT INTO catalog_features (id,project,feature_key,name,status,created_at,updated_at) VALUES ('empty','EMPTY','base','Empty','disabled',?,?)").run(NOW,NOW);
   db.prepare("INSERT INTO entitlement_policies (id,project,name,type,created_at,updated_at) VALUES ('policy-only','POLICY_ONLY','No grants','node_locked',?,?)").run(NOW,NOW);

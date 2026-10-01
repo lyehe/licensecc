@@ -221,7 +221,7 @@ test("HTTP trials start on exchange and preserve their deadline through renewal 
   }
 });
 
-test("HTTP proof remains mandatory in legacy off modes and binds audience, body and expiry",async t=>{
+test("HTTP proof is mandatory and binds audience, body and expiry",async t=>{
   const f=fixture(t),d=await enrollment(f);
   assert.equal((await f.call("/v2/device-authorizations/exchange",d.body)).body.code,"proof_required");
   const wrongAudience=await signed(f,d,"exchange",d.body,{audience:"other"});
@@ -247,7 +247,7 @@ test("HTTP lost commit response requires fresh proof and returns the original co
   assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_events").get().n,1);
 });
 
-test("HTTP rate/config gates precede parsing and cannot be disabled by legacy settings",async t=>{
+test("HTTP rate/config gates precede parsing and fail closed without protected config",async t=>{
   const f=fixture(t);
   for(let i=0;i<20;i++) assert.equal((await f.call("/v2/device-authorizations","malformed")).status,400);
   const limited=await f.call("/v2/device-authorizations","malformed");

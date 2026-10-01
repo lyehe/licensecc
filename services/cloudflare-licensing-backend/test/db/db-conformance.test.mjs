@@ -155,13 +155,18 @@ test("the baseline creates each table after the tables its foreign keys referenc
       .map((row) => row.name);
     const position = new Map(created.map((name, index) => [name, index]));
     const outOfOrder = [];
+    const edges = new Set();
     for (const table of created) {
       for (const { table: parent } of db.prepare(`PRAGMA foreign_key_list("${table}")`).all()) {
+        edges.add(`${table} -> ${parent}`);
         if (parent !== table && !(position.get(parent) < position.get(table))) {
           outOfOrder.push(`${table} -> ${parent}`);
         }
       }
     }
+    // Not vacuous: the guard really walked the baseline's foreign keys, including a composite one.
+    assert.ok(edges.size >= 10, `only ${edges.size} foreign-key edges were checked`);
+    assert.ok(edges.has("device_bound_bindings -> entitlements"), [...edges].join(", "));
     assert.deepEqual(outOfOrder, []);
   } finally {
     db.close();

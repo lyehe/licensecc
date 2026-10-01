@@ -393,7 +393,7 @@ test("plan projection refuses an entitlement input without an owner", async (t) 
   }
 });
 
-test("legacy entitlement identity fence uses the project-license-fingerprint index", () => {
+test("non-catalog entitlement identity fence uses the project-license-fingerprint index", () => {
   const db = freshDb();
   const plan = db
     .prepare(
@@ -515,8 +515,8 @@ test("a parent-format unchanged preview fails closed before any projection write
 
   // Model a live parent-version preview: it carried no version discriminator and
   // classified this row as unchanged.
-  const legacy = await previewPlanProjection(env, input, "admin", NOW + 1);
-  const row = db.prepare("SELECT projection_json, actions_json FROM license_plan_projection_previews WHERE id = ?").get(legacy.preview_id);
+  const parentPreview = await previewPlanProjection(env, input, "admin", NOW + 1);
+  const row = db.prepare("SELECT projection_json, actions_json FROM license_plan_projection_previews WHERE id = ?").get(parentPreview.preview_id);
   const actions = JSON.parse(row.actions_json);
   assert.equal(actions.updated.length, 1, "the current implementation sees the device limit change");
   actions.updated = [];
@@ -528,21 +528,21 @@ test("a parent-format unchanged preview fails closed before any projection write
   db.prepare("UPDATE license_plan_projection_previews SET projection_json = ?, actions_json = ? WHERE id = ?").run(
     JSON.stringify(projection),
     JSON.stringify(actions),
-    legacy.preview_id,
+    parentPreview.preview_id,
   );
 
   const idempotencyKey = "parent-format-unchanged";
-  const before = projectionApplyState(db, legacy.preview_id, idempotencyKey);
+  const before = projectionApplyState(db, parentPreview.preview_id, idempotencyKey);
   const batchCount = env.DB.batchSizes.length;
   await assert.rejects(
-    () => applyPlanProjection(env, legacy.preview_id, ctx({ idempotencyKey }), {
+    () => applyPlanProjection(env, parentPreview.preview_id, ctx({ idempotencyKey }), {
       scope: "POST:/api/admin/license-plans/apply:admin",
       responseCode: "license_plan_projection_applied",
     }, NOW + 2),
     /stale_projection_preview/,
   );
   assert.equal(env.DB.batchSizes.length, batchCount, "version rejection happens before the claim batch");
-  assert.deepEqual(projectionApplyState(db, legacy.preview_id, idempotencyKey), before);
+  assert.deepEqual(projectionApplyState(db, parentPreview.preview_id, idempotencyKey), before);
   assert.equal(db.prepare("SELECT max_active_devices FROM entitlements WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").get(FP).max_active_devices, 1,
     "the unsafe parent preview must leave the grant untouched");
 });
@@ -800,13 +800,13 @@ test("a differing existing assignment fingerprint rejects Preview without touchi
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_projection_previews").get().c, 0);
 });
 
-test("a legacy entitlement identity conflict without an assignment rejects Preview and writes nothing", async () => {
+test("a non-catalog entitlement identity conflict without an assignment rejects Preview and writes nothing", async () => {
   const db = freshDb();
   seedCatalog(db);
   const env = { DB: new D1Like(db) };
   const oldFingerprint = "1".repeat(64);
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'legacy_unmanaged', ?, 'active', 'cus_1', 'lic_1', ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'unmanaged', ?, 'active', 'cus_1', 'lic_1', ?, ?)",
   ).run(oldFingerprint, NOW, NOW);
 
   await assert.rejects(
@@ -821,13 +821,13 @@ test("a legacy entitlement identity conflict without an assignment rejects Previ
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_projection_previews").get().c, 0);
 });
 
-test("the legacy entitlement identity fence is status-independent", async () => {
+test("the non-catalog entitlement identity fence is status-independent", async () => {
   for (const status of ["disabled", "revoked"]) {
     const db = freshDb();
     seedCatalog(db);
     const env = { DB: new D1Like(db) };
     db.prepare(
-      "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'legacy_status', ?, ?, 'cus_1', 'lic_1', ?, ?)",
+      "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'unmanaged_st', ?, ?, 'cus_1', 'lic_1', ?, ?)",
     ).run(status === "disabled" ? "5".repeat(64) : "6".repeat(64), status, NOW, NOW);
     await assert.rejects(
       () => previewPlanProjection(env, projectionInput(), "admin", NOW),
@@ -838,22 +838,22 @@ test("the legacy entitlement identity fence is status-independent", async () => 
   }
 });
 
-test("same-fingerprint legacy features and null or empty legacy license ids remain compatible", async () => {
+test("same-fingerprint non-catalog features and null or empty license ids do not conflict", async () => {
   const db = freshDb();
   seedCatalog(db);
   const env = { DB: new D1Like(db) };
   db.prepare(
     "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', ?, ?, 'active', 'cus_1', ?, ?, ?)",
-  ).run("legacy_same_a", FP, "lic_1", NOW, NOW);
+  ).run("same_fp_a", FP, "lic_1", NOW, NOW);
   db.prepare(
     "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', ?, ?, 'active', 'cus_1', ?, ?, ?)",
-  ).run("legacy_same_b", FP, "lic_1", NOW, NOW);
+  ).run("same_fp_b", FP, "lic_1", NOW, NOW);
   db.prepare(
     "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', ?, ?, 'active', 'cus_1', NULL, ?, ?)",
-  ).run("legacy_null", "2".repeat(64), NOW, NOW);
+  ).run("null_license", "2".repeat(64), NOW, NOW);
   db.prepare(
     "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', ?, ?, 'active', 'cus_1', '', ?, ?)",
-  ).run("legacy_empty", "3".repeat(64), NOW, NOW);
+  ).run("empty_license", "3".repeat(64), NOW, NOW);
 
   const preview = await previewPlanProjection(env, projectionInput(), "admin", NOW);
   assert.equal(preview.summary.create, 3);
@@ -887,26 +887,26 @@ test("the final in-batch claim rejects an assignment fingerprint conflict with z
   assert.equal(persisted.consumed_at, null);
 });
 
-test("the final in-batch claim rejects a post-Preview legacy entitlement identity conflict with zero projection writes", async () => {
+test("the final in-batch claim rejects a post-Preview non-catalog entitlement identity conflict with zero projection writes", async () => {
   const db = freshDb();
   seedCatalog(db);
   const env = { DB: new D1Like(db) };
   const preview = await previewPlanProjection(env, projectionInput(), "admin", NOW);
   const oldFingerprint = "4".repeat(64);
   db.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'legacy_race', ?, 'active', 'cus_1', 'lic_1', ?, ?)",
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, customer_id, license_id, created_at, updated_at) VALUES ('DEFAULT', 'unmanaged_race', ?, 'active', 'cus_1', 'lic_1', ?, ?)",
   ).run(oldFingerprint, NOW, NOW);
   const mutation = { scope: "POST:/api/admin/license-plans/apply:admin", responseCode: "license_plan_projection_applied" };
 
   await assert.rejects(
-    () => applyPlanProjection(env, preview.preview_id, ctx({ idempotencyKey: "legacy-identity-race" }), mutation, NOW + 1),
+    () => applyPlanProjection(env, preview.preview_id, ctx({ idempotencyKey: "noncatalog-identity-race" }), mutation, NOW + 1),
     /license_fingerprint_conflict/,
   );
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements WHERE license_fingerprint = ?").get(oldFingerprint).c, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements WHERE license_fingerprint = ?").get(FP).c, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_assignments WHERE license_id = 'lic_1'").get().c, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events").get().c, 0);
-  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM mutation_idempotency WHERE idempotency_key = 'legacy-identity-race'").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM mutation_idempotency WHERE idempotency_key = 'noncatalog-identity-race'").get().c, 0);
   const persisted = db.prepare("SELECT claim_token, consumed_at, applied_response_json FROM license_plan_projection_previews WHERE id = ?").get(preview.preview_id);
   assert.equal(persisted.claim_token, null);
   assert.equal(persisted.consumed_at, null);

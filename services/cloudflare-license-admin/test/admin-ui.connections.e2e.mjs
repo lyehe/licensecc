@@ -153,7 +153,7 @@ test("admin connections retain stale rows and block changes after malformed refr
   await expect(region(page).getByRole('button',{name:'Disconnect',exact:true})).toBeDisabled();expect(f.posts).toHaveLength(0);
 });
 
-test("admin connections keep recovery available when legacy customer detail fails",async({page})=>{
+test("admin connections keep recovery available when the customer-detail bundle fails",async({page})=>{
   const f=fixture();f.behavior.detailFailure=true;await open(page,f);await expect(region(page)).toContainText('Design workstation');
   await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();await expect(page.getByRole('dialog')).toContainText(f.row.binding_id);
   // Initial focus goes to the typed field, matching the shared confirm dialog's own initial focus.

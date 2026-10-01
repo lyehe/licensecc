@@ -8,7 +8,8 @@ const NEXT = "Another long passphrase 2!";
 const PATH = "/portal/v1/auth/password";
 const fixture = () => { const data = baseFixture({ PORTAL_PASSWORD_ENABLED: "1" }); data.db.exec("PRAGMA foreign_keys = ON"); return data; };
 const cookie = (result) => result.res.headers.get("set-cookie").split(";")[0];
-// Existing login/settings tests deliberately exercise legacy unverified credentials.
+// Login/settings tests seed the admin set-password shape: an unverified login address with an empty
+// contact address.
 async function register(env, email = "new@example.com") {
   const id = `cust_${crypto.randomUUID()}`;
   email = email.trim().toLowerCase();
@@ -175,8 +176,8 @@ test("password settings mark a credential eligible when it matches the customer'
   assert.equal(result.body.data.recovery_available, true);
 });
 
-test("password settings mark a legacy/set-password-shaped account eligible for recovery when its address is unclaimed", async () => {
-  // register() seeds a KNOWN password (the set-password/legacy shape, empty contact email but a
+test("password settings mark a set-password-shaped account eligible for recovery when its address is unclaimed", async () => {
+  // register() seeds a KNOWN password (the admin set-password shape, empty contact email but a
   // usable credential) -- not the random-secret Invite shape, which portal-worker-password-email.test.mjs
   // covers separately.
   const { env } = fixture();
@@ -187,9 +188,9 @@ test("password settings mark a legacy/set-password-shaped account eligible for r
   assert.equal(result.body.data.recovery_available, true);
 });
 
-test("password settings never offer recovery for a legacy/set-password-shaped account whose address another customer already verified", async () => {
+test("password settings never offer recovery for a set-password-shaped account whose address another customer already verified", async () => {
   // baseFixture seeds customer A with the verified address a@x.com; a second, empty-contact account
-  // sharing that same login identifier (the legacy/set-password shape) must not recover with it.
+  // sharing that same login identifier (the set-password shape) must not recover with it.
   const { env } = fixture();
   const created = await register(env, "a@x.com");
   const result = await call(env, "GET", PATH, { cookie: cookie(created) });

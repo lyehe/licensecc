@@ -4,7 +4,7 @@
 // override precedence, non-trial zeroing); (2) createEntitlement(..., extraStatements=[stamp]) writes
 // the policy's valid window into the entitlement AND the device limit + frozen-trial columns via the
 // atomic side-write, in ONE batch; (3) the BYTE-IDENTICAL guard — createEntitlement with NO extra
-// statements produces exactly the legacy row (capacity/trial at their column defaults), so the shared
+// statements produces exactly the unstamped row (capacity/trial at their column defaults), so the shared
 // INSERT path is unchanged.
 //
 // Requires node:sqlite (Node >= 22 with --experimental-sqlite). Run via `npm run test:sql`.

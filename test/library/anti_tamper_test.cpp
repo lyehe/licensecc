@@ -427,13 +427,13 @@ BOOST_AUTO_TEST_CASE(source_shadowing_flag_can_be_disabled_for_fallback_shadowin
 	std::remove(valid_path.c_str());
 }
 
-BOOST_AUTO_TEST_CASE(legacy_acquire_license_does_not_emit_tamper_signal) {
+BOOST_AUTO_TEST_CASE(plain_acquire_license_does_not_emit_tamper_signal) {
 	RuntimePolicyGuard guard;
-	const string valid_path = issue_valid_license_file("anti-tamper-legacy-valid");
+	const string valid_path = issue_valid_license_file("anti-tamper-plain-valid");
 	LicenseLocation location = license_path_location(valid_path);
 	CallerInformations caller = default_caller();
 	lcc_set_environment_license_sources_enabled(true);
-	// This test is about the absence of a tamper signal from the legacy entry point, not
+	// This test is about the absence of a tamper signal from the plain entry point, not
 	// about source-fatal strictness, so it opts into the lenient mode: the malformed
 	// environment candidate is a warning because the explicit candidate verifies.
 	lcc_set_strict_source_fatal_enabled(false);

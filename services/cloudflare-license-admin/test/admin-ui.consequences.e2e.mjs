@@ -145,8 +145,7 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
 
 test("admin UI entitlement disable reason presets fill the field and leave it editable", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ feature: "float", license_fingerprint: "a".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -179,8 +178,7 @@ test("admin UI entitlement disable reason presets fill the field and leave it ed
 test("admin UI consequence dialogs contain focus, isolate the background, and reflow long targets", async ({ page }) => {
   const api = makeAdminApiFixture();
   const project = `project-${"long-segment-".repeat(8)}`;
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project, feature: "float", license_fingerprint: "f".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -280,8 +278,7 @@ test("admin UI consequence dialogs contain focus, isolate the background, and re
 
 test("admin UI typed failures keep consequence dialogs open and restore focus", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "typed-failure", feature: "float", license_fingerprint: "f".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -363,8 +360,7 @@ test("admin UI typed failures keep consequence dialogs open and restore focus", 
 
 test("admin UI direct re-enable replays an unknown mutation with the same key", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "direct-reenable-unknown", feature: "float", license_fingerprint: "e".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -400,8 +396,7 @@ test("admin UI direct re-enable replays an unknown mutation with the same key", 
 
 test("admin UI keeps a wrong-action reason_required rejection indeterminate", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "wrong-action-reason", feature: "float", license_fingerprint: "1".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -433,8 +428,7 @@ test("admin UI keeps a wrong-action reason_required rejection indeterminate", as
 
 test("admin UI keeps every same-key replay failure indeterminate until exact success", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "replay-outcomes", feature: "float", license_fingerprint: "e".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -484,8 +478,7 @@ test("admin UI keeps every same-key replay failure indeterminate until exact suc
 
 test("admin UI rejects a partial successful mutation envelope as unknown", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "partial-mutation", feature: "float", license_fingerprint: "f".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -517,8 +510,7 @@ test("admin UI rejects a partial successful mutation envelope as unknown", async
 
 test("admin UI rejects a non-2xx response carrying a successful mutation envelope", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "http-status", feature: "float", license_fingerprint: "7".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -552,8 +544,7 @@ test("admin UI rejects a non-2xx response carrying a successful mutation envelop
 
 test("admin UI treats a well-formed 5xx rejection envelope as an unknown mutation", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "five-hundred-rejection", feature: "float", license_fingerprint: "5".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -1035,8 +1026,7 @@ test("admin UI visibly locks other actions while a refused action's notice waits
 
 test("admin UI gates ordinary mutations while consequence recovery is pending", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "recovery-gate", feature: "float", license_fingerprint: "0".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -1070,8 +1060,7 @@ test("admin UI gates ordinary mutations while consequence recovery is pending", 
 
 test("admin UI gates ordinary mutations through the post-success refresh", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "post-success-gate", feature: "float", license_fingerprint: "8".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -1098,8 +1087,7 @@ test("admin UI gates ordinary mutations through the post-success refresh", async
 
 test("admin UI direct re-enable treats a malformed mutation response as unknown", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "direct-reenable-malformed", feature: "float", license_fingerprint: "7".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -1124,8 +1112,7 @@ test("admin UI direct re-enable treats a malformed mutation response as unknown"
 
 test("admin UI direct re-enable keeps parsed refresh recovery visible", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "direct-reenable-refresh", feature: "float", license_fingerprint: "6".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -1153,8 +1140,7 @@ test("admin UI direct re-enable keeps parsed refresh recovery visible", async ({
 
 test("admin UI settles a same-key reconciliation across a stale filter context without stealing focus", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "stale-unknown", feature: "float", license_fingerprint: "2".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -1198,8 +1184,7 @@ test("admin UI settles a same-key reconciliation across a stale filter context w
 
 test("admin UI settles an ABA filter switch after an exact same-key replay", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "aba-replay", feature: "float", license_fingerprint: "9".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -1246,8 +1231,7 @@ test("admin UI settles an ABA filter switch after an exact same-key replay", asy
 
 test("admin UI keeps unresolved recovery exclusive without stealing focus after a filter change", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "context-bound", feature: "float", license_fingerprint: "8".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");

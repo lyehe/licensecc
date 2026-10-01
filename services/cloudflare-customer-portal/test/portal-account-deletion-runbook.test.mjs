@@ -38,7 +38,7 @@ function seed() {
   cached("POST:/api/admin/customers:op@example.com:invite", { id: "cust_x", name: "Alice Example", email: "", login_email: "alice-login@example.com" });
   cached("POST:/api/admin/customers/cust_x/disable:op@example.com", { id: "cust_x", name: "Alice Example", email: "alice@example.com", status: "disabled" });
   cached("POST:/api/admin/customers:op@example.com", { id: "cust_y", name: "Bob", email: "", login_email: "bob-login@example.com" });
-  cached("POST:/api/admin/customers:legacy", "not json");
+  cached("POST:/api/admin/customers:malformed", "not json");
   run("INSERT INTO device_bound_authorizations (handle_hash, client_id, project, key_id, public_key_spki, device_label, redirect_uri, client_state, pkce_challenge, requested_feature, status, customer_id, feature, license_fingerprint, code_hash, code_expires_at, created_at, expires_at) VALUES ('handle-x', 'app', 'DEFAULT', 'key-cust_x', 'spki', 'Alice laptop', 'http://127.0.0.1/cb', 'st', 'pk', 'DEFAULT', 'approved', 'cust_x', 'DEFAULT', ?, 'code', ?, ?, ?)", "a".repeat(64), NOW + 60, NOW, NOW + 600);
   run("INSERT INTO customer_events (customer_id, event_type, prev_status, next_status, actor, reason, created_at) VALUES ('cust_x', 'disable', 'active', 'disabled', 'op@example.com', 'TICKET-1', ?)", NOW);
   run("INSERT INTO portal_bootstrap_events (id, customer_id, email_lower, actor, created_at) VALUES ('pb-x', 'cust_x', 'alice@example.com', 'operator', ?)", NOW);
@@ -74,7 +74,7 @@ test("the account deletion runbook clears a disabled customer's personal data an
   assert.deepEqual(rows(db, "SELECT state_hash FROM portal_oauth_states"), [], "a pending link flow goes with its session");
   assert.deepEqual(rows(db, "SELECT token_hash FROM portal_password_actions ORDER BY token_hash").map((row) => row.token_hash), ["register-other", "reset-y"]);
   assert.deepEqual(rows(db, "SELECT rate_key FROM rate_limit_counters").map((row) => row.rate_key), ["request:email:bob@example.com"]);
-  assert.deepEqual(rows(db, "SELECT scope FROM mutation_idempotency ORDER BY scope").map((row) => row.scope), ["POST:/api/admin/customers:legacy", "POST:/api/admin/customers:op@example.com"]);
+  assert.deepEqual(rows(db, "SELECT scope FROM mutation_idempotency ORDER BY scope").map((row) => row.scope), ["POST:/api/admin/customers:malformed", "POST:/api/admin/customers:op@example.com"]);
   assert.deepEqual(rows(db, "SELECT customer_id, label FROM device_bound_devices ORDER BY customer_id"), [{ customer_id: "cust_x", label: "" }, { customer_id: "cust_y", label: "cust_y laptop" }]);
   assert.deepEqual(rows(db, "SELECT device_label FROM device_bound_authorizations"), [{ device_label: "" }]);
   assert.deepEqual(snapshot(db, KEPT), kept, "audit rows are kept unchanged");

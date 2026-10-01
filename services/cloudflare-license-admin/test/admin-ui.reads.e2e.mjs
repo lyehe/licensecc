@@ -281,8 +281,7 @@ test("admin UI keeps 5xx null and scalar append cursors retryable", async ({ pag
 
 test("admin UI keeps a batch selection and its row visible through a filter reload, then clears it once the row is confirmed gone", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "selection-context", feature: "float", license_fingerprint: "a".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -391,8 +390,7 @@ test("admin UI keeps Load More working across a tab switch and still sends zero 
 
 test("admin UI entitlement list renders exactly one of table rows or cards at any viewport", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "layout-check", feature: "float", license_fingerprint: "b".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -563,8 +561,7 @@ test("admin UI fences webhook deliveries and report reads after a superseded con
 
 test("admin UI treats accepted mutation plus aborted refresh as success with manual recovery", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "refresh-abort", feature: "float", license_fingerprint: "a".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -594,8 +591,7 @@ test("admin UI treats accepted mutation plus aborted refresh as success with man
 
 test("admin UI treats malformed post-success refresh as success with manual recovery", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "refresh-malformed", feature: "float", license_fingerprint: "b".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -624,8 +620,7 @@ test("admin UI treats malformed post-success refresh as success with manual reco
 for (const refreshFailure of ["truncated", "wrong-enum"]) {
   test(`admin UI rejects a ${refreshFailure} entitlement refresh before clearing a successful consequence`, async ({ page }) => {
     const api = makeAdminApiFixture();
-    // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-    // sends is protected.
+    // Seeded directly so the scenario starts from an existing grant.
     api.seed.entitlement({ project: `refresh-${refreshFailure}`, feature: "float", license_fingerprint: (refreshFailure === "truncated" ? "a" : "b").repeat(64) });
     await page.route("**/api/admin/**", api.route);
     await page.goto("/");
@@ -675,8 +670,7 @@ test("admin UI rejects a nested-null customer detail refresh before clearing a s
 
 test("admin UI rejects a non-2xx refresh carrying an ok response", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "refresh-http-status", feature: "float", license_fingerprint: "e".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -698,8 +692,7 @@ test("admin UI rejects a non-2xx refresh carrying an ok response", async ({ page
 
 test("admin UI keeps the success warning after a parsed refresh error and clears it after recovery", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "refresh-error", feature: "float", license_fingerprint: "c".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -734,8 +727,7 @@ test("admin UI keeps the success warning after a parsed refresh error and clears
 
 test("admin UI treats missing refresh data as success with manual recovery", async ({ page }) => {
   const api = makeAdminApiFixture();
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "refresh-missing-data", feature: "float", license_fingerprint: "d".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -764,8 +756,7 @@ test("admin UI treats missing refresh data as success with manual recovery", asy
 test("admin UI falls back to a stable section when a successful row disappears", async ({ page }) => {
   const api = makeAdminApiFixture();
   api.behavior.dropTransitionRow = true;
-  // Seeded directly: the create form can no longer produce a legacy grant now that every create it
-  // sends is protected.
+  // Seeded directly so the scenario starts from an existing grant.
   api.seed.entitlement({ project: "missing-focus-row", feature: "float", license_fingerprint: "f".repeat(64) });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");

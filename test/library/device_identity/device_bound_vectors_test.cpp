@@ -171,9 +171,13 @@ BOOST_AUTO_TEST_CASE(registration_with_an_empty_requested_feature_is_an_encoding
 								  request.get<std::string>("public_key_spki"), request.get<std::string>("device_label"),
 								  request.get<std::string>("redirect_uri"),	   request.get<std::string>("state"),
 								  request.get<std::string>("code_challenge")};
+	// A sentinel byte tells "left untouched" apart from "cleared" or "partly written".
+	constexpr std::uint8_t sentinel = 0xA5;
 	SensitiveVector out;
+	out.value.assign(1, sentinel);
 	BOOST_CHECK(!encode_bound_authorization(input, out));
-	BOOST_CHECK(out.value.empty());
+	BOOST_REQUIRE_EQUAL(out.value.size(), 1U);
+	BOOST_CHECK_EQUAL(static_cast<unsigned>(out.value[0]), static_cast<unsigned>(sentinel));
 	input.requested_feature = "EXPORT";
 	BOOST_REQUIRE(encode_bound_authorization(input, out));
 	const std::string wire(out.value.begin(), out.value.end());

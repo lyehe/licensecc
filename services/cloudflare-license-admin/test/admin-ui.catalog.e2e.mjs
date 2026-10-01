@@ -419,7 +419,7 @@ test("admin UI opens a confirm dialog before a plan projection Apply that would 
       will_update: [],
       will_disable: [{
         project: "DEFAULT",
-        feature: "legacy",
+        feature: "retired",
         license_fingerprint: body.license_fingerprint,
         policy_id: null,
         source: "included",
