@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { interpretWranglerResult, sqlFor } from "../../scripts/entitlement.mjs";
+import { fileURLToPath } from "node:url";
+import * as cli from "../../scripts/entitlement.mjs";
+
+const { interpretWranglerResult, sqlFor } = cli;
+
+const cliPath = fileURLToPath(new URL("../../scripts/entitlement.mjs", import.meta.url));
+// Each run is refused before any database command, so no wrangler process starts.
+const runCli = (...args) => spawnSync(process.execPath, [cliPath, ...args], { encoding: "utf8" });
 
 test("break-glass CLI upsert does not update revoked entitlements", () => {
   const sql = sqlFor("upsert", {
@@ -14,6 +22,50 @@ test("break-glass CLI upsert does not update revoked entitlements", () => {
   assert.match(sql, /ON CONFLICT\(project, feature, license_fingerprint\) DO UPDATE SET/);
   assert.match(sql, /WHERE entitlements\.status != 'revoked'/);
   assert.match(sql, /INSERT INTO entitlement_events/);
+});
+
+test("break-glass CLI upsert writes the grant and its audit event only for an existing active customer", () => {
+  const sql = sqlFor("upsert", { fingerprint: "a".repeat(64), actor: "operator", "customer-id": "cus_1", "license-id": "lic_1" });
+  const guard = "EXISTS (SELECT 1 FROM customers WHERE id = 'cus_1' AND status = 'active')";
+  const [write, audit] = sql.split(";\n");
+  assert.ok(write.includes(guard), "the grant write is guarded");
+  assert.ok(audit.includes(guard), "the audit event is guarded the same way");
+});
+
+test("the removed revoked override is an unknown option wherever it appears on the command line", () => {
+  for (const args of [
+    ["upsert", "--fingerprint", "not-hex", "--allow-revoked-override"],
+    ["upsert", "--allow-revoked-override", "--fingerprint", "not-hex"],
+  ]) {
+    const result = runCli(...args);
+    assert.equal(result.status, 2, args.join(" "));
+    assert.equal(result.stderr.trim(), "unknown option --allow-revoked-override for upsert", args.join(" "));
+  }
+});
+
+test("the CLI usage names no way to reactivate a revoked grant", () => {
+  const result = runCli();
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /^usage:/u);
+  assert.match(result.stderr, /revoked entitlements are terminal/);
+  assert.doesNotMatch(result.stderr, /override|reactivate/i);
+  assert.match(result.stderr, /--customer-id must name an existing active customer/);
+});
+
+test("a refused mutation's notice names its cause and never suggests reactivating a revoked grant", () => {
+  const { noOpNotice } = cli;
+  const fingerprint = "a".repeat(64);
+  const upsert = noOpNotice("upsert", { fingerprint, "customer-id": "cus_typo" });
+  assert.match(upsert, /^NO-OP: upsert on project=DEFAULT feature=DEFAULT fingerprint=a{64} changed 0 rows and wrote no audit event\./u);
+  assert.match(upsert, /customer cus_typo does not exist or is not active/);
+  assert.match(upsert, /revoked, and revocation is permanent/);
+  assert.match(upsert, /get --fingerprint a{64}/);
+  for (const command of ["disable", "reenable", "revoke"]) {
+    const notice = noOpNotice(command, { fingerprint, project: "CAD" });
+    assert.match(notice, new RegExp(`^NO-OP: ${command} on project=CAD feature=DEFAULT`, "u"));
+    assert.doesNotMatch(notice, /customer/);
+  }
+  for (const notice of [upsert, noOpNotice("reenable", { fingerprint })]) assert.doesNotMatch(notice, /override|reactivate/i);
 });
 
 test("break-glass CLI transitions keep revoked terminal except revoke", () => {
@@ -40,6 +92,7 @@ test("break-glass CLI refuses an option its command does not use instead of drop
   // An option another command uses is still unknown here.
   assert.throws(() => sqlFor("revoke", { fingerprint, actor: "operator", reason: "r", "customer-id": "cus_1" }), /unknown option --customer-id for revoke/u);
   assert.throws(() => sqlFor("reenable", { fingerprint, actor: "operator", "allow-revoked-override": true }), /unknown option --allow-revoked-override for reenable/u);
+  assert.throws(() => sqlFor("upsert", { ...upsert, "allow-revoked-override": true }), /^Error: unknown option --allow-revoked-override for upsert$/u);
   assert.throws(() => sqlFor("list", { fingerprint }), /unknown option --fingerprint for list/u);
   // The connection options apply to every command.
   for (const connection of [{ database: "db" }, { config: "wrangler.toml" }, { remote: true }, { local: true }]) {
@@ -51,35 +104,6 @@ test("break-glass CLI refuses an option its command does not use instead of drop
 test("schema permits sync audit actor type", () => {
   const schema = readFileSync("schema.sql", "utf8");
   assert.match(schema, /actor_type IN \('access', 'dev', 'cli', 'sync', 'system', 'unknown'\)/);
-});
-
-test("break-glass CLI upsert --allow-revoked-override drops the guard and stamps a distinct event", () => {
-  const sql = sqlFor("upsert", {
-    fingerprint: "a".repeat(64),
-    actor: "operator",
-    status: "active",
-    reason: "mistaken revoke, ticket #123",
-    "allow-revoked-override": true,
-    "customer-id": "cus_1",
-    "license-id": "lic_1",
-  });
-  assert.doesNotMatch(sql, /WHERE entitlements\.status != 'revoked'/);
-  assert.match(sql, /'revoked-override'/);
-  assert.match(sql, /INSERT INTO entitlement_events/);
-});
-
-test("break-glass CLI upsert override requires a reason", () => {
-  assert.throws(
-    () =>
-      sqlFor("upsert", {
-        fingerprint: "a".repeat(64),
-        actor: "operator",
-        "allow-revoked-override": true,
-        "customer-id": "cus_1",
-        "license-id": "lic_1",
-      }),
-    /reason is required/,
-  );
 });
 
 test("break-glass CLI upsert sets customer_id and license_id when provided", () => {

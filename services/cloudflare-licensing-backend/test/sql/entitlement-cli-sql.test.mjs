@@ -1,8 +1,9 @@
-// Executable coverage for the break-glass CLI SQL (GAP-3). The other CLI tests only regex-assert the SQL
+// Executable coverage for the break-glass CLI SQL. The other CLI tests only regex-assert the SQL
 // string; this suite EXECUTES sqlFor() output against a real SQLite database built from the shared
 // migrations, proving the load-bearing runtime behaviors: the revoked-terminal guard actually applies zero
-// changes and writes zero audit events, --allow-revoked-override reactivates with a distinct event,
-// revocation_seq increments monotonically, and disable/reenable stay guarded against revoked rows.
+// changes and writes zero audit events, no path reactivates a revoked grant, upsert writes only for an
+// existing active customer, revocation_seq increments monotonically, and disable/reenable stay guarded
+// against revoked rows.
 //
 // Requires node:sqlite (Node >= 22 with --experimental-sqlite). Run via `npm run test:sql`; it is kept out
 // of the default `test/*.mjs` glob so the hermetic unit suite needs no experimental flag.
@@ -60,6 +61,8 @@ function freshDb() {
   for (const name of files) {
     db.exec(readFileSync(join(migrationsDir, name), "utf8"));
   }
+  // Every grant below belongs to this active customer unless a test says otherwise.
+  db.exec("INSERT INTO customers (id, name, created_at, updated_at) VALUES ('cus_1', 'Owner', 1, 1)");
   return db;
 }
 
@@ -100,28 +103,42 @@ test("upsert on a revoked row changes nothing and writes no audit event", () => 
   db.close();
 });
 
-test("upsert --allow-revoked-override reactivates a revoked row with a revoked-override cli event", () => {
+test("no upsert reactivates a revoked grant, and the removed override is an unknown option", () => {
   const db = freshDb();
   seed(db, "revoked", 5);
-  db.exec(
-    sqlFor("upsert", {
-      fingerprint,
-      actor: "op",
-      status: "active",
-      reason: "ticket",
-      "allow-revoked-override": true,
-      "customer-id": "cus_1",
-      "license-id": "lic_1",
-    }),
+  for (const status of ["active", "disabled"]) {
+    db.exec(sqlFor("upsert", { fingerprint, actor: "op", status, reason: "ticket", "customer-id": "cus_1", "license-id": "lic_1" }));
+  }
+  assert.throws(
+    () => sqlFor("upsert", { fingerprint, actor: "op", status: "active", reason: "ticket", "allow-revoked-override": true, "customer-id": "cus_1", "license-id": "lic_1" }),
+    /^Error: unknown option --allow-revoked-override for upsert$/u,
   );
-  const row = entitlement(db);
-  assert.equal(row.status, "active");
-  assert.equal(row.revocation_seq, 6);
-  const event = lastEvent(db);
-  assert.equal(event.event_type, "revoked-override");
-  assert.equal(event.actor_type, "cli");
-  assert.equal(event.source, "cli");
-  assert.equal(event.revocation_seq, 6);
+  assert.deepEqual(entitlement(db), { status: "revoked", revocation_seq: 5, customer_id: "cus_1", license_id: null });
+  assert.equal(eventCount(db), 0);
+  db.close();
+});
+
+test("upsert refuses a customer that does not exist: no grant and no audit event", () => {
+  const db = freshDb();
+  db.exec(sqlFor("upsert", { fingerprint, actor: "op", "customer-id": "cus_typo", "license-id": "lic_1" }));
+  assert.equal(entitlement(db), undefined);
+  assert.equal(eventCount(db), 0);
+  db.close();
+});
+
+test("upsert refuses a disabled customer, for a new grant and for the customer's existing one", () => {
+  const db = freshDb();
+  db.exec("INSERT INTO customers (id, name, status, created_at, updated_at) VALUES ('cus_off', 'Suspended', 'disabled', 1, 1)");
+  db.exec(sqlFor("upsert", { fingerprint, actor: "op", "customer-id": "cus_off", "license-id": "lic_1" }));
+  assert.equal(entitlement(db), undefined);
+  assert.equal(eventCount(db), 0);
+  db.exec(
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, customer_id, created_at, updated_at) " +
+      `VALUES ('DEFAULT', 'DEFAULT', '${fingerprint}', 'active', 5, 'cus_off', 1, 1)`,
+  );
+  db.exec(sqlFor("upsert", { fingerprint, actor: "op", "valid-until": 4102445000, "customer-id": "cus_off", "license-id": "lic_1" }));
+  assert.deepEqual(entitlement(db), { status: "active", revocation_seq: 5, customer_id: "cus_off", license_id: null });
+  assert.equal(eventCount(db), 0, "a refused upsert writes no audit event");
   db.close();
 });
 
