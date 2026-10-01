@@ -108,6 +108,54 @@ BOOST_AUTO_TEST_CASE(registration_refuses_labels_that_could_mislead_the_approver
 	BOOST_REQUIRE(normalize_bound_device_label("\xef\xbb\xbf\t B\xc3\xbcro-PC \r\n", normalized));
 	BOOST_CHECK_EQUAL(normalized, "B\xc3\xbcro-PC");
 }
+// A label may not hide a comparison code behind a character that renders as nothing, or spell one
+// with other dashes, spaces or fullwidth forms.
+BOOST_AUTO_TEST_CASE(registration_refuses_hidden_or_lookalike_comparison_codes) {
+	const auto r = vector("registration_wire.json").get_child("request");
+	BoundAuthorizationInput input{r.get<std::string>("client_id"),		 r.get<std::string>("project"),
+								  r.get<std::string>("public_key_spki"), r.get<std::string>("device_label"),
+								  r.get<std::string>("redirect_uri"),	 r.get<std::string>("state"),
+								  r.get<std::string>("code_challenge"),	 r.get<std::string>("requested_feature")};
+	SensitiveVector out;
+	const std::string refused[] = {
+		// Soft hyphen, combining grapheme joiner, variation selector and tag character inside a code.
+		"4F2A\xc2\xad-0C12-B7E4",
+		"4F2A-0C12-B\xcd\x8f"
+		"7E4",
+		"4F2A-0C12-B7E\xef\xb8\x8f"
+		"4",
+		"4F2A-0C12-B7\xf3\xa0\x81\x81"
+		"E4",
+		// U+206A, U+FFF9, U+061C and U+3164 inside a label.
+		"My\xe2\x81\xaaPC", "My\xef\xbf\xb9PC", "My\xd8\x9cPC", "My\xe3\x85\xa4PC",
+		// A code separated by en dashes, spaces, spaced em dashes or no-break spaces.
+		"4F2A\xe2\x80\x93"
+		"0C12\xe2\x80\x93"
+		"B7E4",
+		"4F2A 0C12 B7E4", "4F2A \xe2\x80\x94 0C12 \xe2\x80\x94 B7E4",
+		"4F2A\xc2\xa0"
+		"0C12\xc2\xa0"
+		"B7E4",
+		// A code in fullwidth digits and letters, with fullwidth or ASCII dashes.
+		"\xef\xbc\x94\xef\xbc\xa6\xef\xbc\x92\xef\xbc\xa1\xef\xbc\x8d\xef\xbc\x90\xef\xbc\xa3\xef\xbc\x91\xef\xbc\x92"
+		"\xef\xbc\x8d\xef\xbc\xa2\xef\xbc\x97\xef\xbc\xa5\xef\xbc\x94",
+		"\xef\xbc\x94\xef\xbc\xa6\xef\xbc\x92\xef\xbc\xa1-\xef\xbc\x90\xef\xbc\xa3\xef\xbc\x91\xef\xbc\x92-"
+		"\xef\xbc\xa2\xef\xbc\x97\xef\xbc\xa5\xef\xbc\x94"};
+	for (const auto& label : refused) {
+		input.device_label = label;
+		BOOST_CHECK_MESSAGE(!encode_bound_authorization(input, out), "label must be refused: " << label);
+		std::string normalized;
+		BOOST_CHECK_MESSAGE(!normalize_bound_device_label(label, normalized), "label must be refused: " << label);
+	}
+	const std::string accepted[] = {"DESKTOP-7Q2K1AB", "Studio \xe2\x80\x93 Mac",
+									"Lab PC\xc2\xa0"
+									"12",
+									"\xef\xbc\xb0\xef\xbc\xa3\xef\xbc\x91\xef\xbc\x92"};
+	for (const auto& label : accepted) {
+		input.device_label = label;
+		BOOST_CHECK_MESSAGE(encode_bound_authorization(input, out), "label must be accepted: " << label);
+	}
+}
 BOOST_AUTO_TEST_CASE(registration_response_requires_exact_schema_and_status) {
 	const auto v = vector("registration_wire.json");
 	const auto response = v.get<std::string>("response_json");

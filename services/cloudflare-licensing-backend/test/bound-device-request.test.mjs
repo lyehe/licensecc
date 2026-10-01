@@ -174,8 +174,40 @@ test("a device label that could mislead the approver is refused at registration"
   }
 });
 
+// A label may not hide a comparison code behind a character that renders as nothing, or spell one
+// with other dashes, spaces or fullwidth forms. Built from code points so no escape is lost.
+const cp = (...points) => String.fromCodePoint(...points);
+const fullwidth = text => [...text].map(c => cp(c.codePointAt(0) + 0xfee0)).join("");
+const HIDDEN_OR_LOOKALIKE_LABELS = {
+  "a soft hyphen inside a code": `4F2A${cp(0xad)}-0C12-B7E4`,
+  "a combining grapheme joiner inside a code": `4F2A-0C12-B${cp(0x34f)}7E4`,
+  "a variation selector inside a code": `4F2A-0C12-B7E${cp(0xfe0f)}4`,
+  "a tag character inside a code": `4F2A-0C12-B7${cp(0xe0041)}E4`,
+  "an inhibit symmetric swapping control": `My${cp(0x206a)}PC`,
+  "an interlinear annotation anchor": `My${cp(0xfff9)}PC`,
+  "an Arabic letter mark": `My${cp(0x61c)}PC`,
+  "a Hangul filler": `My${cp(0x3164)}PC`,
+  "a code separated by en dashes": `4F2A${cp(0x2013)}0C12${cp(0x2013)}B7E4`,
+  "a code separated by spaces": "4F2A 0C12 B7E4",
+  "a code separated by spaced em dashes": `4F2A ${cp(0x2014)} 0C12 ${cp(0x2014)} B7E4`,
+  "a code separated by no-break spaces": `4F2A${cp(0xa0)}0C12${cp(0xa0)}B7E4`,
+  "a code in fullwidth digits, letters and dashes": fullwidth("4F2A-0C12-B7E4"),
+  "a code in fullwidth digits with ASCII dashes": `${fullwidth("4F2A")}-${fullwidth("0C12")}-${fullwidth("B7E4")}`,
+};
+
+test("a device label cannot hide a comparison code behind invisible characters or look-alike separators", () => {
+  for (const [label, device_label] of Object.entries(HIDDEN_OR_LOOKALIKE_LABELS)) {
+    assert.throws(
+      () => validateBoundRequest("authorize", { ...enrollment(), device_label }),
+      error => error.code === "invalid_request" && error.status === 400,
+      label,
+    );
+  }
+});
+
 test("a device label still accepts letters, digits, spaces and punctuation in any script", () => {
-  for (const device_label of ["Büro-PC", "工作站", "Ana's MacBook Pro (2024)", "build-01.example.com", "ПК №12", "Room 4F2A-0C12", "📎 Laptop"]) {
+  for (const device_label of ["Büro-PC", "工作站", "DESKTOP-7Q2K1AB", "Ana's MacBook Pro (2024)", "build-01.example.com", "ПК №12", "Room 4F2A-0C12",
+    "📎 Laptop", `Studio ${cp(0x2013)} Mac`, `Lab PC${cp(0xa0)}12`, fullwidth("PC12")]) {
     assert.equal(validateBoundRequest("authorize", { ...enrollment(), device_label }).device_label, device_label, device_label);
   }
   // Surrounding whitespace is still trimmed before the rule applies.
