@@ -36,6 +36,6 @@
   "devDependencies": {
     "@typescript/typescript6": "6.0.2",
     "typescript": "7.0.2",
-    "wrangler": "4.140.0"
+    "wrangler": "4.142.0"
   }
 }
