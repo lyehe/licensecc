@@ -93,9 +93,9 @@ else(UNIX) #windows and linux crosscompiling for windows target
 	        SET(CMAKE_EXE_LINKER_FLAGS "-static")
 	    endif(MINGW)
 	endif(MSVC)
-	# Keep the historic Windows package path for existing consumers, and also
-	# install a conventional lib/cmake export so find_package works with a
-	# normal CMAKE_PREFIX_PATH on every supported platform.
+	# Install the package to the Windows cmake/ layout the root licensecc package
+	# uses, and also to lib/cmake/ so find_package works with a normal
+	# CMAKE_PREFIX_PATH on every supported platform.
 	set(pkg_config_dest "cmake/${PROJECT_NAME}")
 	set(pkg_config_compat_dest "lib/cmake/${PROJECT_NAME}")
 endif(UNIX)
