@@ -14,8 +14,8 @@ upstream refresh must preserve this provenance and license notice.
 `licensecc` removed v200 license issuance and the weak-key CLI options
 (`--legacy-rsa1024`, `--allow-insecure-key-size`, `project migrate-weak-key`)
 from this vendored copy: `license issue` now always emits v201, and
-`project init --key-bits` accepts only 3072 or 4096. The runtime keeps
-reading v200 licenses independently of this generator change.
+`project init --key-bits` accepts only 3072 or 4096. The `licensecc` runtime
+likewise accepts only v201 license files.
 
 `licensecc` also raised this vendored copy's OpenSSL floor to 3.0: its
 `CMakeLists.txt` requests `find_package(OpenSSL 3.0 ...)` and no longer falls
