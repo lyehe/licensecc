@@ -875,10 +875,23 @@ Not removed, with reasons:
 - The live TPM, browser and backend release gate, remote signer rotation
   qualification, the global fuse and the protected capacity harness remain
   open release items.
-- The D1 database is still named `licensecc-online-verifier`
-  (`services/cloudflare-d1-backup/src/core.ts:110`, the deploy workflows and
-  the break-glass CLI default). Renaming it changes what operators see and is
-  a separate decision.
+- The "online verifier" name survives in three places that should be renamed
+  together, as one operator-visible decision:
+  - the D1 database name `licensecc-online-verifier`
+    (`services/cloudflare-d1-backup/src/core.ts:110`, the backend
+    `wrangler.example.toml:45`, the deploy workflows and the
+    `services/cloudflare-licensing-backend/scripts/entitlement.mjs:8`
+    break-glass CLI default);
+  - the backend Worker and service name `licensecc-online-verifier`
+    (`services/cloudflare-licensing-backend/wrangler.example.toml:1`, the
+    `/health` `service` field in `src/routes/meta.ts:21`, the rollback
+    health check `scripts/check-worker-rollback-health.mjs:233` and the
+    protected smoke
+    `services/cloudflare-licensing-backend/scripts/protected-readiness-smoke.mjs:11`);
+  - the admin `PUBLIC_VERIFIER_URL` binding
+    (`services/cloudflare-license-admin/src/worker/env.ts:30,48`,
+    `src/worker/groups/summary-reports/operations.ts:24` and
+    `scripts/materialize-deploy-configs.mjs:422,539`).
 - `LCC_API_ONLINE_PROJECT_SIZE`, `LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE` and
   `LCC_API_ONLINE_DEVICE_HASH_SIZE` keep their names because configuration
   tokens and `device_identity.h` share them.
@@ -893,40 +906,76 @@ Not removed, with reasons:
   the root package uses the same Windows path; changing it is a packaging
   decision.
 
-Review findings parked for a later change:
+Parked for a later change, one item each:
 
-- An in-place baseline edit leaves `wrangler d1 migrations apply` a no-op on an
-  older database. A post-migrate schema-signature check would catch a database
-  that was not recreated.
-- The runtime still accepts 1024-bit project keys (the golden v201 vectors use
-  one), while `lccgen` refuses keys below 3072 bits.
-- `src/library/os/openssl/signature_verifier.cpp` uses the deprecated
-  `d2i_RSAPublicKey_bio`. With OpenSSL 3.0 as the floor it could move to the
-  `OSSL_DECODER` API.
-- CI workflows still install `zlib1g-dev`, which may now be unused; check that
-  nothing else needs it before removing it.
-- The .NET suite lost its wrong-prefix envelope test when the online
-  assertions went; a token with a foreign prefix should be pinned to
-  `VerifyFailureCode.Envelope`.
+- An in-place baseline edit is a no-op for `wrangler d1 migrations apply` on
+  an older database, which is why every database is recreated. Once there is
+  live data, a post-migrate schema-signature check in the deploy workflows
+  would catch a database that was not recreated.
+- Clang reports `-Wtautological-pointer-compare` warnings in
+  `public_api_symbols_are_linkable` (`test/library/public_api_test.cpp:307`);
+  they predate this branch.
 - The rewritten `docs-accuracy` test dropped two negative README guards;
-  restoring the TPM `doesNotMatch` line is worth considering.
-- `public_api_symbols_are_linkable` triggers Clang
-  `-Wtautological-pointer-compare` warnings (they predate this branch).
-- A synced withdrawal whose body names a different owner is ignored without an
-  audit note of the mismatch. A sync idempotency key reused with a different
-  body replays the first cached 200, while admin create returns 409
-  `idempotency_request_conflict` (this predates the branch).
+  consider restoring the TPM `doesNotMatch` line.
+- The runtime still accepts 1024-bit project keys, because the golden v201
+  vectors use one, while `lccgen` refuses keys below 3072 bits. Schedule
+  3072-bit golden vectors and give `current_v201_signature_policy`
+  (`src/library/os/signature_verifier.hpp:209`) the same floor.
+- `src/library/os/openssl/signature_verifier.cpp:48` calls
+  `d2i_RSAPublicKey_bio`, which raises a deprecation warning. With OpenSSL 3.0
+  as the floor it can move to the EVP or `OSSL_DECODER` API.
+- CI still runs `apt-get install` with `zlib1g-dev` in the CodeQL, lint,
+  Linux, native-security, platform-release and release-artifacts workflows,
+  which may be dead weight; check that nothing links zlib before removing it.
+- The .NET suite has no wrong-prefix token test: a token with another prefix,
+  such as `lccoa1`, should be pinned to `VerifyFailureCode.Envelope`.
+- A sync withdrawal whose body names a different owner is ignored without
+  recording the mismatch in the audit `detail`.
+- A sync idempotency key reused with a different body replays the first cached
+  200, whereas admin create returns 409 `idempotency_request_conflict`. This
+  predates the branch.
 - The admin console can report "status could not be refreshed" when a create
   lands inside the list's 300 ms filter debounce. The e2e waits for the
   filtered list, but the race in the console remains.
-- The webhook dispatcher's `reason` log field is not on the log allowlist, so
-  it is dropped (this predates the branch).
-- The admin PATCH owner and licence check is a read before the write, not an
-  assertion inside the batch. The window is narrow, and issuance re-checks the
-  customer.
+- The webhook dispatcher's `reason` log field is not on `LOG_FIELD_NAMES`
+  (`services/cloudflare-licensing-backend/src/observability/index.ts:8`), so it
+  is dropped. This predates the branch.
+- The admin grant PATCH's owner and licence check (`protectedOwnerReason` in
+  `services/cloudflare-license-admin/src/worker/groups/entitlements/protected-checks.ts`)
+  is a read before the write, not an assertion inside the batch. The window is
+  narrow, and issuance re-checks the customer.
 - The plan-projection `customer_id` paths trim a padded id instead of refusing
-  it with 400, unlike create, PATCH and sync (this predates the branch).
-- Webhook deliveries queued before a scope or URL change are still sent to the
-  endpoint's current URL, because delivery and redrive do not re-check the
-  scope (this predates the branch). The admin `webhooks.ts` is 496 lines, close
-  to the 500-line hotspot threshold.
+  it with 400, unlike create, PATCH and sync. This predates the branch.
+- Webhook deliveries queued before a scope or URL change go to the endpoint's
+  current URL, because delivery and redrive do not re-check the scope. This
+  predates the branch.
+- The admin `services/cloudflare-license-admin/src/worker/webhooks.ts` is 496
+  lines, close to the 500-line hotspot threshold.
+- Schema tightening, cheapest now while no data exists but only after an audit
+  of every writer: `orders.customer_id` and
+  `license_plan_assignments.customer_id` are still nullable
+  (`services/cloudflare-licensing-backend/migrations/0001_baseline.sql:417`
+  and `:335`), and
+  `entitlements.trial_expiration_basis` (`:265`) lacks the CHECK constraint
+  that `entitlement_policies.trial_expiration_basis` has (`:220`).
+- `LCC_LICENSE_CHECK_OPTIONS_VERSION` was reset to 1, but
+  `LCC_CONFIG_VERIFY_OPTIONS_VERSION` is still 3
+  (`include/licensecc/datatypes.h:78,81`). Both are exact-match and neither
+  was ever released, so the difference is cosmetic; pick one convention.
+- `services/cloudflare-license-admin/scripts/sync-entitlement.mjs` reports a
+  missing `--url` or token before an unknown option. This is cosmetic.
+- `npm ci` reports four audit findings, two moderate and two high, all in
+  development dependencies (`npm audit --omit=dev` reports none):
+  `brace-expansion` 1.1.18 (high, through `eslint-plugin-import` and
+  `minimatch` 3.1.5; `npm audit fix` resolves it within the existing ranges),
+  and `undici` (high) through `miniflare` (moderate) through the pinned
+  `wrangler` 4.140.0 (moderate), which npm says `wrangler` 4.145.0 fixes.
+  Bump the four service Wrangler pins together, as `test:wrangler-pins`
+  requires.
+- Two admin e2e flakes appeared under full-suite load on the Windows host and
+  passed on reruns: `admin-ui.feedback.e2e.mjs` failed once (it matches the
+  300 ms debounce race above), and one `admin-ui.connections.e2e.mjs` run
+  failed with `net::ERR_NO_BUFFER_SPACE` navigating to
+  `http://127.0.0.1:4173/` (local TCP exhaustion from the parallel Playwright
+  run). If either recurs, lower the admin suite's parallelism on Windows rather
+  than retrying silently.
