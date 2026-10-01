@@ -182,12 +182,14 @@ function sqlFor(command, options) {
     }
     // Revoked rows are terminal: the ON CONFLICT guard refuses them and no option lifts it. The
     // schema has no foreign key from a grant to its customer, so a mistyped or suspended customer
-    // would get a grant no one can use; both statements require an existing active customer, so a
-    // refused upsert writes neither the grant nor its audit event.
+    // would get a grant no one can use; both statements require an existing active customer. An
+    // upsert never changes an owner, so it also refuses an existing grant another customer owns.
+    // A refused upsert writes neither the grant nor its audit event.
     const activeCustomer = `EXISTS (SELECT 1 FROM customers WHERE id = ${sqlString(customerId)} AND status = 'active')`;
+    const sameOwner = `customer_id = ${sqlString(customerId)}`;
     return [
-      `INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, customer_id, license_id, created_at, updated_at) SELECT ${sqlString(fields.project)}, ${sqlString(fields.feature)}, ${sqlString(fields.fingerprint)}, ${sqlString(status)}, ${nextInsertedRevocationSeqSql(fields)}, ${sqlNullableInt(validFrom)}, ${sqlNullableInt(validUntil)}, ${sqlString(customerId)}, ${sqlString(licenseId)}, unixepoch(), unixepoch() WHERE ${activeCustomer} ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET status = excluded.status, revocation_seq = ${nextExistingRevocationSeqSql()}, valid_from = excluded.valid_from, valid_until = excluded.valid_until, updated_at = unixepoch() WHERE entitlements.status != 'revoked'`,
-      eventSqlFromCurrent(fields, "upsert", status, ctx.actor, ctx.reason, activeCustomer),
+      `INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, customer_id, license_id, created_at, updated_at) SELECT ${sqlString(fields.project)}, ${sqlString(fields.feature)}, ${sqlString(fields.fingerprint)}, ${sqlString(status)}, ${nextInsertedRevocationSeqSql(fields)}, ${sqlNullableInt(validFrom)}, ${sqlNullableInt(validUntil)}, ${sqlString(customerId)}, ${sqlString(licenseId)}, unixepoch(), unixepoch() WHERE ${activeCustomer} ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET status = excluded.status, revocation_seq = ${nextExistingRevocationSeqSql()}, valid_from = excluded.valid_from, valid_until = excluded.valid_until, updated_at = unixepoch() WHERE entitlements.status != 'revoked' AND entitlements.customer_id = excluded.customer_id`,
+      eventSqlFromCurrent(fields, "upsert", status, ctx.actor, ctx.reason, `${activeCustomer} AND ${sameOwner}`),
     ].join(";\n");
   }
   if (command === "revoke" || command === "disable" || command === "reenable") {
@@ -203,7 +205,7 @@ function sqlFor(command, options) {
   }
   if (command === "get") {
     const fields = baseFields(options);
-    return `SELECT project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, notes, created_at, updated_at FROM entitlements WHERE project = ${sqlString(fields.project)} AND feature = ${sqlString(fields.feature)} AND license_fingerprint = ${sqlString(fields.fingerprint)}`;
+    return `SELECT project, feature, license_fingerprint, customer_id, license_id, status, revocation_seq, valid_from, valid_until, notes, created_at, updated_at FROM entitlements WHERE project = ${sqlString(fields.project)} AND feature = ${sqlString(fields.feature)} AND license_fingerprint = ${sqlString(fields.fingerprint)}`;
   }
   if (command === "list") {
     const project = options.project === undefined ? undefined : validatedName(options.project, "project", 127);
@@ -215,7 +217,7 @@ function sqlFor(command, options) {
     if (feature !== undefined) {
       filters.push(`feature = ${sqlString(feature)}`);
     }
-    return `SELECT project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, notes, created_at, updated_at FROM entitlements${filters.length === 0 ? "" : ` WHERE ${filters.join(" AND ")}`} ORDER BY updated_at DESC LIMIT 100`;
+    return `SELECT project, feature, license_fingerprint, customer_id, license_id, status, revocation_seq, valid_from, valid_until, notes, created_at, updated_at FROM entitlements${filters.length === 0 ? "" : ` WHERE ${filters.join(" AND ")}`} ORDER BY updated_at DESC LIMIT 100`;
   }
   usage();
 }
@@ -262,7 +264,7 @@ function interpretWranglerResult(parsedJson, command) {
 function noOpNotice(command, options) {
   const target = `project=${options.project ?? "DEFAULT"} feature=${options.feature ?? "DEFAULT"} fingerprint=${options.fingerprint}`;
   const cause = command === "upsert"
-    ? `Either customer ${options["customer-id"]} does not exist or is not active, or the entitlement is revoked, and revocation is permanent.`
+    ? `Either customer ${options["customer-id"]} does not exist or is not active, the entitlement belongs to another customer, and upsert never changes an owner, or the entitlement is revoked, and revocation is permanent.`
     : command === "revoke"
       ? "The entitlement does not exist."
       : "The entitlement is revoked, and revocation is permanent, or it does not exist.";

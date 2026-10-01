@@ -246,8 +246,11 @@ duplicate check as crash-redrive evidence.
   conflict — ownership is set once, at creation. The customer must exist and be
   active; the schema has no foreign key from a grant to its customer, so the
   write and its audit event both carry that guard, and a mistyped or suspended
-  customer gets no grant. A guarded mutation is a NO-OP: it changes zero rows and
-  writes no audit event. On `--remote` the helper detects this (zero
+  customer gets no grant. An upsert onto an existing grant that another customer
+  owns is refused the same way and leaves that grant untouched; `get` and `list`
+  show each grant's `customer_id` and `license_id`. A guarded mutation is a
+  NO-OP: it changes zero rows and writes no audit event. On `--remote` the
+  helper detects this (zero
   `rows_written`) and exits 3 with a notice naming the cause; on `--local` the
   helper sees no row counts in the wrangler output, so it prints a note and you
   should confirm with `get`. Use `reenable` to make a *disabled* entitlement active

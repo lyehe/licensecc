@@ -119,8 +119,12 @@ test("break-glass CLI upsert sets customer_id and license_id when provided", () 
   assert.match(sql, /customer_id, license_id, created_at, updated_at\) SELECT /);
   assert.match(sql, /'cus_123'/);
   assert.match(sql, /'lic_123'/);
-  assert.doesNotMatch(sql, /customer_id = excluded\.customer_id/);
-  assert.doesNotMatch(sql, /license_id = excluded\.license_id/);
+  // A later upsert never reassigns the owner or the license: neither is in the SET clause.
+  const assignments = sql.slice(sql.indexOf("DO UPDATE SET"), sql.indexOf(" WHERE entitlements.status != 'revoked'"));
+  assert.match(assignments, /^DO UPDATE SET status = excluded\.status, /u);
+  assert.doesNotMatch(assignments, /customer_id|license_id/);
+  // It refuses a grant another customer owns instead of refreshing it.
+  assert.match(sql, /WHERE entitlements\.status != 'revoked' AND entitlements\.customer_id = excluded\.customer_id/);
 });
 
 test("upsert requires --customer-id and --license-id", () => {

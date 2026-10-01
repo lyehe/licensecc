@@ -621,7 +621,8 @@ operator break-glass path that **bypasses Cloudflare Access**. It stamps
 `revocation_seq` server-side. `upsert` requires `--customer-id` and
 `--license-id`: every entitlement it creates is a protected grant with a named
 owner, and neither field is cleared or reassigned on a later conflict. The
-customer must exist and be active, or `upsert` writes nothing. Like the admin
+customer must exist and be active, and an existing grant must already belong to
+that customer, or `upsert` writes nothing. Like the admin
 Worker it treats revoked as permanent: `upsert`/`disable`/`reenable` will not
 change a revoked row, and no command or option makes it active again. A guarded
 no-op writes no audit event, and the helper exits 3 on `--remote` with a notice
