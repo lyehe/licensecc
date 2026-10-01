@@ -90,4 +90,4 @@ Registry identifiers: ``cpp-local-verification``, ``hardware-binding``,
 ``backend-order-fulfillment``, ``admin-control-plane``,
 ``portal-self-service``, ``d1-backup-and-restore-drill``, ``python-sdk``,
 ``dotnet-sdk``, ``arm-support``, ``custom-execution-limits``,
-``tpm-request-proof-provider``, ``windows-device-bound-client``, and ``java-sdk``.
+``tpm-device-key-provider``, ``windows-device-bound-client``, and ``java-sdk``.

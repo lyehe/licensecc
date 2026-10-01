@@ -63,7 +63,7 @@ bool payload_claims(const std::vector<std::uint8_t>& bytes, BoundLeaseClaims& ou
 }
 // DER SPKI for rsaEncryption with explicit NULL parameters. Reuse the existing
 // strict DER length/integer checks and RSA exponent validation, without changing
-// the legacy verifier's PKCS#1-based key identity contract.
+// the offline signature verifier's PKCS#1-based key identity contract.
 bool rsa3072_spki(const std::vector<std::uint8_t>& spki, std::vector<std::uint8_t>& pkcs1, std::string& spki_id) {
 	if (spki.size() > 1024 || spki.empty() || spki[0] != 0x30) return false;
 	std::size_t offset = 1, length = 0;

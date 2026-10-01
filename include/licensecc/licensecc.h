@@ -205,7 +205,7 @@ LCC_EVENT_TYPE lcc_verify_config_decision(const CallerInformations* callerInform
  * Enables or disables license lookup through process environment variables
  * (`LICENSE_LOCATION` and `LICENSE_DATA`). Hardened generated projects disable
  * environment lookup by default. Enable it only for trusted test, support, or
- * compatibility flows; production hosts should normally pass an explicit
+ * launcher-supplied license flows; production hosts should normally pass an explicit
  * ::LicenseLocation to ::acquire_license or use the colocated license-file
  * lookup. This process-global policy is atomic but should be configured once
  * during single-threaded startup before worker threads begin license checks.

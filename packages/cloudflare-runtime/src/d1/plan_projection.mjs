@@ -134,10 +134,10 @@ function managedEntitlementsStatement(env, input) {
 }
 
 function entitlementFingerprintConflictStatement(env, input) {
-  // This is an identity fence, not a managed-catalog lookup: historic rows
-  // may predate license_plan_assignments or refer to arbitrary features. A
-  // normalized projection license_id is always non-empty, so NULL/empty legacy
-  // license ids retain their existing non-match behavior.
+  // This is a non-catalog identity fence, not a managed-catalog lookup: a row
+  // may have no license_plan_assignments entry or name an arbitrary feature. A
+  // normalized projection license_id is always non-empty, so a NULL or empty
+  // license_id on such a row never matches.
   return env.DB.prepare(
     `SELECT 1
      FROM entitlements e
@@ -199,7 +199,7 @@ function selectedPlanRows(rows, plan, addonList) {
 
 // All source-dependent Preview reads run in one D1 batch. D1 executes a batch
 // atomically, so generation, plan, feature/policy rows, managed entitlement
-// rows, the all-entitlement identity fence, and the compatibility-critical
+// rows, the all-entitlement identity fence, and the conflict-critical
 // assignment snapshot all come from one source snapshot rather than a sequence
 // of independently fresh reads. Cleanup deliberately follows capacity
 // validation, so an oversized Preview remains entirely read-only.

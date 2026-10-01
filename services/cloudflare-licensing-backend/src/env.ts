@@ -47,7 +47,7 @@ interface RuntimeEnv {
   // Protected-device global fuse (requests/minute); default 1000, range 100..1000000.
   BOUND_GLOBAL_RATE_LIMIT?: string;
   // Protected device v2: explicit registry/issuer and independently purposed
-  // RSA-3072 signer. Missing configuration fails closed; no legacy key fallback.
+  // RSA-3072 signer. Missing configuration fails closed; there is no fallback key.
   BOUND_DEVICE_CONFIG?: string;
   BOUND_APPROVAL_ENCRYPTION_KEYS?: string;
   BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM?: string;

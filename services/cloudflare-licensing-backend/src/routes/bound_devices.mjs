@@ -10,7 +10,7 @@ export async function handleBoundDevice(request, env, operation) {
   try {
     if (request.url.includes("?") || request.url.includes("#")) throw new BoundRequestError();
     // Fixed issuer/audience and client registry are required even for challenge
-    // issuance. A partially configured deployment is closed, not a legacy mode.
+    // issuance. A partially configured deployment fails closed.
     const config = boundDeviceConfig(env);
     const db = typeof env.DB.withSession === "function" ? env.DB.withSession("first-primary") : env.DB;
     await limitBoundRequest(request, env, db);

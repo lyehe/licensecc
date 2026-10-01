@@ -19,9 +19,11 @@ owner; JNI only marshals its C interface.
 
 ## Build and install
 
-Use Windows x64, an x64 JDK 17+, and an **installed** Licensecc package with
-device identity and Windows TPM enabled. Match the installed package's MSVC
-architecture, configuration and CRT. Set `JAVA_HOME` to the JDK directory.
+Use an x64 JDK 17+ and an **installed** 64-bit Licensecc package with device
+identity and its platform TPM provider enabled: Windows TPM with MSVC on Windows
+x64, or TPM2/OpenSSL with the Linux desktop flow on Linux. On Windows, match the
+installed package's MSVC architecture, configuration and CRT. Set `JAVA_HOME`
+to the JDK directory.
 The standalone CMake project needs JNI headers, not a JVM import library; it
 does not introduce a JDK dependency into normal C++ builds.
 
@@ -32,6 +34,9 @@ cmake --build build/java-device-bound --config Release
 cmake --install build/java-device-bound --config Release --prefix C:/your-app/native
 npm run test:java-sdk
 ```
+
+On Linux, configure with `-DCMAKE_PREFIX_PATH=<install-prefix>` instead; the
+built library is `liblicensecc_device_bound_jni.so`.
 
 Distribute the built SDK JAR with
 `bin/licensecc_device_bound_jni.dll` and its matching runtime dependencies.
@@ -71,7 +76,8 @@ worker thread. Java thread interruption does not cancel native I/O.
 Configure the application's fixed backend/portal origins, issuer, lease/proof
 audiences, project, feature, registered client and callback path. Supply the
 dedicated public RSA-3072 **DER SPKI** trust ring via
-`DeviceBoundConfiguration.TrustedSigner`; the legacy PKCS#1 key type is different.
+`DeviceBoundConfiguration.TrustedSigner`; a PKCS#1 key, such as the offline license
+project key, is a different type.
 Configuration and trust bytes are defensively copied, and text uses strict
 UTF-8. Native policy validation remains authoritative.
 
@@ -134,7 +140,8 @@ Real-library calls use invalid configuration rejected before any key,
 checkpoint or network provisioning. The incompatible-version DLL and synthetic
 fixture are test-only and are never installed.
 
-Windows CI runs this gate for the existing TPM-enabled installed package.
+Windows CI runs this gate for the TPM-enabled installed package. Linux CI builds
+the bridge against the installed TPM2 package and runs `scripts/test-java-sdk.mjs`.
 Physical TPM/browser/backend, copied-checkpoint and host deployment qualification
 remain separate release requirements; this gate does not claim those results.
 

@@ -2,7 +2,7 @@
 
 ## Optional feature sessions
 
-`FeatureSessionLibrary` loads the installed Windows JNI bridge. Use
+`FeatureSessionLibrary` loads the installed JNI bridge on Windows x64 or Linux. Use
 `open(configuration)` with a feature already enrolled through the device-bound
 flow. Every job needs a new session and a successful `start()` online decision.
 Call `authorize("BATCH_RUN")` before the first protected unit, every subsequent
@@ -16,14 +16,14 @@ same handle with bounded backoff. Handle checkpoint failures independently with
 Call `stop()` to end local authority and use try-with-resources to close the
 session. Stop does not retire the machine or release a device slot. Another
 feature, such as `EXPORT`, needs its own enrolled configuration and session.
-Build the JNI library from the same SDK version as the JAR: a JNI library from
-before this release (JNI protocol 1) is rejected at load, by `DeviceBoundLibrary`
-as well as by this adapter. See the [installed adapter guide](native/README.md) and
+Build the JNI library from the same SDK version as the JAR: a JNI library built
+for a different JNI protocol is rejected at load, by `DeviceBoundLibrary` as
+well as by this adapter. See the [installed adapter guide](native/README.md) and
 [native session contract](../../doc/api/feature_sessions.rst).
 
 The Java 17 SDK is a dependency-free client for Licensecc's signed-token
 contract. It verifies `lcccfg1` configuration attestations locally. An
-optional Windows x64 [device-bound JNI adapter](native/README.md) calls the
+optional [device-bound JNI adapter](native/README.md) for Windows x64 and Linux calls the
 installed native runtime for browser enrollment, TPM identity, renewal and
 local authorization.
 
@@ -123,3 +123,6 @@ and run its Windows gate with an installed TPM-enabled Licensecc package:
 ```powershell
 pwsh -NoProfile -File scripts/ci/run-installed-java-device-bound.ps1 -InstallPrefix C:/your-install
 ```
+
+Linux CI builds the same bridge against an installed TPM2 package and runs
+`scripts/test-java-sdk.mjs` against it.

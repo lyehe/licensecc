@@ -34,7 +34,7 @@ No native DLL is bundled in the Python wheel. The Python package can still
 be imported and used on other platforms without this DLL.
 
 Use the existing account/browser consent flow. Configure the dedicated public
-RSA-3072 **SPKI** trust ring; this is not the legacy SDK's PKCS#1 trust record.
+RSA-3072 **SPKI** trust ring; a PKCS#1 key, such as the offline license project key, is a different type.
 Create a `Configuration` and `DeviceBoundLibrary`, then explicitly choose
 `open_enrollment(configuration)` for a new device or
 `open_resume(configuration)` for an existing device. Both return

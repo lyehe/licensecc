@@ -8,7 +8,7 @@
  * protected work: call lcc_device_bound_authorize immediately before that work.
  * Handles require exclusive ownership at close; other calls return BUSY on overlap.
  * Blocking network and shell operations belong on an application worker thread.
- * No call silently deletes a key, retires a binding or falls back to legacy.
+ * No call silently deletes a key, retires a binding or falls back to another licensing path.
  * @{ */
 #ifdef __cplusplus
 extern "C" {

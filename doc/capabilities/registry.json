@@ -221,7 +221,7 @@
       ]
     },
     {
-      "id": "tpm-request-proof-provider",
+      "id": "tpm-device-key-provider",
       "title": "TPM device-key provider",
       "status": "platform_limited",
       "owner": "C++ ABI and core maintainer",

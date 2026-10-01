@@ -44,7 +44,11 @@ The canonical licensing D1 schema lives under
 `schema.sql` and `scripts/check-schema-parity.py` tooling. After editing the
 baseline, run
 `npm run schema:write --workspace @licensecc/cloudflare-licensing-backend`
-and recreate every D1 database; there is no upgrade path. Admin and portal
+and recreate every D1 database; there is no upgrade path. Create each table
+after every table its foreign keys reference: a D1 export replays tables in
+creation order and enforces foreign keys on import, and
+`services/cloudflare-licensing-backend/test/db/db-conformance.test.mjs` pins
+that order. Admin and portal
 local migration commands deliberately apply that backend-owned schema; they do
 not create a second migration history. Put a service-specific query beside the
 route or bounded context that owns the data transition. Shared D1 binding

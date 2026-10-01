@@ -142,9 +142,9 @@ unset(_lcc_source_inside_binary)
 unset(_lcc_projects_inside_source)
 unset(_lcc_projects_inside_binary)
 
-# The reconciled online/v201 modules use project-scoped generated headers.
-# Keep the generated metadata under the build tree while preserving the legacy
-# include shape consumed by existing C and C++ callers.
+# The v201 licence modules use project-scoped generated headers. Keep the
+# generated metadata under the build tree, in the licensecc/<project>/ include
+# shape that C and C++ callers use.
 set(LCC_PROJECT_INCLUDE_ROOT "${LCC_PROJECTS_BASE_DIR}/${LCC_PROJECT_NAME}/include")
 set(LCC_PROJECT_CONFIG_HEADER "${PROJECT_NAME}/${LCC_PROJECT_NAME}/licensecc_properties.h")
 set(LCC_PROJECT_PUBLIC_KEY_HEADER "${PROJECT_NAME}/${LCC_PROJECT_NAME}/public_key.h")
