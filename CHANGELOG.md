@@ -47,3 +47,11 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
 - Customer account tokens.
 - The `/v1/emergency` break-glass routes.
 - The local SQLite online demo.
+- A D1 schema upgrade path: the schema is one baseline edited in place, so every D1 database
+  (staging, production, and restore scratch databases) must be recreated from the baseline when
+  it changes.
+- Release qualification of the live TPM, browser, and backend journeys: they remain release
+  gates on each supported platform.
+- A flood limit that spares legitimate clients: the protected global fuse
+  (`BOUND_GLOBAL_RATE_LIMIT`) can deny all online licensing when a few sources flood the
+  protected routes, so operators must size it to the expected peak and add a WAF rate rule.
