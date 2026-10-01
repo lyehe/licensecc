@@ -40,11 +40,13 @@ const CHECKOUTS = [
   ["with CRLF line endings", committed.replace(/\r\n/gu, "\n").replace(/\n/gu, "\r\n")],
 ];
 
-// Edits one checkout's text and fails if the edit matched nothing.
+// Edits one checkout's text on its LF form, keeps the checkout's line endings, and fails if the
+// edit matched nothing.
 function edit(checkout, from, to) {
-  const edited = checkout.replace(from, to);
-  assert.notEqual(edited, checkout, `the edit ${String(from)} must change the table`);
-  return edited;
+  const lf = checkout.replace(/\r\n/gu, "\n");
+  const edited = lf.replace(from, to);
+  assert.notEqual(edited, lf, `the edit ${String(from)} must change the table`);
+  return checkout.includes("\r\n") ? edited.replace(/\n/gu, "\r\n") : edited;
 }
 
 for (const [label, checkout] of CHECKOUTS) {
