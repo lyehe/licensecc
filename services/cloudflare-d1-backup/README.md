@@ -1,7 +1,7 @@
 # Cloudflare D1 Backup
 
-Scheduled D1 export infrastructure for the hosted license verifier database.
-This service is intentionally separate from the public verifier and admin UI:
+Scheduled D1 export infrastructure for the hosted licensing database.
+This service is intentionally separate from the licensing backend and admin UI:
 it owns backup automation only, uses a least-privilege D1 REST API token, and
 stores SQL dumps plus metadata manifests in R2.
 
@@ -278,8 +278,8 @@ authenticity. The adjacent manifest is not signed and shares the R2 write trust
 boundary with the SQL object, so a principal able to replace both can replace
 the digest too. ETag (and R2's default MD5 behavior) is not treated as an
 authenticity mechanism. Restore evidence therefore reports
-`authenticity_verified: false`. Older R2 manifests without the strong integrity
-and snapshot-time fields fail closed; a local `--sql-file` drill remains
+`authenticity_verified: false`. A manifest without the strong integrity and
+snapshot-time fields fails closed; a local `--sql-file` drill remains
 explicitly unverified.
 
 Immediately after import, and before changing the scratch schema, the drill
@@ -295,18 +295,18 @@ current baseline cannot be restored through this drill — the database must be
 recreated from the baseline instead.
 
 Device operation tombstones are durable counted state in the baseline schema.
-Older manifests that omit counts for an already-present `device_bound_operations`
-table fail restore validation; they require explicit restore migration and
-revalidation, not an exemption treating tombstones as temporary records. Counts
+A manifest that omits counts for the `device_bound_operations` table fails
+restore validation; tombstones are never treated as temporary records. Counts
 cannot prove the safety of restoring a snapshot taken before an operation existed;
-the protected-client cutover/restore procedure must address that rollback window.
+the restore procedure must address that rollback window.
 
 After the baseline migration history is verified, the drill compares the normalized
 SQLite DDL signature for all 42 tables, 63 named indexes, and 48 triggers
 against the canonical generated `cloudflare-licensing-backend/schema.sql`
 signature. Evidence emits only SHA-256 signatures and object/count metadata,
-not DDL or row values. High-churn/swept delivery, meter, nonce, session, and
-preview/projection tables remain presence- and schema-checked rather than
+not DDL or row values. High-churn/swept delivery, rate-limit, nonce, session,
+protected-device ephemera, and preview/projection tables remain presence- and
+schema-checked rather than
 snapshot-counted. When `--source-database` is supplied, its current counts are
 reported explicitly as informational and never invalidate a valid historic
 snapshot merely because the live source has received later writes.

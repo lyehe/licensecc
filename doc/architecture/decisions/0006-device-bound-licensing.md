@@ -1,6 +1,6 @@
 # ADR 0006: Device-bound licensing authority and persistent slots
 
-- Status: Accepted for staged implementation; public v2 endpoints and a reviewed
+- Status: Accepted; public v2 endpoints and a reviewed
   browser consent flow exist. Public Windows and Linux owners and installed
   consumers exist; each live TPM/browser/backend journey remains a release gate.
 - Date: 2026-09-13

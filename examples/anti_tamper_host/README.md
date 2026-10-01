@@ -18,8 +18,8 @@ The check options initializer sets the secure defaults, so `tamper_policy` is
 A `host_integrity_check` runs on a machine the attacker may fully control. It can
 be patched out, hooked, or stubbed to always return `true`. Do not treat it as a
 guarantee. Use it as one input to a layered defense: combine it with server-side
-entitlement checks and online verification, plus telemetry. On its own it
-stops nothing.
+entitlement checks such as protected device-bound online licensing, plus
+telemetry. On its own it stops nothing.
 
 ## Build and run
 

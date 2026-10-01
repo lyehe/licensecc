@@ -13,7 +13,7 @@ accept ownership.
 | C++ ABI and core maintainer | `include/licensecc/`, `src/library/`, `test/`, `cmake/`, root CMake files | Public headers, ABI behavior, licensing runtime, platform adapters, CMake targets, and C++ tests. |
 | Shared licensing-domain maintainer | `packages/licensing-domain/` | Portable entitlement values, policy transitions, catalog DTOs, pure projections, contracts, and audit logic. No Worker bindings. |
 | Shared Cloudflare-runtime maintainer | `packages/cloudflare-runtime/` | Reused HTTP/auth/D1 mechanics and protocol adapters. No deployable route or service-specific business transition. |
-| Backend deployable maintainer | `services/cloudflare-licensing-backend/` | Licensing verification, fulfillment, leases, seats, webhooks, D1 queries/migrations, backend OpenAPI, and backend deployment. |
+| Backend deployable maintainer | `services/cloudflare-licensing-backend/` | Protected device licensing, fulfillment, webhooks, D1 schema, backend OpenAPI and deployment, including the `BOUND_DEVICE_CONFIG` shape that `src/device/bound_config.mjs` validates. |
 | Admin deployable maintainer | `services/cloudflare-license-admin/` | Operator Worker routes, authorization/use cases, admin OpenAPI, catalog/policy workflows, UI features, and deployment. |
 | Customer-portal deployable maintainer | `services/cloudflare-customer-portal/` | Customer auth/session/public routes, portal OpenAPI, self-service UI/workflows, and deployment. |
 | D1-backup deployable maintainer | `services/cloudflare-d1-backup/` | D1 export/R2 backup Worker, restore drill, Workflow, operational checks, and deployment. |
@@ -45,3 +45,15 @@ accept ownership.
 * `AGENTS.md` and repository skills route work to this map and the change guide.
   They may summarize commands for context efficiency but must not redefine
   ownership, architecture, or release authority.
+
+## Recorded cross-boundary edges
+
+* `scripts/materialize-deploy-configs.mjs` (Release and CI tooling) imports
+  `services/cloudflare-licensing-backend/src/device/bound_config.mjs` to
+  validate `BOUND_DEVICE_CONFIG` and the `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM`
+  PEM with the backend's own parsers, rather than keeping a second copy of the
+  rules. The backend owns the config shape; the tooling only consumes it.
+  `npm run check:architecture` scans only `services/*/src` and
+  `packages/*/src`, so it does not see this tooling-to-backend edge. A change
+  to `bound_config.mjs` must therefore also run
+  `npm run test:release-operations`, which exercises the materializer.

@@ -9,8 +9,7 @@ announced.
 
 The independently versioned C++ runtime and the platform services/SDKs have
 separate release streams. A tag or package is supported only when its release
-notes explicitly say so; inherited legacy tags do not describe the current
-platform.
+notes explicitly say so.
 
 This repository provides software that operators may deploy themselves. The
 project does not operate or claim a hosted production service, so incidents in

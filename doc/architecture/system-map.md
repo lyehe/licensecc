@@ -11,10 +11,10 @@ rewrite.
 
 | Area | Responsibility | Deployable/public output |
 | --- | --- | --- |
-| `include/licensecc/` | Stable C/C++-linkage public ABI: license acquisition, device identification, and configuration-token verification types. | Installed public headers `licensecc.h` and `datatypes.h`; CMake target `licensecc::licensecc_static`. |
-| `src/library/` | C++ licensing implementation, parsing, hardware identification, anti-tamper, and configuration attestation. | Static runtime library. |
+| `include/licensecc/` | Stable C/C++-linkage public ABI: offline v201 license acquisition, hardware identification, configuration-token verification, and the optional device-identity, device-bound, and feature-session APIs. | Installed public headers `licensecc.h`, `datatypes.h`, `device_identity.h`, `device_bound.h`, and `feature_session.h`; CMake target `licensecc::licensecc_static`. |
+| `src/library/` | C++ licensing implementation: v201 license parsing, hardware identification, anti-tamper, configuration attestation, and the protected device-bound client. | Static runtime library. |
 | `cmake/`, root `CMakeLists.txt`, `CMakePresets.json` | CMake configuration, project/key generation, install/export configuration, and build presets. | Build-tree generated project material and install tree. |
-| `services/cloudflare-licensing-backend/` | Licensing API Worker and D1-backed entitlement, lease, fulfillment, audit, and webhook behavior. | Cloudflare licensing backend Worker. |
+| `services/cloudflare-licensing-backend/` | Protected device-licensing API Worker: device enrollment, signed device leases and renewal, order fulfillment, audit, webhooks, and the D1 baseline schema. | Cloudflare licensing backend Worker. |
 | `services/cloudflare-license-admin/` | Administrative Worker API and its React/Vite operator UI. | Cloudflare license-admin Worker plus static UI assets. |
 | `services/cloudflare-customer-portal/` | Customer portal Worker, session/auth flow, and React/Vite customer UI. | Cloudflare customer-portal Worker plus static UI assets. |
 | `services/cloudflare-d1-backup/` | D1 export-to-R2 backup Worker and Workflow composition. | Cloudflare D1 backup Worker and `D1BackupWorkflow`. |
@@ -130,7 +130,9 @@ manifests, exports, and declared dependencies. It rejects package-to-service,
 service-to-service, UI-to-worker,
 undeclared workspace, unresolved relative/subpath, and cross-workspace-relative
 imports. Repository-hygiene policy remains cached-only and does not inspect ignored
-local build output.
+local build output. The check does not scan `scripts/`; the one tooling import
+of backend source, the deploy materializer's use of `bound_config.mjs`, is
+recorded in {doc}`ownership`.
 
 The remaining repository tooling boundaries are executable too:
 

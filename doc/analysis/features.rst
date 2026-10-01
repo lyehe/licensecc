@@ -13,12 +13,13 @@ Historical context
 
 The C++ library originated as a local license-file verifier with expiry,
 feature, version, and hardware-binding inputs. The repository has since gained
-online verification, floating-seat lifecycle routes, administration, a customer
-portal, backup tooling, signed host-defined execution policies, native Linux
-ARM64 evidence, and Python/.NET/Java token SDKs. Their exact current status
-and constraints are intentionally centralized in the registry.
+protected device-bound online licensing, signed order fulfillment,
+administration, a customer portal, backup tooling, signed host-defined
+execution policies, native Linux ARM64 evidence, and Python/.NET/Java token
+SDKs. Their exact current status and constraints are intentionally centralized
+in the registry.
 
-TPM-backed request-proof providers, Linux ARM64, and environment classification
+TPM-backed device-key providers, Linux ARM64, and environment classification
 remain platform-limited rather than universal. Container and cloud hardware
 identification is deliberately constrained rather than described as universal
 machine binding. The signed ``custom-limit`` value is intentionally opaque:

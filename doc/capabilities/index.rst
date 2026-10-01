@@ -47,26 +47,34 @@ Local C++ runtime
 Online platform
 ---------------
 
-* **Fail-closed online verification** and **signed order fulfillment** are
-  shipped in the accepted repository.
-* **Backend request proof of possession** is experimental. The protocol is
-  implemented; the C++ runtime now has platform-limited Windows Platform KSP
-  and Ubuntu TPM2/OpenSSL provider surfaces with conditional build and
-  simulator evidence. These are client-runtime integrations, not a hosted
-  backend TPM claim.
-* **Administrative control plane**, **customer self-service portal**, and **D1
-  backup and restore drill** are shipped in the accepted repository.
+* **Protected device-bound online licensing** is experimental. The backend
+  serves the four ``/v2`` device routes and the portal serves browser consent;
+  every grant is protected. Leases last at most 24 hours and never survive a
+  process restart. Live TPM, browser, and backend journeys remain a release
+  gate, and no protected capacity harness exists yet.
+* **Signed order fulfillment** is shipped in the accepted repository.
+* **Administrative control plane**, **customer self-service portal** (protected
+  devices and consent only), and **D1 backup and restore drill** are shipped in
+  the accepted repository.
+
+The capabilities the initial release deliberately does not include are listed
+in the launch scope of :doc:`../operations/production-readiness`.
 
 SDKs and platform limits
 ------------------------
 
 * The **Python**, **.NET**, and dependency-free **Java 17+ SDKs** are shipped and
-  tested from the repository. None is published to its public package registry.
+  tested from the repository for ``lcccfg1`` config-token verification. Their
+  optional protected adapters call the installed native runtime; none has an
+  HTTP backend client. None is published to its public package registry.
 * **Linux ARM64** is platform-limited and runs the native purity suite on an
   Ubuntu 24.04 ARM64 runner. Windows ARM64, macOS, and prebuilt ARM packages are
   not claimed.
-* TPM provider support remains platform-limited rather than universal.
-* The **Windows device-bound desktop client** has an additive public C API and
+* The **TPM device-key providers** (Windows Platform KSP and Ubuntu
+  TPM2/OpenSSL) remain platform-limited rather than universal, with conditional
+  build and simulator evidence. They are client-runtime integrations, not a
+  hosted backend TPM claim.
+* The **Windows and Linux device-bound desktop client** has a public C API and
   installed example with local workflow/build evidence. Live TPM/browser/backend
   qualification remains open; see :doc:`../api/device_identity`.
 

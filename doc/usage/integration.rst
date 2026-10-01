@@ -108,7 +108,8 @@ install prefix, application source, and executable paths.
 Do not make a successful build the authorization signal. Protected behavior
 must remain unavailable until the runtime returns ``LICENSE_OK`` for the exact
 product feature being used. :doc:`examples` routes to the fail-closed host and
-the production-shaped online decision example.
+to the protected device-bound example, which needs fresh online permission for
+each protected operation.
 
 Verification
 ************

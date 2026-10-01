@@ -2,10 +2,10 @@ Feature work sessions
 =====================
 
 Use a feature work session when each new job must obtain fresh permission from
-the licensing Worker. This is an additional native API in
-``licensecc/feature_session.h``. Existing device-bound enrollment and renewal
-APIs retain their behavior. Windows uses the user-scoped TPM provider; Linux
-uses the TPM2/OpenSSL provider. Both expose the same C API and SDK adapters.
+the licensing Worker. The native API is declared in
+``licensecc/feature_session.h`` and builds on device-bound enrollment and
+renewal. Windows uses the user-scoped TPM provider; Linux uses the
+TPM2/OpenSSL provider. Both expose the same C API and SDK adapters.
 
 One session authorizes one immutable feature, such as ``BATCH_RUN`` or ``EXPORT``.
 Feature IDs contain 1–15 ASCII letters, digits, underscores, dots, colons or
@@ -14,8 +14,8 @@ hyphens. Display labels can be more descriptive; they are not protocol IDs.
 Enrollment and starting work
 ----------------------------
 
-First enroll each feature with the existing :doc:`device_identity` browser
-flow. The app shows its expected feature and includes it in registration.
+First enroll each feature with the :doc:`device_identity` browser flow. The
+app shows its expected feature and includes it in registration.
 The portal lists only matching entitlements; approval cannot change the requested
 feature. The comparison code binds the feature as well as the app, key and callback.
 The feature is required: the backend refuses a registration without it.
@@ -80,31 +80,32 @@ result for the next operation is permission. Calls on the same owner must be
 serialized; overlapping calls return ``BUSY``. Close requires exclusive ownership
 after other calls have returned.
 
-Capacity and compatibility
---------------------------
+Capacity and adapters
+---------------------
 
-The Worker uses the existing protected-device endpoints and signed lease format.
-Each successful start or renewal normally uses two HTTPS POST requests; local
-authorization generates no server traffic. The entitlement's existing
-``lease_seconds`` sets the lease duration, bounded by its validity and trial.
+The Worker uses the protected-device ``/v2`` endpoints and the signed ``lccdl1``
+lease format. Each successful start or renewal normally uses two HTTPS POST
+requests; local authorization generates no server traffic. The entitlement's
+``lease_seconds`` sets the lease duration (24 hours by default, which is also
+the longest lease the backend signs), bounded by its validity and trial.
 Renewal is due at the signed halfway point. Frequent sessions increase signing,
 database and retained audit work; choose job boundaries deliberately.
 
 Capacity remains per ``(project, feature, license_fingerprint)`` entitlement.
 Repeated jobs on one binding do not consume additional device slots. Two
 separately licensed features can consume one slot in each feature's entitlement.
-Stop neither retires the binding nor frees its persistent slot. This API does
-not impose a concurrent-process limit and does not replace floating-seat
-checkout/heartbeat/release. Existing legacy and floating APIs are unchanged.
+Stop neither retires the binding nor frees its persistent slot. The device
+limit caps connected devices only: this API does not impose a
+concurrent-process limit, and the platform has no concurrent-seat model.
 
 Python ``licensecc.feature_session``, .NET ``FeatureSessionLibrary`` and Java
 ``FeatureSessionLibrary`` provide optional opaque native adapters using the
-application-owned native bridge (JNI for Java). Older Python/.NET bridge
-DLLs are explicitly unsupported for this new adapter; their existing
-device-bound API remains usable. Java is different: a JNI library from before
-this release (JNI protocol 1) is rejected at load, for device-bound use as well,
-so build the JNI library from the same SDK version as the JAR. Adapter tests
-alone are not proof of a live TPM/server journey.
+application-owned native bridge (JNI for Java). A Python or .NET bridge library
+without the feature-session exports fails to load for this adapter, while its
+device-bound API remains usable. A Java JNI library must use the same JNI
+protocol as the JAR or it is rejected at load, so build the JNI library from
+the same SDK version as the JAR. Adapter tests alone are not proof of a live
+TPM/server journey.
 See the SDK README for installed-bridge validation and current availability.
 
 Generated C reference
@@ -119,7 +120,9 @@ Session traffic limits
 Protected endpoints keep a global 1,000-request/minute ceiling. Registration is
 limited to 20 requests/minute per source IP; challenge and issuance traffic share
 a separate 600-request/minute IP ceiling so machines behind one NAT can start
-short jobs. After proof and current-authority validation, issuance and recovery
-share limits of 60 requests/minute per device key and 240 per customer. A job
+short jobs. After proof and current-authority validation, fresh issuance is
+limited to 60 requests/minute per device key and, per customer, the larger of
+240 and twice the entitlement's device limit. Replaying an already-committed
+operation returns the stored lease and spends neither budget. A job
 normally uses two HTTP requests. These limits do not change lease lifetimes or
 the existing conservative retry interval.

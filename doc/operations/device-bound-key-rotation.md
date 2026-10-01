@@ -1,6 +1,6 @@
 # Rotate protected-device keys
 
-This runbook covers the staged device-bound protocol. It specifies required
+This runbook covers the protected device-bound protocol. It specifies required
 release evidence; it does not claim that a remote rotation has been qualified.
 The backend owner controls signing and approval secrets. The application release
 owner controls native public trust. Coordinate both before changing a signer.
@@ -9,12 +9,12 @@ owner controls native public trust. Coordinate both before changing a signer.
 
 | Material | Authority | Rotation constraint |
 | --- | --- | --- |
-| `BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM` and matching public SPKI | Backend signs new protected leases with RSA-3072/SHA-256 | One active pair; key ID derives from SPKI. No fallback to legacy signing keys. |
+| `BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM` and matching public SPKI | Backend signs new protected leases with RSA-3072/SHA-256 | One active pair; key ID derives from SPKI. No fallback to the v201 license-signing keys. |
 | Application public trust keys | Native lease and checkpoint verification | Public API accepts at most eight trusted keys. Trust comes from the application release, never from a token or an end-user setting. |
 | `BOUND_APPROVAL_ENCRYPTION_KEYS` | Backend encrypts browser approval recovery | AES-GCM ring with one active key and at most three total keys; independent of lease signing. |
 | Device private key | Application/user identity | Signer rotation does not replace this key, enroll again or surrender a slot. |
 
-The standalone Windows example accepts one primary public key and optional
+The standalone Windows and Linux example accepts one primary public key and optional
 `LCC_BOUND_ADDITIONAL_SIGNING_SPKIS` for overlap, up to eight keys in total.
 See `examples/device_bound/README.md` in the repository for configuration instructions.
 A production integration must ship both keys through the native trust array
@@ -23,7 +23,7 @@ before switching issuance; merely configuring the backend is insufficient.
 ## Routine lease-signer rotation
 
 1. Inventory supported application releases, both checkpoint slots, active backend
-   versions, exact-response recovery, offline leases and rollback artifacts.
+   versions, exact-response recovery, outstanding signed leases and rollback artifacts.
    Record public key IDs and version IDs only. Keep private material in the
    authorized secret store, outside source, client artifacts and command output.
 2. Prepare a new independently generated RSA-3072 pair and verify that signing
@@ -35,7 +35,7 @@ before switching issuance; merely configuring the backend is insufficient.
 3. Require the supported client cohort to have the overlap release before
    switching server issuance. Old clients trusting only the old key cannot accept
    new-key leases. The server has no client-version-based signer selection or
-   automatic legacy fallback; do not assume gradual traffic routing solves this.
+   automatic fallback; do not assume gradual traffic routing solves this.
    Native owners copy trust when created. Installing an overlap build does not
    update an already-open owner; require reopening under the overlap release.
 4. Prepare a backend version with the new matched private/public pair. Qualify
@@ -90,13 +90,14 @@ secrets merely to bypass logical expiry. Keep the ring within its three-key limi
 
 Compromise requires an incident decision, not routine overlap with the compromised
 key. Stop compromised signing and distribute corrected client trust. Removing a
-server secret cannot invalidate signatures already accepted offline; account
-disable or retirement stops future issuance but does not immediately revoke
-offline authority. Re-establishing trust in old checkpoints needs a reviewed
-recovery path. Do not promise immediate revocation to offline clients.
+server secret cannot invalidate leases already accepted by running processes;
+account disable or retirement stops future issuance but does not revoke a lease
+before its signed expiry, at most 24 hours later. Re-establishing trust in old
+checkpoints needs a reviewed recovery path. Do not promise immediate revocation
+to running clients.
 
-Rollback must preserve protected enforcement mode, generations, device identities
-and slot holds. Roll back only to a version whose signer pair and approval ring
+Rollback must preserve generations, device identities and slot holds. Roll back
+only to a version whose signer pair and approval ring
 are available and compatible with the supported client trust. An old backup or
 old Worker version is not by itself sufficient rollback evidence.
 

@@ -5,7 +5,9 @@ The device-identity API creates or opens a provider-backed P-256 key and
 exposes its public SPKI and canonical device-key identifier. It is an
 optional C runtime feature; building the core library does not automatically
 enable a platform provider. Protected clients sign server-bound proofs
-through the additive ``licensecc/device_bound.h`` API described below.
+through the ``licensecc/device_bound.h`` API described below. The licensing
+backend serves the matching ``/v2`` device routes; it accepts no other online
+licensing protocol.
 
 Lifecycle
 ---------
@@ -34,9 +36,9 @@ key id is still checked before deletion. Windows decides whether a prompt is
 needed; the application must not rely on it as its confirmation dialog.
 Cancellation returns ``LCC_DEVICE_ACCESS_DENIED`` without an automatic retry.
 
-This additive flag preserves the version-1 structure layout and existing
-zero-flag behavior. Older runtimes reject the new flag. Open/create rejects it,
-as do non-Windows providers; clear it before reusing options for opening a key.
+The flag keeps the version-1 structure layout and zero-flag behavior.
+Open/create rejects it, as do non-Windows providers; clear it before reusing
+options for opening a key.
 Activation, renewal and automatic creation rollback remain noninteractive.
 Silent deletion can fail on providers that reject ``NCRYPT_SILENT_FLAG``;
 there is no automatic interactive fallback.
@@ -47,13 +49,13 @@ then remove the exact local key only when it is no longer needed for recovery.
 See Microsoft's `NCryptDeleteKey contract
 <https://learn.microsoft.com/en-us/windows/win32/api/ncrypt/nf-ncrypt-ncryptdeletekey>`_.
 
-Device-bound protocol integration status
-----------------------------------------
+Device-bound client
+-------------------
 
-The additive ``licensecc/device_bound.h`` C API owns the Windows and Linux desktop flows
+The ``licensecc/device_bound.h`` C API owns the Windows and Linux desktop flows
 through ``LccDeviceBoundClient``. It fixes user scope and hardware-required
 provider policy and exposes no caller transport, clock, raw response or storage
-root override. It preserves the version-1 identity API and key namespace.
+root override. It shares the version-1 identity API and key namespace.
 
 Initialize options, the public signing-key ring and output structures before
 opening a client. ``open_enrollment`` permits explicit key creation only when
@@ -93,16 +95,11 @@ caller's outcome as it was, so initialize it before each call. Renewal and
 feature sessions never report the device limit. Treat a value the header does
 not name as ``LCC_BOUND_DETAIL_NONE``.
 
-The detail occupies the outcome's former ``reserved`` member. This C ABI change
-is additive: the outcome's size and offsets, ``LCC_DEVICE_BOUND_VERSION`` and
-every existing enumeration value are unchanged, and
-``lcc_init_device_bound_outcome`` still sets the member to zero. Source code that
-named ``reserved`` must use ``denial_detail``. The .NET and Python SDK releases
-before this change treat any non-zero value in that member as an invalid outcome,
-so a device-limit refusal makes them throw instead of returning a conflict:
-upgrade the SDK together with the native bridge library. The Java JNI adapter now
-uses protocol 2, whose outcome arrays carry the detail; a JAR and JNI library
-from different protocols fail at load.
+``lcc_init_device_bound_outcome`` sets ``denial_detail`` to zero. The .NET and
+Python adapters read the detail through the native bridge, and the Java JNI
+adapter's protocol 2 outcome arrays carry it. Build each SDK and its native
+bridge or JNI library from the same release; a JAR and JNI library from
+different protocols fail at load.
 
 The installed-header-only desktop example is maintained in
 ``examples/device_bound/README.md`` and listed in :doc:`../usage/examples`.
@@ -133,14 +130,15 @@ issuance time and checks continuity and expiry again after signature verificatio
 There is no anchor restore, copy or reset API. Clock failures permanently reject
 that anchor; recovery requires a fresh online operation.
 
-The Windows pilot samples ``QueryUnbiasedInterruptTimePrecise`` around
+Windows samples ``QueryUnbiasedInterruptTimePrecise`` around
 ``QueryInterruptTimePrecise`` using the realtime API set. It rejects reordered
 readings, process changes, sampling brackets over 10 ms and incompatible changes
 in the accumulated sleep-time interval. Accepted intervals only narrow across
 observations. Small changes inside sampling uncertainty can remain undetected;
 this is not a proof against every suspend or VM snapshot. Supported sleep states
-and clock-rate error still require hardware release evidence. Other platforms
-currently reject production anchor creation. See Microsoft's
+and clock-rate error still require hardware release evidence. Linux uses
+``CLOCK_BOOTTIME``, as described under the Linux requirements below; other
+platforms reject production anchor creation. See Microsoft's
 `interrupt-time reference <https://learn.microsoft.com/en-us/windows/win32/sysinfo/interrupt-time>`_
 and `API-set loader reference <https://learn.microsoft.com/en-us/windows/win32/apiindex/windows-apisets>`_.
 
@@ -363,15 +361,19 @@ is a canonical lowercase HTTPS DNS origin with an optional non-default port;
 paths, credentials, query/fragment and IP literals/aliases are rejected. This
 origin is pinned local routing configuration, separate from the signed issuer
 and proof/lease audience values. Responses cannot change it. Unsupported
-security options fail closed; older Windows compatibility is not yet certified.
+security options fail closed; older Windows versions are not certified.
 Windows Server 2022 rejects the required
 ``WINHTTP_OPTION_DISABLE_GLOBAL_POOLING`` option, so protected enrollment and
 renewal are unavailable there. Protected-device CI uses Windows Server 2025
 with Visual Studio 2026, explicitly selected for the core and installed bridges;
-the legacy licensing builds retain Windows Server 2022 coverage. This does not
+the offline licensing builds retain Windows Server 2022 coverage. This does not
 establish a minimum supported Windows desktop version; desktop qualification
 remains separate from hosted CI.
-There is no production transport on non-Windows platforms in this pilot.
+
+The Linux adapter uses libcurl restricted to HTTPS, with peer and host
+certificate verification, TLS 1.2 or later, no redirects, no HTTP or proxy
+authentication and no ``.netrc`` credentials. Its build and runtime
+requirements are listed under the Linux protected desktop requirements below.
 
 Headers and bodies are bounded to 16 KiB. Representation checks reject redirects,
 ambiguous content headers, compression, conflicting transfer/length framing and
@@ -387,7 +389,7 @@ or replace the installed application/network/hardware release journey.
 The public desktop API composes these internal signing and enforcement components.
 The enrollment owner must supply its pinned server/callback context and the
 local provider key identity; encoding a value does not establish trust in it.
-See :doc:`device_enrollment` for the staged browser/native contract.
+See :doc:`device_enrollment` for the browser/native enrollment contract.
 Exchange transcript scratch buffers use bounded, wipe-on-destruction storage;
 the caller remains responsible for its code/verifier input storage and copies.
 

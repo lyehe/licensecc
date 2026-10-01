@@ -25,7 +25,7 @@ Applications do not need to subclass an internal locator to load a license from
 a database, secret store, embedded resource, or authenticated download. Fetch
 the data in application code, copy it into a zero-initialized
 :c:type:`LicenseLocation`, and pass that location to :c:func:`acquire_license`
-or one of the decision APIs. This keeps network credentials, retries, trust
+or :c:func:`acquire_license_ex`. This keeps network credentials, retries, trust
 policy, and cancellation in the host application rather than in Licensecc.
 
 For an in-memory INI license use ``LICENSE_PLAIN_DATA``:

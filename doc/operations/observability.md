@@ -10,8 +10,8 @@ secret. Those remain Cloudflare/operator-owned resources.
 Every protected Wrangler configuration must enable persisted observability,
 invocation logs, query-string redaction, and a non-zero head sample. The
 deployment materializer rejects a configuration that does not. Use a sampling rate of `1` through the
-pilot and capacity windows; a later reduction requires a reviewed decision
-that preserves enough data for every alert below.
+pilot window; a later reduction requires a reviewed decision that preserves
+enough data for every alert below.
 
 Protected dry-run, deployment, migration, and deployment-list commands run
 through a fixed-operation wrapper. It captures bounded Wrangler stdout/stderr,
@@ -24,9 +24,13 @@ provider's retained invocation and application logs.
 The licensing backend emits one-line JSON application events. The logger adds
 `event` and `severity`, admits only its bounded operational field allow-list,
 replaces control characters, and drops unknown fields. In particular, it does
-not admit raw IP addresses, fingerprints, device hashes or key IDs, customer or
-license identifiers, email addresses, request/response bodies, assertions,
-tokens, OTPs, signing material, payloads, or arbitrary exception messages.
+not admit raw IP addresses, fingerprints, device key IDs, customer or license
+identifiers, email addresses, request/response bodies, leases, proofs, tokens,
+OTPs, signing material, payloads, or arbitrary exception messages. Its events
+are `request.unhandled_error` (only `request_id`, `path`, and `error_type`),
+the protected-device cleanup events described under OBS-08, and the
+`webhook.*` dispatcher events. Rate-limit refusals and readiness are observed
+through invocation status codes and `/health`, not application events.
 The portal emits one closed-shape
 `portal.email_delivery_failed` error event when delivery is unconfigured,
 throws/fails, is rejected, or returns an invalid result. Its only varying field
@@ -61,21 +65,20 @@ deployed version beside the measurements.
 
 | Panel | Required measurement |
 | --- | --- |
-| Public verifier traffic | requests/second, concurrency when available, status family, recognized allow/deny/rate-limit classification, and availability |
-| Public verifier latency | p50, p95, and p99 duration with separate D1 duration from `verify.ok` and `verify.denied` |
-| Backend failures | counts by `event` for every error-severity event and `verify.request_proof` result |
-| Abuse controls | `verify.rate_limited` by limiter source and malformed-request counts, without source identity |
+| Protected device traffic | requests/second for each `/v2` device route and `POST /v1/orders`, concurrency when available, status family, and availability |
+| Protected exchange and renewal latency | p50, p95, and p99 duration for `POST /v2/device-authorizations/exchange` and `POST /v2/device-leases/renew` |
+| Backend failures | counts by `event` for every error-severity event, including `request.unhandled_error` |
+| Abuse controls | `429` counts by `/v2` route template and malformed-request counts, without source identity, plus the current minute's `device-v2-global` row in `rate_limit_counters` against `BOUND_GLOBAL_RATE_LIMIT`; a `429` does not say whether a per-source limit or the global fuse refused it |
 | Downstream delivery | pending/delivered/failed webhook counts, `webhook.*` warning/error events, and `portal.email_delivery_failed` counts by its four-value `error_type` |
-| Configuration | `/health` readiness, invalid mode names, and the count of consistency warnings |
+| Configuration | `/health` `protected_device_ready` and the count of names-only `config_warnings` |
 | Backup/recovery | last completed snapshot time, R2 upload time, backup age from `snapshot_requested_at`, Workflow result, SHA-256/size and object/manifest agreement, snapshot-count inventory status, historical migration/schema identity, migration-history verification result, final schema digest, authenticity disposition, last scratch restore time, and measured RPO/RTO |
 | Four-Worker health | request/error/duration summaries for backend, admin, portal, and backup, split by environment |
 | Protected-device cleanup | scheduled invocation outcomes and last observed invocation time; sweep failures and limit warnings by source/target; all six backlog ages and snapshot times, with unavailable/stale measurements shown as unknown |
 
-Capacity evidence from `capacity:public-verifier` is overlaid on the same UTC
-window. The overlay must name the approved backend deployment ID, sole active
-version UUID, exact commit, and whether that target remained unchanged before
-and after the run. The load harness result is not a substitute for retained
-service telemetry and makes no account-token or lease-signing claim.
+No protected capacity harness exists yet, so no load-test overlay exists and
+the dashboards make no capacity claim. Exchange and renewal objectives are read
+from retained service telemetry for the approved deployment ID, sole active
+version UUID, and exact commit.
 
 ## Alert policy
 
@@ -85,12 +88,12 @@ operational queue. Missing data fails closed for health and backup predicates.
 
 | ID | Predicate | Warn | Page / release effect |
 | --- | --- | --- | --- |
-| OBS-01 | public verifier unexpected 5xx or transport-failure ratio | at least 0.05% for 10 minutes; at low traffic, two failures in 10 minutes | at least 0.1% for 5 minutes, or any `verify.unhandled_error`, `verify.d1_error`, `verify.signing_error`, or `lease.signing_error`; page and block promotion |
-| OBS-02 | public verifier latency | p95 at least 400 ms or p99 at least 800 ms for 10 minutes | p95 at least 500 ms or p99 at least 1 second for 5 minutes; page and block promotion |
+| OBS-01 | protected device route and order inbox unexpected 5xx or transport-failure ratio | at least 0.05% for 10 minutes; at low traffic, two failures in 10 minutes | at least 0.1% for 5 minutes, or any `request.unhandled_error`; page and block promotion |
+| OBS-02 | protected exchange and renewal latency | p95 at least 400 ms or p99 at least 800 ms for 10 minutes | p95 at least 500 ms or p99 at least 1 second for 5 minutes; page and block promotion |
 | OBS-03 | latest completed, identity-valid, integrity-valid, and snapshot-inventory-valid backup age measured from `snapshot_requested_at` | 45 minutes | 60 minutes, missing/invalid manifest, failed Workflow, SQL/manifest digest or size mismatch, snapshot-count mismatch, noncanonical or incomplete migration history, or invalid final schema identity; page and block migrations/promotion |
-| OBS-04 | security configuration consistency | any non-empty `/health` warning or readiness probe failure | invalid security mode, disabled required enforcement, or warning lasting 5 minutes; page and block traffic promotion |
+| OBS-04 | security configuration consistency | any non-empty `/health` `config_warnings` (an unset `ORDER_SIGNER_SCOPES`, or an unbound `BOUND_REGISTRATION_RATE_LIMITER` or `BOUND_SESSION_RATE_LIMITER`) or readiness probe failure | `protected_device_ready: false`, or a warning lasting 5 minutes; page and block traffic promotion |
 | OBS-05 | webhook delivery | `webhook.signing_unconfigured`, `webhook.signing_key_missing`, `webhook.sign_failed`, `webhook.enqueue_error`, or `webhook.deliver_error` once | `webhook.delivery_failed` once or any enqueue/deliver error for 5 minutes; page and retain the failed delivery for controlled redrive |
-| OBS-06 | emergency/security anomaly | abnormal request-proof failure or rate-limit growth versus the preceding 24-hour staging/production baseline | any `account.emergency_override_used`; page immediately and open an incident record |
+| OBS-06 | protected-route abuse or global-fuse saturation | `429` growth on a `/v2` route versus the preceding 24-hour staging/production baseline | the `device-v2-global` counter reaching `BOUND_GLOBAL_RATE_LIMIT` in any minute, which denies all online licensing for the rest of that minute; page immediately and open an incident record |
 | OBS-07 | portal transactional email | any `portal.email_delivery_failed`, grouped only by its bounded `error_type` | any occurrence in production or a sustained staging occurrence for 5 minutes; page/block promotion until delivery is restored and separately proven end to end |
 | OBS-08 | protected-device cleanup health | any sweep/snapshot failure or limit warning; missing invocation or complete six-target snapshot for 10 minutes; backlog age at least 15 minutes | failures or unknown telemetry lasting 15 minutes; backlog age at least 60 minutes; page and block promotion until fresh complete measurements and the affected sweeps recover |
 
@@ -172,18 +175,23 @@ control to manufacture an alert.
    and 60-minute page boundaries, then prove recovery when a fresh, identity-
    valid manifest is selected.
 4. Exercise OBS-04 with a canary health response containing a configuration
-   warning and an invalid-mode readiness failure. The protected materializer
-   must continue rejecting such a configuration for the real staging services.
-5. Configure a synthetic staging webhook receiver to return a bounded `503`,
+   warning and a `protected_device_ready: false` readiness failure. The
+   protected materializer and the post-deploy protected smoke must continue
+   rejecting such a configuration for the real staging services.
+5. Exercise OBS-06 by replaying a synthetic `device-v2-global` counter at the
+   configured fuse through the exact alert query, or against an isolated canary
+   backend with a lowered `BOUND_GLOBAL_RATE_LIMIT`. Never flood the shared
+   staging or production routes to trip the real fuse.
+6. Configure a synthetic staging webhook receiver to return a bounded `503`,
    generate a synthetic event, allow the documented retries to reach
    `webhook.delivery_failed`, acknowledge the alert, restore the receiver, and
    use the controlled redrive path. Remove the synthetic endpoint afterward.
-6. Route one synthetic portal sign-in through a canary email sender that
+7. Route one synthetic portal sign-in through a canary email sender that
    returns the bounded rejected result. Prove exactly one redacted
    `portal.email_delivery_failed` event reaches OBS-07, acknowledge and clear
    the alert, and restore the sender. This exercises failure telemetry only;
    it is not evidence that a real transactional email was delivered.
-7. Exercise OBS-08 through the actual evaluator and routing pipeline using a
+8. Exercise OBS-08 through the actual evaluator and routing pipeline using a
    replay or isolated canary. Cover a sweep failure with a clear snapshot, a
    failed snapshot, missing scheduled invocations, missing log ingestion despite
    successful invocations, a never-terminal invocation, identical log redelivery,
@@ -194,7 +202,7 @@ control to manufacture an alert.
    stale success. Restore fresh complete telemetry and affected sweep success,
    then record acknowledgement and clearing. Do not disable real cleanup or
    populate production with expired records to manufacture these conditions.
-8. Confirm every alert clears, no production resource was selected, and no
+9. Confirm every alert clears, no production resource was selected, and no
    customer payload or credential appears in the retained evidence.
 
 If the monitoring product cannot replay a predicate safely, use a separately
@@ -204,15 +212,16 @@ test alone exercised the predicate.
 
 ## Sensitive-value review
 
-For the capacity window and each alert drill, review both application and
+For the pilot window and each alert drill, review both application and
 invocation logs. Search for the following classes without copying any match
 into a committed report:
 
-- authorization/cookie values, `lcca_` tokens, OTPs, and email addresses;
+- authorization/cookie values, OTPs, and email addresses;
 - PEM headers, long base64/key material, and webhook or signing secrets;
-- complete 64-hex fingerprints/device hashes/key IDs;
-- `lccoa1` assertions, license payloads, request/response bodies, and customer
-  or license identifiers; and
+- complete 64-hex fingerprints and device key IDs;
+- `lccdl1` leases, device proofs, approval codes, PKCE verifiers, attempt
+  handles, license payloads, request/response bodies, and customer or license
+  identifiers; and
 - raw client IP addresses or URLs containing userinfo, query, or fragment.
 
 The review passes only with zero unexplained matches. A false positive records
@@ -235,9 +244,10 @@ requires. The bundle and summary must contain or reference:
 - exact commit and four deployed version identities;
 - alert ID, predicate revision, trigger/notification/acknowledgement/clear UTC
   timestamps, receiver class, and outcome;
-- capacity p50/p95/p99, availability, unexpected-error ratio, declared `P`,
-  offered rate, achieved rate, request totals, approved backend
-  deployment/version/commit, and before/after target stability;
+- exchange and renewal p50/p95/p99, availability, unexpected-error ratio,
+  `429` counts, declared `P`, configured `BOUND_GLOBAL_RATE_LIMIT`, request
+  totals, approved backend deployment/version/commit, and target stability
+  across the observed window;
 - selected manifest identity, snapshot and upload timestamps, streamed and
   downloaded SHA-256/size agreement, R2 metadata, manifest-pinned count result,
   historical migration/schema identity, migration-history verification
@@ -255,5 +265,5 @@ An event-producer unit test is not an alert-delivery or missed-schedule drill.
 Do not retain raw logs, notification payloads, configuration, customer data,
 email addresses, or secret values in the repository. Absent dashboards,
 unrouted alerts, unexercised predicates, non-zero sensitive matches, stale
-backups, or a shortened capacity run are explicit `blocked`/`failed` results,
-not partial passes.
+backups, or missing burst/soak evidence (no protected capacity harness exists
+yet) are explicit `blocked`/`failed` results, not partial passes.

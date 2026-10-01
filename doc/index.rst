@@ -1,10 +1,11 @@
 Licensecc
 =========
 
-Licensecc provides a native C/C++ licensing runtime, a local license issuer,
-optional online entitlement services, and Python, .NET, and Java client SDKs.
-Use this site by outcome; you do not need to build or deploy every repository
-surface.
+Licensecc provides a native C/C++ licensing runtime for offline v201 ``.lic``
+files and ``lcccfg1`` configuration tokens, the ``lccgen`` license issuer,
+optional protected device-bound online licensing services, and
+Python, .NET, and Java client SDKs. Use this site by outcome; you do not need
+to build or deploy every repository surface.
 
 Choose a starting point
 -----------------------
@@ -25,7 +26,8 @@ Choose a starting point
      - Your CMake target links the matching installed Licensecc component.
    * - Use Python, .NET, or Java
      - :doc:`tutorials/sdk-and-support` and :doc:`api/sdks`
-     - The selected SDK verifies server tokens against the shared contract.
+     - The selected SDK verifies ``lcccfg1`` config tokens against the shared
+       contract.
    * - Diagnose a customer machine
      - :ref:`support-with-lccinspector`
      - ``lccinspector`` reports identifiers and checks an explicit license.
@@ -134,7 +136,7 @@ repository for auditability but is not part of the maintained reader path.
 * :ref:`search`
 
 .. meta::
-   :description: Licensecc native licensing runtime, online entitlement services, and client SDKs.
+   :description: Licensecc native licensing runtime, protected device-bound online licensing services, and client SDKs.
    :keywords: c++, licensing software, copy protection, license manager, hardware identification
 
 .. title::

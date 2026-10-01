@@ -1,12 +1,12 @@
-Staged device enrollment
-========================
+Device enrollment
+=================
 
 This reference covers the implemented enrollment comparison and license-page
-protocol. The public Windows client and installed example are described in
+protocol. The public Windows and Linux client and installed example are described in
 :doc:`device_identity`; live TPM/browser/backend validation of the complete
 protected application workflow remains a release gate. See :doc:`services` for
 served request/response schemas and :doc:`../architecture/decisions/0006-device-bound-licensing`
-for the authority and compatibility boundaries.
+for the authority boundaries.
 
 Renewal recovery
 ----------------

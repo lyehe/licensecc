@@ -3,14 +3,9 @@
 The customer portal (`services/cloudflare-customer-portal`) and the admin
 console (`services/cloudflare-license-admin`) render the same underlying
 records for two different audiences: a customer managing their own access,
-and an operator managing many customers'. Before this glossary, the two UIs
-had drifted onto different words for the same concept (for example
-`Binding:`, `Retire connection`, and `Registered nodes` in the admin console
-next to `Device ID`, `Disconnect`, and `Legacy device registrations` in the
-portal). This page is the single source of truth for the word each app uses.
-It was written first, ahead of the other copy changes in this consistency
-pass, so that later work could reuse these terms instead of inventing new
-ones.
+and an operator managing many customers'. This page is the single source of
+truth for the word each app uses, so that new copy reuses these terms instead
+of inventing a different word for the same concept in each app.
 
 **API codes, JSON field names, route paths, CSS class names, and TypeScript
 identifiers are unchanged by this glossary.** It governs rendered text only:
@@ -32,7 +27,9 @@ keep its existing code while the text shown for it changes (for example to
 
 **Entitlement row.** The grant of a feature to a customer (an
 `EntitlementRecord`/`EntitlementRow`: project, feature, license fingerprint,
-mode, validity window, status). A customer only ever sees their own rows and
+owning customer, license mode (`trial` or `node_locked`), device limit,
+validity window, status). Every entitlement is a protected grant with a
+required owner. A customer only ever sees their own rows and
 calls each one a **license**. An operator manages rows that belong to many
 customers and needs to distinguish the record from the license file it can
 issue, so the operator vocabulary is **license (entitlement)**: lead with
@@ -79,7 +76,7 @@ those identifiers, but the words a person reads are "Disconnect".
 allows (`max_active_devices`/`device_limit`). Both apps call this the
 **device limit** wherever it names that one field specifically (the portal
 already does, in the consent page and in `device_limit_exceeded` copy). The
-device limit is a grant's only capacity: there is no seat pool.
+device limit is a grant's only capacity.
 
 ## Applying this glossary
 
@@ -92,9 +89,12 @@ device limit is a grant's only capacity: there is no seat pool.
 - A copy-guard test in each app's `test:ui` suite
   (`services/cloudflare-customer-portal/test/portal-glossary-copy.test.mjs`,
   `services/cloudflare-license-admin/test/admin-ui-workflow/glossary-copy.test.mjs`)
-  fails if a retired term (`Binding:`, `Retire connection`, `Registered
-  nodes`, a quoted `"enabled"` status, `Floating sessions`, and the list
-  labels of the removed activated-device view; the admin guard also retires
-  the removed seat view's label, and the portal's guard `Registered
-  machines`) resurfaces in `src/ui/**`. Extend that list rather than
-  reintroducing a retired word under a new name.
+  fails if a retired term resurfaces in that app's `src/ui/**`. Both guards
+  retire `Binding:`, `Retire connection`, `Floating sessions`, a quoted
+  `"enabled"` status, and the activated-device list label (`Activated devices`
+  in the portal; any case of "activated device(s)" in the admin). The portal
+  guard also retires `Registered machines`. The admin guard also retires
+  `Registered nodes`, the floating-seat list label in any case, a quoted `Retiring`
+  connection state, the `Disabled` entitlement count label, and `Customers
+  disabled`. Extend these lists rather than reintroducing a retired word under
+  a new name.

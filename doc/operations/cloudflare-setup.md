@@ -119,7 +119,7 @@ not production-ready configuration.
 
 | Service | Configuration to complete | Authoritative runbook |
 | --- | --- | --- |
-| Backend | Account/name, `DB`, canonical client destinations, mode selectors, public verification keys, cron and rate limits | [Backend](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-licensing-backend/README.md) |
+| Backend | Account/name, `DB`, `ORDER_INGEST_AUDIENCE`, `BOUND_DEVICE_CONFIG`, the RSA-3072 `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM`, cron, and the `BOUND_REGISTRATION_RATE_LIMITER` and `BOUND_SESSION_RATE_LIMITER` bindings | [Backend](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-licensing-backend/README.md) |
 | Admin | Same `DB`, `ENVIRONMENT`, Access issuer/audience and operator allowlist; `ADMIN_DEV_BEARER_ENABLED="0"`; `DEVICE_OPERATOR` targets the backend's `DeviceOperator` entrypoint | [Hosted admin setup](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-license-admin/README.md#hosted-setup) |
 | Admin (optional binding) | `WEBHOOK_OPERATOR` targets the backend's `WebhookOperator` entrypoint for **Send test event**. The backend keeps the webhook signing secret; without this binding the button reports that test sends are not set up | [Hosted admin setup](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-license-admin/README.md#hosted-setup) |
 | Portal | Same `DB`, `ENVIRONMENT`, exact `PORTAL_PUBLIC_ORIGIN`, matching `BACKEND_ORIGIN`, chosen sign-in method, optional `PORTAL_SUPPORT_CONTACT` (an `https:` URL or `mailto:` address shown to customers who need help); `DEVICE_CONSENT` targets the backend's `DeviceConsent` entrypoint; `BACKEND` targets the backend Worker for readiness (map it per environment) | [Customer portal](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-customer-portal/README.md) |
@@ -158,13 +158,11 @@ random material per purpose and environment.
 
 | Owner | Names | Purpose / when required |
 | --- | --- | --- |
-| Backend | `ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM`, `ONLINE_SIGNING_KEY_ID` | Signed online assertions; the backend key-generation helper documents the matching client public record |
-| Backend | `LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM`, `LEASE_SIGNING_KEY_ID` | Legacy lease/download signer; separate from the protected v2 signer |
-| Backend and portal | `ACCOUNT_TOKEN_PEPPERS` | Matching per-environment map for portal-minted legacy action tokens; align `ACCOUNT_TOKEN_ACTIVE_PEPPER_ID` with a key in the map |
-| Backend | `ORDER_HMAC_SECRETS`, `ORDER_SIGNER_SCOPES` | Order-ingest authentication and scoped signer authority |
-| Backend | `WEBHOOK_SIGNING_SECRETS`, `WEBHOOK_SIGNING_KEY_ID` | Signed webhook delivery and active selector |
 | Backend | `BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM` | Protected device leases; dedicated RSA-3072 key with matching `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM` configuration |
 | Backend | `BOUND_APPROVAL_ENCRYPTION_KEYS` | Separate approval-recovery encryption key ring |
+| Backend | `ORDER_HMAC_SECRETS`, `ORDER_SIGNER_SCOPES` | Order-ingest authentication and the mandatory scoped signer authority |
+| Backend | `WEBHOOK_SIGNING_SECRETS`, `WEBHOOK_SIGNING_KEY_ID` | Signed webhook delivery and active selector |
+| Admin | `SYNC_API_TOKEN` | Only for the bearer-authenticated `/api/sync/entitlements` projection |
 | Portal | `PORTAL_SESSION_PEPPERS` | Customer browser sessions, including password login |
 | Portal | `PORTAL_OTP_PEPPERS` | Email-code or operator-bootstrap authentication when enabled |
 | Portal | `PORTAL_GOOGLE_CLIENT_SECRET`, `PORTAL_GITHUB_CLIENT_SECRET` | Only for the corresponding configured OAuth provider |
@@ -172,24 +170,24 @@ random material per purpose and environment.
 | Backup | `D1_REST_API_TOKEN` | Export authority for the selected account/database |
 | Backup | `BACKUP_TRIGGER_TOKEN` | Authenticated manual backup/status and pre-migration gate |
 
-The protected deployment's backend inventory requires the legacy assertion,
-lease, account-token, order and webhook secrets even if a pilot primarily uses
-protected devices. See [readiness checks](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-licensing-backend/README.md#protected-deployment-readiness-checks)
+The protected deployment's backend inventory requires exactly the six backend
+names above: the two `BOUND_*`, two `ORDER_*`, and two `WEBHOOK_*` secrets. See
+[readiness checks](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-licensing-backend/README.md#protected-deployment-readiness-checks)
 for exact formats and selectors. Do not satisfy the inventory with dummy keys.
 Secret-name presence does not prove that values are valid or paired correctly.
 
 For protected devices, also configure `BOUND_DEVICE_CONFIG`: fixed issuer,
 audience, portal `/connect` URL, and a registry of application client IDs,
 projects and allowed loopback callbacks. Follow the
-[protected-device configuration](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-licensing-backend/README.md#protected-device-api-staged-implementation)
+[protected-device configuration](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-licensing-backend/README.md#protected-device-api)
 for the JSON and encryption-key-ring formats. Keep the app's trusted public
 key, issuer/audience and client registration aligned. Rotation follows the
 {doc}`device-bound-key-rotation` runbook, not a reinstall or key deletion.
 
-Break-glass secrets such as `EMERGENCY_OPERATOR_BEARER` and
-`PORTAL_BOOTSTRAP_BEARER` are not normal customer-login credentials. Leave them
-unset in steady state unless a documented protected drill requires them.
-The default single-D1 topology does not need the optional replica-sync token.
+The portal's break-glass secret `PORTAL_BOOTSTRAP_BEARER` is not a normal
+customer-login credential. Leave it unset in steady state unless a documented
+protected drill requires it. The default single-D1 topology does not need the
+optional replica-sync token.
 
 ## 6. Choose customer sign-in
 
@@ -199,11 +197,10 @@ peppers, and configure email delivery (`PORTAL_EMAIL_API_KEY`,
 password reset send a single-use link valid for 15 minutes; without a working
 sender both return `email_unconfigured` and the portal hides those actions.
 Registration creates an empty customer after the address is verified; it never
-grants a license. Accounts registered before email verification existed, and
-accounts the admin console's Add user creates -- including invited ones
-(step 8) -- can recover through reset as long as no other customer has
-already verified the address, which records the proven address as their
-contact email.
+grants a license. Accounts the admin console's Add user creates -- including
+invited ones (step 8) -- can recover through reset as long as no other
+customer has already verified the address, which records the proven address as
+their contact email.
 
 Alternatively, follow the portal's
 [Google/GitHub setup](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-customer-portal/README.md#google-and-github-sign-in):
@@ -269,11 +266,11 @@ still need review. It does not validate that retained settings match the code.
    draft). Follow
    [protected application access](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-license-admin/README.md#create-protected-application-access)
    for the exact project/feature/fingerprint rules, the device limit, and what
-   each refusal reason means. Do not convert an existing legacy grant to
-   protected mode in place.
+   each refusal reason means. Every grant is protected; there is no mode to
+   choose.
 4. Use the configured native app to Connect. Compare the app/browser codes,
    approve the intended license, and verify activation and renewal. The portal
-   does not issue a replacement downloadable `.lic` for protected enrollment.
+   issues no `.lic` file; offline `.lic` files come from `lccgen`.
 5. Verify a second machine is refused when the one-device limit is occupied;
    test disabled/expired feature denial and separate feature grants. Retirement
    stops renewal, but signed access and the slot hold can persist until expiry.
@@ -301,22 +298,23 @@ Configure these baseline inputs in the selected environment:
   `LICENSECC_ADMIN_WRANGLER_CONFIG_B64`, `LICENSECC_PORTAL_WRANGLER_CONFIG_B64`
   and `LICENSECC_BACKUP_WRANGLER_CONFIG_B64` secrets, containing base64-encoded
   live configuration **without embedded Worker secrets**. Base64 is not encryption.
-- The workflow-specific Access/session credentials, backup trigger token and
-  synthetic verifier, order, lease and portal fixtures. These are separate
-  from Worker runtime secrets; inspect every `secrets.*`, `vars.*` and dispatch
-  input in the selected workflow before running it. Short-lived JWTs must still
-  be valid when their drill executes.
+- The workflow-specific Access/session credentials, backup trigger token,
+  synthetic order and portal fixtures, and the staging protected-device
+  journey variables (`LICENSECC_STAGING_DEVICE_*` and the staging lease public
+  key). These are separate from Worker runtime secrets; inspect every
+  `secrets.*`, `vars.*` and dispatch input in the selected workflow before
+  running it. Short-lived JWTs must still be valid when their drill executes.
 
 The source authorities are
 [staging rollout](https://github.com/lyehe/licensecc/blob/main/.github/workflows/deploy-staging.yml),
 [production rollout](https://github.com/lyehe/licensecc/blob/main/.github/workflows/deploy-production.yml), and
 [configuration validation](https://github.com/lyehe/licensecc/blob/main/scripts/materialize-deploy-configs.mjs).
-Their fixed profiles enforce names, origins, bindings, selector values and
-schedules more strictly than standalone example configs. In particular, set
-the profile's order audience and required modes rather than copying development
-defaults. Do not change `DEVICE_PROOF_MODE` merely to satisfy an unrelated v2
-requirement: the portal-compatible legacy profile and protected v2 proof checks
-are distinct, as explained in the backend runbook.
+Their fixed profiles enforce names, origins, bindings, and schedules more
+strictly than standalone example configs, and the materializer requires an
+explicit `--profile`. In particular, set the profile's order audience rather
+than copying development defaults. There is no security mode to choose: order
+HMAC and signer scope are always enforced, and protected device licensing is
+the only online mode.
 
 Dispatch from `main` at the reviewed commit with the correct environment
 confirmation and origins. Follow the workflow's backup, migration, build,
@@ -386,8 +384,7 @@ contracts, not a fresh Cloudflare account or remote production readiness.
 ## Protected-device readiness
 
 A secret-name inventory is not an end-to-end readiness verdict. The backend
-inventory now requires `BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM` and
-`BOUND_APPROVAL_ENCRYPTION_KEYS` in addition to the legacy secrets. It reports
+inventory requires the six names listed in step 5. It reports
 `secret_names_only`; it cannot read or prove deployed secret values.
 
 Before deploying protected licensing, validate the prepared JSON Worker config
@@ -415,16 +412,17 @@ The protected deploy materializer also refuses a backend Wrangler config whose
 them to `LICENSECC_BACKEND_WRANGLER_CONFIG_B64` in both the `staging` and
 `production` environments before any protected workflow runs: every workflow
 that materializes the backend config (`deploy-production.yml`,
-`deploy-staging.yml`, `rollback-workers.yml`, `recovery-drill.yml` and
-`capacity.yml`) fails at materialization until they are there, including an
-emergency rollback.
+`deploy-staging.yml`, `rollback-workers.yml` and `recovery-drill.yml`) fails at
+materialization until they are there, including an urgent rollback. The
+materializer also requires both edge rate-limit bindings.
 
 The deployed backend runs the same check for `GET /health`, once per Worker
 isolate. A healthy `200` carries `protected_device_ready: true`; a failed check
 returns `503` with `protected_device_ready: false` and never names the failing
 check or any value. Portal `/health` is healthy (`200`, `data.backend_protected_ready:
 true`) only when the backend reports that readiness, and otherwise returns `503
-backend_not_ready`. The rollback health check requires both.
+backend_not_ready`. The rollback health check requires both, and also fails on
+any backend `config_warnings`.
 
 After the Worker deploy, the production workflow runs a backend-only protected
 smoke with no credential:
@@ -455,6 +453,6 @@ code, activate, authorize protected work, close the process, resume and renew,
 then start/authorize a feature session. Record exact deployed Worker versions,
 public signer id, platform/runtime build and results without tokens or private
 keys. Both activation and post-restart renewal must pass. Configuration checks,
-legacy lease smoke tests and simulator tests do not substitute for this live
-qualification. Run it separately on each supported platform before claiming
-that deployment/platform ready.
+the protected smoke, the staging software-key journey and simulator tests do
+not substitute for this live qualification. Run it separately on each supported
+platform before claiming that deployment/platform ready.

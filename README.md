@@ -1,16 +1,19 @@
 # Licensecc
 
-*Copy protection, offline licensing, and online entitlement services for Windows and Linux.*
+*Copy protection, offline licensing, and protected device-bound online licensing for Windows and Linux.*
 
 [![Standard](https://img.shields.io/badge/c%2B%2B-17-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B#Standardization)
 [![License](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
 [![Linux_CI](https://github.com/lyehe/licensecc/actions/workflows/linux.yml/badge.svg)](https://github.com/lyehe/licensecc/actions/workflows/linux.yml)
 [![Github_CI](https://github.com/lyehe/licensecc/actions/workflows/windows.yml/badge.svg)](https://github.com/lyehe/licensecc/actions/workflows/windows.yml)
 
-Licensecc lets a native application verify signed local license files, bind a
-license to machine identifiers, and enforce expiration dates or licensed
-features. The repository also includes an optional online verifier, operator
-and customer services, and Python, .NET, and Java client SDKs.
+Licensecc lets a native application verify signed offline v201 `.lic` files,
+bind a license to machine identifiers, enforce expiration dates or licensed
+features, and verify signed `lcccfg1` configuration tokens. For online
+licensing it offers protected device-bound licensing: a TPM-held device key,
+browser consent in a customer portal, and short signed leases from a Cloudflare
+licensing backend. The repository also includes the operator console, the
+customer portal, a D1 backup service, and Python, .NET, and Java client SDKs.
 
 The repository is licensed under the [GNU Affero General Public License v3.0
 or later](LICENSE). Review the license, including its network-use obligations,
@@ -25,7 +28,7 @@ before integrating Licensecc into proprietary or closed-source software.
 | You want to... | Start here | What you need |
 | --- | --- | --- |
 | Add offline licensing to a C/C++ application | [First successful license check](#first-successful-license-check) | CMake, a C++17 compiler, and Boost |
-| Verify server tokens from Python, .NET, or Java | [SDK and support entry points](doc/tutorials/sdk-and-support.rst) | Only the selected language toolchain |
+| Verify config tokens from Python, .NET, or Java | [SDK and support entry points](doc/tutorials/sdk-and-support.rst) | Only the selected language toolchain |
 | Diagnose a customer machine or license | [SDK and support entry points](doc/tutorials/sdk-and-support.rst#support-with-lccinspector) | An installed native build |
 | Set up Cloudflare hosting | [Cloudflare setup](doc/operations/cloudflare-setup.md) | Workers, D1, Access and backup setup in order |
 | Operate the hosted platform | [Production readiness](doc/operations/production-readiness.md) | Cloudflare resources and explicit operator authority |
@@ -33,8 +36,8 @@ before integrating Licensecc into proprietary or closed-source software.
 | Give a coding agent a bounded task | [`$using-licensecc`](.agents/skills/using-licensecc/SKILL.md) and [repository workflows](doc/usage/repository-workflows.rst) | The checkout and its owning documentation |
 
 The [examples catalog](doc/usage/examples.rst) routes native integrations from
-the minimal host through fail-closed, online, anti-tamper, and device-identity
-examples.
+the minimal host through fail-closed, anti-tamper, device-identity, and
+protected device-bound examples.
 
 ## First successful license check
 
@@ -115,8 +118,30 @@ failure signals, and next integration steps.
 | --- | --- | --- |
 | `licensecc` and `lccinspector` | Native enforcement, machine identity, and support diagnostics | [Capability registry](doc/capabilities/index.rst) |
 | `lccgen` | Project initialization and signed local-license issuance | [License issuance](doc/usage/issue-licenses.md) |
-| `services/` | Online verification, administration, customer self-service, and backup | [Operations](doc/operations/index.rst) |
-| `sdks/` | Signed-token verification for Python, .NET, and Java | [SDK reference](doc/api/sdks.rst) |
+| `services/` | Protected device-bound licensing and order fulfillment, administration, customer consent and devices, and backup | [Operations](doc/operations/index.rst) |
+| `sdks/` | `lcccfg1` config-token verification and protected native adapters for Python, .NET, and Java | [SDK reference](doc/api/sdks.rst) |
+
+**Not included in the initial release:** the owner has accepted that Licensecc
+does not provide
+
+- floating or concurrent seats;
+- metering and quotas;
+- usage reports;
+- online revocation for `.lic` applications;
+- server-issued 30-day offline leases (protected authority lasts at most
+  24 hours and never survives a process restart);
+- online licensing without a TPM and a desktop browser, so headless hosts, CI
+  runners, containers, and Windows Server 2022 cannot license online;
+- SDK-only online licensing;
+- customer account tokens;
+- the `/v1/emergency` break-glass routes; or
+- the local SQLite online demo.
+
+The hosted D1 schema is a single baseline, so every D1 database must be
+recreated from it when it changes. Live TPM, browser, and backend journeys
+remain release gates, and the protected global fuse can deny all online
+licensing under a flood. See the
+[production-readiness launch scope](doc/operations/production-readiness.md#launch-scope).
 
 **Versioning:** no namespaced release has been tagged yet. The C++ library is
 `2.1.0` in CMake. Platform services, SDKs, and Node packages are `0.1.0-rc.2`

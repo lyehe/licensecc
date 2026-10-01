@@ -5,14 +5,14 @@ compatibility_flags = ["global_fetch_strictly_public"]
 workers_dev = true
 preview_urls = false
 
-# Cron Trigger: the scheduled() handler runs protected-device cleanup, portal session sweeps,
-# webhook delivery and the audit digest.
+# Cron Trigger: the scheduled() handler runs protected-device cleanup, device_bound_denials
+# retention, portal OTP and session sweeps, webhook delivery and the audit digest.
 [triggers]
 crons = ["*/5 * * * *"]
 
 [vars]
-# Protected device v2 stays closed until explicitly configured. See README's
-# staged API section for BOUND_DEVICE_CONFIG (registry, fixed issuer/audience).
+# Protected device v2 stays closed until explicitly configured. See the README's
+# protected-device API section for BOUND_DEVICE_CONFIG (registry, fixed issuer/audience).
 # Dedicated Worker secret: BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM.
 # Separate consent recovery secret: BOUND_APPROVAL_ENCRYPTION_KEYS (JSON key ring).
 # Matching public configuration: BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM.
@@ -78,5 +78,6 @@ simple = { limit = 600, period = 60 }
 # dispatcher logs + SKIPS delivery (never sends unsigned). No per-endpoint secret is stored in D1.
 # wrangler secret put WEBHOOK_SIGNING_SECRETS
 # WEBHOOK_SIGNING_KEY_ID names the active key (a key in WEBHOOK_SIGNING_SECRETS) that signs deliveries.
-# It is a non-secret selector, so it MAY be a [vars] entry; kept here next to its map for clarity.
+# The protected secret inventory requires it as a Worker secret, and the deploy materializer
+# refuses it in [vars].
 # wrangler secret put WEBHOOK_SIGNING_KEY_ID

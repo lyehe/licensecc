@@ -10,8 +10,7 @@ The repository has two release streams. The C++ library has its own 2.x version,
 while the Cloudflare services, shared Node packages, OpenAPI documents, and
 Python, .NET, and Java SDKs form one platform contract. Before this decision,
 platform version strings were repeated without an executable source
-of truth. The reachable bare `v1.0.0` tag predates the current release streams
-and is not an identifier for the current platform.
+of truth.
 
 A platform release must be unambiguous about which API and SDK projections it
 contains without implying that the independently versioned C++ ABI was released
@@ -33,8 +32,7 @@ and all tracked release projections:
    lockfile;
 2. the backend, admin, and customer-portal OpenAPI `info.version` values and
    their reviewed canonical contract snapshots;
-3. Python project metadata, uv lock entry, runtime `__version__`, and default
-   HTTP User-Agent;
+3. Python project metadata, uv lock entry, and runtime `__version__`;
 4. .NET package metadata and its SDK README;
 5. the Java artifact manifest, SDK documentation, and release-toolchain
    projection; and
@@ -58,8 +56,7 @@ Release tags use disjoint namespaces:
   `platform-v0.1.0-rc.2`;
 * future independent C++ releases: `cpp-v<cpp-version>`, for example
   `cpp-v2.1.0`; and
-* no new bare `v*` tags. Existing bare tags remain immutable legacy history and
-  do not identify either current release stream.
+* no new bare `v*` tags.
 
 Tags are immutable pointers to reviewed commits, never version authorities. A
 platform tag must exactly match `version.json`, have all checker projections in
@@ -81,8 +78,7 @@ public ABI and CMake `SameMajorVersion` package contract.
 
 * Version drift fails locally and in the deterministic pull-request gate before
   a tag or package can be prepared.
-* Consumers can distinguish platform and C++ releases without interpreting
-  inherited bare tags.
+* Consumers can distinguish platform and C++ releases by tag namespace alone.
 * Python's required spelling difference is derived and tested rather than
   maintained as a separate decision.
 * Preparing a release requires one contract change plus reviewed projections;

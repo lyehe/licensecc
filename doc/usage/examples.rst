@@ -62,8 +62,9 @@ directory. Each README labels the shell explicitly (Bash on Linux and
 PowerShell 7 with Visual Studio 2022 x64 on Windows/MSVC), points
 ``CMAKE_PREFIX_PATH`` and ``licensecc_DIR`` at the matching install layout,
 and uses an explicit platform executable path. A successful run states its
-observable output and exit status; online and hardware-provider examples also
-describe the verifier or device prerequisites that must be satisfied.
+observable output and exit status; protected device-bound and hardware-provider
+examples also describe the backend, browser, or device prerequisites that must
+be satisfied.
 
 For the complete issue-and-run sequence, use
 :doc:`../tutorials/offline-first-license`. For public C/C++ declarations, use
@@ -74,4 +75,4 @@ To validate the offline install, issuance, and installed-consumer path from
 the repository root, run the dedicated local gate
 ``npm run test:docs-quickstart``. It is intentionally separate from the
 documentation link/structure checks because it builds native code and does
-not contact an online verifier.
+not contact the licensing backend.

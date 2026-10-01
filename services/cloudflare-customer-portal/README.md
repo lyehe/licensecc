@@ -7,12 +7,14 @@ portable policy and Cloudflare mechanics come from the explicit workspace
 packages documented in [`../../doc/architecture/system-map.md`](../../doc/architecture/system-map.md).
 
 **Audience:** portal contributors and authorized hosted-platform operators.
-Offline native integrations and server-token verification do not require this
-deployable.
+Offline native integrations and config-token verification do not require this
+deployable. Its 29 routes serve the meta pages, sign-in and sign-in methods,
+the operator bootstrap, account and license reads, protected device consent,
+and connected-device retirement.
 
 ## License access in the portal
 
-Every grant is protected: app details direct customers to Connect in their application. The portal never offers a device-key field or a `.lic` download; offline `.lic` files are issued by the operator.
+Every grant is protected: app details direct customers to Connect in their application. The portal never offers a device-key field or a `.lic` download; offline `.lic` files are issued by the operator with `lccgen`.
 
 The status label preserves disabled/revoked state and marks past or future validity windows as Expired or Not started. Enabled describes the listed dates only: the backend still checks device, trial and account eligibility. The browser clock updates these labels without server polling; it does not authorize access.
 
@@ -48,7 +50,7 @@ exclusive. Every read rechecks ownership and uses primary D1 session semantics
 when available. Database time determines logical release at the hold boundary.
 No private keys, raw proofs or license fingerprints are included.
 
-## Staged device consent API
+## Device consent API
 
 The three session-authenticated POST routes under
 `/api/portal/device-authorizations/` inspect, approve and deny an attempt.
@@ -69,14 +71,14 @@ code, status and data shape. Responses are no-store. Retry an uncertain mutation
 with its original body and key; approval recovery ends at code expiry and denial
 recovery at attempt expiry.
 
-The staged consent screen captures and removes the enrollment fragment before
+The consent screen captures and removes the enrollment fragment before
 authentication. Tab-scoped state preserves the original mutation key through
 login, reload and reopening the same link. Callback codes remain in memory;
 loopback navigation retains the sanitized portal history entry so Back can
 recover a failed handoff. Expiry clears pending actions/callbacks, account changes
 fail closed, and sign-out shares the consent mutation guard.
 
-Inspection now supports live keyset pagination with at most 100 choices per
+Inspection supports live keyset pagination with at most 100 choices per
 page. Previous/Next fetch current eligibility; successful navigation clears the
 selected license and a failed request preserves it. A comparison code derived
 from immutable enrollment intent is displayed before initial approval; the user
@@ -120,7 +122,7 @@ Connect approval flow. Configured capacity is not presented as available capacit
 | --- | --- | --- |
 | Validate code locally | [Local checks](#local-checks) | Local build/test output only |
 | Review credential forwarding | [Credential-bearing destinations](#credential-bearing-destinations) | Read-only documentation |
-| Validate a deployed portal | Use the staged/production drill below | Sends an authorized session to the named remote origin |
+| Validate a deployed portal | Use the staging/production drill below | Sends an authorized session to the named remote origin |
 | Judge production readiness | [Production readiness](../../doc/operations/production-readiness.md) | Evidence review; deployment remains an operator decision |
 
 Unless a block explicitly says "repository root," run service-local commands
@@ -161,7 +163,7 @@ npx wrangler deploy --config wrangler.jsonc
 ```
 
 Verify the reported Worker name, account, D1 binding and new version. Reload the
-public portal and validate sign-in and the documented staged portal drill.
+public portal and validate sign-in and the documented staging portal drill.
 Preserve any deliberate dashboard variable settings when choosing Wrangler's
 variable-retention options; do not silently replace them with example values.
 
@@ -255,8 +257,7 @@ templates.
 The backend-owned baseline schema contains the provider identity and OAuth
 state tables. Apply the baseline with
 `npm run migrate:remote --workspace @licensecc/cloudflare-licensing-backend`
-to a newly created database before deploying the portal. No licensing policy,
-entitlement, or SDK protocol changes are required.
+to a newly created database before deploying the portal.
 
 Set `PORTAL_PUBLIC_ORIGIN` to the exact HTTPS portal origin. Register separate
 OAuth applications for staging and production. On the provider dashboard:
@@ -294,10 +295,9 @@ The existing opaque D1-backed 24-hour session remains the browser credential.
 A new provider subject registers an empty personal customer account, with no
 licenses or entitlements. Email matches never silently merge accounts. If an
 existing customer's email matches an unlinked provider, the user must first
-sign in by the existing method and connect the provider from Account. During
-migration, retain working email delivery or use the existing protected
-operator bootstrap runbook for an authorized recovery; do not enable a public
-bootstrap bypass.
+sign in by the existing method and connect the provider from Account. For an
+authorized recovery, use working email delivery or the protected operator
+bootstrap runbook; do not enable a public bootstrap bypass.
 
 Customers can disconnect a provider from Account
 (`POST /portal/v1/auth/identities/unlink`). It is allowed only while another
@@ -370,8 +370,8 @@ recent verified sign-in.
 
 Forgot password sends a link for an active password account whose login
 email matches its verified contact address, or whose contact email is still
-empty -- a legacy or admin-created credential -- as long as no other customer
-has already verified that address; redeeming the link also sets it as the
+empty (as an admin-created account's is), as long as no other customer has
+already verified that address; redeeming the link also sets it as the
 account's verified contact. An address another customer already verified
 is refused with the same generic response; connect a provider or use the
 protected operator recovery procedure instead.
@@ -392,10 +392,10 @@ Successful changes and emailed resets revoke old browser sessions and email
 codes, invalidate old reset links, and issue a fresh session. Concurrent link
 redemption permits one write.
 
-The registration API now accepts `{ "email": "..." }` and returns 202; clients
+The registration API accepts `{ "email": "..." }` and returns 202; clients
 must follow the email link and POST `{ "token": "...", "password": "..." }` to
 `/portal/v1/auth/password/complete`. POST `/portal/v1/auth/password/reset` requests
-a recovery link. Update old registration clients before enabling this flow.
+a recovery link.
 
 Before deployment, apply the baseline to a newly created database, verify the
 billing/CPU configuration, and test registration, sign-out/login, password

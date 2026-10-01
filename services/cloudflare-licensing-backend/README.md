@@ -1,6 +1,7 @@
 # Licensecc Cloudflare Licensing Backend
 
-Reference Cloudflare Worker for low-volume online license verification.
+Reference Cloudflare Worker for protected device-bound online licensing and
+signed order fulfillment.
 
 **Audience:** backend contributors and operators of the optional hosted
 platform. Native users who only need offline `.lic` files do not need this
@@ -25,8 +26,9 @@ The Worker serves the protected device-bound routes
 (`POST /v2/device-authorizations`, `/v2/device-challenges`,
 `/v2/device-authorizations/exchange` and `/v2/device-leases/renew`), the signed
 order inbox `POST /v1/orders`, and `/health`, `/openapi.json` and `/docs`.
-Native hosts check offline `.lic` licenses with `acquire_license_ex()` and use
-the device-bound API for protected online sessions.
+These eight routes are the whole surface: there is no other online licensing
+protocol. Native hosts check offline `.lic` licenses with `acquire_license_ex()`
+and use the device-bound API for protected online sessions.
 
 Two optional Cloudflare rate-limit bindings reject floods at the edge before any
 D1 write: `BOUND_REGISTRATION_RATE_LIMITER` for registration and
@@ -35,16 +37,13 @@ fixed D1 budgets apply either way, so an unbound limiter is never an outage;
 `/health` reports it as a names-only `config_warnings` entry so a stale or
 manual deploy that dropped a binding is visible instead of silent.
 
-> **Directory renamed (operator note).** This service directory was renamed
-> from `cloudflare-online-verifier` to `cloudflare-licensing-backend` to reflect
-> its multiple roles (protected device licensing, order fulfillment, webhooks,
-> offline config signer). The deployed Worker `name` and the D1 `database_name` are
-> intentionally **unchanged** (still `licensecc-online-verifier`) so live infra
-> and hardcoded client URLs are not orphaned. After moving to this path you must
-> re-create / reinstall the gitignored working files at the new location:
-> `wrangler.toml`, `.dev.vars`, `node_modules/`, and `.wrangler/`. Run
-> `npx --yes npm@10.9.8 ci` from the repository root; the root
-> `package-lock.json` is authoritative for every Worker workspace.
+> **Deployed names.** The deployed Worker `name` and the D1 `database_name` are
+> `licensecc-online-verifier` (`licensecc-online-verifier-staging` for
+> staging), which the protected deployment profiles require. Keep the gitignored
+> working files (`wrangler.toml`, `.dev.vars`, `node_modules/`, and
+> `.wrangler/`) in this directory, and run `npx --yes npm@10.9.8 ci` from the
+> repository root; the root `package-lock.json` is authoritative for every
+> Worker workspace.
 
 ## Hosted setup (remote changes)
 
@@ -103,7 +102,7 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
 
    The sync helper writes a protected grant for the named customer and that
    customer's license; both are required. Policies and catalog plans stamp the
-   device limit and trial state, never a seat pool, as documented in
+   device limit and trial state, as documented in
    `../cloudflare-license-admin/README.md`.
 
 6. Deploy:
@@ -127,8 +126,8 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
 
    The smoke is credential-free; it also fails on any non-empty or malformed
    `config_warnings`, not only on a failed readiness check. The
-   [protected-device API](#protected-device-api-staged-implementation) section
-   describes what it proves.
+   [protected-device API](#protected-device-api) section describes what it
+   proves.
 
 ## Protected deployment readiness checks
 
@@ -157,7 +156,7 @@ Add both to `LICENSECC_BACKEND_WRANGLER_CONFIG_B64` in both the `staging` and
 `production` environments before any protected workflow runs: every workflow
 that materializes the backend config (`deploy-production.yml`,
 `deploy-staging.yml`, `rollback-workers.yml` and `recovery-drill.yml`) fails at
-materialization until they are there, including an emergency rollback. The
+materialization until they are there, including an urgent rollback. The
 materializer also requires exactly two `[[ratelimits]]` bindings,
 `BOUND_REGISTRATION_RATE_LIMITER` and `BOUND_SESSION_RATE_LIMITER`, each with a
 positive `namespace_id`, `limit` and `period`.
@@ -336,7 +335,7 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
 - **Responses.** `200 applied` (with the entitlement snapshot + `license_fingerprint`),
   the stored application result for a freshly signed matching-event retry
   (`cached` is the neutral fallback when terminal result finalization did not
-  complete or a legacy terminal row has no stored result), `200 stale_ignored`, `409 seq_conflict`,
+  complete or a terminal row has no stored result), `200 stale_ignored`, `409 seq_conflict`,
   `409 event_id_conflict`, `409 fingerprint_owned`, `409 entitlement_owner_mismatch`, `200 no_entitlement`
   (modify on a never-activated subscription — never materializes access),
   `409 entitlement_revoked` (terminal), `401` (auth family), `400 invalid_order`,
@@ -358,19 +357,22 @@ OAuth state for the customer portal's OAuth routes. New social registrations
 create customers without granting licensing access. See the
 [portal setup](../cloudflare-customer-portal/README.md#google-and-github-sign-in).
 
-### Protected-device API (staged implementation)
+### Protected-device API
 
 The baseline schema contains persistent device bindings, capacity holds, proof
 challenges, authorization attempts, exact operation recovery and audit records.
 Every grant is protected, and there is no enforcement mode. Each entitlement names
 its owning customer. Its `lease_seconds` defaults to 86400 (24 hours), which is
-also the longest lease the issuer signs.
-The backend now serves `/v2/device-authorizations`, `/v2/device-challenges`,
-`/v2/device-authorizations/exchange` and `/v2/device-leases/renew`. Staged browser
-consent is implemented; the native protected consumer remains unfinished. Local
-workerd tests exercise real portal sessions, named consent RPC and backend D1;
-browser tests separately exercise the UI with API fixtures. This does not prove
-an end-to-end production enrollment workflow.
+also the longest lease the issuer signs. A protected refusal is recorded in
+`device_bound_denials`, which scheduled maintenance keeps for 90 days.
+The backend serves `/v2/device-authorizations`, `/v2/device-challenges`,
+`/v2/device-authorizations/exchange` and `/v2/device-leases/renew`. Browser
+consent and the Windows and Linux native device-bound client are implemented.
+Local workerd tests exercise real portal sessions, named consent RPC and
+backend D1; browser tests separately exercise the UI with API fixtures; native
+tests use software-provider and HTTP fixtures. None of these proves the live
+TPM, browser and backend journey, which remains a release gate on each
+supported platform.
 Protected trials use the same proven-device exchange. First successful exchange
 atomically records the trial start and device key; browser approval starts no
 clock and reserves no slot. Activation-based trials expire at that persisted
@@ -382,8 +384,7 @@ in `trial_device_key_id`.
 Consent inspection includes optional `activation_trial_seconds` only for an
 unstarted activation-based trial. Its `valid_until` is an optional absolute cap;
 for a started trial it is the effective expiry. The portal explains activation
-timing instead of presenting a null date as “No expiry.” Deploy the portal
-validator/UI update before enabling protected trials in the backend.
+timing instead of presenting a null date as “No expiry.”
 
 Scheduled maintenance deletes expired proof challenges and unconsumed
 authorization attempts using the database clock and existing expiry indexes.
@@ -400,7 +401,7 @@ Operation identity and digest remain as immutable tombstones: retries cannot
 become new issuances after cleanup, and erased responses remain unavailable even
 if the database clock moves backward. The database rejects tombstone deletion and
 payload restoration. A restore predating the original
-operation can omit its tombstone, so backup/cutover qualification remains required.
+operation can omit its tombstone, so backup qualification remains required.
 
 Lease-table cleanup uses the baseline's `accept_until` index. An indexed sweep
 prunes lease rows at `accept_until`, using database time and at most ten
@@ -428,7 +429,7 @@ result for 48 hours; changed intent or an expired/erased result fails with
 identity. This method is a named service capability, not a public HTTP route:
 only bind authenticated callers that derive customer identity from their session.
 The customer portal exposes this capability through its session-protected
-`POST /api/portal/device-bindings/retire` route. Its Nodes screen lists protected
+`POST /api/portal/device-bindings/retire` route. Its Devices screen lists protected
 bindings and confirms retirement, with exact pending-request recovery and
 instructions to connect another machine after the hold ends. Physical native
 transfer qualification remains a release gate.
@@ -585,7 +586,8 @@ the original response without minting another lease or extending the hold. A
 denial of this request does not prove an earlier concurrent/timed-out invocation
 never committed. Native clients must preserve the original monotonic send anchor;
 a new process requires fresh online renewal. Customer/device denial stops new
-issuance, while previously signed offline authority remains bounded by its expiry.
+issuance, while a lease already accepted by a running process stays bounded by
+its signed expiry (at most 24 hours).
 
 The deployment entrypoint exports `DeviceConsent`, a named Workers RPC capability
 with `inspect`, `approve`, and `deny` methods. Bind only the authenticated customer
@@ -595,7 +597,9 @@ rate limits, idempotency keys and strict parsing of original HTTP bytes before
 invoking it. RPC cannot recover duplicate keys or numeric lexemes already lost
 through JSON parsing. The portal's browser consent screen owns interactive
 review and confirmation. The physical native/browser/backend journey still
-requires its separate release qualification.
+requires its separate release qualification. The portal and backend validate
+the inspection payload against the same closed entitlement field set; deploy
+and roll back both Workers together.
 
 Registration and inspection return the same immutable enrollment comparison
 code. Inspection also supports bounded live keyset pages using the existing

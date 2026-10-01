@@ -24,9 +24,9 @@ Hosted services and SDKs
 
 * :doc:`services` — the canonical backend, admin, and customer-portal OpenAPI
   operation inventories, plus the private backup control surface.
-* :doc:`device_enrollment` — staged enrollment comparison bytes and live
+* :doc:`device_enrollment` — enrollment comparison bytes and live
   eligible-license pagination.
-* :doc:`python` — generated Python verifier and HTTP-client reference.
+* :doc:`python` — generated Python config-token verifier reference.
 * :doc:`sdks` — scope and entry points for the Python, .NET, and Java SDKs.
 
 Reference policy

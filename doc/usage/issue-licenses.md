@@ -2,12 +2,16 @@
 
 Licensecc supports two issuing paths:
 
-- local/offline license files for the C++ library and inspector;
-- online entitlements managed by the Cloudflare backend/admin service.
+- offline v201 `.lic` files issued with `lccgen` for the C++ library and
+  inspector;
+- protected grants managed by the Cloudflare admin service and served by the
+  licensing backend to the native device-bound client.
 
-Use local license files when a product only needs offline verification. Use online
-entitlements when you need account-bound activation, node-locked leases, floating
-seats, trials, metering, catalog tiers, or customer self-service.
+Use offline license files when a product only needs offline verification. Use
+protected grants when each machine must enroll a TPM-held device key through
+browser consent and hold a short signed lease: node-locked or trial access, a
+device limit, catalog tiers, and customer self-service. Protected grants need a
+TPM and a desktop browser on the client machine.
 
 ## Local license files
 
@@ -79,6 +83,11 @@ command deploys anything or contacts a remote service. With another CMake
 generator, use the `lccgen` path printed by that generator's build rather than
 the Visual Studio-specific `Debug` path above.
 
+`lccgen` issues only the v201 format, which is the only format the runtime
+accepts. It refuses project keys below 3072 bits and project names the v201
+format cannot carry: a name must start with an ASCII letter or `_` and contain
+only ASCII letters, digits, and `_`.
+
 The destination application can print its hardware identifier through your own
 integration code, or you can use `lccinspector` while testing.
 
@@ -97,51 +106,49 @@ Useful options:
 Run `& $lccgen license issue --help` in PowerShell or
 `"$lccgen" license issue --help` in Bash for the full option set.
 
-## Online entitlements
+## Protected grants
 
-Online entitlements are created through the admin service and stored in the
-licensing backend database. The license mode is derived from stamped entitlement
-capacity:
+Protected grants are created through the admin service, the bearer-authenticated
+sync endpoint, or signed orders, and are stored in the licensing backend
+database. Every grant is protected and names its owning customer. Its license
+mode is derived, not chosen:
 
 - `trial`: `is_trial = 1`
-- `floating`: `pool_size > 0`
-- `node_locked`: `pool_size = 0`
+- `node_locked`: every other grant
 
-Node-locked clients use `/v1/activate` and `/v1/renew`. Floating clients use
-`/v1/checkout`, `/v1/heartbeat`, and `/v1/release`.
+A grant's only capacity is its device limit, `max_active_devices`. A native
+client enrolls through `POST /v2/device-authorizations` and customer consent in
+the portal, then exchanges and renews signed `lccdl1` leases through
+`POST /v2/device-challenges`, `POST /v2/device-authorizations/exchange`, and
+`POST /v2/device-leases/renew`. A lease lasts at most 24 hours and never
+survives a process restart. The C++ runtime is the on-device enforcement layer;
+the SDKs reach the backend only through its native adapters.
 
-The online server and its SDK clients are supported repository surfaces; the
-C++ runtime remains the on-device enforcement layer.
+### Set up hosted licensing
 
-### Choose an online setup
-
-**Local evaluation** runs the production Worker code on a loopback-only Node
-host backed by SQLite. It does not require a Cloudflare account and should be
-the first path used to evaluate online verification. Start with the
-[local SQLite host runbook](https://github.com/lyehe/licensecc/tree/main/services/cloudflare-licensing-backend/local-host#readme).
-That runbook owns the local database, test signing-key, entitlement seed, and
-smoke-request commands. Its generated database and private key are local
-development artifacts, not production credentials.
-
-**Staging or production** creates or changes Cloudflare resources, migrations,
+Hosted licensing creates or changes Cloudflare resources, the D1 baseline,
 bindings, secrets, and deployed Workers. Those are privileged side effects:
 follow the owning service runbooks, use an explicitly selected account and
-environment, and review every remote command before running it:
+environment, and review every remote command before running it. Start with
+staging:
 
 - [licensing backend runbook](https://github.com/lyehe/licensecc/tree/main/services/cloudflare-licensing-backend#readme)
-  for D1, signing-key, migration, verification, and deployment order;
+  for D1, signing-key, baseline schema, protected readiness, and deployment
+  order;
 - [admin service runbook](https://github.com/lyehe/licensecc/tree/main/services/cloudflare-license-admin#readme)
   for Cloudflare Access authentication, policy templates, entitlement
   stamping, catalog projection, and admin deployment;
 - [customer portal runbook](https://github.com/lyehe/licensecc/tree/main/services/cloudflare-customer-portal#readme)
-  when customer self-service is part of the deployment.
+  for customer sign-in, device consent, and connected devices.
 
 Install JavaScript dependencies exactly once from the repository root with
 `npm ci`. Service-local `npm ci` and `npm --prefix` installs are unsupported
 because the root workspace lockfile is the dependency authority.
 
-The backend's online assertion private key and the offline project's
+The backend's protected lease signing key
+(`BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM`) and the offline project's
 `private_key.rsa` serve different trust domains. Never reuse either key for the
 other purpose, expose private material to client applications, or put it in
-source control. Clients receive a trusted public key and verify the signed
-`lccoa1` assertion locally after an online response.
+source control. Native clients ship the lease signer's public key in their
+trust set and verify each signed `lccdl1` lease locally after an online
+response.

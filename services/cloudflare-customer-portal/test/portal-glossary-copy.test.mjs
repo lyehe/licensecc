@@ -17,8 +17,8 @@ const RETIRED_TERMS = [
   { name: "'Binding:' identifier label (protected binding)", pattern: /\bBinding:/, useInstead: '"Connection ID:"' },
   { name: "'Retire connection' action (protected binding)", pattern: /Retire connection/, useInstead: '"Disconnect"' },
   { name: "'Activated devices' list label (removed self-service device list)", pattern: /Activated devices/, useInstead: '"Connected devices" (the only device list the portal shows)' },
-  { name: "'Registered machines' section label (activated devices and seats)", pattern: /Registered machines/, useInstead: '"Activated devices and seats"' },
-  { name: "'Floating sessions' list label (floating seat)", pattern: /Floating sessions/, useInstead: '"Floating seats"' },
+  { name: "'Registered machines' section label (removed device and seat views)", pattern: /Registered machines/, useInstead: '"Connected devices" (the only device list the portal shows)' },
+  { name: "'Floating sessions' list label (removed seat view)", pattern: /Floating sessions/, useInstead: "nothing: the portal has no seat view" },
   { name: '\'"enabled"\' as a displayed status', pattern: /"enabled"/, useInstead: '"active"' },
 ];
 

@@ -34,14 +34,14 @@ Placement rules are:
 1. `packages/licensing-domain` contains portable policy, entitlement values and
    transitions, catalog DTOs and pure classification rules, shared API
    contracts, and pure audit logic. D1-backed catalog projection and
-   single-service usage reporting stay with their owning deployable. The domain
+   single-service reporting stay with their owning deployable. The domain
    package has no Worker `Env`, D1 binding, service, secret, or route ownership
    dependency.
 2. `packages/cloudflare-runtime` contains Cloudflare/Web-standard mechanics
-   reused by at least two deployables, such as HTTP helpers, account-token
-   primitives, D1 contracts/adapters, and idempotency. A single-consumer
-   adapter remains service-local: the current seat-reclaim implementation is
-   admin-owned and webhook delivery is backend-owned. Only an independently
+   reused by at least two deployables, such as HTTP helpers, authentication
+   primitives, D1 contracts/adapters, protected-device capacity and trial
+   rules, webhook delivery, and idempotency. A single-consumer adapter remains
+   service-local. Only an independently
    shared protocol primitive may move. The runtime package may depend on
    `licensing-domain`, but never on a service.
 3. Each `services/*` deployable owns its Worker composition root, bindings,

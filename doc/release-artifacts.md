@@ -167,8 +167,11 @@ Those configs remain ignored and runner-local; the materializer rejects
 development modes, placeholder domains, unsafe bindings, embedded Worker
 application secrets, split D1 identities, mismatched routes/origins, incomplete
 Access or asset configuration, disabled invocation logs, incomplete backup
-wiring, and a backend config without a valid `BOUND_DEVICE_CONFIG` registry and
-RSA-3072 `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM` in its `vars`. It binds
+wiring, a backend config without a valid `BOUND_DEVICE_CONFIG` registry and
+RSA-3072 `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM` in its `vars`, and a backend
+config without both `BOUND_REGISTRATION_RATE_LIMITER` and
+`BOUND_SESSION_RATE_LIMITER` bindings. It runs only with an explicit
+`--profile`. It binds
 every D1 binding, every present top-level Worker account ID, the backup export
 account, and each credential-bearing drill URL to the exact
 protected account, D1 ID, and validated Worker route. The environment also
@@ -190,12 +193,14 @@ SQL/manifest object pair.
 Only after that gate succeeds does it apply backend-owned D1 migrations and
 deploy backend → admin → portal with the lockfile-pinned Wrangler. A
 credential-free protected smoke then requires backend `/health` to report
-`protected_device_ready: true` and an unauthenticated challenge for an unknown
-attempt to return `404 authorization_unavailable`, and retains its redacted
-evidence as `backend-protected-smoke.json`. The final
-gate checks the public verifier, an authenticated read-only admin UI/API path,
-an authenticated read-only customer portal UI/API path, and backup health,
-secrets, and Workflow registration. A bounded post-deploy poll requires a new
+`protected_device_ready: true` with no `config_warnings` (it fails on any
+warning, such as an unset `ORDER_SIGNER_SCOPES` or an unbound edge limiter)
+and an unauthenticated challenge for an unknown attempt to return
+`404 authorization_unavailable`, and retains its redacted evidence as
+`backend-protected-smoke.json`. The final gate checks an authenticated
+read-only admin UI/API path, an authenticated read-only customer portal UI/API
+path, and backup health, secrets, and Workflow registration. A bounded
+post-deploy poll requires a new
 deployment ID and a new sole version receiving 100% of traffic for every
 Worker. Before/after deployment identities are retained as redacted workflow
 artifacts for 30 days without uploading the protected configs or raw Wrangler
@@ -224,12 +229,14 @@ post-deploy transition check as production.
 
 The staging order is backup → completed pre-migration backup → D1 migrations →
 backend → admin → portal. Before deployment, a bounded backend check validates
-the protected selector posture and the presence of required Worker secret names
-without reading or emitting secret values. Post-deploy checks deliberately
-exercise the public client-network rate limiter with rotating fingerprints; real
-unauthenticated, malformed-token, non-admin mutation-denial, and authenticated
-admin paths; and a synthetic customer portal login, read, protected device
-enrollment, exchange, renewal, retirement, and logout. A newly issued staging
+the staging profile's order audience and the presence of the six required
+Worker secret names without reading or emitting secret values. Post-deploy
+checks deliberately exercise real unauthenticated, malformed-token, non-admin
+mutation-denial, and authenticated admin paths, and a synthetic customer portal
+login, read, protected device enrollment, exchange, renewal, retirement, and
+logout. The protected device journey runs only when all of its inputs are set;
+the staging workflow sets them. Its software P-256 key proves the protocol,
+not hardware-backed key storage or the native client. A newly issued staging
 portal session must carry `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, and a
 positive `Max-Age`; the drill also proves unauthenticated and post-logout reads
 are denied. Denial of an expired unused OTP, denial of a previously
@@ -290,14 +297,17 @@ The import uses the restore tool's explicit `--confirm-scratch` guard and
 rejects any pre-existing non-system scratch table, including an empty unrelated
 table. Immediately after import it requires the historical durable-table set
 and counts to equal the snapshot-pinned manifest inventory. It records the
-historical schema digest, requires `d1_migrations` to be an exact prefix of the
-checked-out backend migration sequence, applies the missing suffix to scratch,
-and requires the final history and complete table/named-index/trigger digest to
-match the current canonical schema. Current staging source counts are retained
-as informational only because post-snapshot writes are expected. Restored
-active/revoked verifier semantics remain blocking. Evidence records the exact
-commit, manifest identity, snapshot/upload timestamps, backup age, streamed
-integrity, pre/post-migration schema identity, result, and elapsed time, and
+historical schema digest, requires `d1_migrations` to equal the checked-out
+`migrations/0001_baseline.sql` baseline exactly, and refuses any other history
+(missing, divergent, ahead, or incomplete) without applying a migration. It
+then requires the complete table/named-index/trigger digest to match the
+current canonical schema. A backup of a database created from an earlier
+baseline cannot be restored this way; that database must be recreated from the
+current baseline. Current staging source counts are retained as informational
+only because post-snapshot writes are expected. Restored active/revoked
+entitlement semantics remain blocking. Evidence records the exact commit,
+manifest identity, snapshot/upload timestamps, backup age, streamed integrity,
+historical and final schema identity, result, and elapsed time, and
 fails if the one-hour RPO or four-hour RTO is not met. The SQL and adjacent
 manifest share one R2 write trust boundary and the manifest is unsigned, so
 this detects corruption but does not prove authenticity; evidence reports
@@ -355,7 +365,8 @@ completed identities plus the failing Worker's pre-state.
 After every selected deployment reaches its target, a separate fail-closed
 postcheck probes all four services, not only the selected subset. It performs
 bounded, timed, redirect-disabled `GET` requests only: backend readiness must
-report `protected_device_ready: true`; the Access-authenticated admin summary
+report `protected_device_ready: true` with no `config_warnings`; the
+Access-authenticated admin summary
 must be readable; portal readiness must report that the backend is protected
 ready (`data.backend_protected_ready: true`); and backup readiness must return
 `backup_ready`. Backend, admin, and portal must also serve a nonempty OpenAPI

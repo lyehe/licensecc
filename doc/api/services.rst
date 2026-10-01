@@ -13,19 +13,24 @@ Common response and authentication rules
 * JSON operations use a flat ``{ ok, code?, ... }`` envelope. A successful
   HTTP transport does not imply an allowed licensing decision; inspect ``ok``
   and ``code``.
-* Backend account operations use an account bearer when account isolation is
-  enabled. Admin operations use the configured reader/admin authorization
-  boundary. Portal operations bind data to the opaque customer session.
-* Mutation retry behavior is operation-specific. Do not retry metering or an
-  ambiguous mutation unless the operation documents an idempotency contract.
+* Backend ``/v2`` device operations authenticate with device-key proofs over
+  single-use server challenges, and the order inbox with an HMAC signature;
+  the backend has no account bearer. Admin operations use the configured
+  reader/admin authorization boundary. Portal operations bind data to the
+  opaque customer session.
+* Mutation retry behavior is operation-specific. Do not retry an ambiguous
+  mutation unless the operation documents an idempotency contract; the
+  protected device operations return the exact stored response when retried
+  with the same operation ID.
 * ``/docs``, ``/openapi.json``, and health routes are meta surfaces and may be
   intentionally outside an individual service's operation inventory.
 
 Licensing backend
 -----------------
 
-The backend owns online verification, leases, floating seats, metering,
-usage reports, signed assertions, and order ingestion.
+The backend owns protected device enrollment, signed ``lccdl1`` device leases
+and their renewal, and signed order ingestion. It serves eight routes: the
+three meta routes, ``POST /v1/orders``, and the four ``/v2`` device routes.
 
 .. licensecc-openapi:: backend
 

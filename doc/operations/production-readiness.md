@@ -14,26 +14,28 @@ environments.
 
 The repository defines fail-closed automation for the following controls:
 
-- protected deployment, rollback, recovery, and capacity jobs run only from
-  `main`, check out the exact workflow SHA, and share one operations concurrency
-  group per environment;
+- protected deployment, rollback, and recovery jobs run only from `main`, check
+  out the exact workflow SHA, and share one operations concurrency group per
+  environment;
 - protected configuration is bound to the expected Cloudflare account, D1
   database, validated service origins, and credential-bearing target origins;
 - Wrangler dry-run, deploy, migration, and deployment-list output is captured
   behind a fixed-operation redaction wrapper, and deployment evidence requires
   a bounded transition to a new sole 100% active version;
-- backend secret inventory is names-only and bounded; staging admin and portal
-  drills exercise real authorization denials; capacity evidence pins one
-  approved backend deployment/version and records an operator-attested
-  candidate commit; and backup/recovery evidence binds streamed content
-  integrity, snapshot time, and complete schema identity.
+- backend secret inventory is names-only and bounded; the production deploy
+  runs a credential-free protected smoke that fails on any `/health`
+  configuration warning; staging admin and portal drills exercise real
+  authorization denials and a software-key protected-device journey; and
+  backup/recovery evidence binds streamed content integrity, snapshot time,
+  and complete schema identity.
 
 Those controls describe repository behavior, not a completed promotion. They
 do not prove remote branch/ruleset or protected-environment policy, Cloudflare
 resource isolation or token scope, deployed secret contents, dashboard/alert
-routing, a completed burst/soak, rollback/recovery execution, registry
-publication, or the production pilot. Until immutable external evidence covers
-those items for one exact commit, the candidate remains a no-go.
+routing, a protected capacity run, the live TPM/browser/backend journey,
+rollback/recovery execution, registry publication, or the production pilot.
+Until immutable external evidence covers those items for one exact commit, the
+candidate remains a no-go.
 
 ## Launch scope
 
@@ -42,10 +44,39 @@ The initial hosted production scope is:
 - the licensing-backend, license-admin, customer-portal, and D1-backup
   Cloudflare Workers;
 - Cloudflare D1 as the production database;
+- offline v201 `.lic` licensing issued with `lccgen`, and `lcccfg1`
+  configuration tokens;
+- protected device-bound online licensing and feature sessions on Windows and
+  Linux with a TPM and a desktop browser, served by the four `/v2` device
+  routes, plus the signed order inbox `POST /v1/orders`;
 - the platform release artifacts and the Python, .NET, and Java SDKs described
-  by the platform version contract; and
+  by the platform version contract (config-token verification and the
+  protected native adapters); and
 - the Windows and Linux native validation matrix documented by the release
   evidence.
+
+The owner has accepted that the initial release does not include:
+
+- floating or concurrent seats;
+- metering and quotas;
+- usage reports;
+- online revocation for `.lic` applications;
+- server-issued 30-day offline leases: protected authority lasts at most
+  24 hours and never survives a process restart;
+- online licensing without a TPM and a desktop browser, so headless hosts, CI
+  runners, containers, and Windows Server 2022 cannot license online;
+- SDK-only online licensing, without the native runtime;
+- customer account tokens;
+- the `/v1/emergency` break-glass routes; and
+- the local SQLite online demo.
+
+The D1 schema is one baseline edited in place, with no upgrade path. Every D1
+database, including staging, production, and restore scratch databases, must be
+recreated from that baseline when it changes. The live TPM, browser, and
+backend journeys remain release gates on each supported platform. The protected
+global fuse, `BOUND_GLOBAL_RATE_LIMIT`, can deny all online licensing when a few
+sources flood the protected routes; operators must size it to the expected peak
+and add a WAF rate rule.
 
 ## Accountable roles
 
@@ -68,17 +99,20 @@ does not invent GitHub teams or grant production access.
 
 ## Service objectives and capacity envelope
 
-Before a staging load run, the release evidence must record the intended peak
-request rate and concurrency for the candidate. Tests use that declared value
-as `P`; an absent value fails the gate rather than silently selecting a smaller
-load.
+The release evidence must record the intended peak protected request rate and
+concurrency for the candidate. Gates use that declared value as `P`; an absent
+value fails the gate rather than silently selecting a smaller load. The same
+value sizes `BOUND_GLOBAL_RATE_LIMIT`, so the global fuse does not trip below
+the declared peak.
 
+The protected objectives apply to the two routes that issue signed leases,
+`POST /v2/device-authorizations/exchange` and `POST /v2/device-leases/renew`.
 The initial acceptance targets are:
 
 | Objective | Acceptance threshold |
 | --- | --- |
-| Public verification availability | At least 99.9% over the production-pilot observation window, excluding an agreed provider-wide outage recorded in the evidence |
-| Public verification latency | p95 below 500 ms and p99 below 1 second at `P` |
+| Protected exchange and renewal availability | At least 99.9% over the production-pilot observation window, excluding an agreed provider-wide outage recorded in the evidence |
+| Protected exchange and renewal latency | p95 below 500 ms and p99 below 1 second at `P` |
 | Unexpected server errors | Less than 0.1% of requests at `P`, with no unexplained error class |
 | Burst capacity | `2P` for 30 minutes without an objective or data-integrity violation |
 | Soak capacity | `P` for four hours without resource growth, stale backup, or integrity drift |
@@ -89,6 +123,11 @@ The initial acceptance targets are:
 A release may adopt stricter targets. Relaxing a target requires a reviewed
 documentation change and an explicit risk decision before the affected test;
 the evidence report must never redefine a threshold after seeing the result.
+
+No protected capacity harness exists yet. The repository therefore makes no
+capacity claim: the burst and soak objectives above stay unmet, and the release
+stays a no-go, until a reviewed harness exercises the exchange and renewal
+routes at the declared `P`.
 
 ## Required gates
 
@@ -138,23 +177,29 @@ rulesets, environment reviewers/restrictions, Cloudflare account settings, or
 security-product enablement. Link immutable remote configuration evidence for
 the exact candidate.
 
-### PRD-03: staged four-Worker rollout
+### PRD-03: staging rollout of the four Workers
 
 - Protected configuration materializes successfully and every Worker passes a
-  Wrangler dry run through the bounded, raw-output-suppressing wrapper.
-- D1 migrations are reviewed for deployment-order compatibility.
+  Wrangler dry run through the bounded, raw-output-suppressing wrapper. The
+  materializer requires `BOUND_DEVICE_CONFIG`, an RSA-3072
+  `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM`, both edge rate-limit bindings, and
+  an explicit `--profile`.
+- The D1 baseline is reviewed. A changed baseline has no upgrade path: every
+  affected D1 database is recreated from it before dependent Workers deploy.
 - Backend, admin, portal, and backup deploy in the documented order against
   isolated staging resources.
 - Every deploy records a changed deployment ID and a new sole version receiving
   100% of traffic within the bounded post-deploy poll.
-- Backend `/health` returns `200` with `protected_device_ready: true`, and
-  portal `/health` returns `200 healthy` with `data.backend_protected_ready:
-  true`; any other answer is a readiness failure. The production deploy, not
-  this staging rollout, runs the protected smoke right after its Worker deploy:
-  it requires that backend readiness and an unauthenticated challenge for an
-  unknown attempt to return `404 authorization_unavailable`, and retains its
-  redacted evidence. Health proves local protected configuration only; the
-  staging drill below and native live qualification prove issuance and renewal.
+- Backend `/health` returns `200` with `protected_device_ready: true` and no
+  `config_warnings`, and portal `/health` returns `200 healthy` with
+  `data.backend_protected_ready: true`; any other answer is a readiness failure.
+  The production deploy, not this staging rollout, runs the protected smoke
+  right after its Worker deploy: it requires that backend readiness, fails on
+  any configuration warning (an unset `ORDER_SIGNER_SCOPES` or an unbound edge
+  limiter), requires an unauthenticated challenge for an unknown attempt to
+  return `404 authorization_unavailable`, and retains its redacted evidence.
+  Health proves local protected configuration only; the staging drill below and
+  native live qualification prove issuance and renewal.
 - A synthetic tenant completes the backend, operator, customer, and recovery
   paths without touching production data.
 - The admin drill proves unauthenticated and malformed-token denial, real
@@ -182,17 +227,16 @@ the exact candidate.
   fields carry the durable values forward; the protected staging sequence does
   not by itself exercise that conflict branch.
 - The last-known-good Worker version is restored in a timed rollback drill.
-
-The standard portal-compatible topology keeps `DEVICE_PROOF_MODE=off` for
-`/v1/verify`: missing proof is accepted, while any presented proof is
-verified. The portal does not hold a device private key. Global required proof
-is blocked until a reviewed client/browser registration and signing workflow
-exists; release evidence must carry this residual-risk disposition.
+- On each supported platform, the real native example completes the live
+  protected journey against the staging backend and portal: enrollment with a
+  TPM-held key and browser consent, activation, protected work, a restart that
+  needs a fresh online renewal, and a feature session. The staging drill's
+  software key does not substitute for this journey.
 
 ### PRD-04: backup and recovery
 
-- A backup completes and is verified immediately before a production schema
-  migration.
+- A backup completes and is verified immediately before the deployment's D1
+  migration step.
 - SHA-256 and byte size are computed in the same backpressured stream uploaded
   to R2; a names-and-counts-only durable-table inventory is derived from those
   same snapshot bytes; returned object size and any returned SHA-256 checksum
@@ -200,16 +244,16 @@ exists; release evidence must carry this residual-risk disposition.
 - The retained backup is restored into a scratch D1 database.
 - The scratch target has no pre-existing non-system table, including an
   unrelated empty table, before import.
-- Before migration, the imported historical snapshot must have exactly the
+- Immediately after import, the historical snapshot must have exactly the
   durable-table set and counts pinned in its manifest. Current live-source
   counts are informational only and cannot invalidate a valid historic
   snapshot after later writes.
-- The imported `d1_migrations` history must equal the checked-out canonical
-  backend baseline exactly. Its historical schema digest is recorded; any
-  other history (missing, divergent, ahead, or incomplete) fails the drill
-  closed, and no upgrade is attempted. A backup of a database created before
-  the current baseline cannot be restored this way — the database must be
-  recreated from the baseline instead.
+- The imported `d1_migrations` history must equal the checked-out
+  `migrations/0001_baseline.sql` baseline exactly. Its historical schema digest
+  is recorded; any other history (missing, divergent, ahead, or incomplete)
+  fails the drill closed, and no migration is applied. A backup of a database
+  created from an earlier baseline cannot be restored this way: the database
+  must be recreated from the current baseline instead.
 - After the baseline history is verified, the complete table, named-index,
   and trigger inventory is compared to the canonical backend schema through a
   normalized digest/count contract, and service-level invariants are checked.
@@ -227,20 +271,23 @@ version-retention, and access-review controls. A missing or rejected
 disposition is a release blocker; an approved disposition does not turn the
 field into `true`.
 
-### PRD-05: capacity and observability
+### PRD-05: protected objectives and observability
 
-- The `2P` burst and `P` soak tests meet every objective above.
-- Each run names the backend deployment ID and sole active version UUID from
-  the matching staging rollout and records an operator-attested commit equal to
-  the workflow SHA. The capacity URL is the validated backend route, and the
-  same sole 100% deployment remains active before and after the run. Cloudflare
-  deployment-list output does not independently prove source-commit provenance,
-  so the staging deployment artifact and protected operator attestation remain
-  part of the evidence boundary.
-- The public verifier capacity route does not use an account token; capacity
-  evidence therefore makes no account-token or lease-signing readiness claim.
+- `POST /v2/device-authorizations/exchange` and `POST /v2/device-leases/renew`
+  meet the availability, latency, and unexpected-error objectives above over
+  the pilot window, measured from retained service telemetry for the approved
+  deployment, its sole active version UUID, and its exact commit.
+- No protected capacity harness exists yet, so this gate makes no capacity
+  claim. The `2P` burst and `P` soak objectives remain unmet blockers until a
+  reviewed harness exercises both routes with real device-key proofs against
+  one approved staging deployment. A health check, the protected smoke, or the
+  staging software-key journey is not load evidence.
+- `BOUND_GLOBAL_RATE_LIMIT` is recorded and is at least the declared `P`, and a
+  WAF rate rule covers the protected routes; otherwise a few flooding sources
+  can trip the global fuse and deny all online licensing.
 - Alert paths are deliberately exercised for elevated errors, stale backup,
-  configuration inconsistency, and failed downstream delivery.
+  configuration inconsistency, failed downstream delivery, and protected-route
+  rate limiting.
 - Logs are inspected for tokens, OTPs, signing material, license payloads, and
   customer data; sensitive values must not appear.
 
@@ -251,14 +298,13 @@ requirements are defined in
 Protected-device rollout additionally requires the OBS-08 cleanup drill in
 that runbook, including failed/unknown sweeps, backlog age and an independently
 evaluated missing schedule. Retain its predicate, delivery, acknowledgement and
-recovery evidence separately from the existing four-alert capacity artifact;
-the capacity artifact alone does not qualify protected-device maintenance.
+recovery evidence separately from the other alert drills.
 
 ### PRD-06: security assurance
 
-- The maintained threat model covers public verification, admin Access,
-  portal sessions and OTP, signed order ingestion, D1, R2, CI, registries, and
-  signing/credential custody.
+- The maintained threat model covers protected device licensing and consent,
+  admin Access, portal sessions and OTP, signed order ingestion, D1, R2, CI,
+  registries, and signing/credential custody.
 - Supported dependency, static-analysis, sanitizer, and fuzzing gates pass.
 - Protected backend secret inventory confirms required names only. It does not
   inspect secret values, prove a selector exists inside a secret map, or prove
@@ -353,7 +399,7 @@ their own.
   security-product status, staging/production resource inventory, route and
   origin map, exact account/D1/R2/Workflow binding map, Access policy summary,
   credential-origin matrix, least-privilege scope review, and backend
-  names-only nine-secret inventory.
+  names-only six-secret inventory.
 - **Dependencies:** Phase 1 pass and the Phase 0 role assignments.
 - **Accountable roles:** repository/CI administrator, Cloudflare operator, and
   security reviewer.
@@ -377,14 +423,14 @@ their own.
   to its intended environment and least privilege. A missing export, ambiguous
   owner, extra secret name, or origin/scope mismatch is a failure.
 
-### Phase 3 — Prove staged behavior, authorization, and idempotency
+### Phase 3 — Prove staging behavior, authorization, and idempotency
 
 - **Objective:** deploy the exact candidate to isolated staging and prove the
   security-sensitive positive, negative, replay, and lifecycle paths.
 - **Deliverables:** four changed deployment IDs with sole 100% version/commit
-  bindings; admin, portal, and order evidence; a controlled order
-  crash/redrive result; rollback target identity; and a disposition for the
-  portal device-proof compatibility posture.
+  bindings; admin, portal, protected-device, and order evidence; a controlled
+  order crash/redrive result; the live native protected journey on each
+  supported platform; and rollback target identity.
 - **Dependencies:** Phases 1–2, pre-created synthetic fixtures, protected
   staging reviewers, and approved fault-injection isolation.
 - **Accountable roles:** service maintainers and Cloudflare operator;
@@ -398,30 +444,33 @@ their own.
   admin, portal, and rollback contract tests remain included and
   green.
 - **Protected verification/evidence:** run `.github/workflows/deploy-staging.yml`
-  from the exact SHA. Require the PRD-03 admin denials; order apply, exact
-  replay denial, fresh-signature cached result, terminal linked-order conflict,
-  and controlled crash redrive. For the portal, separately require an
-  expired unused OTP denial, denial of a previously authenticated cookie after
-  the server-side session TTL, real email receipt, and two-fixture cross-tenant
-  denial. Retain status/code and fixture-class labels, never credentials,
-  fixture IDs, OTPs, keys, cookies, or payloads.
+  from the exact SHA. Require the PRD-03 admin denials; the portal drill's
+  protected enrollment, consent, exchange, renewal, and retirement journey;
+  order apply, exact replay denial, fresh-signature cached result, terminal
+  linked-order conflict, and controlled crash redrive. For the portal,
+  separately require an expired unused OTP denial, denial of a previously
+  authenticated cookie after the server-side session TTL, real email receipt,
+  and two-fixture cross-tenant denial. Run the live native TPM/browser/backend
+  journey on each supported platform. Retain status/code and fixture-class
+  labels, never credentials, fixture IDs, OTPs, keys, cookies, leases, or
+  payloads.
 - **Binary exit criterion:** pass only when every deployed identity and listed
-  positive/negative path has the exact expected result, the scratch fault is
-  cleaned up, rollback is timed, and `DEVICE_PROOF_MODE=off` is explicitly
-  accepted with the documented browser-key UX limitation. Any partial staging
-  artifact—including cached retry without crash redrive—is a failure.
+  positive/negative path has the exact expected result, the live native
+  journey passes on every supported platform, the scratch fault is cleaned up,
+  and rollback is timed. Any partial staging artifact—including cached retry
+  without crash redrive—is a failure.
 
 ### Phase 4 — Prove backup, migration recovery, and rollback
 
 - **Objective:** demonstrate that the retained release backup can recover into
-  strict scratch, upgrade from its historical schema, and support the declared
-  RPO/RTO and rollback decisions without touching production data.
+  strict scratch, prove it carries the exact current baseline, and support the
+  declared RPO/RTO and rollback decisions without touching production data.
 - **Deliverables:** immediate pre-migration backup manifest and SQL identity,
   streamed/downloaded integrity agreement, snapshot-pinned table inventory,
-  historical schema/migration identity, applied canonical suffix, complete
+  historical schema identity, exact baseline migration history, complete
   current schema result, semantic checks, timed RPO/RTO, Worker rollback, and
   backup-authenticity disposition.
-- **Dependencies:** Phase 3 staging identity; reviewed migrations; a unique
+- **Dependencies:** Phase 3 staging identity; the reviewed baseline; a unique
   operator-created empty scratch D1; approved R2 retention and access controls.
 - **Accountable roles:** database/recovery operator, Cloudflare operator,
   security reviewer, and release coordinator.
@@ -435,9 +484,9 @@ their own.
   @licensecc/cloudflare-d1-backup`, and `npm run test:worker-rollback`.
 - **Protected verification/evidence:** select the immediate pre-migration
   object through `.github/workflows/recovery-drill.yml`, require strict empty
-  scratch, exact manifest-pinned pre-migration set/counts, canonical migration
-  prefix and suffix, final table/index/trigger digest, semantic checks, and
-  measured snapshot-time RPO/RTO. Current live-source counts are informational
+  scratch, exact manifest-pinned set/counts, a migration history equal to the
+  baseline, final table/index/trigger digest, semantic checks, and measured
+  snapshot-time RPO/RTO. Current live-source counts are informational
   only. Run `.github/workflows/rollback-workers.yml` for the approved target and
   retain before/after identities and health results.
 - **Binary exit criterion:** pass only when recovery and rollback meet every
@@ -448,39 +497,41 @@ their own.
   version-retention, and access-review evidence. Missing disposition or any
   scratch/source ambiguity is a failure.
 
-### Phase 5 — Prove capacity, telemetry, and alert operations
+### Phase 5 — Prove protected objectives, telemetry, and alert operations
 
-- **Objective:** demonstrate the declared envelope on the unchanged approved
-  deployment and prove that operators receive, acknowledge, and clear the
-  documented failure predicates without leaking sensitive data.
-- **Deliverables:** accepted `2P` burst and `P` soak artifacts, target-stability
-  evidence, dashboards for every required signal, four predicate/route drills,
-  receiver acknowledgements, and a sensitive-log review.
+- **Objective:** show the protected exchange and renewal objectives on the
+  unchanged approved deployment and prove that operators receive, acknowledge,
+  and clear the documented failure predicates without leaking sensitive data.
+- **Deliverables:** exchange/renewal availability, latency, and error evidence;
+  the `BOUND_GLOBAL_RATE_LIMIT` and WAF disposition against the declared `P`;
+  dashboards for every required signal; predicate/route drills for every
+  alert; receiver acknowledgements; and a sensitive-log review. Burst and soak
+  artifacts need a protected capacity harness, which does not exist yet; record
+  them as `blocked`.
 - **Dependencies:** Phases 3–4; declared `P`; stable approved backend
-  deployment/version plus its protected staging artifact and operator-attested
-  candidate commit; dashboards, receivers, and on-call schedule.
+  deployment/version plus its protected staging artifact and candidate commit;
+  dashboards, receivers, and on-call schedule.
 - **Accountable roles:** observability/on-call operator and service
   maintainers; release coordinator confirms the deployment join.
 - **Suggested model/effort:** GPT-5.6-Sol, high for planned execution and
   evidence synthesis; raise to xhigh only for diagnosis of an unexplained
   latency, resource-growth, error-class, or telemetry discrepancy.
-- **Local verification:** rerun the capacity-harness and telemetry contract
-  tests through `npm run test:backend` and review
+- **Local verification:** rerun the backend telemetry and rate-limit tests
+  through `npm run test:backend` and review
   [`observability.md`](observability.md) thresholds against the declared `P`.
-- **Protected verification/evidence:** run `.github/workflows/capacity.yml` in
-  both immutable profiles. Retain the exact deployment ID, sole version UUID,
-  operator-attested commit, matching staging deployment artifact, before/after
-  target, offered/achieved rate, latency percentiles, availability, error
-  classes, and resource trend. Exercise elevated errors,
-  stale backup, configuration inconsistency, and downstream-delivery failure;
-  retain trigger, notification, acknowledgement, and clear times plus the
-  redacted log-review result. Capacity uses no account token and cannot satisfy
-  the Phase 3 token-scope drill.
-- **Binary exit criterion:** pass only when both full-duration profiles meet
-  every objective, the target stays unchanged, all four alerts reach and are
+- **Protected verification/evidence:** retain the exact deployment ID, sole
+  version UUID, commit, latency percentiles, availability, error classes, and
+  rate-limit counts for the two protected routes. Exercise elevated errors,
+  stale backup, configuration inconsistency, downstream-delivery failure,
+  protected-route rate limiting, and protected-device cleanup; retain trigger,
+  notification, acknowledgement, and clear times plus the redacted log-review
+  result.
+- **Binary exit criterion:** pass only when the protected routes meet every
+  measured objective, the target stays unchanged, every alert reaches and is
   acknowledged by the expected receiver, and sensitive-log review has zero
-  unexplained match. A shortened run, missing dashboard, or unrouted predicate
-  is a failure.
+  unexplained match. A missing dashboard or unrouted predicate is a failure,
+  and burst/soak evidence stays a blocker until a protected capacity harness
+  exists and passes.
 
 ### Phase 6 — Reproduce, publish, re-download, and deploy the candidate
 
@@ -579,8 +630,9 @@ backup restoration or rollback has not been demonstrated, an objective is
 undefined or missed, a high-impact security finding is untriaged, artifacts
 cannot be reproduced, or the pilot observation window is incomplete. Repository
 implementation alone cannot clear this condition: absent remote branch and
-environment controls, unexercised alert routes, missing protected burst/soak,
-rollback, or recovery runs, unpublished/unverified registry artifacts, and an
+environment controls, unexercised alert routes, a missing protected capacity
+harness or burst/soak run, a missing live TPM/browser/backend journey, missing
+rollback or recovery runs, unpublished/unverified registry artifacts, and an
 unfinished pilot are all explicit no-go blockers. An unsigned backup is not an
 automatic blocker after the specific lower-severity residual has been accepted
 under PRD-04; lack of that recorded disposition is a blocker.

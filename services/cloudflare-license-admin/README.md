@@ -1,7 +1,7 @@
 # licensecc Cloudflare admin
 
-Private control-plane Worker and Vite + React console for managing online
-verification entitlements stored in the shared D1 database.
+Private control-plane Worker and Vite + React console for managing the
+protected device-licensing entitlements stored in the shared D1 database.
 
 **Audience:** contributors and authorized operators of the hosted control
 plane. It is not required for offline native licensing.
@@ -21,8 +21,8 @@ command from `services/cloudflare-license-admin` after the single root
 workspace install. Commands labelled staging, remote, deploy, break-glass, or
 production require authority for the named environment.
 
-This service is intentionally separate from the public verifier Worker. The
-admin Worker does not bind or use the online assertion signing secret. It owns
+This service is intentionally separate from the licensing backend Worker. The
+admin Worker holds no signing secret. It owns
 ordinary control-plane D1 operations, delegates protected retirement to the
 backend's named `DeviceOperator` capability, and delegates webhook test sends to
 its named `WebhookOperator` capability.
@@ -118,8 +118,9 @@ through **Reconcile status**.
 Eligibility and copied policy state are checked in the mutation batch. Conflicts
 leave no partial grant, audit event or replay record. Earlier activity for the same
 fingerprint, such as a refused device connection, does not block re-creating the
-grant. Production still requires the issuer/cohort inventory and cutover gates in
-ADR 0006. The complete deployment requires the backend's baseline schema.
+grant. Production still requires the live TPM, browser and backend journey in
+the [production readiness](../../doc/operations/production-readiness.md) gates.
+The complete deployment requires the backend's baseline schema.
 
 ### Device limit
 
@@ -227,15 +228,15 @@ npm run migrate:local --workspace @licensecc/cloudflare-license-admin
 After the root install, the same `npm run <script>` commands also work from
 this service directory; do not create a package-local lockfile.
 
-`npm run migrate:local` applies the shared verifier baseline migration from
-`../cloudflare-licensing-backend/migrations` because the admin service and public
-verifier share the same D1 schema.
+`npm run migrate:local` applies the backend's baseline migration from
+`../cloudflare-licensing-backend/migrations` because the admin service and the
+licensing backend share the same D1 schema.
 
 Run `npm run setup:browsers` once from the repository root before browser
 checks; that command installs the Playwright Chromium browser for both UI workspaces
 (admin and portal). `npm run test:e2e` itself does not install
 browsers. It starts a local Vite preview and runs a browser workflow with
-mocked admin API responses. It covers create, metadata/validity/TTL patch,
+mocked admin API responses. It covers create, metadata/validity patch,
 disable, reenable, revoke, audit timeline display, duplicate-submit guarding,
 and UI secret exposure checks. It does not replace the real Cloudflare Access
 staging drill below.
@@ -337,10 +338,12 @@ manual `Authorization: Bearer <local value>` header or Cloudflare Access.
 
 ## API
 
-This list is the complete route inventory and is kept in lockstep with the
-canonical dispatcher table in `src/worker/routes.ts` (`API_ROUTES`). Paths use
+This list is the complete API route inventory of the canonical dispatcher table
+in `src/worker/routes.ts` (`API_ROUTES`): 66 API routes, plus the
+`GET /openapi.json` and `GET /docs` meta routes, for 68 in all. Paths use
 OpenAPI `{param}` templating. `test/openapi-crosscheck.test.mjs` fails if the
-dispatcher, the OpenAPI spec, and this inventory drift apart.
+dispatcher, the canonical inventory, and the OpenAPI spec drift apart; update
+this list by hand when a route changes.
 
 Summary, reporting, and audit:
 
@@ -353,10 +356,13 @@ Summary, reporting, and audit:
 Customers:
 
 - `GET /api/admin/customers`
+- `POST /api/admin/customers`
 - `GET /api/admin/customers/{id}`
 - `POST /api/admin/customers/{id}/disable`
 - `POST /api/admin/customers/{id}/reenable`
 - `POST /api/admin/customers/{id}/licenses`
+- `GET /api/admin/customers/{id}/access`
+- `GET /api/admin/customers/{id}/apps`
 - `GET /api/admin/customers/{id}/bindings`
 - `GET /api/admin/customers/{id}/bindings/{bindingId}/events`
 - `POST /api/admin/customers/{id}/bindings/{bindingId}/retire`
@@ -388,8 +394,9 @@ rejected. The operator header is a precondition, not identity authority.
 On timeout, preserve the exact body/key/operator for retry; authenticated exact
 recovery lasts 48 hours. A changed operator or conflicting intent requires
 review before another action. Retirement stops renewal, advances generation,
-and preserves the maximum hold; existing offline access can continue until its
-signed deadline. There is no force-release or key/ownership override.
+and preserves the maximum hold; a lease already accepted by a running process
+stays valid until its signed expiry. There is no force-release or
+key/ownership override.
 
 The checked example configuration binds `DEVICE_OPERATOR` to the backend
 service's `DeviceOperator` entrypoint. Profile materialization pins that binding
@@ -407,7 +414,7 @@ only an exact retry; a GET cannot settle a potentially queued POST. A terminal
 denial, changed operator/customer access, already-confirmed success needing
 local cleanup, or unreadable saved state permits a current-state review followed
 by a separate clear action. Clearing never cancels or reverses retirement.
-Recovery remains accessible when legacy customer-detail reads fail and across
+Recovery remains accessible when customer-detail reads fail and across
 customer section navigation. Closing a dialog preserves any sent request.
 Hardware transfer and production release qualification remain separate gates.
 
@@ -427,8 +434,9 @@ Policies:
 - `POST /api/admin/policies/{id}/disable`
 - `POST /api/admin/policies/{id}/reenable`
 
-Catalog features:
+Catalog projects and features:
 
+- `GET /api/admin/catalog/projects`
 - `GET /api/admin/catalog/features`
 - `POST /api/admin/catalog/features`
 - `GET /api/admin/catalog/features/{id}`
@@ -487,17 +495,14 @@ Entitlements:
 - `GET /api/admin/entitlements`
 - `POST /api/admin/entitlements`
 - `POST /api/admin/entitlements/batch`
-- `POST /api/admin/entitlements/{id}/release-seats`
 - `GET /api/admin/entitlements/{id}`
 - `PATCH /api/admin/entitlements/{id}`
 - `POST /api/admin/entitlements/{id}/disable`
 - `POST /api/admin/entitlements/{id}/reenable`
 - `POST /api/admin/entitlements/{id}/revoke`
-- `GET /api/admin/entitlements/{id}/devices`
-- `GET /api/admin/entitlements/{id}/meter`
-- `POST /api/admin/entitlements/{id}/devices/{deviceKeyId}/revoke`
-- `POST /api/admin/entitlements/{id}/devices/{deviceKeyId}/disable`
-- `POST /api/admin/entitlements/{id}/devices/{deviceKeyId}/reenable`
+
+Connected devices are read and retired through the customer `bindings` routes
+above.
 
 Events:
 
@@ -539,8 +544,8 @@ project, name, and type cannot change.
 
 A policy is `trial`, `node_locked` or `subscription`. It carries a device
 limit, a validity window and trial rules, and nothing else: a create or PATCH
-that names any other field returns `400 invalid_request`, as does the
-`floating` type.
+that names any other field returns `400 invalid_request`, as does any other
+type.
 
 Node-locked policy example:
 
@@ -585,13 +590,13 @@ For catalog-driven tiers, create catalog features and plans, attach each plan
 feature to a policy or set a device limit override on the plan feature, then
 use `/api/admin/license-plans/preview` and `/api/admin/license-plans/apply`.
 A plan feature carries only its policy and that optional device limit; a plan
-feature or imported manifest row that names a seat, borrowing, meter or TTL
-field returns `400 invalid_request`, and a plan export names none. Runtime
+feature or imported manifest row that names any other field returns
+`400 invalid_request`, and a plan export names none. Runtime
 checks read the stamped entitlement rows, not plan or tier names. Plan apply
 writes protected grants. An update writes only the validity window, notes,
 owner, license, policy, device limit and trial state, so it never makes a
-protected grant unusable. A preview item reports each grant's mode and device
-limit.
+protected grant unusable. A preview item reports each grant's license mode
+(`trial` or `node_locked`) and device limit.
 
 Applications use the protected v2 integration: a customer enrolls each device,
 and the device limit caps how many are connected at once.
@@ -692,8 +697,8 @@ The schema is a single baseline edited in place. After a schema change,
 recreate each D1 database and apply the baseline with
 `npm run migrate:remote --workspace @licensecc/cloudflare-licensing-backend`
 before deploying a Worker version that reads the new columns. Use distinct D1
-databases and Access applications for staging and production. Keep the public
-verifier and admin Worker on separate routes.
+databases and Access applications for staging and production. Keep the
+licensing backend and admin Worker on separate routes.
 
 Do not deploy the admin Worker with local bearer authentication enabled. A
 staging deployment should be protected by Cloudflare Access and should validate
@@ -705,23 +710,22 @@ identity or role headers.
 `GET /api/admin/customers/{id}/access` returns a bounded grant page using the
 existing `entitlements_listed` envelope. The path fixes customer scope; optional
 `project` narrows it. Use `limit` (1–100, default 50) and `next_cursor` to read beyond
-the legacy customer detail bundle's 200-record cap. Each row includes its exact
+the customer detail bundle's 200-record cap. Each row includes its exact
 entitlement `id`, independent validity dates, stored status, and revision fields.
-Use that ID with the existing entitlement read/actions and device/meter routes.
+Use that ID with the entitlement read and lifecycle routes.
 This is a grant page, not a complete app-level summary or authorization decision.
 
 `GET /api/admin/catalog/projects` discovers projects from catalog features/plans,
 policies, entitlements, licenses, orders, and order events. It includes disabled configuration,
-unassigned legacy access, and configured apps with no access grants. It uses the
+unassigned records, and configured apps with no access grants. It uses the
 same bounded pagination and returns `{items: [{project}], next_cursor}` inside the
-`projects_listed` envelope. Audit-only and token-scope-only strings are not app
-configuration. No separate app registry or schema migration is introduced.
+`projects_listed` envelope. Audit-only strings are not app configuration. There
+is no separate app registry.
 
 Both routes require existing admin-reader authorization. Results contain no
 credential secrets. Pages have deterministic ordering on unchanged data, but offset
 cursors are not snapshots: refresh after concurrent insertion/deletion or mutation.
 Account state may change between reads; authoritative mutations must revalidate.
-These additions do not replace old routes or change SDK licensing protocols.
 
 Overview and Reports share one stored-state entitlement aggregate query. An active
 count still includes enabled grants whose validity dates may have expired; it is
@@ -732,13 +736,6 @@ returned app before pagination. It returns grant_count, enabled_count,
 in_date_count, earliest_expiry, latest_expiry, and no_expiry_count. In-date counts
 check grant status/dates only; customer suspension and runtime restrictions still
 apply. Mixed expiry is never presented as one app expiry.
-
-`GET /api/admin/customers/{id}/resources?kind=nodes|sessions&project=...` independently
-paginates node registrations or floating-session records through a customer-owned
-grant join. Expired session rows may remain until runtime cleanup; compare their
-heartbeat_deadline with server_time. These reader-authorized pages select no
-public key material, credentials, or private notes. They use the same bounded
-limit/cursor contract and are not snapshot reads.
 
 The customer Apps & access section consumes these pages and opens a selected
 grant's existing editor/lifecycle workflow inline. Customer-scoped mode fixes the

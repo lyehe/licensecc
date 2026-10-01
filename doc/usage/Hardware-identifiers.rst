@@ -40,11 +40,11 @@ A copied VM can retain many of the same properties, while ordinary VM
 maintenance can change others. A MAC address, for example, may change during a
 legitimate move or be preserved by a clone.
 
-Licensecc's supported online backend can add account-bound activation,
-node-locked leases, floating seats, renewal, and revocation controls. Those
-server decisions improve lifecycle control but do not turn a mutable VM
-property into a hardware root of trust. See
-:doc:`issue-licenses` for local evaluation and hosted runbook boundaries.
+Licensecc's protected device-bound online licensing binds a license to a
+TPM-held device key with short signed leases, a device limit, and revocation.
+It needs a TPM and a desktop browser, which many VMs lack, and it does not turn
+a mutable VM property into a hardware root of trust. See
+:doc:`issue-licenses` for the offline and hosted issuing paths.
 
 .. TIP::
 
@@ -54,10 +54,11 @@ property into a hardware root of trust. See
 Execution in a container
 ========================
 A long-lived desktop container may inherit stable host properties, but an
-ephemeral replica in an orchestrated cluster generally does not. Prefer
-account, entitlement, lease, or seat identity for elastic workloads. Validate
-the selected strategy on every supported deployment platform before treating
-it as a binding input.
+ephemeral replica in an orchestrated cluster generally does not, and protected
+online licensing is not available there because it needs a TPM and a desktop
+browser. Do not rely on hardware binding for elastic workloads. Validate the
+selected strategy on every supported deployment platform before treating it as
+a binding input.
 
 *************************************************
 Hardware Identifier Generation
