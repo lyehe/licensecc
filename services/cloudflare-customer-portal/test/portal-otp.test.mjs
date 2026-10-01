@@ -465,6 +465,22 @@ test("two live codes for one address each still sign in, and a wrong check count
   assert.equal(db.prepare("SELECT count(*) AS n FROM portal_otp WHERE consumed_at IS NULL").get().n, 0);
 });
 
+test("an email longer than 320 characters is malformed: invalid_otp before any limit is counted", async () => {
+  const db = freshDb();
+  seedCustomer(db, "A", "a@x.com");
+  const e = env(db);
+  const tooLong = `${"a".repeat(309)}@example.com`; // 321 characters
+  assert.equal(tooLong.length, 321);
+  const r = await redeemOtp(e, { email: tooLong, code: "12345678", clientIp: "198.51.100.1", now: NOW });
+  assert.deepEqual(r, { ok: false, code: "invalid_otp" });
+  assert.equal(db.prepare("SELECT count(*) AS n FROM rate_limit_counters").get().n, 0, "no limiter row is written");
+
+  const longest = `${"a".repeat(308)}@example.com`; // 320 characters: still checked normally
+  assert.equal((await redeemOtp(e, { email: longest, code: "12345678", clientIp: "198.51.100.1", now: NOW })).code, "invalid_otp");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM rate_limit_counters WHERE rate_key = ?").get(`verify:email:${longest}`).n, 1,
+    "an address of 320 characters is counted as usual");
+});
+
 test("the per-email verify budget refuses the 11th attempt for an address, whatever the client address", async () => {
   const db = freshDb();
   seedCustomer(db, "A", "a@x.com");
