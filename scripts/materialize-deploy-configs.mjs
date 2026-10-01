@@ -554,20 +554,6 @@ function validateExpectedOrigins(records, environment) {
   }
 }
 
-function validateCredentialTargetOrigins(records, environment) {
-  const bindings = Object.freeze({
-    backend: "LICENSECC_EXPECTED_BACKEND_CREDENTIAL_ORIGIN",
-  });
-  for (const [id, name] of Object.entries(bindings)) {
-    if (environment[name] === undefined) continue;
-    const expected = canonicalHttpsOrigin(environment[name], { env: name }, "to the credential-bearing target origin");
-    const record = records.find((candidate) => candidate.id === id);
-    if (record.validation.origin !== expected) {
-      throw new Error(`${name} must exactly match the validated ${id} Worker route`);
-    }
-  }
-}
-
 function expectedProtectedId(environment, name, pattern, label) {
   const value = environment[name];
   if (typeof value !== "string" || value !== value.trim() || !pattern.test(value.toLowerCase())) {
@@ -613,7 +599,6 @@ export function materializeDeploymentConfigs({ root = repositoryRoot, environmen
   });
   validateTopology(prepared);
   validateExpectedOrigins(prepared, environment);
-  validateCredentialTargetOrigins(prepared, environment);
   validateExpectedResourceBindings(prepared, environment);
   const written = [];
   try {

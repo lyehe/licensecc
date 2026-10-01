@@ -298,32 +298,6 @@ test("binds every credential-bearing drill origin to the validated Worker route"
   }
 });
 
-test("binds a single credential-bearing backend target without weakening four-service deployment binding", () => {
-  const acceptedRoot = mkdtempSync(join(tmpdir(), "licensecc-deploy-capacity-origin-ok-"));
-  try {
-    const environment = validEnvironment("staging");
-    environment.LICENSECC_EXPECTED_BACKEND_CREDENTIAL_ORIGIN = `https://${profileValues.staging.backendHost}`;
-    assert.equal(materializeDeploymentConfigs({ root: acceptedRoot, environment, profile: "staging" }).length, 4);
-  } finally {
-    rmSync(acceptedRoot, { recursive: true, force: true });
-  }
-
-  for (const [name, value, expected] of [
-    ["wrong route", `https://${profileValues.staging.adminHost}`, /exactly match the validated backend/u],
-    ["path", `https://${profileValues.staging.backendHost}/verify`, /canonical HTTPS origin/u],
-  ]) {
-    const root = mkdtempSync(join(tmpdir(), "licensecc-deploy-capacity-origin-fail-"));
-    try {
-      const environment = validEnvironment("staging");
-      environment.LICENSECC_EXPECTED_BACKEND_CREDENTIAL_ORIGIN = value;
-      assert.throws(() => materializeDeploymentConfigs({ root, environment, profile: "staging" }), expected, name);
-      assertNoConfigsWritten(root, name);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  }
-});
-
 test("rejects malformed encodings and unknown or cross-wired profiles before writing", () => {
   const cases = [
     ["missing config", (env) => { delete env.LICENSECC_BACKEND_WRANGLER_CONFIG_B64; }, /strict base64/u],

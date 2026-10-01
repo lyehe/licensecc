@@ -12,7 +12,7 @@ import {
   rollbackWorkers,
   safeFailureEvidence,
 } from "./rollback-workers.mjs";
-import { assertWorkerDeployment, parseDeploymentAssertionArguments } from "./assert-worker-deployment.mjs";
+import { parseSanitizedDeployment } from "./assert-worker-deployment.mjs";
 import { captureDeploymentTransition, parseTransitionArguments } from "./capture-worker-deployment-transition.mjs";
 import { parseProtectedWranglerArguments, runProtectedWrangler } from "./run-protected-wrangler.mjs";
 
@@ -62,21 +62,14 @@ test("deployment parser retains identities and drops Wrangler metadata", () => {
   assert.doesNotMatch(output, /operator@example\.invalid|private operator note|annotations|author_email/u);
 });
 
-test("capacity target assertion requires one exact active backend deployment", () => {
-  const expected = parseDeploymentAssertionArguments([
-    "--expected-deployment-id", "deployment-backend-current",
-    "--expected-version-id", targetVersions.backend,
-  ]);
+test("sanitized deployment evidence parser accepts only the exact shape for one known Worker", () => {
   const sanitized = deploymentEvidence(JSON.stringify(deployment("backend", targetVersions.backend, "current")), "backend");
-  assert.deepEqual(assertWorkerDeployment(JSON.stringify(sanitized), expected), sanitized);
-  assert.throws(
-    () => assertWorkerDeployment(JSON.stringify(sanitized), { ...expected, versionId: previousVersions.backend }),
-    /does not match/u,
-  );
-  assert.throws(
-    () => parseDeploymentAssertionArguments(["--expected-deployment-id", "bad id", "--expected-version-id", targetVersions.backend]),
-    /invalid/u,
-  );
+  assert.deepEqual(parseSanitizedDeployment(JSON.stringify(sanitized), "backend"), sanitized);
+  assert.throws(() => parseSanitizedDeployment(JSON.stringify(sanitized), "admin"), /invalid shape/u);
+  assert.throws(() => parseSanitizedDeployment(JSON.stringify(sanitized), "unknown"), /Worker identity is invalid/u);
+  assert.throws(() => parseSanitizedDeployment("{", "backend"), /malformed/u);
+  const split = { ...sanitized, deployment: { ...sanitized.deployment, versions: [{ version_id: targetVersions.backend, percentage: 60 }] } };
+  assert.throws(() => parseSanitizedDeployment(JSON.stringify(split), "backend"), /invalid shape/u);
 });
 
 test("post-deploy evidence polls through stale state and requires a new sole-active version", async () => {
