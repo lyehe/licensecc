@@ -928,7 +928,7 @@ export const openApiComponents: LabeledComponentFragment = {
               properties: {
                 event_id: { type: "string" }, subscription_id: { type: "string" }, project: { type: "string" }, feature: { type: "string" },
                 order_epoch: { type: "integer" }, seq: { type: "integer" }, intent: { type: "string" }, key_id: { type: ["string", "null"] }, status: { type: "string" },
-                received_at: { type: "integer" }, processed_at: { type: ["integer", "null"] }, stale: { type: "boolean" },
+                received_at: { type: "integer" }, processed_at: { type: ["integer", "null"] }, stale: { type: "boolean" }, result_code: { type: ["string", "null"], pattern: "^[a-z][a-z0-9_]{0,63}$", description: "The code of the order's stored result, and nothing else of it: why a rejected order was refused (for example customer_email_conflict or capacity_in_use), or how a processed order ended. Null while the order is accepted, or when no readable result is stored." },
               },
             },
           },

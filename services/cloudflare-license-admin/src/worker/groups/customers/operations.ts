@@ -145,11 +145,16 @@ export async function listOrders(request: Request, env: Env, requestIdValue: str
   const { limit, cursor } = pagination;
   const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
   values.push(limit + 1, cursor);
+  // Of the stored order result only its code leaves D1, so the console can say why an order
+  // was refused; the entitlement snapshot and any other field stay behind.
   const rows = await env.DB.prepare(
-    `SELECT event_id, subscription_id, project, feature, order_epoch, seq, intent, key_id, status, received_at, processed_at FROM order_events ${where} ORDER BY received_at DESC, event_id LIMIT ? OFFSET ?`,
+    `SELECT event_id, subscription_id, project, feature, order_epoch, seq, intent, key_id, status, received_at, processed_at, ` +
+      `CASE WHEN json_valid(result_json) AND json_type(result_json, '$.code') = 'text' THEN json_extract(result_json, '$.code') END AS result_code ` +
+      `FROM order_events ${where} ORDER BY received_at DESC, event_id LIMIT ? OFFSET ?`,
   ).bind(...values).all<Record<string, unknown>>();
   const items = rows.results.slice(0, limit).map((row) => ({
     ...row,
+    result_code: typeof row.result_code === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(row.result_code) ? row.result_code : null,
     stale: row.status === "accepted" && row.processed_at === null && Number(row.received_at) < now - staleSecs,
   }));
   const byStatus = await env.DB.prepare("SELECT status, COUNT(*) AS count FROM order_events GROUP BY status")

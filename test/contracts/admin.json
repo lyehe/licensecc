@@ -2207,6 +2207,14 @@
                   "received_at": {
                     "type": "integer"
                   },
+                  "result_code": {
+                    "description": "The code of the order's stored result, and nothing else of it: why a rejected order was refused (for example customer_email_conflict or capacity_in_use), or how a processed order ended. Null while the order is accepted, or when no readable result is stored.",
+                    "pattern": "^[a-z][a-z0-9_]{0,63}$",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "seq": {
                     "type": "integer"
                   },

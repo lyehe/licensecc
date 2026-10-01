@@ -425,6 +425,11 @@ Licenses, orders, search, and settings:
 - `GET /api/admin/search`
 - `GET /api/admin/settings`
 
+Each order row carries `result_code`, the code of the order's stored result and
+nothing else of it. **Order activity** says in words why a rejected order was
+refused, for example that its email already belongs to another customer, and
+keeps the code under Technical details.
+
 Policies:
 
 - `GET /api/admin/policies`

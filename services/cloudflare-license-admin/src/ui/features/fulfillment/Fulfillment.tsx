@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 
 import type { NavigationIntent } from "../../app/types";
 import { useAdminNavigation } from "../../app/navigation";
+import { FeedbackText } from "../../shared/FeedbackText";
 import { ReadNotice } from "../../shared/ReadNotice";
 import { api, parseExactApiSuccess } from "../../shared/api";
 import { BarSparkChart } from "../../shared/charts";
@@ -14,7 +15,7 @@ import { isRetryableAppendFailure, pageAppendError, withCursor } from "../../sha
 import { useRequestFence } from "../../shared/requestFence";
 import { TIMESERIES_RANGE_DAYS } from "../../shared/timeseries";
 import { useUsageTimeseries } from "../../shared/usageTimeseries";
-import { OrderListFilter, ordersPath } from "./workflow";
+import { OrderListFilter, orderRefusalFeedback, ordersPath } from "./workflow";
 
 interface OrderEventItem {
   event_id: string;
@@ -26,6 +27,8 @@ interface OrderEventItem {
   intent: string;
   key_id: string | null;
   status: string;
+  /** The stored result's code only: why a rejected order was refused. */
+  result_code: string | null;
   received_at: number;
   processed_at: number | null;
   stale: boolean;
@@ -144,11 +147,12 @@ export function Fulfillment({ active, navigationIntent, onNavigationHandled }: {
         <button type="button" onClick={() => setOrderFilter({ status: "", subscription_id: "" })}>Clear filters</button>
       </div>
       <div className="tableScroll" role="region" aria-label="Fulfillment event records" tabIndex={0}><table>
-        <thead><tr><th>Received</th><th>Subscription</th><th>Project</th><th>Feature</th><th>Seq</th><th>Intent</th><th>Status</th><th>Processed</th></tr></thead>
+        <thead><tr><th>Received</th><th>Subscription</th><th>Project</th><th>Feature</th><th>Seq</th><th>Intent</th><th>Status</th><th>Reason</th><th>Processed</th></tr></thead>
         <tbody>{(orders?.items ?? []).map((item) => (
           <tr key={item.event_id} className={item.stale ? "staleRow" : ""}>
             <td>{formatEpoch(item.received_at)}</td><td>{item.subscription_id}</td><td>{item.project}</td><td>{item.feature}</td><td>{item.seq}</td><td>{item.intent}</td>
-            <td><span className={`status ${item.status}`}>{item.status}</span>{item.stale && <span className="staleFlag">STALE</span>}</td><td>{formatEpoch(item.processed_at)}</td>
+            <td><span className={`status ${item.status}`}>{item.status}</span>{item.stale && <span className="staleFlag">STALE</span>}</td>
+            <td>{item.status === "rejected" && <FeedbackText feedback={orderRefusalFeedback(item.result_code)} />}</td><td>{formatEpoch(item.processed_at)}</td>
           </tr>
         ))}</tbody>
       </table></div>

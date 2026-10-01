@@ -722,7 +722,7 @@ export function hasOrdersListData(value: unknown): boolean {
     const row = record(item);
     return row !== null && stringField(row, "event_id") && stringField(row, "subscription_id") && stringField(row, "project") &&
       stringField(row, "feature") && nonNegativeIntegerField(row, "order_epoch") && nonNegativeIntegerField(row, "seq") &&
-      stringField(row, "intent") && nullableStringField(row, "key_id") && enumField(row, "status", ["accepted", "processed", "superseded", "rejected"] as const) &&
+      stringField(row, "intent") && nullableStringField(row, "key_id") && nullableStringField(row, "result_code") && enumField(row, "status", ["accepted", "processed", "superseded", "rejected"] as const) &&
       nonNegativeIntegerField(row, "received_at") && nullableIntegerInRangeField(row, "processed_at", 0, Number.MAX_SAFE_INTEGER) &&
       typeof row.stale === "boolean" && (row.processed_at === null || (row.processed_at as number) >= (row.received_at as number));
   });
