@@ -179,7 +179,7 @@ Added or reshaped:
 - `customer_notifications`
 - `access_refusals` (generalises `device_bound_denials`)
 - `catalog_generations`
-- `portal_otp` gains a `purpose` column: `sign_in`, `email_change` or `link`.
+- `portal_otp` gains a `purpose` column (`sign_in`, `email_change` or `link`) and an index on `email_lower`, because the code check filters on it.
 
 The order inbox (`order_events`, `order_ingest_nonces`) and the webhook tables stay.
 
@@ -314,7 +314,7 @@ The security core is unchanged:
   - An abandoned or phished approval therefore never disconnects anything.
 - **Ineligible:** the reason sentence (section 8) and a link to the license.
 - **Phone or tablet:** the page says "Finish on the computer running Colmap" and shows no approve controls. If the hand-off fails, an approval that never reached exchange can be retried inside the window.
-- **Device label rules:** printable Unicode, 1–80 code points. No control, bidi or format characters, and nothing matching the code pattern.
+- **Device label rules:** printable Unicode, 1–80 code points. No control, format, separator or default-ignorable characters. Nothing matching the code pattern once fullwidth forms are folded and every dash or space counts as a separator. Number matching makes look-alike labels more dangerous. So the Connect phase also refuses a label whose confusable skeleton contains the code pattern; the skeleton is defined by Unicode UTS #39 and catches look-alikes such as Cyrillic letters and mathematical digits. The backend rule stays authoritative, and the native mirror is generated from it.
 
 ### 7.3 Freeing a slot
 
