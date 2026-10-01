@@ -31,6 +31,23 @@ test("break-glass CLI list does not require a fingerprint", () => {
   assert.doesNotMatch(sql, /license_fingerprint =/);
 });
 
+test("break-glass CLI refuses an option its command does not use instead of dropping it", () => {
+  const fingerprint = "a".repeat(64);
+  const upsert = { fingerprint, actor: "operator", "customer-id": "cus_1", "license-id": "lic_1" };
+  // A protected grant carries no device hash: a removed flag must fail loudly, not vanish.
+  assert.throws(() => sqlFor("upsert", { ...upsert, "device-hash": "b".repeat(64) }), /^Error: unknown option --device-hash for upsert$/u);
+  assert.throws(() => sqlFor("upsert", { ...upsert, "assertion-ttl": "300" }), /^Error: unknown option --assertion-ttl for upsert$/u);
+  // An option another command uses is still unknown here.
+  assert.throws(() => sqlFor("revoke", { fingerprint, actor: "operator", reason: "r", "customer-id": "cus_1" }), /unknown option --customer-id for revoke/u);
+  assert.throws(() => sqlFor("reenable", { fingerprint, actor: "operator", "allow-revoked-override": true }), /unknown option --allow-revoked-override for reenable/u);
+  assert.throws(() => sqlFor("list", { fingerprint }), /unknown option --fingerprint for list/u);
+  // The connection options apply to every command.
+  for (const connection of [{ database: "db" }, { config: "wrangler.toml" }, { remote: true }, { local: true }]) {
+    assert.doesNotThrow(() => sqlFor("get", { fingerprint, ...connection }), JSON.stringify(connection));
+    assert.doesNotThrow(() => sqlFor("list", connection), JSON.stringify(connection));
+  }
+});
+
 test("schema permits sync audit actor type", () => {
   const schema = readFileSync("schema.sql", "utf8");
   assert.match(schema, /actor_type IN \('access', 'dev', 'cli', 'sync', 'system', 'unknown'\)/);

@@ -476,8 +476,8 @@ test("access validator rejects oversized responses without reporting their conte
   });
 });
 
-// Every synced grant is protected: the CLI names its customer and license, and never sends a device
-// hash or an assertion TTL, which the Worker refuses.
+// Every synced grant is protected: the CLI names its customer and license, and refuses any option
+// it does not know, such as a device hash or an assertion TTL, which the Worker also refuses.
 const syncOptions = { fingerprint: "A".repeat(64), "customer-id": "cus_1", "license-id": "lic_1" };
 
 test("sync CLI payload names the grant's owner and license, and nothing a protected grant lacks", () => {
@@ -489,7 +489,7 @@ test("sync CLI payload names the grant's owner and license, and nothing a protec
   assert.deepEqual([revoked.status, revoked.reason, revoked.valid_until], ["revoked", "chargeback", 2000]);
 });
 
-test("sync CLI refuses a payload without a customer or license, or with a device hash or assertion TTL", () => {
+test("sync CLI refuses a payload without a customer or license, or with an option it does not know", () => {
   for (const [option, pattern] of [["customer-id", /customer-id is required/u], ["license-id", /license-id is required/u]]) {
     for (const value of [undefined, ""]) {
       const options = { ...syncOptions, [option]: value };
@@ -497,9 +497,11 @@ test("sync CLI refuses a payload without a customer or license, or with a device
       assert.throws(() => buildSyncPayload(options), pattern, `${option}=${String(value)}`);
     }
   }
-  for (const option of ["device-hash", "assertion-ttl"]) {
-    assert.throws(() => buildSyncPayload({ ...syncOptions, [option]: option === "device-hash" ? "b".repeat(64) : "300" }),
-      new RegExp(`--${option} is not a sync field`, "u"));
+  // A removed flag such as --device-hash fails loudly, the same way as any other unknown option.
+  for (const [option, value] of [["device-hash", "b".repeat(64)], ["assertion-ttl", "300"], ["max-active-devices", "2"], ["fingerprnt", "c".repeat(64)]]) {
+    assert.throws(() => buildSyncPayload({ ...syncOptions, [option]: value }), new RegExp(`^Error: unknown option --${option}$`, "u"), option);
   }
+  // The connection options that main() reads are known.
+  assert.doesNotThrow(() => buildSyncPayload({ ...syncOptions, url: "https://admin.example", token: "t", "idempotency-key": "k" }));
   assert.throws(() => buildSyncPayload({ ...syncOptions, status: "revoked" }), /reason is required/u);
 });
