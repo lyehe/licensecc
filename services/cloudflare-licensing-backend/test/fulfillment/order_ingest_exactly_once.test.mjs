@@ -1634,3 +1634,180 @@ test("an owner change racing a seq-0 order on an operator-made grant leaves no a
     assert.equal(eventRow(db, order.event_id).status, "rejected", intent);
   }
 });
+
+// =============================================================================
+// An order whose email already belongs to another customer. The customer write would
+// collide with that account, and retrying can never change that, so the order is refused
+// terminally with 409 customer_email_conflict instead of failing retryably for ever.
+// =============================================================================
+const EMAIL_OWNERS = [
+  {
+    label: "a customer's contact email",
+    sql: "INSERT INTO customers(id,name,email,created_at,updated_at) VALUES('cus_existing','Existing','Buyer@Example.test',1,1);",
+  },
+  {
+    label: "an invited password login",
+    sql: `INSERT INTO customers(id,name,email,created_at,updated_at) VALUES('cus_existing','Invited','',1,1);
+      INSERT INTO portal_passwords(customer_id,email_lower,password_hash,created_at,updated_at) VALUES('cus_existing','buyer@example.test','hash',1,1);`,
+  },
+  {
+    label: "a Google or GitHub sign-in",
+    sql: `INSERT INTO customers(id,name,email,created_at,updated_at) VALUES('cus_existing','Linked','',1,1);
+      INSERT INTO portal_identities(provider,subject,customer_id,email,created_at) VALUES('github','42','cus_existing','Buyer@Example.test',1);`,
+  },
+];
+
+const accountRows = (db) => ["customers", "portal_passwords", "portal_identities"]
+  .map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+
+function conflictOrder(overrides = {}) {
+  return makeOrder({ seq: 1, event_id: "evt_email_conflict", customer: { id: "cus_store", email: " BUYER@example.test " }, ...overrides });
+}
+
+function assertEmailConflict(db, response, order) {
+  assert.equal(response.status, 409);
+  assert.deepEqual(response.body, { ok: false, code: "customer_email_conflict" });
+  const event = eventRow(db, order.event_id);
+  assert.equal(event.status, "rejected");
+  assert.deepEqual(JSON.parse(event.result_json), { ok: false, code: "customer_email_conflict" });
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM customers WHERE id = ?").get(order.customer.id).c, 0, "no second customer for the address");
+  assert.equal(countRows(db, "entitlements"), 0, "no grant for a refused order");
+}
+
+for (const owner of EMAIL_OWNERS) {
+  test(`an order whose email belongs to ${owner.label} is refused terminally, not retried`, async (t) => {
+    const { db, env } = freshEnv(); t.after(() => db.close());
+    db.exec(owner.sql);
+    const accounts = accountRows(db);
+    const order = conflictOrder();
+    assertEmailConflict(db, await submit(env, order), order);
+    assert.deepEqual(accountRows(db), accounts, "the existing account is untouched");
+    // A resend returns the stored refusal; it never re-runs the customer write.
+    const resent = await submit(env, order, { now: NOW + 1 });
+    assert.equal(resent.status, 409);
+    assert.deepEqual(resent.body, { ok: false, code: "customer_email_conflict" });
+    assert.deepEqual(accountRows(db), accounts);
+    assert.equal(eventRow(db, order.event_id).status, "rejected");
+  });
+}
+
+test("an order for an existing customer id keeps working whoever else holds its email", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  db.exec(`INSERT INTO customers(id,name,email,created_at,updated_at) VALUES('cus_order','Owner','owner@example.test',1,1);
+    INSERT INTO customers(id,name,email,created_at,updated_at) VALUES('cus_other','Other','buyer@example.test',1,1);
+    INSERT INTO portal_passwords(customer_id,email_lower,password_hash,created_at,updated_at) VALUES('cus_order','owner@example.test','hash',1,1);`);
+  const own = makeOrder({ seq: 1, event_id: "evt_own_email", customer: { id: "cus_order", email: "Owner@Example.test" } });
+  const applied = await submit(env, own);
+  assert.equal(applied.status, 200);
+  assert.equal(applied.body.code, "applied");
+  const taken = makeOrder({ seq: 2, event_id: "evt_taken_email", customer: { id: "cus_order", email: "buyer@example.test" } });
+  const refreshed = await submit(env, taken);
+  assert.equal(refreshed.status, 200);
+  assert.equal(refreshed.body.code, "applied");
+  assert.equal(entRow(db, await fpOf(own)).customer_id, "cus_order");
+  assert.equal(db.prepare("SELECT email FROM customers WHERE id = 'cus_order'").get().email, "owner@example.test", "an existing customer's email is never rewritten");
+});
+
+// Wrap the D1 adapter so the order's customer write first lets another writer act.
+function racingCustomerWrite(env, beforeWrite) {
+  const realDb = env.DB;
+  return {
+    ...env,
+    DB: {
+      prepare(sql) {
+        const statement = realDb.prepare(sql);
+        if (!sql.startsWith("INSERT INTO customers")) return statement;
+        return {
+          bind(...values) {
+            const bound = statement.bind(...values);
+            return {
+              first: async () => { await beforeWrite(); return bound.first(); },
+              run: async () => { await beforeWrite(); return bound.run(); },
+              all: async () => { await beforeWrite(); return bound.all(); },
+            };
+          },
+        };
+      },
+      batch: (statements) => realDb.batch(statements),
+    },
+  };
+}
+
+test("an account created for the order's email just before the customer write refuses the order terminally", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  let raced = false;
+  const racing = racingCustomerWrite(env, () => {
+    if (raced) return;
+    raced = true;
+    db.exec("INSERT INTO customers(id,name,email,created_at,updated_at) VALUES('cus_racer','Racer','buyer@example.test',1,1)");
+  });
+  const order = conflictOrder();
+  assertEmailConflict(db, await submit(racing, order), order);
+  assert.equal(raced, true);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM customers WHERE id = 'cus_racer'").get().c, 1);
+});
+
+test("a unique-email failure on the customer write is the terminal refusal; any other failure stays retryable", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  const uniqueFailure = racingCustomerWrite(env, () => {
+    db.exec("INSERT OR IGNORE INTO customers(id,name,email,created_at,updated_at) VALUES('cus_racer','Racer','buyer@example.test',1,1)");
+    throw new Error("D1_ERROR: UNIQUE constraint failed: index 'idx_customers_email': SQLITE_CONSTRAINT");
+  });
+  const order = conflictOrder();
+  assertEmailConflict(db, await submit(uniqueFailure, order), order);
+
+  const unavailable = racingCustomerWrite(env, () => { throw new Error("D1_ERROR: storage unavailable"); });
+  const other = conflictOrder({ subscription_id: "sub_B", event_id: "evt_storage_down", customer: { id: "cus_fresh", email: "fresh@example.test" } });
+  const failed = await submit(unavailable, other);
+  assert.equal(failed.status, 503);
+  assert.equal(failed.body.code, "write_failed");
+  assert.equal(eventRow(db, other.event_id).status, "accepted", "an unrelated failure is retried");
+  const retried = await submit(env, other, { now: NOW + 1 });
+  assert.equal(retried.status, 200);
+  assert.equal(retried.body.code, "applied");
+});
+
+// A terminal refusal at apply records the event as rejected and leaves the subscription
+// cursor at the refused seq, so a lower seq is stale and a resend is the stored refusal.
+// The grant and its floor are untouched.
+async function assertTerminalRefusalFloor(db, env, order, expected, now) {
+  const authority = () => ["entitlements", "entitlement_events"].map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+  const before = authority();
+  const refused = await submit(env, order, { now });
+  assert.equal(refused.status, 409, expected);
+  assert.equal(refused.body.code, expected);
+  const event = eventRow(db, order.event_id);
+  assert.equal(event.status, "rejected", expected);
+  assert.equal(JSON.parse(event.result_json).code, expected);
+  assert.equal(event.processed_at, now);
+  assert.deepEqual(authority(), before, `${expected} writes no grant or audit row`);
+  assert.equal(orderRow(db, order.subscription_id).last_seq, order.seq, `${expected} advances the subscription cursor`);
+  const resent = await submit(env, order, { now: now + 1 });
+  assert.deepEqual([resent.status, resent.body], [refused.status, refused.body], `${expected} resend is the stored refusal`);
+  const lower = await submit(env, makeOrder({ ...order, event_id: `${order.event_id}_lower`, seq: order.seq - 1 }), { now: now + 2 });
+  assert.equal(lower.body.code, "stale_ignored", `${expected} leaves a lower seq stale`);
+  assert.deepEqual(authority(), before);
+  assert.equal(orderRow(db, order.subscription_id).last_seq, order.seq);
+}
+
+test("an email-conflict refusal moves the order floor exactly like an existing terminal refusal", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  // The reference: an order against a revoked grant is refused with entitlement_revoked.
+  const revoked = makeOrder({ subscription_id: "sub_R", event_id: "evt_R1", seq: 1 });
+  await submit(env, revoked);
+  await submit(env, makeOrder({ subscription_id: "sub_R", event_id: "evt_R2", seq: 2, intent: "fraud.confirmed" }));
+  await assertTerminalRefusalFloor(db, env, makeOrder({ subscription_id: "sub_R", event_id: "evt_R4", seq: 4, intent: "subscription.renewed" }), "entitlement_revoked", NOW + 10);
+  assert.equal(entRow(db, await fpOf(revoked)).last_applied_order_seq, 2, "the refused order never moves the grant floor");
+
+  db.exec("INSERT INTO customers(id,name,email,created_at,updated_at) VALUES('cus_existing','Existing','buyer@example.test',1,1)");
+  await assertTerminalRefusalFloor(db, env, conflictOrder({ subscription_id: "sub_E", event_id: "evt_E4", seq: 4 }), "customer_email_conflict", NOW + 20);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM customers WHERE id = 'cus_store'").get().c, 0);
+
+  // A later order for the subscription is admitted, not stale: with a free address it applies.
+  const corrected = conflictOrder({ subscription_id: "sub_E", event_id: "evt_E5", seq: 5, customer: { id: "cus_store", email: "store-buyer@example.test" } });
+  const applied = await submit(env, corrected, { now: NOW + 30 });
+  assert.equal(applied.status, 200);
+  assert.equal(applied.body.code, "applied");
+  assert.equal(entRow(db, await fpOf(corrected)).last_applied_order_seq, 5);
+  assert.equal(db.prepare("SELECT email FROM customers WHERE id = 'cus_store'").get().email, "store-buyer@example.test");
+});
