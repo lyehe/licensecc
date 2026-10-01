@@ -137,6 +137,51 @@ test("enrollment validates exact schema, canonical secrets and trimmed Unicode l
   assert.equal(validateBoundRequest("authorize", { ...enrollment(), device_label: "🚀".repeat(80) }).device_label.length, 160);
 });
 
+// The approval page shows the label beside the real comparison code, so a label may not break
+// lines, reorder or hide text, or carry a code of its own for the approver to match.
+const MISLEADING_LABELS = {
+  "a C0 control": "My\u0007PC",
+  "a line feed inside": "My PC\nApproved",
+  "a carriage return inside": "My\rPC",
+  "a tab inside": "My\tPC",
+  "a delete control": "My\u007fPC",
+  "a C1 control": "My\u0085PC",
+  "the last C1 control": "My\u009fPC",
+  "a line separator": "My\u2028PC",
+  "a paragraph separator": "My\u2029PC",
+  "a zero-width space": "My\u200bPC",
+  "a left-to-right mark": "\u200eMy PC",
+  "a right-to-left mark": "My\u200fPC",
+  "a bidi embedding": "My\u202aPC",
+  "a bidi override": "PC\u202emy",
+  "a word joiner": "My\u2060PC",
+  "an invisible separator": "My\u2064PC",
+  "a bidi isolate": "My\u2066PC",
+  "a pop directional isolate": "My\u2069PC",
+  "a byte order mark inside": "My\ufeffPC",
+  "a comparison code": "code 4F2A-0C12-B7E4 matches",
+  "a lowercase comparison code": "pick 4f2a-0c12-b7e4",
+  "a comparison code inside a word": "PC4F2A-0C12-B7E4X",
+};
+
+test("a device label that could mislead the approver is refused at registration", () => {
+  for (const [label, device_label] of Object.entries(MISLEADING_LABELS)) {
+    assert.throws(
+      () => validateBoundRequest("authorize", { ...enrollment(), device_label }),
+      error => error.code === "invalid_request" && error.status === 400,
+      label,
+    );
+  }
+});
+
+test("a device label still accepts letters, digits, spaces and punctuation in any script", () => {
+  for (const device_label of ["Büro-PC", "工作站", "Ana's MacBook Pro (2024)", "build-01.example.com", "ПК №12", "Room 4F2A-0C12", "📎 Laptop"]) {
+    assert.equal(validateBoundRequest("authorize", { ...enrollment(), device_label }).device_label, device_label, device_label);
+  }
+  // Surrounding whitespace is still trimmed before the rule applies.
+  assert.equal(validateBoundRequest("authorize", { ...enrollment(), device_label: "\ufeff\t Büro-PC \r\n" }).device_label, "Büro-PC");
+});
+
 test("an authorization without requested_feature is refused", () => {
   const request = enrollment();
   delete request.requested_feature;

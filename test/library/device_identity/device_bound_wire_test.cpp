@@ -60,7 +60,7 @@ BOOST_AUTO_TEST_CASE(registration_wire_matches_shared_fixture_and_normalizes_lab
 		BOOST_CHECK(!encode_bound_authorization(input, out));
 		BOOST_CHECK_EQUAL(std::string(out.value.begin(), out.value.end()), wire);
 	}
-	input.device_label = "quote\" slash\\ line\ninside";
+	input.device_label = "quote\" slash\\ inside";
 	BOOST_REQUIRE(encode_bound_authorization(input, out));
 	bound_json::Value decoded;
 	BOOST_REQUIRE(bound_json::parse(std::string(out.value.begin(), out.value.end()), decoded));
@@ -71,6 +71,42 @@ BOOST_AUTO_TEST_CASE(registration_wire_matches_shared_fixture_and_normalizes_lab
 	BOOST_CHECK(encode_bound_authorization(input, out));
 	input.device_label += "x";
 	BOOST_CHECK(!encode_bound_authorization(input, out));
+}
+// The approval page shows the label beside the comparison code, so the app refuses, before
+// sending, a label that breaks lines, reorders or hides text, or carries a code of its own.
+BOOST_AUTO_TEST_CASE(registration_refuses_labels_that_could_mislead_the_approver) {
+	const auto r = vector("registration_wire.json").get_child("request");
+	BoundAuthorizationInput input{r.get<std::string>("client_id"),		 r.get<std::string>("project"),
+								  r.get<std::string>("public_key_spki"), r.get<std::string>("device_label"),
+								  r.get<std::string>("redirect_uri"),	 r.get<std::string>("state"),
+								  r.get<std::string>("code_challenge"),	 r.get<std::string>("requested_feature")};
+	SensitiveVector out;
+	const std::string misleading[] = {
+		// C0 controls (BEL, LF, CR, TAB), DEL and C1 controls (U+0085, U+009F) inside the label.
+		"My\x07PC", "My PC\nApproved", "My\rPC", "My\tPC", "My\x7fPC", "My\xc2\x85PC", "My\xc2\x9fPC",
+		// Line and paragraph separators, U+2028 and U+2029.
+		"My\xe2\x80\xa8PC", "My\xe2\x80\xa9PC",
+		// Bidi and format controls: U+200B, U+200E, U+200F, U+202A, U+202E, U+2060, U+2064, U+2066,
+		// U+2069 and an inner U+FEFF.
+		"My\xe2\x80\x8bPC", "\xe2\x80\x8eMy PC", "My\xe2\x80\x8fPC", "My\xe2\x80\xaaPC", "PC\xe2\x80\xaemy",
+		"My\xe2\x81\xa0PC", "My\xe2\x81\xa4PC", "My\xe2\x81\xa6PC", "My\xe2\x81\xa9PC", "My\xef\xbb\xbfPC",
+		// Anything shaped like a comparison code, in either case and inside a word.
+		"code 4F2A-0C12-B7E4 matches", "pick 4f2a-0c12-b7e4", "PC4F2A-0C12-B7E4X"};
+	for (const auto& label : misleading) {
+		input.device_label = label;
+		BOOST_CHECK_MESSAGE(!encode_bound_authorization(input, out), "label must be refused: " << label);
+		std::string normalized;
+		BOOST_CHECK_MESSAGE(!normalize_bound_device_label(label, normalized), "label must be refused: " << label);
+	}
+	const std::string accepted[] = {"B\xc3\xbcro-PC", "\xe5\xb7\xa5\xe4\xbd\x9c\xe7\xab\x99",
+									"Ana's MacBook Pro (2024)", "build-01.example.com", "Room 4F2A-0C12"};
+	for (const auto& label : accepted) {
+		input.device_label = label;
+		BOOST_CHECK_MESSAGE(encode_bound_authorization(input, out), "label must be accepted: " << label);
+	}
+	std::string normalized;
+	BOOST_REQUIRE(normalize_bound_device_label("\xef\xbb\xbf\t B\xc3\xbcro-PC \r\n", normalized));
+	BOOST_CHECK_EQUAL(normalized, "B\xc3\xbcro-PC");
 }
 BOOST_AUTO_TEST_CASE(registration_response_requires_exact_schema_and_status) {
 	const auto v = vector("registration_wire.json");

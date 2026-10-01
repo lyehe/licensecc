@@ -42,7 +42,7 @@ BOOST_AUTO_TEST_CASE(config_rejects_invalid_authority_and_paths_before_any_facto
 	const auto good = options(signer);
 	BoundPublicConfig c;
 	BOOST_REQUIRE_EQUAL(validate_bound_public_options(&good, c), LCC_BOUND_OK);
-	for (unsigned scenario = 0; scenario < 13; ++scenario) {
+	for (unsigned scenario = 0; scenario < 15; ++scenario) {
 		auto o = good;
 		switch (scenario) {
 			case 0:
@@ -84,6 +84,12 @@ BOOST_AUTO_TEST_CASE(config_rejects_invalid_authority_and_paths_before_any_facto
 			case 12:
 				o.trust_key_count = 2;
 				o.trust_keys[1] = o.trust_keys[0];
+				break;
+			case 13:
+				std::strcpy(o.device_label, "code 4F2A-0C12-B7E4 matches");
+				break;
+			case 14:
+				std::strcpy(o.device_label, "My\xe2\x80\xaePC");
 				break;
 		}
 		BoundPublicHooks hooks;
