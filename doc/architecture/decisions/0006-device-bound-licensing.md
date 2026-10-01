@@ -4,6 +4,7 @@
   browser consent flow exist. Public Windows and Linux owners and installed
   consumers exist; each live TPM/browser/backend journey remains a release gate.
 - Date: 2026-09-13
+- Amended: 2026-09-28 — protected mode is the only online mode; the compatibility and cutover section is superseded.
 - Decision owners: licensing backend, native runtime, portal and release maintainers.
 
 ## Context
@@ -15,8 +16,7 @@ possession. Floating-seat checkouts also have a different lifecycle from a
 persistent device allocation and cannot serve as its authority ledger.
 
 The new flow must enforce a device cap under concurrent requests, tolerate lost
-responses, retain capacity while an offline lease can still be accepted, and
-remain separate from supported legacy and floating clients.
+responses, and retain capacity while an offline lease can still be accepted.
 
 ## Decision
 
@@ -69,22 +69,21 @@ continuity; those cases require online renewal. Clients stop at signed expiry.
 The server's conservative clock allowance belongs only to capacity holds and
 must be supported by native clock-continuity evidence before release.
 
-### Compatibility and cutover
+### Protected-only operation
 
-Entitlements explicitly distinguish legacy and protected enforcement. Legacy
-verification, issuance, device registration and floating-seat writes fail closed
-for protected mode. There is no fallback from a protected validation failure to
-a legacy format or an environment-wide optional-proof setting.
+Protected device-bound licensing is the only online mode. Entitlements have no
+enforcement mode: every grant is protected and names its owner. There are no
+legacy verification, issuance, device-registration or floating-seat paths to
+fence, so a protected validation failure has nothing to fall back to: no other
+format and no environment-wide optional-proof setting.
 
-The baseline schema defaults entitlements to legacy mode. Automatic in-place
-conversion is blocked: retained lease/seat rows cannot prove complete historical
-authority, and legacy offline clients have different clock and expiry semantics.
-Future conversion needs reviewed issuer fencing and durable cutover evidence,
-including externally issued and pruned grants. Development uses fresh synthetic
-protected cohorts. Rollback must preserve mode, generations, identities and holds.
+There is no cutover. The D1 schema is a single baseline edited in place, and
+every database is recreated from it when it changes, so no in-place conversion,
+issuer fencing or cutover evidence exists to maintain. Development uses fresh
+synthetic protected cohorts. Rollback must preserve generations, identities and
+holds.
 
-D1 is the only store for protected state; the repository has no PostgreSQL
-adapter.
+D1 is the only store for protected state.
 
 ## Consequences and release evidence
 
@@ -93,8 +92,8 @@ allocation distinct. The cost is bounded transfer delay and online renewal after
 restart in the initial native profile. These are explicit product behavior.
 
 The implementation must demonstrate atomic capacity and rollback, authenticated
-recovery, parser/crypto interoperability, restored holds, protected legacy-route
-denial, browser consent and a real native protected operation. Schema and helper
+recovery, parser/crypto interoperability, restored holds, browser consent and a
+real native protected operation. Schema and helper
 tests alone do not establish end-to-end protection.
 
 The maintained native API and enrollment references describe the application
