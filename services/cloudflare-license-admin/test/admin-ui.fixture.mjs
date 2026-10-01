@@ -11,6 +11,9 @@ const KNOWN_RESULT_CODES = (() => {
   const codes = new Set();
   const messages = readFileSync(new URL("../src/ui/shared/messages.ts", import.meta.url), "utf8");
   for (const match of messages.matchAll(/^ {2}([a-z][a-z0-9_]*): (?:failed|done)\(/gm)) codes.add(match[1]);
+  // Order activity's own sentences for the codes the backend records on a refused order.
+  const orderRefusals = readFileSync(new URL("../src/ui/features/fulfillment/workflow.ts", import.meta.url), "utf8");
+  for (const match of orderRefusals.matchAll(/^ {2}([a-z][a-z0-9_]*): "/gm)) codes.add(match[1]);
   const fixture = readFileSync(new URL(import.meta.url), "utf8");
   for (const match of fixture.matchAll(/(?:makeEnvelope\(|code: )"([a-z][a-z0-9_]*)"/g)) codes.add(match[1]);
   return [...codes].filter((code) => code.includes("_"));

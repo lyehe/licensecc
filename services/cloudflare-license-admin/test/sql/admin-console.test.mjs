@@ -529,6 +529,37 @@ test("console: fulfillment monitor surfaces status summary + stale-accepted flag
   assert.equal(accepted[0].event_id, "evt_stuck");
 });
 
+test("console: order activity carries each row's result code and nothing else of its stored result", async () => {
+  const db = freshDb();
+  seed(db);
+  const event = (id, seq, status, resultJson) => db.prepare(
+    `INSERT INTO order_events (event_id, subscription_id, project, feature, order_epoch, seq, intent, key_id, payload_digest, raw_payload, status, result_json, received_at, processed_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  ).run(id, "sub_b", "DEFAULT", "DEFAULT", 0, seq, "subscription.active", "k1", `d_${id}`, "{\"customer\":{\"email\":\"buyer@example.test\"}}", status, resultJson, NOW - 60 + seq, NOW - 60 + seq);
+  event("evt_email", 1, "rejected", JSON.stringify({ ok: false, code: "customer_email_conflict" }));
+  event("evt_capacity", 2, "rejected", JSON.stringify({ ok: false, code: "capacity_in_use", license_fingerprint: FP_A, fingerprint_origin: "derived" }));
+  event("evt_applied", 3, "processed", JSON.stringify({ ok: true, code: "applied", license_fingerprint: FP_A, entitlement: { customer_id: "cus_a", notes: "private note" } }));
+  event("evt_unreadable", 4, "rejected", "not json");
+  event("evt_not_a_code", 5, "rejected", JSON.stringify({ ok: false, code: "Refused: see note" }));
+  const env = devEnv(db);
+
+  const data = (await body(await worker.fetch(devReq("/api/admin/orders"), env))).data;
+  const byId = Object.fromEntries(data.items.map((item) => [item.event_id, item]));
+  assert.equal(byId.evt_email.result_code, "customer_email_conflict");
+  assert.equal(byId.evt_capacity.result_code, "capacity_in_use");
+  assert.equal(byId.evt_applied.result_code, "applied");
+  assert.equal(byId.evt_stuck.result_code, null, "an accepted order has no result yet");
+  assert.equal(byId.evt_done.result_code, null, "a row without a stored result has no code");
+  assert.equal(byId.evt_unreadable.result_code, null, "an unreadable stored result has no code");
+  assert.equal(byId.evt_not_a_code.result_code, null, "only a result code is passed on, never free text");
+  for (const item of data.items) {
+    assert.deepEqual(Object.keys(item).sort(), [
+      "event_id", "feature", "intent", "key_id", "order_epoch", "processed_at", "project", "received_at", "result_code", "seq", "stale", "status", "subscription_id",
+    ]);
+  }
+  assert.doesNotMatch(JSON.stringify(data.items), /private note|buyer@example\.test|license_fingerprint|entitlement/);
+});
+
 test("console: report aggregates entitlements / customers / licenses / fulfillment", async () => {
   const db = freshDb();
   seed(db);

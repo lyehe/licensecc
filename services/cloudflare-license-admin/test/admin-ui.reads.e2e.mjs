@@ -53,7 +53,7 @@ test("admin UI loads every active-policy selector page and accepts production nu
   api.behavior.activePolicyPagination = true;
   api.behavior.deliveryPagination = true;
   api.behavior.licenseRows = [{ id: "lic_null", customer_id: null, project: "DEFAULT", label: null, created_at: 1_760_000_000, updated_at: 1_760_000_000 }];
-  api.behavior.orderRows = [{ event_id: "evt-string-id", subscription_id: "sub_string", project: "DEFAULT", feature: "pro", order_epoch: 1, seq: 1, intent: "upsert", key_id: null, status: "accepted", received_at: 1_760_000_000, processed_at: null, stale: false }];
+  api.behavior.orderRows = [{ event_id: "evt-string-id", subscription_id: "sub_string", project: "DEFAULT", feature: "pro", order_epoch: 1, seq: 1, intent: "upsert", key_id: null, status: "accepted", result_code: null, received_at: 1_760_000_000, processed_at: null, stale: false }];
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
 
@@ -102,8 +102,8 @@ test("admin UI fences duplicate and stale load-more appends for deliveries, orde
   ];
   api.behavior.ordersPagination = true;
   api.behavior.orderRows = [
-    { event_id: "evt_accept", subscription_id: "sub_page", project: "DEFAULT", feature: "pro", order_epoch: 1, seq: 1, intent: "upsert", key_id: null, status: "accepted", received_at: 1_760_000_000, processed_at: null, stale: false },
-    { event_id: "evt_reject", subscription_id: "sub_page", project: "DEFAULT", feature: "pro", order_epoch: 1, seq: 2, intent: "upsert", key_id: null, status: "rejected", received_at: 1_760_000_001, processed_at: null, stale: false },
+    { event_id: "evt_accept", subscription_id: "sub_page", project: "DEFAULT", feature: "pro", order_epoch: 1, seq: 1, intent: "upsert", key_id: null, status: "accepted", result_code: null, received_at: 1_760_000_000, processed_at: null, stale: false },
+    { event_id: "evt_reject", subscription_id: "sub_page", project: "DEFAULT", feature: "pro", order_epoch: 1, seq: 2, intent: "upsert", key_id: null, status: "rejected", result_code: "entitlement_revoked", received_at: 1_760_000_001, processed_at: 1_760_000_001, stale: false },
   ];
   api.behavior.expiringPagination = true;
   await page.route("**/api/admin/**", api.route);
@@ -181,8 +181,8 @@ test("admin UI retires contract-invalid null, scalar, and envelope append cursor
   });
   api.behavior.ordersPagination = true;
   api.behavior.orderRows = [
-    { event_id: "evt_invalid_one", subscription_id: "sub_invalid", project: "DEFAULT", feature: "pro", order_epoch: 1, seq: 1, intent: "upsert", key_id: null, status: "accepted", received_at: 1_760_000_000, processed_at: null, stale: false },
-    { event_id: "evt_invalid_two", subscription_id: "sub_invalid", project: "DEFAULT", feature: "pro", order_epoch: 1, seq: 2, intent: "upsert", key_id: null, status: "accepted", received_at: 1_760_000_001, processed_at: null, stale: false },
+    { event_id: "evt_invalid_one", subscription_id: "sub_invalid", project: "DEFAULT", feature: "pro", order_epoch: 1, seq: 1, intent: "upsert", key_id: null, status: "accepted", result_code: null, received_at: 1_760_000_000, processed_at: null, stale: false },
+    { event_id: "evt_invalid_two", subscription_id: "sub_invalid", project: "DEFAULT", feature: "pro", order_epoch: 1, seq: 2, intent: "upsert", key_id: null, status: "accepted", result_code: null, received_at: 1_760_000_001, processed_at: null, stale: false },
   ];
   api.behavior.orderAppendResponses.push({
     status: 200,
@@ -1084,4 +1084,26 @@ test("a whitespace-only entitlement filter counts as unfiltered for the empty st
   await page.getByLabel("Filter by project").fill("acme");
   await expect(filteredEmptyState).toBeVisible();
   await expect(clearFilters).toBeEnabled();
+});
+
+test("order activity says why an order was refused and keeps its code under Technical details", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const row = { project: "DEFAULT", feature: "DEFAULT", order_epoch: 0, intent: "subscription.active", key_id: "store", received_at: 1_760_000_000, processed_at: 1_760_000_000, stale: false };
+  api.behavior.orderRows = [
+    { ...row, event_id: "evt_email", subscription_id: "sub_email", seq: 1, status: "rejected", result_code: "customer_email_conflict" },
+    { ...row, event_id: "evt_applied", subscription_id: "sub_applied", seq: 1, status: "processed", result_code: "applied" },
+  ];
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/fulfillment");
+
+  const refused = page.locator("tbody tr", { hasText: "sub_email" });
+  await expect(refused).toContainText("The order's email already belongs to another customer.");
+  const code = refused.getByText("customer_email_conflict", { exact: true });
+  await expect(code).toBeHidden();
+  await refused.getByText("Technical details", { exact: true }).click();
+  await expect(code).toBeVisible();
+
+  const applied = page.locator("tbody tr", { hasText: "sub_applied" });
+  await expect(applied).toBeVisible();
+  await expect(applied.getByText("Technical details", { exact: true })).toHaveCount(0);
 });

@@ -21,6 +21,39 @@ test("admin UI workflow builds filtered license and order API paths", async () =
   assert.equal(fulfillment.ordersPath({ status: "rejected", subscription_id: "" }), "/api/admin/orders?status=rejected");
 });
 
+test("order activity says in words why an order was refused and keeps the code under Technical details", async () => {
+  const fulfillment = await loadWorkflowModule("features/fulfillment/workflow.ts");
+  assert.deepEqual(fulfillment.orderRefusalFeedback("customer_email_conflict"), {
+    tone: "error",
+    message: "The order's email already belongs to another customer.",
+    detail: { code: "customer_email_conflict", requestId: null },
+  });
+  // Every refusal the backend records reads as a sentence, never as its code.
+  for (const code of ["invalid_order", "entitlement_revoked", "entitlement_owner_mismatch", "customer_email_conflict", "a_future_refusal"]) {
+    const feedback = fulfillment.orderRefusalFeedback(code);
+    assert.doesNotMatch(feedback.message, /\b[a-z0-9]+_[a-z0-9_]+\b/, code);
+    assert.match(feedback.message, /[.!?]$/, code);
+    assert.deepEqual(feedback.detail, { code, requestId: null }, code);
+  }
+  assert.equal(fulfillment.orderRefusalFeedback("a_future_refusal").message, "The order was refused.");
+  // A refused row without a stored code still gets the sentence, and no empty Technical details.
+  assert.deepEqual(fulfillment.orderRefusalFeedback(null), { tone: "error", message: "The order was refused." });
+});
+
+test("the order list guard requires each row's result code, a string or null", async () => {
+  const guards = await loadWorkflowModule("shared/mutationGuards.ts");
+  const row = {
+    event_id: "evt_1", subscription_id: "sub_1", project: "DEFAULT", feature: "DEFAULT", order_epoch: 0, seq: 1, intent: "subscription.active",
+    key_id: "store", status: "rejected", result_code: "customer_email_conflict", received_at: 10, processed_at: 11, stale: false,
+  };
+  const page = (item) => ({ items: [item], summary: { accepted: 0, processed: 0, superseded: 0, rejected: 1, stale_accepted: 0 }, stale_secs: 300, next_cursor: null });
+  assert.equal(guards.hasOrdersListData(page(row)), true);
+  assert.equal(guards.hasOrdersListData(page({ ...row, status: "accepted", result_code: null, processed_at: null })), true);
+  const { result_code: _omitted, ...withoutCode } = row;
+  assert.equal(guards.hasOrdersListData(page(withoutCode)), false);
+  assert.equal(guards.hasOrdersListData(page({ ...row, result_code: 7 })), false);
+});
+
 test("admin UI workflow formats event timestamps in local time with a zone label", async () => {
   const format = await loadWorkflowModule("shared/format.ts");
   assert.equal(format.formatEpoch(null), "-");
