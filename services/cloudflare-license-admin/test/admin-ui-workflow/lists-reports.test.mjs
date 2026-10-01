@@ -30,7 +30,7 @@ test("order activity says in words why an order was refused and keeps the code u
   });
   assert.deepEqual(fulfillment.orderRefusalFeedback("capacity_in_use"), {
     tone: "error",
-    message: "This order would allow fewer devices than are connected. Disconnect devices, then resend the order.",
+    message: "This order would allow fewer devices than are connected. Disconnect devices, then have the store send a new order event.",
     detail: { code: "capacity_in_use", requestId: null },
   });
   // Every refusal the backend records reads as a sentence, never as its code.
