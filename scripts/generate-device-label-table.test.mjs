@@ -55,6 +55,11 @@ test("a table generated with other Unicode data passes only where this engine ha
   assert.deepEqual(unexplainedDifference([[0x10, 0x12]], [[0x11, 0x13]], () => false), [0x10, 0x13]);
 });
 
+test("a checkout with CRLF line endings still matches", () => {
+  const lf = committed.replace(/\r\n/gu, "\n");
+  assert.deepEqual(deviceLabelTableDrift(lf.replace(/\n/gu, "\r\n")), []);
+});
+
 test("the generator is deterministic for one engine", () => {
   assert.equal(renderDeviceLabelTable("1.0"), renderDeviceLabelTable("1.0"));
 });
