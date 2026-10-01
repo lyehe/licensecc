@@ -40,8 +40,13 @@ export async function loadTerminalOrderOutcome(env, eventId) {
   } catch {
     return { status: 503, body: resultBody("write_failed", {}) };
   }
-  const status = row.status === "rejected" ? (body.code === "invalid_order" ? 400 : 409) : 200;
+  const status = row.status === "rejected" ? rejectedStatus(body.code) : 200;
   return { status, body };
+}
+
+// A malformed or contradictory order is a 400; every other terminal refusal is a 409.
+function rejectedStatus(code) {
+  return code === "invalid_order" ? 400 : 409;
 }
 
 export async function claimStaleOrderOutcome(env, order, digest, now) {
@@ -95,13 +100,16 @@ export async function claimStaleOrderOutcome(env, order, digest, now) {
   return { status: 503, body: resultBody("write_failed", {}), claimed: false };
 }
 
-export async function terminalizeInvalidOrderEvent(env, eventId, now) {
-  const body = resultBody("invalid_order", {});
+// Refuse a still-accepted event terminally with `code` when the refusal is decided outside
+// the apply batch, such as an order identity that contradicts an established one or an
+// email that already belongs to another customer. A resend returns this stored result.
+export async function terminalizeRejectedOrderEvent(env, eventId, code, now) {
+  const body = resultBody(code, {});
   const marked = await env.DB.prepare(
     "UPDATE order_events SET status = 'rejected', result_json = ?, processed_at = ? " +
       "WHERE event_id = ? AND status = 'accepted' RETURNING event_id",
   ).bind(JSON.stringify(body), now, eventId).first();
-  return marked === null ? loadTerminalOrderOutcome(env, eventId) : { status: 400, body };
+  return marked === null ? loadTerminalOrderOutcome(env, eventId) : { status: rejectedStatus(code), body };
 }
 
 // Reject a still-accepted event with a 409 `code` when the entitlement matches `condition`

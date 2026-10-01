@@ -155,14 +155,47 @@ export async function materializeOrderAuxiliaryIdentities(env, order, now) {
     if (license === null) return conflict(400, "invalid_order");
   }
   if (order.customer?.id) {
+    const id = order.customer.id;
     const email = typeof order.customer.email === "string" ? order.customer.email.trim().toLowerCase() : "";
     const name = typeof order.customer.name === "string" ? order.customer.name : "";
     const externalRef = typeof order.customer.external_ref === "string" ? order.customer.external_ref : "";
-    await env.DB.prepare(
-      "INSERT INTO customers (id, name, email, metadata_json, created_at, updated_at, status, external_ref) " +
-        "VALUES (?, ?, ?, '{}', ?, ?, 'active', ?) " +
-        "ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at",
-    ).bind(order.customer.id, name, email, now, now, externalRef).run();
+    // The guard and the write are one statement, so no other account can take the address
+    // between them. An existing customer id keeps its stored email and is never refused here.
+    let written;
+    try {
+      written = await env.DB.prepare(
+        "INSERT INTO customers (id, name, email, metadata_json, created_at, updated_at, status, external_ref) " +
+          `SELECT ?, ?, ?, '{}', ?, ?, 'active', ? WHERE NOT (${NEW_CUSTOMER_EMAIL_TAKEN}) ` +
+          "ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at RETURNING id",
+      ).bind(id, name, email, now, now, externalRef, ...newCustomerEmailTakenValues(id, email)).first();
+    } catch (error) {
+      // The unique email index refuses an address another writer claimed concurrently.
+      // Classify the failure by reading the accounts again, never by the driver's message.
+      if (await newCustomerEmailTaken(env, id, email)) return conflict(409, "customer_email_conflict");
+      throw error;
+    }
+    if (written === null) return conflict(409, "customer_email_conflict");
   }
   return { ok: true };
+}
+
+// An order's address may already belong to another customer: as a contact email, as a
+// password login (an invited account has no contact email until its owner proves the
+// mailbox), or as a Google or GitHub sign-in. A new customer for that address would split
+// one buyer across two accounts and cost the existing login its password reset, and no
+// retry can change it, so the order is refused terminally (409 customer_email_conflict).
+const NEW_CUSTOMER_EMAIL_TAKEN =
+  "? <> '' AND NOT EXISTS (SELECT 1 FROM customers WHERE id = ?) AND EXISTS (" +
+  "SELECT 1 FROM customers WHERE email <> '' AND lower(email) = ? AND id <> ? " +
+  "UNION ALL SELECT 1 FROM portal_passwords WHERE email_lower = ? AND customer_id <> ? " +
+  "UNION ALL SELECT 1 FROM portal_identities WHERE lower(email) = ? AND customer_id <> ?)";
+
+function newCustomerEmailTakenValues(id, email) {
+  return [email, id, email, id, email, id, email, id];
+}
+
+async function newCustomerEmailTaken(env, id, email) {
+  const row = await env.DB.prepare(`SELECT 1 AS taken WHERE ${NEW_CUSTOMER_EMAIL_TAKEN}`)
+    .bind(...newCustomerEmailTakenValues(id, email)).first();
+  return row !== null;
 }

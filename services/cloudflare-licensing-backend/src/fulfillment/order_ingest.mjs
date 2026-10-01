@@ -43,8 +43,8 @@ import {
   resultBody,
   terminalizeDefensiveNoEntitlement,
   terminalizeForeignOwnerOrderEvent,
-  terminalizeInvalidOrderEvent,
   terminalizeMissingEntitlementOrderEvent,
+  terminalizeRejectedOrderEvent,
   terminalizeRevokedOrderEvent,
 } from "./order_result_store.mjs";
 import {
@@ -968,7 +968,7 @@ async function applyAccepted(env, order, fingerprint, fingerprintOrigin, now) {
   if (!auxiliary.ok) {
     let rejected;
     try {
-      rejected = await terminalizeInvalidOrderEvent(env, order.event_id, now);
+      rejected = await terminalizeRejectedOrderEvent(env, order.event_id, auxiliary.code, now);
     } catch {
       return jsonResponse({ ok: false, code: "write_failed" }, 503);
     }

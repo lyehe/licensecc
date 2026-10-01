@@ -308,6 +308,19 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   fingerprint. Orders never change a grant's owner, and a subscription's customer
   is fixed, so after an operator reassigns a grant to another customer, orders can
   no longer reach it.
+- **One customer per email.** An order whose `customer.id` does not exist yet
+  creates that customer with the order's email. If that email (compared trimmed
+  and case-insensitively) already belongs to another customer, as a contact
+  email, a password login (an invited account has no contact email yet) or a
+  Google or GitHub sign-in, the order is refused with `409
+  customer_email_conflict`. The refusal is terminal: the event is recorded as
+  rejected, the subscription cursor has advanced, no customer, grant, audit or
+  webhook row is written, and a resend of the event returns the stored refusal.
+  The guard and the customer insert are one statement, and a unique-email
+  failure from a concurrent account maps to the same refusal. An order for an
+  existing customer id is never refused for its email and never rewrites that
+  customer's stored email. A later event for the subscription is admitted as
+  usual, so it applies once its email no longer belongs to another account.
 - **Withdrawals always apply** for the grant's own customer. The withdrawals
   (`subscription.past_due`, `subscription.paused`,
   `subscription.payment_failed`, `subscription.canceled_at_period_end`,
@@ -340,7 +353,8 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   complete or a terminal row has no stored result), `200 stale_ignored`, `409 seq_conflict`,
   `409 event_id_conflict`, `409 fingerprint_owned`, `409 entitlement_owner_mismatch`, `200 no_entitlement`
   (modify on a never-activated subscription — never materializes access),
-  `409 entitlement_revoked` (terminal), `401` (auth family), `400 invalid_order`,
+  `409 entitlement_revoked` (terminal), `409 customer_email_conflict` (terminal,
+  above), `401` (auth family), `400 invalid_order`,
   `503 config_error`, or `503 write_failed`. The body is read once as a bounded raw-byte stream and
   capped at `MAX_ORDER_BODY_BYTES = 16384`; overflow cancels the stream even if
   `Content-Length` is absent or lies. The HMAC is over those original bytes,
