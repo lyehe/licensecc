@@ -58,8 +58,11 @@ test("a refused mutation's notice names its cause and never suggests reactivatin
   const upsert = noOpNotice("upsert", { fingerprint, "customer-id": "cus_typo" });
   assert.match(upsert, /^NO-OP: upsert on project=DEFAULT feature=DEFAULT fingerprint=a{64} changed 0 rows and wrote no audit event\./u);
   assert.match(upsert, /customer cus_typo does not exist or is not active/);
+  assert.match(upsert, /the entitlement belongs to another customer, and upsert never changes an owner/);
   assert.match(upsert, /revoked, and revocation is permanent/);
   assert.match(upsert, /get --fingerprint a{64}/);
+  // get shows the owner, so the operator can see which cause applies.
+  assert.match(cli.sqlFor("get", { fingerprint }), /^SELECT project, feature, license_fingerprint, customer_id, license_id, status, /u);
   for (const command of ["disable", "reenable", "revoke"]) {
     const notice = noOpNotice(command, { fingerprint, project: "CAD" });
     assert.match(notice, new RegExp(`^NO-OP: ${command} on project=CAD feature=DEFAULT`, "u"));

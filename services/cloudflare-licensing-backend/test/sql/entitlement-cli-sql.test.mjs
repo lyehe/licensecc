@@ -126,6 +126,23 @@ test("upsert refuses a customer that does not exist: no grant and no audit event
   db.close();
 });
 
+test("upsert refuses a grant owned by another customer: the grant, its owner and its audit stay unchanged", () => {
+  const db = freshDb();
+  db.exec("INSERT INTO customers (id, name, created_at, updated_at) VALUES ('cus_2', 'Other', 1, 1)");
+  seed(db, "active", 5);
+  const before = db.prepare("SELECT * FROM entitlements").all();
+  for (const status of ["active", "disabled"]) {
+    db.exec(sqlFor("upsert", { fingerprint, actor: "op", status, reason: "move", "valid-until": 4102445000, "customer-id": "cus_2", "license-id": "lic_2" }));
+  }
+  assert.deepEqual(db.prepare("SELECT * FROM entitlements").all(), before);
+  assert.equal(eventCount(db), 0, "a refused upsert writes no audit event");
+  // The owner's own upsert still refreshes the grant.
+  db.exec(sqlFor("upsert", { fingerprint, actor: "op", "valid-until": 4102445000, "customer-id": "cus_1", "license-id": "lic_1" }));
+  assert.equal(entitlement(db).revocation_seq, 6);
+  assert.equal(eventCount(db), 1);
+  db.close();
+});
+
 test("upsert refuses a disabled customer, for a new grant and for the customer's existing one", () => {
   const db = freshDb();
   db.exec("INSERT INTO customers (id, name, status, created_at, updated_at) VALUES ('cus_off', 'Suspended', 'disabled', 1, 1)");
