@@ -303,10 +303,12 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   (default 1); `quantity.changed` changes only that device limit. A device limit
   is never set below the devices holding a slot on the grant (active, or
   retiring until their hold ends): such an order is refused with `409
-  capacity_in_use`. The refusal is terminal, because a retry cannot free a slot:
-  the event is recorded as rejected, the subscription cursor has advanced, the
-  grant, its floor and its audit are untouched, and a resend of the event
-  returns the stored refusal. Disconnect devices, then send a new event.
+  capacity_in_use`. The refusal is terminal: the event is recorded as rejected,
+  the subscription cursor has advanced, the grant, its floor and its audit are
+  untouched, and a resend of the same event only returns the stored refusal.
+  Disconnect devices, then have the store send a new order event (a higher
+  `seq`). A refusal caused only by a disconnecting device's hold clears once
+  that hold ends, but it still needs a new event.
 - **Grant ownership.** An order may act only on a grant its own `customer.id`
   already owns, or create a new one. If a grant already exists for the order's
   project, feature and fingerprint and another customer owns it, or no one does,

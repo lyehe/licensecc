@@ -196,6 +196,7 @@ test("order ingest documents distinct config/write failures and raw-wire body se
   assert.match(operation.responses["409"].description, /entitlement_owner_mismatch/);
   assert.match(operation.responses["409"].description, /customer_email_conflict \(the order names a customer id that does not exist yet/);
   assert.match(operation.responses["409"].description, /capacity_in_use \(a quantity\.changed or subscription\.active order would set the device limit below the devices holding a slot/);
+  assert.match(operation.responses["409"].description, /have the store send a new order event with a higher seq\. A refusal caused only by a disconnecting device's hold clears once that hold ends, but still needs a new event/);
   const order503 = operation.responses["503"];
   const examples = order503.content["application/json"].examples;
   assert.deepEqual(Object.keys(examples).sort(), ["config_error", "write_failed"]);
