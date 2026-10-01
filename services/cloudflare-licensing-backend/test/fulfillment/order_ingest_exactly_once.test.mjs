@@ -1857,3 +1857,40 @@ test("a device-limit refusal moves the order floor exactly like an existing term
   assert.equal(entRow(db, fingerprint).max_active_devices, 3);
   assert.equal(entRow(db, fingerprint).last_applied_order_seq, 5);
 });
+
+// Withdrawals always apply for the grant's own customer. A grant can name an owner id that has
+// no customer row (one written before the emergency CLI required an existing customer); a
+// withdrawal for it must still apply when its email belongs to another account. The owner's
+// customer row is created without an email, so no address is split across two accounts.
+for (const [intent, status] of WITHDRAWALS) {
+  test(`${intent} applies to its customer's grant even when the order's email belongs to another account`, async (t) => {
+    const { db, env } = freshEnv(); t.after(() => db.close());
+    const order = makeOrder({ seq: 1, event_id: "evt_withdraw", intent, customer: { id: "cus_legacy", email: "Buyer@Example.test" } });
+    const fingerprint = await fpOf(order);
+    db.exec(`INSERT INTO customers(id,name,email,created_at,updated_at) VALUES('cus_existing','Existing','buyer@example.test',1,1);
+      INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,max_active_devices,created_at,updated_at)
+        VALUES('${PROJECT}','${FEATURE}','${fingerprint}','active','cus_legacy',1,1,1);`);
+    const outcome = await submit(env, order);
+    assert.equal(outcome.status, 200, intent);
+    assert.equal(outcome.body.code, "applied", intent);
+    assert.equal(entRow(db, fingerprint).status, status, intent);
+    assert.equal(entRow(db, fingerprint).customer_id, "cus_legacy");
+    assert.equal(eventRow(db, order.event_id).status, "processed");
+    assert.deepEqual({ ...db.prepare("SELECT id, email, status FROM customers WHERE id = 'cus_legacy'").get() }, { id: "cus_legacy", email: "", status: "active" });
+    assert.equal(db.prepare("SELECT email FROM customers WHERE id = 'cus_existing'").get().email, "buyer@example.test");
+  });
+}
+
+test("an order that grants access is still refused when its new customer's email belongs to another account", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  const order = makeOrder({ seq: 1, event_id: "evt_renew_legacy", intent: "subscription.renewed", customer: { id: "cus_legacy", email: "buyer@example.test" } });
+  const fingerprint = await fpOf(order);
+  db.exec(`INSERT INTO customers(id,name,email,created_at,updated_at) VALUES('cus_existing','Existing','buyer@example.test',1,1);
+    INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,max_active_devices,valid_until,created_at,updated_at)
+      VALUES('${PROJECT}','${FEATURE}','${fingerprint}','active','cus_legacy',1,${NOW + 86400},1,1);`);
+  const refused = await submit(env, order);
+  assert.equal(refused.status, 409);
+  assert.equal(refused.body.code, "customer_email_conflict");
+  assert.equal(entRow(db, fingerprint).valid_until, NOW + 86400, "the grant is untouched");
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM customers WHERE id = 'cus_legacy'").get().c, 0);
+});
