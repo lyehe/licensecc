@@ -667,7 +667,7 @@
                       "const": "S256"
                     },
                     "device_label": {
-                      "description": "Trimmed display-only Unicode label, 1–80 code points.",
+                      "description": "Trimmed display-only Unicode label, 1–80 code points. Shown beside the comparison code on the approval page, so a label holding a C0 or C1 control or DEL, a line or paragraph separator, a bidi or format control (U+200B–U+200F, U+202A–U+202E, U+2060–U+2064, U+2066–U+2069, U+FEFF) or text shaped like a comparison code (XXXX-XXXX-XXXX in hex digits) is refused with invalid_request.",
                       "type": "string"
                     },
                     "project": {

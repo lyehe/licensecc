@@ -3,7 +3,9 @@
 #include "bound_json.hpp"
 #include "bound_lease.hpp"
 #include <algorithm>
+#include <cstdint>
 #include <stdexcept>
+#include <string_view>
 
 namespace license {
 namespace device_identity {
@@ -120,6 +122,39 @@ void quoted(SensitiveVector& out, const std::string& text) {
 	}
 	out.value.push_back('"');
 }
+// The approval page shows the label beside the comparison code, so a label may not hold a C0 or
+// C1 control or DEL, a line or paragraph separator, or a bidi or format control. Matches the
+// backend's device-label rule.
+bool misleading_code_point(std::uint32_t c) {
+	return c < 0x20 || (c >= 0x7f && c <= 0x9f) || c == 0x2028 || c == 0x2029 || (c >= 0x200b && c <= 0x200f) ||
+		   (c >= 0x202a && c <= 0x202e) || (c >= 0x2060 && c <= 0x2064) || (c >= 0x2066 && c <= 0x2069) || c == 0xfeff;
+}
+bool hex_digit(char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
+// Nor any text shaped like a comparison code, XXXX-XXXX-XXXX in hex digits of either case, which
+// could tell the approver which code to match. Those are ASCII, so bytes are compared directly.
+bool holds_comparison_code(std::string_view label) {
+	constexpr std::size_t length = 14;
+	for (std::size_t start = 0; start + length <= label.size(); ++start) {
+		bool match = true;
+		for (std::size_t i = 0; i < length && match; ++i)
+			match = (i == 4 || i == 9) ? label[start + i] == '-' : hex_digit(label[start + i]);
+		if (match) return true;
+	}
+	return false;
+}
+// The label is already valid UTF-8, trimmed only at sequence boundaries.
+bool misleading_label(std::string_view label) {
+	for (std::size_t i = 0; i < label.size();) {
+		const auto lead = static_cast<unsigned char>(label[i]);
+		const std::size_t size = lead < 0x80 ? 1 : (lead & 0xe0) == 0xc0 ? 2 : (lead & 0xf0) == 0xe0 ? 3 : 4;
+		if (i + size > label.size()) return true;
+		std::uint32_t point = size == 1 ? lead : lead & (0x7f >> size);
+		for (std::size_t k = 1; k < size; ++k) point = (point << 6) | (static_cast<unsigned char>(label[i + k]) & 0x3f);
+		if (misleading_code_point(point)) return true;
+		i += size;
+	}
+	return holds_comparison_code(label);
+}
 bool device_label(const std::string& input, std::string& out) {
 	if (!bound_encoding::utf8_text(input, 16384)) return false;
 	// ECMAScript TrimString: WhiteSpace plus LineTerminator, matching the
@@ -155,7 +190,7 @@ bool device_label(const std::string& input, std::string& out) {
 	unsigned points = 0;
 	for (unsigned char c : label)
 		if ((c & 0xc0) != 0x80) ++points;
-	if (points > 80) return false;
+	if (points > 80 || misleading_label(label)) return false;
 	out.assign(label);
 	return true;
 }

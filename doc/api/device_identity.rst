@@ -296,7 +296,15 @@ registers the S256 challenge, and pins the returned URL to the configured portal
 path and returned attempt handle. It independently recomputes the comparison
 code before publishing browser metadata. Device labels are trimmed with the
 backend's ECMAScript whitespace rules and must contain 1–80 Unicode code points
-after trimming. Registration retries preserve their original inputs and
+after trimming. The approval page shows the label beside the comparison code, so
+the trimmed label must not contain a C0 or C1 control character or DEL, a line or
+paragraph separator (U+2028, U+2029), a bidirectional or format control
+(U+200B–U+200F, U+202A–U+202E, U+2060–U+2064, U+2066–U+2069, U+FEFF), or
+any text shaped like a comparison code (``XXXX-XXXX-XXXX`` in hexadecimal digits
+of either case). Letters, digits, spaces and punctuation in any script remain
+valid. The native client refuses such a label with ``LCC_BOUND_INVALID_ARGUMENT``
+before it sends anything, and the backend refuses it at registration with
+``invalid_request``. Registration retries preserve their original inputs and
 five-minute inclusive-clock deadline.
 
 The owner accepts exactly one canonical code/state callback for the registered

@@ -66,7 +66,10 @@ registration response must stop enrollment before opening the browser. The
 browser displays the code derived from the stored attempt and asks the user to
 confirm that it matches the app. Cancellation does not require confirmation.
 Labels, customer/license selection, revisions and timestamps are not part of
-this immutable enrollment transcript.
+this immutable enrollment transcript. Because the browser shows the
+app-supplied device label beside the code, registration refuses a label that
+holds control, line-separator, bidirectional or format characters, or text
+shaped like a comparison code; :doc:`device_identity` lists the exact rule.
 
 The code is a 48-bit human comparison aid, not a credential, lookup key,
 signature or proof of key possession. State verification, PKCE, fresh challenges
