@@ -130,6 +130,10 @@ The owner accepted these losses with no protected replacement:
 
 ### Operator actions before the next deploy
 
+The maintained version of the staging drill setup and of the configuration
+to delete is in `doc/operations/cloudflare-setup.md`, under "Staging drill
+prerequisites" and "Secrets and variables no longer read".
+
 - Recreate every D1 database (staging, production and restore scratch
   databases) from the baseline, then apply it with
   `npm run migrate:remote --workspace @licensecc/cloudflare-licensing-backend`.
@@ -143,7 +147,12 @@ The owner accepted these losses with no protected replacement:
   order returns 503 `config_error`.
 - Delete the secrets the backend no longer reads (the online signer, account
   token, lease-issuance and emergency-operator secrets), and drop the removed
-  rollout selectors and the `D1_*RATE_LIMIT*` variables.
+  rollout selectors and the `D1_*RATE_LIMIT*` variables. Delete the portal's
+  `ACCOUNT_TOKEN_PEPPERS` secret and `ACCOUNT_TOKEN_ACTIVE_PEPPER_ID` variable,
+  and the GitHub environment secrets and variables no workflow reads
+  (`LICENSECC_STAGING_LEASE_*`, `LICENSECC_PUBLIC_VERIFIER_*` and
+  `LICENSECC_CAPACITY_*`). Nothing refuses these: the materializer accepts
+  unknown variables and the secret inventory checks only required names.
 - Staging protected drill: set the repository variables
   `LICENSECC_STAGING_DEVICE_CLIENT_ID`, `LICENSECC_STAGING_DEVICE_PROJECT`,
   `LICENSECC_STAGING_DEVICE_FEATURE`, `LICENSECC_STAGING_DEVICE_REDIRECT_URI`,
@@ -153,8 +162,9 @@ The owner accepted these losses with no protected replacement:
   feature, with a device limit of at least 20, and pass its id as the
   `portal_protected_entitlement_id` dispatch input. Register the drill's
   client, project and loopback callback in the staging `BOUND_DEVICE_CONFIG`
-  with the same audience. Until then a staging dispatch fails at startup and
-  names the missing variables.
+  with the same audience. Nothing checks these before the deploy: until they
+  are set, a staging dispatch still deploys the Workers, then fails at its
+  synthetic drill step and names the missing variables.
 - The staging catalog drill's manifest variable must not name the removed
   policy and plan-feature fields (the seat, borrow, meter and TTL fields).
 - Size `BOUND_GLOBAL_RATE_LIMIT` to the expected peak and add a WAF rate rule:
@@ -730,14 +740,21 @@ git grep -nIiE "supabase|postgres|pg-parity" -- ':!docs/superpowers/plans' ':!do
 | Search | Lines before the sweep (`b44493f6`) | Lines at the branch head |
 | --- | --- | --- |
 | legacy, compat, backward, deprecated | 442 | 339 |
-| `LEASE_ISSUE_BEARER`, `enforcement_mode`, `v200` | 7 | 6 |
+| `LEASE_ISSUE_BEARER`, `enforcement_mode`, `v200` | 7 | 7 |
 | supabase, postgres, pg-parity | 1 | 0 |
 
 A supplementary search for the names of deleted concepts (account tokens,
 request proof, `DEVICE_PROOF_MODE`, `lccoa1`, `/v1/verify`, `/v1/activate`,
-`/v1/renew` and floating) found three stale OpenAPI descriptions, which the
-sweep fixed. Every other hit is a negative test, a capability-loss statement,
-a current protocol name or vendored text.
+`/v1/renew` and floating) found stale OpenAPI descriptions, which the sweep
+fixed (the OpenAPI row below). Two more that still named account tokens, the
+admin customer-detail summary and the project-discovery description, were
+fixed after the whole-branch review. Every other hit is a negative test, a
+capability-loss statement, a current protocol name or vendored text.
+
+The second search counted 6 lines when the sweep finished. It counts 7 at the
+branch head because the setup guide now lists `LEASE_ISSUE_BEARER` among the
+secrets operators must delete (`doc/operations/cloudflare-setup.md:407`), a
+removal record classified below.
 
 ### Fixed by the sweep
 
@@ -745,7 +762,7 @@ a current protocol name or vendored text.
 | --- | --- |
 | `services/cloudflare-licensing-backend/scripts/entitlement.mjs` and `services/cloudflare-license-admin/scripts/sync-entitlement.mjs` | Both CLIs refuse an option they do not read with `unknown option --<name>` and exit 2; the backend CLI checks the options of each command. The failing tests came first (`10cedea5`: backend 10/11, admin 20/21), then passed (11/11, 21/21). |
 | `scripts/materialize-deploy-configs.mjs` | The dead `LICENSECC_EXPECTED_BACKEND_CREDENTIAL_ORIGIN` binding and its test are gone; its only setter was the deleted capacity workflow. Materializer tests 19/19. |
-| `scripts/assert-worker-deployment.mjs` | Keeps only `parseSanitizedDeployment`, which the deploy-transition capture imports. The command-line form and the capacity-target assertion had the same deleted caller. Rollback tests 12/12. |
+| `scripts/assert-worker-deployment.mjs` | Keeps only `parseSanitizedDeployment`, which the deploy-transition capture imports. The command-line form and the capacity-target assertion had the same deleted caller. Rollback tests 12/12. The parser later moved into `scripts/capture-worker-deployment-transition.mjs`, its only production importer, and the module was deleted. |
 | Portal password and OAuth tests | The "legacy" account shape is the admin console's set-password shape (an empty contact address and an unverified login address), which is live; the helper, addresses and titles say so. A duplicate password session that stood in for the removed session method is gone. |
 | Portal `src/worker/routes/password-email.ts` | The comment no longer mentions accounts "registered before verification existed". The empty-contact recovery branch stays, because the admin console still creates such accounts. |
 | Portal OAuth unlink rule | Unchanged: an address without `@` does not count as a sign-in method. No writer stores one, so this is validation that matches the OTP sender, not a compatibility branch; the test comment says so. |
@@ -776,13 +793,13 @@ a description of removed behaviour as current.
 | Windows API names | `extern/license-generator/src/base_lib/win/CryptoHelperWindows.cpp:39,91,99,106,115,165,191,215,313`; `src/library/device_identity/providers/windows_cng_api.hpp:35,37`; `windows_tpm.cpp:52,53,57,58`; `test/library/device_identity/windows_tpm_test.cpp:86,176,183,197,205,641,701` | `LEGACY_RSAPRIVATE_BLOB` and the `legacy_key_spec` parameter are Windows CNG names. |
 | Kept stability commitments | `src/library/hw_identifier/hw_identifier.hpp:28` (hardware-identifier byte layout); bridge ABI probes in `sdks/dotnet/src/Licensecc.Client/DeviceBoundAbi.cs:55`, `FeatureSessionNative.cs:27`, `sdks/python/src/licensecc/_device_bound_abi.py:49`, `_feature_session_abi.py:27`, `sdks/java/src/main/java/io/licensecc/client/DeviceBoundNative.java:32`, `FeatureSessionNative.java:9`, `sdks/java/src/test/java/io/licensecc/client/DeviceBoundAdapterTest.java:229,267,268,273`, `sdks/java/native/CMakeLists.txt:31`, `sdks/java/native/README.md:7,140`; root `CMakeLists.txt:440` (`COMPATIBILITY SameMajorVersion`) | The owner kept the issued-licence byte layout, the bridge layout probes and the CMake package version rule. |
 | Release, contribution and review policy | `doc/architecture/decisions/0005-platform-version-and-release-tags.md:68-72,74`; `CHANGELOG.md:13`; `CONTRIBUTING.md:30,161,178`; `doc/architecture/change-guide.md:20,99`; `doc/architecture/decisions/0003-route-openapi-ownership.md:24`; `doc/architecture/ownership.md:20,21`; `doc/development/Dependencies.md:12` | SemVer and release-tag rules, and the rule that a change to a public contract states its compatibility impact. |
-| Rollback and key-rotation compatibility | `doc/operations/cloudflare-setup.md:350,354`; `doc/operations/device-bound-key-rotation.md:101,110`; `doc/operations/production-readiness.md:316`; `doc/release-artifacts.md:397` | A rolled-back Worker must match the current schema and trust; this is live operational guidance. |
+| Rollback and key-rotation compatibility | `doc/operations/cloudflare-setup.md:380,384`; `doc/operations/device-bound-key-rotation.md:101,110`; `doc/operations/production-readiness.md:316`; `doc/release-artifacts.md:397` | A rolled-back Worker must match the current schema and trust; this is live operational guidance. |
 | Cloudflare `compatibility_date` and `compatibility_flags` | `scripts/materialize-deploy-configs.mjs:308-310,390,392,510`; `scripts/materialize-deploy-configs.test.mjs:78,92,93,185,403-406`; `services/*/wrangler.example.*` (portal :5, D1 backup :5,6, admin :5, backend :3,4); `services/cloudflare-licensing-backend/README.md:142`; `services/cloudflare-license-admin/scripts/remote-d1-atomicity.mjs:223`; workerd test configs in `services/cloudflare-licensing-backend/test/db/bound-device-d1.test.mjs:64`, `bound-device-worker.test.mjs:28,33,43,46,235,238`, `pcp-evidence-workerd.test.mjs:33`, `webhook-operator-worker.test.mjs:32,35,43`, `services/cloudflare-customer-portal/test/portal-oauth-runtime.test.mjs:39`, `services/cloudflare-d1-backup/test/backup-runtime.test.mjs:39`, `backup-bound-restore.test.mjs:16`; `packages/cloudflare-runtime/test/entitlement-json.test.mjs:404` | Workers platform settings and Wrangler's local D1 runner. |
 | Generated-binding type guards | `IncompatibleGeneratedBindings` in `services/cloudflare-licensing-backend/src/env.ts:24,28,77,78`, `services/cloudflare-license-admin/src/worker/env.ts:11,15,53,54`, `services/cloudflare-customer-portal/src/worker/env.ts:32,36,79,80`, `services/cloudflare-d1-backup/src/index.ts:35,39,58,59`; `scripts/wrangler-env-drift.test.mjs:17,25,33,41,88,92,118` | Compile-time checks that generated Wrangler types match the runtime environment. |
 | Resend-compatible email | `services/cloudflare-customer-portal/README.md:342,346`; `src/auth/portal_email.mjs:1`; `wrangler.example.jsonc:45,49`; `test/portal-worker-public.test.mjs:194` | The email adapter speaks the Resend API. |
 | Kept live features | `cmake/Findlccgen.cmake:25` (`license_generator_lib`); `scripts/check-typecheck-coverage.mjs:8,14,107,111,115,117` (the JavaScript graphs not yet strictly typed, which is type-coverage debt); `services/cloudflare-customer-portal/src/auth/portal_otp.mjs:194` (the empty pepper-map contract) | Live code that only looks like compatibility. |
 | Vendored generator packaging | `extern/license-generator/CMakeLists.txt:22,100`; `extern/license-generator/src/license_generator/CMakeLists.txt:43,44,46` | A parent project's version value and the generator package's `lib/cmake` install path beside the Windows `cmake/` path; an install layout, not a data or protocol path (see Follow-ups). |
-| Negative tests and removal records | `packages/cloudflare-runtime/test/runtime-primitives.test.mjs:28`; `services/cloudflare-license-admin/test/routes-table.test.mjs:16,18,19`; `test/admin-ui-workflow/glossary-copy.test.mjs:19,21,22`; `test/admin-ui.workspace.e2e.mjs:219`; `services/cloudflare-customer-portal/test/portal-ui.e2e.mjs:783`; `portal-ui.nodes.e2e.mjs:25`; `portal-session.test.mjs:142`; `services/cloudflare-d1-backup/test/backup-restore-drill.test.mjs:867,868,873,878,882,883`; `extern/license-generator/test/command-line_test.cpp:1534,1681,1682`; `extern/license-generator/test/license_test.cpp:279`; `extern/license-generator/PROVENANCE.md:14,15`; `test/library/LicenseReader_test.cpp:116,120,122`; `scripts/materialize-deploy-configs.test.mjs:476` | Each asserts or records that a removed thing is absent or refused. |
+| Negative tests and removal records | `packages/cloudflare-runtime/test/runtime-primitives.test.mjs:28`; `services/cloudflare-license-admin/test/routes-table.test.mjs:16,18,19`; `test/admin-ui-workflow/glossary-copy.test.mjs:19,21,22`; `test/admin-ui.workspace.e2e.mjs:219`; `services/cloudflare-customer-portal/test/portal-ui.e2e.mjs:783`; `portal-ui.nodes.e2e.mjs:25`; `portal-session.test.mjs:142`; `services/cloudflare-d1-backup/test/backup-restore-drill.test.mjs:867,868,873,878,882,883`; `extern/license-generator/test/command-line_test.cpp:1534,1681,1682`; `extern/license-generator/test/license_test.cpp:279`; `extern/license-generator/PROVENANCE.md:14,15`; `test/library/LicenseReader_test.cpp:116,120,122`; `scripts/materialize-deploy-configs.test.mjs:476`; `doc/operations/cloudflare-setup.md:407` | Each asserts or records that a removed thing is absent or refused. |
 | ADR 0006 text the amendment requires | `doc/architecture/decisions/0006-device-bound-licensing.md:7,76` | The required "Amended:" line and the statement that no legacy paths remain to fence. |
 | General English | `CMakeLists.txt:248`; `doc/api/device_identity.rst:135,158`; `doc/usage/concepts.rst:44`; `doc/usage/repository-workflows.rst:90,166`; `doc/tutorials/sdk-and-support.rst:31`; `doc/architecture/decisions/0001-module-boundaries.md:70,87`; `scripts/README.md:21`; `scripts/canonical-contracts.mjs:25`; `scripts/rollback-workers.mjs:328,372`; `scripts/assemble-release-artifacts.mjs:1304`; `services/cloudflare-licensing-backend/README.md:404`; `services/cloudflare-licensing-backend/test/fulfillment/order_event.test.mjs:285`; `order_ingest_exactly_once.test.mjs:1029`; `test/sql/bound-device-store.test.mjs:117`; `services/cloudflare-license-admin/test/admin-ui.connections.e2e.mjs:51`; `test/admin-ui-workflow/entitlements.test.mjs:8`; `test/sql/policy-admin.test.mjs:393,399`; `test/worker/auth-and-request.test.mjs:158`; `test/worker/query-boundaries.test.mjs:24`; `src/library/device_identity/providers/tpm2_openssl.cpp:1559`; `extern/license-generator/test/CMakeLists.txt:33`; `extern/license-generator/test/license_test.cpp:125`; `extern/license-generator/test/project_test.cpp:193,209` | "Compatible", "incompatible", "backward" and "deprecated" in their ordinary senses: a compatible generator, clocks moving backwards, an incompatible identifier, a disable reason string, JSON-compatible values, OpenSSL and MSBuild behaviour, project names v201 cannot carry, and the closed module-import history of ADR 0001. |
 
