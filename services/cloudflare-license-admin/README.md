@@ -481,8 +481,9 @@ event (operator-wide), `project` only the entitlement and order events of
 `scope_project`, and `customer` only the customer events of `scope_customer_id`.
 A create without `scope_kind`, or whose scope values do not match its kind,
 returns 400 `invalid_request`; there is no default. A PATCH is checked against
-the whole row it would leave, so moving an endpoint to another kind also clears
-the old kind's value (`""`). `event_types` is a comma-separated filter of the
+the whole row it would leave, so a PATCH that moves an endpoint to another kind
+must also send the old kind's value as `""`; otherwise it returns 400
+`invalid_request` and changes nothing. `event_types` is a comma-separated filter of the
 event types the dispatcher emits (empty receives every type). A token outside
 that set returns 400 `invalid_event_types` on create and on every PATCH,
 including one that resends a stored value unchanged or leaves it out. The

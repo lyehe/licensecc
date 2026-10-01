@@ -55,7 +55,7 @@ export const passwordPaths: LabeledPathFragment = { label: "password", entries: 
     tags: ["auth"], operationId: "authCompletePassword", summary: "Redeem an email proof and set a password.", security: [],
     requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["token", "password"], properties: { token: { type: "string", pattern: "^[A-Za-z0-9_-]{43}$" }, password: { type: "string", minLength: 15, maxLength: 128 } } } } } },
     responses: { "200": { description: "Signed in with a rotated session cookie (code signed_in), or password_updated with sign_in_required when the credential changed but no session could be issued." }, "400": errorResponse("Expired, used or invalid link, or invalid password/JSON.", ["invalid_link", "invalid_registration", "invalid_json"]), ...common },
-    description: "POST only; opening the email link does not consume it. Single-use atomic redemption creates an empty verified account or resets an existing credential. Reset revokes sessions, OTPs and ephemeral account tokens. Outstanding reset links become invalid after any password change. Token must be passed in JSON, never a query parameter. IP 10/900s and token 5/900s before hashing. A committed credential change always reports success, even when the follow-up session mint fails.",
+    description: "POST only; opening the email link does not consume it. Single-use atomic redemption creates an empty verified account or resets an existing credential. Reset revokes sessions and outstanding OTPs. Outstanding reset links become invalid after any password change. Token must be passed in JSON, never a query parameter. IP 10/900s and token 5/900s before hashing. A committed credential change always reports success, even when the follow-up session mint fails.",
   } }],
   ["/portal/v1/auth/password/login", { post: {
     tags: ["auth"], operationId: "authLoginPassword", summary: "Sign in using an email/password credential.", security: [], requestBody: body(true),
@@ -66,7 +66,7 @@ export const passwordPaths: LabeledPathFragment = { label: "password", entries: 
   ["/portal/v1/auth/password", {
     get: { tags: ["auth"], operationId: "authPasswordSettings", summary: "Read this customer's password settings.", security: [{ sessionCookie: [] }], responses: settingsGetResponses },
     post: { tags: ["auth"], operationId: "authSetPassword", summary: "Set or change this customer's password.", security: [{ sessionCookie: [] }], requestBody: body(false), responses: settingsPostResponses,
-      description: "Requires current password or an OTP/OAuth session created within ten minutes. First set requires a recent OTP/OAuth session and customer contact email. Atomic compare-and-swap revokes all old sessions, outstanding OTPs and ephemeral account tokens, then issues a new password-authenticated session.",
+      description: "Requires current password or an OTP/OAuth session created within ten minutes. First set requires a recent OTP/OAuth session and customer contact email. Atomic compare-and-swap revokes all old sessions and outstanding OTPs, then issues a new password-authenticated session.",
     },
   }],
 ] };

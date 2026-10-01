@@ -9,12 +9,12 @@ const ordersPath: Record<string, unknown> = {
     operationId: "postOrders",
     security: [{ orderKeyId: [], orderTimestamp: [], orderSignature: [] }],
     description:
-      "Requires X-LCC-Key-Id, X-LCC-Timestamp, and X-LCC-Signature. The signature is base64 HMAC-SHA256 over the method, path, ORDER_INGEST_AUDIENCE, canonical timestamp, and original raw wire bytes, keyed by ORDER_HMAC_SECRETS[key_id]. The timestamp is bounded by ORDER_MAX_SKEW_SECONDS. The raw-byte stream is capped at 16384 bytes, then strictly UTF-8 decoded before JSON parsing. An exact signed-request replay returns HTTP 401 code:replayed. A freshly signed delivery of an already-terminal event_id with a matching normalized payload digest returns the stored application result; code:cached is the truthful neutral fallback when terminal result finalization did not complete or a legacy terminal row has no stored result.",
+      "Requires X-LCC-Key-Id, X-LCC-Timestamp, and X-LCC-Signature. The signature is base64 HMAC-SHA256 over the method, path, ORDER_INGEST_AUDIENCE, canonical timestamp, and original raw wire bytes, keyed by ORDER_HMAC_SECRETS[key_id]. The timestamp is bounded by ORDER_MAX_SKEW_SECONDS. The raw-byte stream is capped at 16384 bytes, then strictly UTF-8 decoded before JSON parsing. An exact signed-request replay returns HTTP 401 code:replayed. A freshly signed delivery of an already-terminal event_id with a matching normalized payload digest returns the stored application result; code:cached is the truthful neutral fallback when terminal result finalization did not complete, so the terminal row has no stored result.",
     requestBody: jsonBody("#/components/schemas/OrderRequest"),
     responses: {
       "200": {
         description:
-          "Applied/cached (ok:true, code: applied|superseded|no_entitlement|stale_ignored|cached), including the stored application result for a freshly signed matching replay of a processed/superseded event. cached is the neutral fallback when terminal result finalization did not complete or a legacy terminal row has no stored result.",
+          "Applied/cached (ok:true, code: applied|superseded|no_entitlement|stale_ignored|cached), including the stored application result for a freshly signed matching replay of a processed/superseded event. cached is the neutral fallback when terminal result finalization did not complete and the terminal row has no stored result.",
         content: {
           "application/json": { schema: { $ref: "#/components/schemas/OrderResult" } },
         },

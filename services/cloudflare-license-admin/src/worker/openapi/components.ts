@@ -789,7 +789,7 @@ export const openApiComponents: LabeledComponentFragment = {
           url: { type: "string", maxLength: 2048, description: "One https:// URL on a public host name: no username or password, no IP-literal host, no single-label or internal host name (localhost, .local, .internal, .home.arpa), and no trailing dot. A URL that fails this rule, or cannot be parsed, returns 400 invalid_url." },
           event_types: { type: "string", maxLength: 1024, description: "CSV event-type filter; '' = all. Each token must be one of the entitlement/customer/order event types the dispatcher actually emits (else 400 invalid_event_types with data.allowed)." },
           description: { type: "string", maxLength: 500 },
-          scope_kind: { type: "string", enum: ["global", "project", "customer"], description: "Moving to another kind also clears the old kind's value ('')." },
+          scope_kind: { type: "string", enum: ["global", "project", "customer"], description: "Moving to another kind requires sending the old kind's value as '' in the same PATCH; otherwise 400 invalid_request." },
           scope_project: { type: "string", maxLength: 128, description: "'' clears it." },
           scope_customer_id: { type: "string", maxLength: 128, description: "'' clears it." },
         },

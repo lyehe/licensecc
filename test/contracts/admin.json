@@ -3353,7 +3353,7 @@
               "type": "string"
             },
             "scope_kind": {
-              "description": "Moving to another kind also clears the old kind's value ('').",
+              "description": "Moving to another kind requires sending the old kind's value as '' in the same PATCH; otherwise 400 invalid_request.",
               "enum": [
                 "global",
                 "project",
@@ -8209,7 +8209,7 @@
                   }
                 }
               },
-              "description": "Customer detail bundle. Account-token HMAC and pepper_key_id are never returned."
+              "description": "Customer detail bundle."
             },
             "401": {
               "content": {
@@ -9454,7 +9454,7 @@
       },
       "/api/admin/customers/{id}/bindings/{bindingId}/retire": {
         "post": {
-          "description": "Requires admin role and an active target customer. The named backend capability rechecks ownership, commits retirement/audit atomically and preserves the maximum hold. effective_release_at is the later of that hold and commit time. Identical body/key/operator retries recover for 48 hours; a timeout is an unknown outcome and must retain the same key. No legacy fallback, ownership edit or force-release override. Strict JSON rejects unknown/duplicate fields, malformed UTF-8 and noninteger numeric lexemes; maximum body 16 KiB. All responses are no-store.",
+          "description": "Requires admin role and an active target customer. The named backend capability rechecks ownership, commits retirement/audit atomically and preserves the maximum hold. effective_release_at is the later of that hold and commit time. Identical body/key/operator retries recover for 48 hours; a timeout is an unknown outcome and must retain the same key. No fallback, ownership edit or force-release override. Strict JSON rejects unknown/duplicate fields, malformed UTF-8 and noninteger numeric lexemes; maximum body 16 KiB. All responses are no-store.",
           "operationId": "retireCustomerBinding",
           "parameters": [
             {

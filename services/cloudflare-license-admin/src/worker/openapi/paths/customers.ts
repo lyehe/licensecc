@@ -61,7 +61,7 @@ export const customerPaths: LabeledPathFragment = {
       security: ADMIN_SECURITY,
       parameters: [idParam],
       responses: {
-        "200": okResponse("Customer detail bundle. Account-token HMAC and pepper_key_id are never returned.", "#/components/schemas/CustomerDetailData", "customer"),
+        "200": okResponse("Customer detail bundle.", "#/components/schemas/CustomerDetailData", "customer"),
         ...ADMIN_AUTH_ERRORS,
         "404": errorResponse("No customer with that id.", "not_found"),
       },

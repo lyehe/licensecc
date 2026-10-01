@@ -3501,7 +3501,7 @@
           ]
         },
         "post": {
-          "description": "Requires current password or an OTP/OAuth session created within ten minutes. First set requires a recent OTP/OAuth session and customer contact email. Atomic compare-and-swap revokes all old sessions, outstanding OTPs and ephemeral account tokens, then issues a new password-authenticated session.",
+          "description": "Requires current password or an OTP/OAuth session created within ten minutes. First set requires a recent OTP/OAuth session and customer contact email. Atomic compare-and-swap revokes all old sessions and outstanding OTPs, then issues a new password-authenticated session.",
           "operationId": "authSetPassword",
           "requestBody": {
             "content": {
@@ -3710,7 +3710,7 @@
       },
       "/portal/v1/auth/password/complete": {
         "post": {
-          "description": "POST only; opening the email link does not consume it. Single-use atomic redemption creates an empty verified account or resets an existing credential. Reset revokes sessions, OTPs and ephemeral account tokens. Outstanding reset links become invalid after any password change. Token must be passed in JSON, never a query parameter. IP 10/900s and token 5/900s before hashing. A committed credential change always reports success, even when the follow-up session mint fails.",
+          "description": "POST only; opening the email link does not consume it. Single-use atomic redemption creates an empty verified account or resets an existing credential. Reset revokes sessions and outstanding OTPs. Outstanding reset links become invalid after any password change. Token must be passed in JSON, never a query parameter. IP 10/900s and token 5/900s before hashing. A committed credential change always reports success, even when the follow-up session mint fails.",
           "operationId": "authCompletePassword",
           "requestBody": {
             "content": {
