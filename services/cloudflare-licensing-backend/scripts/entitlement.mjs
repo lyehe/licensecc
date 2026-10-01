@@ -12,7 +12,7 @@ const STATUS = new Set(["active", "revoked", "disabled"]);
 
 function usage() {
   console.error(`usage:
-  node scripts/entitlement.mjs upsert --fingerprint <64-hex> --actor <operator> --customer-id <text> --license-id <text> [--project DEFAULT] [--feature DEFAULT] [--status active] [--valid-from <epoch>] [--valid-until <epoch>] [--reason <text>] [--allow-revoked-override] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
+  node scripts/entitlement.mjs upsert --fingerprint <64-hex> --actor <operator> --customer-id <text> --license-id <text> [--project DEFAULT] [--feature DEFAULT] [--status active] [--valid-from <epoch>] [--valid-until <epoch>] [--reason <text>] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
   node scripts/entitlement.mjs revoke --fingerprint <64-hex> --actor <operator> --reason <text> [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
   node scripts/entitlement.mjs disable --fingerprint <64-hex> --actor <operator> --reason <text> [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
   node scripts/entitlement.mjs reenable --fingerprint <64-hex> --actor <operator> [--reason <text>] [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
@@ -20,13 +20,12 @@ function usage() {
   node scripts/entitlement.mjs list [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
 
 notes:
-  revoked entitlements are terminal: upsert/disable/reenable refuse a revoked row (a refused mutation
-  changes 0 rows, writes no audit event, and exits 3 on --remote). Use
-  'upsert --allow-revoked-override --reason <text>' to intentionally reactivate a revoked entitlement;
-  it requires --reason and records a distinct 'revoked-override' audit event. Every upsert is a protected
-  grant: --customer-id and --license-id are required, and neither is cleared or reassigned
-  on a later conflict. An option the command does not list is refused. The CLI bypasses
-  Cloudflare Access and stamps actor_type='cli', source='cli'.`);
+  revoked entitlements are terminal: no command makes a revoked row active again, and
+  upsert/disable/reenable refuse it. Every upsert is a protected grant:
+  --customer-id must name an existing active customer and --license-id is required, and
+  neither is cleared or reassigned on a later conflict. A refused mutation changes 0 rows,
+  writes no audit event, and exits 3 on --remote. An option the command does not list is
+  refused. The CLI bypasses Cloudflare Access and stamps actor_type='cli', source='cli'.`);
   process.exit(2);
 }
 
@@ -36,7 +35,7 @@ notes:
 const CONNECTION_OPTIONS = ["database", "config", "remote", "local"];
 const TRANSITION_OPTIONS = ["fingerprint", "actor", "reason", "project", "feature"];
 const COMMAND_OPTIONS = {
-  upsert: ["fingerprint", "actor", "customer-id", "license-id", "project", "feature", "status", "valid-from", "valid-until", "reason", "allow-revoked-override"],
+  upsert: ["fingerprint", "actor", "customer-id", "license-id", "project", "feature", "status", "valid-from", "valid-until", "reason"],
   revoke: TRANSITION_OPTIONS,
   disable: TRANSITION_OPTIONS,
   reenable: TRANSITION_OPTIONS,
@@ -44,15 +43,16 @@ const COMMAND_OPTIONS = {
   list: ["project", "feature"],
 };
 
-function refuseUnknownOptions(command, options) {
+function refuseUnknownOption(command, option) {
   const known = COMMAND_OPTIONS[command];
-  if (known === undefined) {
-    return;
+  if (known !== undefined && !known.includes(option) && !CONNECTION_OPTIONS.includes(option)) {
+    throw new Error(`unknown option --${option} for ${command}`);
   }
+}
+
+function refuseUnknownOptions(command, options) {
   for (const option of Object.keys(options)) {
-    if (!known.includes(option) && !CONNECTION_OPTIONS.includes(option)) {
-      throw new Error(`unknown option --${option} for ${command}`);
-    }
+    refuseUnknownOption(command, option);
   }
 }
 
@@ -68,7 +68,10 @@ function parseArgs(argv) {
       usage();
     }
     const key = arg.slice(2);
-    if (key === "remote" || key === "local" || key === "allow-revoked-override") {
+    // Refuse an unknown option before reading a value for it, so a removed flag fails as
+    // unknown wherever it appears instead of consuming the next argument.
+    refuseUnknownOption(command, key);
+    if (key === "remote" || key === "local") {
       options[key] = true;
       continue;
     }
@@ -145,8 +148,8 @@ function mutationContext(options, reasonRequired = false) {
   };
 }
 
-function eventSqlFromCurrent(fields, eventType, status, actor, reason = "") {
-  return `INSERT INTO entitlement_events (project, feature, license_fingerprint, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, reason, created_at) SELECT project, feature, license_fingerprint, ${sqlString(eventType)}, status, revocation_seq, ${sqlString(reason)}, ${sqlString(actor)}, 'cli', 'cli', 'cli-' || lower(hex(randomblob(8))), ${sqlString(reason)}, unixepoch() FROM entitlements WHERE project = ${sqlString(fields.project)} AND feature = ${sqlString(fields.feature)} AND license_fingerprint = ${sqlString(fields.fingerprint)} AND status = ${sqlString(status)}`;
+function eventSqlFromCurrent(fields, eventType, status, actor, reason = "", guard = "") {
+  return `INSERT INTO entitlement_events (project, feature, license_fingerprint, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, reason, created_at) SELECT project, feature, license_fingerprint, ${sqlString(eventType)}, status, revocation_seq, ${sqlString(reason)}, ${sqlString(actor)}, 'cli', 'cli', 'cli-' || lower(hex(randomblob(8))), ${sqlString(reason)}, unixepoch() FROM entitlements WHERE project = ${sqlString(fields.project)} AND feature = ${sqlString(fields.feature)} AND license_fingerprint = ${sqlString(fields.fingerprint)} AND status = ${sqlString(status)}${guard === "" ? "" : ` AND ${guard}`}`;
 }
 
 function eventHistoryFloorSql(projectExpr, featureExpr, fingerprintExpr, fallbackExpr) {
@@ -169,24 +172,22 @@ function sqlFor(command, options) {
     if (!STATUS.has(status)) {
       throw new Error("status must be active, revoked, or disabled");
     }
-    const allowRevokedOverride = options["allow-revoked-override"] === true;
     const validFrom = validatedOptionalInt(options["valid-from"], "valid-from", 0, Number.MAX_SAFE_INTEGER);
     const validUntil = validatedOptionalInt(options["valid-until"], "valid-until", 0, Number.MAX_SAFE_INTEGER);
     const customerId = validatedText(options["customer-id"], "customer-id", 128, true);
     const licenseId = validatedText(options["license-id"], "license-id", 128, true);
-    // Reactivating a revoked (terminal) entitlement is a deliberate break-glass override: require a reason so
-    // it is never unexplained, and stamp a distinct audit event_type so it is unmistakable in the event log.
-    const ctx = mutationContext(options, allowRevokedOverride);
+    const ctx = mutationContext(options);
     if (validFrom !== null && validUntil !== null && validFrom >= validUntil) {
       throw new Error("valid-from must be less than valid-until");
     }
-    // Default: revoked rows are terminal (the ON CONFLICT guard refuses them). --allow-revoked-override drops
-    // the guard so an operator can intentionally, auditably reactivate a mistakenly-revoked entitlement.
-    const conflictGuard = allowRevokedOverride ? "" : " WHERE entitlements.status != 'revoked'";
-    const eventType = allowRevokedOverride ? "revoked-override" : "upsert";
+    // Revoked rows are terminal: the ON CONFLICT guard refuses them and no option lifts it. The
+    // schema has no foreign key from a grant to its customer, so a mistyped or suspended customer
+    // would get a grant no one can use; both statements require an existing active customer, so a
+    // refused upsert writes neither the grant nor its audit event.
+    const activeCustomer = `EXISTS (SELECT 1 FROM customers WHERE id = ${sqlString(customerId)} AND status = 'active')`;
     return [
-      `INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, customer_id, license_id, created_at, updated_at) VALUES (${sqlString(fields.project)}, ${sqlString(fields.feature)}, ${sqlString(fields.fingerprint)}, ${sqlString(status)}, ${nextInsertedRevocationSeqSql(fields)}, ${sqlNullableInt(validFrom)}, ${sqlNullableInt(validUntil)}, ${sqlString(customerId)}, ${sqlString(licenseId)}, unixepoch(), unixepoch()) ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET status = excluded.status, revocation_seq = ${nextExistingRevocationSeqSql()}, valid_from = excluded.valid_from, valid_until = excluded.valid_until, updated_at = unixepoch()${conflictGuard}`,
-      eventSqlFromCurrent(fields, eventType, status, ctx.actor, ctx.reason),
+      `INSERT INTO entitlements (project, feature, license_fingerprint, status, revocation_seq, valid_from, valid_until, customer_id, license_id, created_at, updated_at) SELECT ${sqlString(fields.project)}, ${sqlString(fields.feature)}, ${sqlString(fields.fingerprint)}, ${sqlString(status)}, ${nextInsertedRevocationSeqSql(fields)}, ${sqlNullableInt(validFrom)}, ${sqlNullableInt(validUntil)}, ${sqlString(customerId)}, ${sqlString(licenseId)}, unixepoch(), unixepoch() WHERE ${activeCustomer} ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET status = excluded.status, revocation_seq = ${nextExistingRevocationSeqSql()}, valid_from = excluded.valid_from, valid_until = excluded.valid_until, updated_at = unixepoch() WHERE entitlements.status != 'revoked'`,
+      eventSqlFromCurrent(fields, "upsert", status, ctx.actor, ctx.reason, activeCustomer),
     ].join(";\n");
   }
   if (command === "revoke" || command === "disable" || command === "reenable") {
@@ -256,6 +257,18 @@ function interpretWranglerResult(parsedJson, command) {
   return withCount.meta.rows_written === 0 ? "noop" : "ok";
 }
 
+// The error for a guarded mutation that changed no rows, and so wrote no audit event: it names
+// what refused it. Revocation is permanent, so no notice offers a way to undo one.
+function noOpNotice(command, options) {
+  const target = `project=${options.project ?? "DEFAULT"} feature=${options.feature ?? "DEFAULT"} fingerprint=${options.fingerprint}`;
+  const cause = command === "upsert"
+    ? `Either customer ${options["customer-id"]} does not exist or is not active, or the entitlement is revoked, and revocation is permanent.`
+    : command === "revoke"
+      ? "The entitlement does not exist."
+      : "The entitlement is revoked, and revocation is permanent, or it does not exist.";
+  return `NO-OP: ${command} on ${target} changed 0 rows and wrote no audit event. ${cause} Check it with "get --fingerprint ${options.fingerprint}".`;
+}
+
 function runWrangler(sql, options, command) {
   const require = createRequire(import.meta.url);
   const wranglerBin = require.resolve("wrangler/bin/wrangler.js");
@@ -295,11 +308,7 @@ function runWrangler(sql, options, command) {
     }
     const signal = interpretWranglerResult(parseWranglerJson(result.stdout), command);
     if (signal === "noop") {
-      const recovery = `The entitlement is revoked (terminal) or does not exist. Re-run "upsert --allow-revoked-override --reason <text>" to reactivate a revoked entitlement, or check with "get --fingerprint ${options.fingerprint}".`;
-      console.error(
-        `NO-OP: ${command} on project=${options.project ?? "DEFAULT"} feature=${options.feature ?? "DEFAULT"} ` +
-          `fingerprint=${options.fingerprint} changed 0 rows and wrote no audit event. ${recovery}`,
-      );
+      console.error(noOpNotice(command, options));
       process.exit(3);
     }
     if (signal === "unavailable" && !options.remote) {
@@ -315,7 +324,7 @@ function runWrangler(sql, options, command) {
   }
 }
 
-export { interpretWranglerResult, sqlFor };
+export { interpretWranglerResult, noOpNotice, sqlFor };
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
   try {

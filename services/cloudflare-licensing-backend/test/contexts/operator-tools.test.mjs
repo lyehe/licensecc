@@ -113,7 +113,7 @@ test("break-glass CLI upsert sets customer_id and license_id when provided", () 
     "customer-id": "cus_123",
     "license-id": "lic_123",
   });
-  assert.match(sql, /customer_id, license_id, created_at, updated_at\) VALUES/);
+  assert.match(sql, /customer_id, license_id, created_at, updated_at\) SELECT /);
   assert.match(sql, /'cus_123'/);
   assert.match(sql, /'lic_123'/);
   assert.doesNotMatch(sql, /customer_id = excluded\.customer_id/);

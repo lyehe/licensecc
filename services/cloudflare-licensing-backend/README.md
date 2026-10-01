@@ -238,19 +238,21 @@ duplicate check as crash-redrive evidence.
   not at all — there is no path that writes the row without the event. An option
   the command does not use exits 2 with `unknown option --<name>`, so a removed
   or misspelled flag is never silently dropped.
-- Revoked entitlements are terminal for v1. `upsert`, `disable`, and `reenable`
-  are guarded by `status != 'revoked'` and will not change a revoked row. A
-  guarded mutation is a NO-OP: it changes zero rows and writes no audit event. On
-  `--remote` the helper detects this (zero `rows_written`) and exits non-zero with
-  a notice; on `--local` wrangler reports no row counts, so the helper prints a
-  note and you should confirm with `get`. Use `reenable` to reactivate a
-  *disabled* entitlement. To intentionally reactivate a *revoked* entitlement
-  (e.g. a mistaken revoke), run `upsert --allow-revoked-override --reason <text>`:
-  it requires a reason and records a distinct `revoked-override` audit event so
-  the override is unmistakable in the log. `upsert` requires `--customer-id` and
-  `--license-id`: every entitlement it writes is a protected grant with a named
-  owner, and neither field is cleared or reassigned on a later conflict —
-  ownership is set once, at creation.
+- Revoked entitlements are terminal. `upsert`, `disable`, and `reenable` are
+  guarded by `status != 'revoked'` and will not change a revoked row, and no
+  command or option makes a revoked row active again. `upsert` requires
+  `--customer-id` and `--license-id`: every entitlement it writes is a protected
+  grant with a named owner, and neither field is cleared or reassigned on a later
+  conflict — ownership is set once, at creation. The customer must exist and be
+  active; the schema has no foreign key from a grant to its customer, so the
+  write and its audit event both carry that guard, and a mistyped or suspended
+  customer gets no grant. A guarded mutation is a NO-OP: it changes zero rows and
+  writes no audit event. On `--remote` the helper detects this (zero
+  `rows_written`) and exits 3 with a notice naming the cause; on `--local` the
+  helper sees no row counts in the wrangler output, so it prints a note and you
+  should confirm with `get`. Use `reenable` to make a *disabled* entitlement active
+  again. The audit event type `revoked-override` remains in the schema only so
+  history written by earlier versions of the helper stays valid.
 - This reference service does not prevent local binary patching or API hooking.
 
 ## Order ingest (`POST /v1/orders`)

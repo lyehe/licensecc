@@ -113,7 +113,7 @@ test("no upsert reactivates a revoked grant, and the removed override is an unkn
     () => sqlFor("upsert", { fingerprint, actor: "op", status: "active", reason: "ticket", "allow-revoked-override": true, "customer-id": "cus_1", "license-id": "lic_1" }),
     /^Error: unknown option --allow-revoked-override for upsert$/u,
   );
-  assert.deepEqual(entitlement(db), { status: "revoked", revocation_seq: 5, customer_id: "cus_1", license_id: null });
+  assert.deepEqual({ ...entitlement(db) }, { status: "revoked", revocation_seq: 5, customer_id: "cus_1", license_id: null });
   assert.equal(eventCount(db), 0);
   db.close();
 });
@@ -137,7 +137,7 @@ test("upsert refuses a disabled customer, for a new grant and for the customer's
       `VALUES ('DEFAULT', 'DEFAULT', '${fingerprint}', 'active', 5, 'cus_off', 1, 1)`,
   );
   db.exec(sqlFor("upsert", { fingerprint, actor: "op", "valid-until": 4102445000, "customer-id": "cus_off", "license-id": "lic_1" }));
-  assert.deepEqual(entitlement(db), { status: "active", revocation_seq: 5, customer_id: "cus_off", license_id: null });
+  assert.deepEqual({ ...entitlement(db) }, { status: "active", revocation_seq: 5, customer_id: "cus_off", license_id: null });
   assert.equal(eventCount(db), 0, "a refused upsert writes no audit event");
   db.close();
 });
