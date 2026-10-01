@@ -101,15 +101,32 @@ export async function claimStaleOrderOutcome(env, order, digest, now) {
 }
 
 // Refuse a still-accepted event terminally with `code` when the refusal is decided outside
-// the apply batch, such as an order identity that contradicts an established one or an
-// email that already belongs to another customer. A resend returns this stored result.
-export async function terminalizeRejectedOrderEvent(env, eventId, code, now) {
-  const body = resultBody(code, {});
+// the apply batch, such as an order identity that contradicts an established one, an email
+// that already belongs to another customer, or a device limit the capacity trigger refused.
+// A resend returns this stored result.
+export async function terminalizeRejectedOrderEvent(env, eventId, code, now, extra = {}) {
+  const body = resultBody(code, extra);
   const marked = await env.DB.prepare(
     "UPDATE order_events SET status = 'rejected', result_json = ?, processed_at = ? " +
       "WHERE event_id = ? AND status = 'accepted' RETURNING event_id",
   ).bind(JSON.stringify(body), now, eventId).first();
   return marked === null ? loadTerminalOrderOutcome(env, eventId) : { status: rejectedStatus(code), body };
+}
+
+// The apply batch failed. The schema's capacity trigger aborts with capacity_in_use when the
+// order's device limit is below the devices holding a slot (active, or retiring until its
+// hold ends); orders never change a grant's owner, so the owner-change trigger that shares
+// the message cannot fire here. A retry cannot free a slot, so that order is refused
+// terminally and recorded. Any other failure stays a retryable write_failed.
+export async function orderWriteFailure(env, order, key, fingerprintOrigin, now, error) {
+  if (error instanceof Error && /\bcapacity_in_use\b/.test(error.message)) {
+    return terminalizeRejectedOrderEvent(env, order.event_id, "capacity_in_use", now, {
+      license_fingerprint: key.license_fingerprint,
+      fingerprint_origin: fingerprintOrigin,
+    });
+  }
+  if (error instanceof Error && error.message === "write_failed") return { status: 503, body: resultBody("write_failed", {}) };
+  throw error;
 }
 
 // Reject a still-accepted event with a 409 `code` when the entitlement matches `condition`

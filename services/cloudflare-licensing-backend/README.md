@@ -295,7 +295,13 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   subscription id.
 - **Grants.** `subscription.active` creates or refreshes a protected grant owned
   by the order's customer, with a device limit of `quantity.max_active_devices`
-  (default 1); `quantity.changed` changes only that device limit.
+  (default 1); `quantity.changed` changes only that device limit. A device limit
+  is never set below the devices holding a slot on the grant (active, or
+  retiring until their hold ends): such an order is refused with `409
+  capacity_in_use`. The refusal is terminal, because a retry cannot free a slot:
+  the event is recorded as rejected, the subscription cursor has advanced, the
+  grant, its floor and its audit are untouched, and a resend of the event
+  returns the stored refusal. Disconnect devices, then send a new event.
 - **Grant ownership.** An order may act only on a grant its own `customer.id`
   already owns, or create a new one. If a grant already exists for the order's
   project, feature and fingerprint and another customer owns it, or no one does,
@@ -353,8 +359,8 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   complete or a terminal row has no stored result), `200 stale_ignored`, `409 seq_conflict`,
   `409 event_id_conflict`, `409 fingerprint_owned`, `409 entitlement_owner_mismatch`, `200 no_entitlement`
   (modify on a never-activated subscription — never materializes access),
-  `409 entitlement_revoked` (terminal), `409 customer_email_conflict` (terminal,
-  above), `401` (auth family), `400 invalid_order`,
+  `409 entitlement_revoked` (terminal), `409 customer_email_conflict` and
+  `409 capacity_in_use` (terminal, above), `401` (auth family), `400 invalid_order`,
   `503 config_error`, or `503 write_failed`. The body is read once as a bounded raw-byte stream and
   capped at `MAX_ORDER_BODY_BYTES = 16384`; overflow cancels the stream even if
   `Content-Length` is absent or lies. The HMAC is over those original bytes,

@@ -20,6 +20,7 @@ export function ordersPath(filter: OrderListFilter): string {
  */
 const ORDER_REFUSAL_TEXT: Readonly<Record<string, string>> = {
   customer_email_conflict: "The order's email already belongs to another customer.",
+  capacity_in_use: "This order would allow fewer devices than are connected. Disconnect devices, then resend the order.",
   entitlement_revoked: "The order's license (entitlement) is revoked, and revocation is permanent.",
   entitlement_owner_mismatch: "The order's license (entitlement) belongs to another customer.",
   invalid_order: "The order's customer or license contradicts the records it names.",

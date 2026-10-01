@@ -40,6 +40,7 @@ import {
   buildRevokedOrderEventMark,
   claimStaleOrderOutcome,
   loadTerminalOrderOutcome,
+  orderWriteFailure,
   resultBody,
   terminalizeDefensiveNoEntitlement,
   terminalizeForeignOwnerOrderEvent,
@@ -554,8 +555,8 @@ function firstBatchRow(result) {
  * in one atomic D1 batch.
  *
  * Returns the response object for the response matrix:
- *   { status, body } where body.code ∈
- *     applied | superseded | no_entitlement | entitlement_revoked | write_failed.
+ *   { status, body } where body.code ∈ applied | superseded | no_entitlement |
+ *     entitlement_revoked | entitlement_owner_mismatch | capacity_in_use | write_failed.
  *
  */
 export async function applyOrderEvent(env, order, fingerprint, fingerprintOrigin, now) {
@@ -629,10 +630,8 @@ export async function applyOrderEvent(env, order, fingerprint, fingerprintOrigin
       env, key, writeStatement, eventType, prev, order, now, extraStatements, requireNonRevoked,
     );
   } catch (error) {
-    if (error instanceof Error && error.message === "write_failed") {
-      return { status: 503, body: resultBody("write_failed", {}) };
-    }
-    throw error;
+    // A device limit below the connected devices is a terminal refusal, not a retry.
+    return orderWriteFailure(env, order, key, fingerprintOrigin, now, error);
   }
 
   // Two fresh-signature deliveries can both observe `accepted` before their D1 batches
