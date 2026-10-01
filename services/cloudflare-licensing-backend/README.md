@@ -327,14 +327,18 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   The guard and the customer insert are one statement, and a unique-email
   failure from a concurrent account maps to the same refusal. An order for an
   existing customer id is never refused for its email and never rewrites that
-  customer's stored email. A later event for the subscription is admitted as
-  usual, so it applies once its email no longer belongs to another account.
+  customer's stored email, and a withdrawal (below) is never refused for its
+  email either. A later event for the subscription is admitted as usual, so it
+  applies once its email no longer belongs to another account.
 - **Withdrawals always apply** for the grant's own customer. The withdrawals
   (`subscription.past_due`, `subscription.paused`,
   `subscription.payment_failed`, `subscription.canceled_at_period_end`,
   `fraud.confirmed`, `chargeback`) are never refused because that customer is
-  disabled or the period they concern ended long ago, and they never change the
-  grant's license. A withdrawal for a subscription with no grant returns `200
+  disabled, the period they concern ended long ago, or the order's email
+  belongs to another account, and they never change the grant's license. When a
+  withdrawal names a customer id that has no customer row yet and its email is
+  taken, the customer is created without an email, so no address is split
+  across two accounts. A withdrawal for a subscription with no grant returns `200
   no_entitlement` and creates no grant. It still records the subscription's order
   identity and the order event, and upserts the named customer and license rows.
 - **Exactly-once.** Accept-then-apply: a durable cursor advance on

@@ -11,6 +11,14 @@ export const DISABLE_INTENTS = new Set([
 // Terminal revoke intents (fraud) -- the ONLY path that revokes.
 export const REVOKE_INTENTS = new Set(["fraud.confirmed", "chargeback"]);
 
+// Withdrawals only reduce or end access, so they always apply for the grant's own customer,
+// whatever the period they concern or the customer's state.
+export const WITHDRAWAL_INTENTS = new Set([
+  "subscription.canceled_at_period_end",
+  ...DISABLE_INTENTS,
+  ...REVOKE_INTENTS,
+]);
+
 /**
  * Monotone-forward valid_until clamp: max(currentPeriodEnd ?? 0, prevValidUntil ?? 0).
  * A stale/backdated current_period_end can never regress an already-granted window.

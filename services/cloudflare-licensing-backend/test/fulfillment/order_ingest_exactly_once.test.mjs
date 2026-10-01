@@ -1881,6 +1881,27 @@ for (const [intent, status] of WITHDRAWALS) {
   });
 }
 
+test("a withdrawal whose customer write fails on a racing account is retried and then applies", async (t) => {
+  const { db, env } = freshEnv(); t.after(() => db.close());
+  const order = makeOrder({ seq: 1, event_id: "evt_withdraw_race", intent: "chargeback", customer: { id: "cus_legacy", email: "buyer@example.test" } });
+  const fingerprint = await fpOf(order);
+  db.exec(`INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,max_active_devices,created_at,updated_at)
+    VALUES('${PROJECT}','${FEATURE}','${fingerprint}','active','cus_legacy',1,1,1);`);
+  const racing = racingCustomerWrite(env, () => {
+    db.exec("INSERT OR IGNORE INTO customers(id,name,email,created_at,updated_at) VALUES('cus_racer','Racer','buyer@example.test',1,1)");
+    throw new Error("D1_ERROR: UNIQUE constraint failed: index 'idx_customers_email': SQLITE_CONSTRAINT");
+  });
+  const failed = await submit(racing, order);
+  assert.equal(failed.status, 503, "a withdrawal is never refused for its email");
+  assert.equal(failed.body.code, "write_failed");
+  assert.equal(eventRow(db, order.event_id).status, "accepted");
+  const retried = await submit(env, order, { now: NOW + 1 });
+  assert.equal(retried.status, 200);
+  assert.equal(retried.body.code, "applied");
+  assert.equal(entRow(db, fingerprint).status, "revoked");
+  assert.equal(db.prepare("SELECT email FROM customers WHERE id = 'cus_legacy'").get().email, "");
+});
+
 test("an order that grants access is still refused when its new customer's email belongs to another account", async (t) => {
   const { db, env } = freshEnv(); t.after(() => db.close());
   const order = makeOrder({ seq: 1, event_id: "evt_renew_legacy", intent: "subscription.renewed", customer: { id: "cus_legacy", email: "buyer@example.test" } });

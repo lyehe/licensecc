@@ -14,7 +14,7 @@
 // KNOWN_INTENTS is shared with the admin console's webhook event-types validator (a different
 // deployable), so it lives in the licensing-domain package -- imported here, never duplicated.
 import { KNOWN_INTENTS } from "@licensecc/licensing-domain/orders/intents";
-import { DISABLE_INTENTS, REVOKE_INTENTS } from "./order_mutation.mjs";
+import { WITHDRAWAL_INTENTS } from "./order_mutation.mjs";
 
 export { clampValidUntil, mapIntentToMutation } from "./order_mutation.mjs";
 
@@ -48,11 +48,7 @@ const GRACE_SECONDS = 86400;
 // end is the whole point of that intent, and a disable or revoke never reads the period
 // end: a chargeback or dunning notice routinely arrives after the period it concerns,
 // and a withdrawal must always apply.
-const PERIOD_EXEMPT_INTENTS = new Set([
-  "subscription.canceled_at_period_end",
-  ...DISABLE_INTENTS,
-  ...REVOKE_INTENTS,
-]);
+const PERIOD_EXEMPT_INTENTS = WITHDRAWAL_INTENTS;
 
 /**
  * A bounded, single-line, separator-free string id: 1..maxLength characters with no

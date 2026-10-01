@@ -1,6 +1,8 @@
 // Subscription, customer, and license identity persistence for order ingest. The
 // subscription-to-fingerprint mapping is immutable; license ids are project-bound.
 
+import { WITHDRAWAL_INTENTS } from "./order_mutation.mjs";
+
 function conflict(status, code) {
   return { ok: false, status, code };
 }
@@ -161,17 +163,25 @@ export async function materializeOrderAuxiliaryIdentities(env, order, now) {
     const externalRef = typeof order.customer.external_ref === "string" ? order.customer.external_ref : "";
     // The guard and the write are one statement, so no other account can take the address
     // between them. An existing customer id keeps its stored email and is never refused here.
+    // A withdrawal always applies for the grant's own customer, so instead of being refused it
+    // creates that customer without the taken address.
+    const withdrawal = WITHDRAWAL_INTENTS.has(order.intent);
+    const taken = newCustomerEmailTakenValues(id, email);
+    const [emailSql, emailValues, guardSql, guardValues] = withdrawal
+      ? [`CASE WHEN ${NEW_CUSTOMER_EMAIL_TAKEN} THEN '' ELSE ? END`, [...taken, email], "1", []]
+      : ["?", [email], `NOT (${NEW_CUSTOMER_EMAIL_TAKEN})`, taken];
     let written;
     try {
       written = await env.DB.prepare(
         "INSERT INTO customers (id, name, email, metadata_json, created_at, updated_at, status, external_ref) " +
-          `SELECT ?, ?, ?, '{}', ?, ?, 'active', ? WHERE NOT (${NEW_CUSTOMER_EMAIL_TAKEN}) ` +
+          `SELECT ?, ?, ${emailSql}, '{}', ?, ?, 'active', ? WHERE ${guardSql} ` +
           "ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at RETURNING id",
-      ).bind(id, name, email, now, now, externalRef, ...newCustomerEmailTakenValues(id, email)).first();
+      ).bind(id, name, ...emailValues, now, now, externalRef, ...guardValues).first();
     } catch (error) {
       // The unique email index refuses an address another writer claimed concurrently.
-      // Classify the failure by reading the accounts again, never by the driver's message.
-      if (await newCustomerEmailTaken(env, id, email)) return conflict(409, "customer_email_conflict");
+      // Classify the failure by reading the accounts again, never by the driver's message. A
+      // withdrawal stays retryable: its retry creates the customer without the address.
+      if (!withdrawal && await newCustomerEmailTaken(env, id, email)) return conflict(409, "customer_email_conflict");
       throw error;
     }
     if (written === null) return conflict(409, "customer_email_conflict");
