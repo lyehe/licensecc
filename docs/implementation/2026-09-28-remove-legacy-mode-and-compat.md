@@ -6,15 +6,16 @@ alias and compatibility-only document from the repository. For each change it
 states what the change did, the commits and commands that verify it, and the
 surfaces that were not run and why. It then gives the final schema, the
 consequences an owner or operator sees, the whole-repository sweep, the final
-gate and the open follow-ups.
+gate, the whole-branch review and its fixes, and the open follow-ups.
 
 ## Scope and verified refs
 
 - Base: local `main` at `3bd3f721`.
 - Plan: `docs/superpowers/plans/2026-09-28-remove-legacy-mode-and-compat.md`,
   committed as `1e0f4305` and revised after its review as `40d9ffeb`.
-- Branch: `fix/remove-legacy-and-compat`. The commit that adds this report is
-  the branch head; every commit named below is its ancestor.
+- Branch: `fix/remove-legacy-and-compat`. This report was added in
+  `b4084073` and completed after the whole-branch review; every commit named
+  below is an ancestor of the branch head.
 - Owner decisions the branch implements:
   - protected device-bound licensing (`device_bound_v1`) is the only online
     mode, and the owner accepted the capability losses listed below;
@@ -724,7 +725,7 @@ rounds are noted where a review found something.
 
 - Commits: `10cedea5` (failing test first), `8dd5da39`, `e0c37d49`,
   `4ac9fad0`, `a83f2315`, `496820a1`, `9ee08c57`, `23a613c3`, `d3e979a8`, and
-  the commit that adds this report together with the ADR 0006 amendment.
+  `b4084073`, which adds this report together with the ADR 0006 amendment.
 - Commands: see "Sweep" and "Final gate" below.
 
 ## Sweep
@@ -819,12 +820,12 @@ describes the ADR as covering persistent capacity, recovery and clock policy.
 
 ## Final gate
 
-The gate ran on `d3e979a8` with this commit's ADR 0006 and
-`doc/architecture/index.rst` edits already in the working tree; this commit
-adds only those two files and this report. `npm run check:pr` first ran at
+The gate ran on `d3e979a8` with the ADR 0006 and
+`doc/architecture/index.rst` edits of `b4084073` already in the working tree;
+`b4084073` adds only those two files and this report. `npm run check:pr` first ran at
 `23a613c3`, whose only difference from `d3e979a8` is one sentence in
-`extern/license-generator/PROVENANCE.md`, and was run again with this
-commit's full content staged (last row). Node 24.20.0, npm 10.9.8 for
+`extern/license-generator/PROVENANCE.md`, and was run again with the
+full content of `b4084073` staged (last row). Node 24.20.0, npm 10.9.8 for
 `npm ci`, uv 0.12.5, CMake
 3.28.3 and Clang 18.1.3 in WSL.
 
@@ -846,7 +847,7 @@ commit's full content staged (last row). Node 24.20.0, npm 10.9.8 for
 | `ctest --preset dev-device-identity-test` | 57/57 (run because the sweep changed a device-identity test). |
 | WSL `cmake --preset ci-linux-debug`, build, `ctest --preset ci-linux-debug` | configure and build exit 0; 27/32, the five known WSL failures only. |
 | WSL `cmake --preset ci-linux-sanitizers`, build, `ctest --preset ci-linux-sanitizers` | configure and build exit 0; 27/32, the five known WSL failures only. |
-| `npm run check:pr` (with this commit's content staged on `d3e979a8`) | exit 0 in 5 min; 26 node test summaries, every one `fail 0`, 1,667 tests passed; the secret scan covered this report. |
+| `npm run check:pr` (with the content of `b4084073` staged on `d3e979a8`) | exit 0 in 5 min; 26 node test summaries, every one `fail 0`, 1,667 tests passed; the secret scan covered this report. |
 
 Not run, with reasons:
 
@@ -863,6 +864,64 @@ Not run, with reasons:
   deterministic gate.
 - Live TPM, browser and backend journeys: release gates that need real
   hardware and a deployed backend.
+
+## Whole-branch review
+
+After the final gate, a whole-branch review read the full range
+`3bd3f721..b4084073` area by area (baseline schema, backend, shared packages,
+admin, portal, backup, native library, generator, SDKs, scripts and CI, tests
+and documentation) and swept the repository for dangling references. It found
+no defect in the code, schema, contracts, native ABI or SDKs. Its main finding
+was documentation: the one-time setup for the protected staging drill and the
+list of configuration operators must delete lived only in this report and the
+staging workflow, not in the maintained operator guide. Its smaller findings
+were stale comments and an unused export in the portal UI, a synthetic test
+path named after a removed route, an admin OpenAPI summary that still listed
+tokens, a compatibility rationale in the generator's CMake comment, a library
+module that kept its command-line name, and wording in this report. All of
+them were fixed on the branch:
+
+| Commit | Change |
+| --- | --- |
+| `4e48cfe2` | `doc/operations/cloudflare-setup.md` gains "Staging drill prerequisites" and "Secrets and variables no longer read"; a docs-accuracy test keeps the guide naming every staging drill variable the workflow reads (shown to fail when one is removed). |
+| `60d0cad3` | Portal UI: the download and seat-card comments are gone, `currentSessionEpoch()` is deleted, and `reportUnauthorized()` and `LicenseNextStep` are module-private. The test that read the epoch now proves through `api()` that a credential 401 never fires the session-ended hook (shown to fail when the code check is removed). |
+| `8008be31` | The portal `api()` tests use `/api/portal/example` instead of two removed route names. |
+| `ec881070` | The admin customer-detail summary and project-discovery description no longer name account tokens; contracts regenerated with `npm run write:contract-baselines`, only those two strings changed. |
+| `ff5e8a3a` | The generator's CMake comment states the install layout; no install path changed. |
+| `803ce2bc` | `parseSanitizedDeployment` moved into `scripts/capture-worker-deployment-transition.mjs`; `scripts/assert-worker-deployment.mjs` and its script-catalog entry are gone. |
+| `0031a373` | The system map's customer-portal total follows the portal change (5,751 to 5,742 lines). From `60d0cad3` until this commit, `test:docs-accuracy` failed on that total. |
+| `d38f4dbb`, `2c71c5f9`, `c3910976` | This report: the not-run surfaces of every change, the operator actions and sweep record, and one follow-up per parked item. |
+
+Everything else the review raised is a follow-up, listed below. The sweep's
+three searches, re-run at `c3910976`, count 339, 7 and 0 lines; the one new hit
+is the setup guide's list of secrets to delete. The audit findings in the
+follow-ups come from `npm audit --json` and `npm audit --omit=dev --json` (npm
+11.19.0) against the unchanged lockfile on 2026-09-30.
+
+The gates below ran on `c3910976`, the parent of the commit that adds this
+section, which changes only this report. Node 24.20.0, npm 11.19.0 (the
+dependencies installed earlier with `npm ci` and npm 10.9.8 were unchanged).
+
+| Command | Outcome |
+| --- | --- |
+| `npm run check:pr` | exit 0; 26 node test summaries, every one `fail 0`, 1,668 tests passed (one more than before: the setup-guide test); secret scan, script catalog, lint, typecheck, architecture, hotspots, contracts and schema parity all passed. |
+| `npm run check:docs` | exit 0; Doxygen and Sphinx "build succeeded". |
+| `npm run check:dry-run` | exit 0; all four Workers reached `--dry-run: exiting now.` |
+| `CI=1 npm run test:e2e --workspace @licensecc/cloudflare-customer-portal` | exit 0; 130 passed. Ports 4173 and 4174 were free before and after. |
+| `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug` (at `803ce2bc`, after the last change to a CMake file) | exit 0; 32/32; "Build purity check passed: source fingerprints were unchanged." |
+| Focused runs while fixing | portal `test:ui` 43/43 and `portal-ui-api.test.mjs` 9/9; portal typecheck and lint exit 0; rollback tests 12/12; `check:scripts` passed; admin `test:openapi` 25/25; `test:contracts` passed; `test:docs-accuracy` 15/15. |
+
+Not run, with reasons:
+
+- Admin and backend e2e: no admin or backend route, UI or Worker logic
+  changed; the admin change is two OpenAPI strings, which `test:contracts` and
+  the admin `test:openapi` cover.
+- The SDK legs and WSL CTest: no C++ or SDK source changed; the one CMake edit
+  is a comment, and the Windows build-purity run covers it.
+- `npm run test:docs-quickstart`: no documentation of the native install,
+  local issuance or minimal-consumer journey changed.
+- The live staging drill and production smoke: they need Cloudflare
+  credentials and the operator actions above.
 
 ## Follow-ups
 
