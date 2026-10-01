@@ -38,6 +38,8 @@ const VERIFY_PER_CLIENT = 30;
 const VERIFY_PER_EMAIL = 10;
 const VERIFY_WINDOW_SEC = 900;
 const SECRET_BYTES = 32;
+// Longest email address accepted; anything longer is malformed on both request and redeem.
+const MAX_EMAIL_LENGTH = 320;
 const textEncoder = new TextEncoder();
 const EMAIL_DELIVERY_ERROR_TYPES = new Set(["unconfigured", "send_failed", "rejected", "invalid_result"]);
 
@@ -186,7 +188,7 @@ export async function requestOtp(env, { email, clientIp = "", sendEmailFn, email
   const peppers = loadOtpPeppers(env);
   if (peppers === null) return { ok: false, code: "config_error" };
   const emailLower = normalizeEmail(email);
-  if (emailLower.length === 0 || emailLower.length > 320) {
+  if (emailLower.length === 0 || emailLower.length > MAX_EMAIL_LENGTH) {
     // Treat a malformed email like an unknown one (no oracle), but skip RL/work.
     return { ok: true, code: "ok" };
   }
@@ -294,11 +296,19 @@ export async function redeemOtp(env, { email, code, secret, clientIp = "", now =
   const peppers = loadOtpPeppers(env);
   if (peppers === null) return { ok: false, code: "config_error" };
 
+  const magicSecret = typeof secret === "string" && secret.length > 0 ? secret : null;
+  const emailLower = normalizeEmail(email);
+  if (magicSecret === null && (emailLower.length === 0 || emailLower.length > MAX_EMAIL_LENGTH || typeof code !== "string" || !/^[0-9]{8}$/.test(code))) {
+    // Malformed input is indistinguishable from a wrong code and, as on requestOtp, costs no
+    // limiter work: it can never match a code.
+    return { ok: false, code: "invalid_otp" };
+  }
+
   const ipRl = await portalRateLimit(env, `verify:ip:${clientIp}`, VERIFY_PER_CLIENT, VERIFY_WINDOW_SEC, now);
   if (ipRl.limited) return { ok: false, code: "rate_limited", retryAfter: ipRl.retryAfter };
 
-  if (typeof secret === "string" && secret.length > 0) {
-    const candidates = await candidateHmacs(peppers, secret);
+  if (magicSecret !== null) {
+    const candidates = await candidateHmacs(peppers, magicSecret);
     // ATOMIC single-use claim: set consumed_at only if currently unconsumed, unexpired, under the
     // cap. RETURNING the customer_id proves the claim. A wrong/expired/consumed/capped row matches
     // 0 rows -> null -> invalid_otp (byte-identical to no-OTP). No separate existence check.
@@ -312,11 +322,6 @@ export async function redeemOtp(env, { email, code, secret, clientIp = "", now =
     return { ok: true, customerId: claimed.customer_id, code: "ok" };
   }
 
-  const emailLower = normalizeEmail(email);
-  if (emailLower.length === 0 || typeof code !== "string" || !/^[0-9]{8}$/.test(code)) {
-    // Malformed input is indistinguishable from a wrong code.
-    return { ok: false, code: "invalid_otp" };
-  }
   // Keyed on the normalized email, like the per-email request limit.
   const emailRl = await portalRateLimit(env, `verify:email:${emailLower}`, VERIFY_PER_EMAIL, VERIFY_WINDOW_SEC, now);
   if (emailRl.limited) return { ok: false, code: "rate_limited", retryAfter: emailRl.retryAfter };
