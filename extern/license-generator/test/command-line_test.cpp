@@ -552,7 +552,7 @@ BOOST_AUTO_TEST_CASE(license_issue_rejects_active_custom_key_output_aliases_with
 		BOOST_TEST_MESSAGE("filesystem alias test skipped: hardlink/symlink unavailable: " + link_error.message());
 	}
 
-	// The default project key remains protected by the legacy default-key rule.
+	// The default project key stays protected by the default-key rule.
 	const FileSnapshot default_before = snapshot_file(default_private_key);
 	check_active_key_output_is_rejected(default_private_key, default_private_key, project_folder, default_before,
 										 "default-key output");

@@ -172,7 +172,7 @@ BOOST_AUTO_TEST_CASE(project_initialize_rejects_invalid_project_names) {
 										  "TEST[NAME]", "TEST NAME", "TEST:NAME", "TEST*NAME", "TEST?NAME",
 										  "TEST<NAME", "TEST>NAME", "TEST|NAME", "TEST\"NAME", "CON", "nul", "nul.h",
 										  "COM1", "lpt9", "lpt9.generated", string("TEST\nNAME"),
-										  "my-product", "legacy.product-1"};
+										  "my-product", "dotted.product-1"};
 
 	for (const string &project_name : invalid_names) {
 		BOOST_CHECK_THROW(Project(project_name, project_folder.string(), mock_source_folder.string(), false),
