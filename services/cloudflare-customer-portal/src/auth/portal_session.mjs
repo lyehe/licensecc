@@ -21,6 +21,11 @@ import { loadSecretMap } from "@licensecc/cloudflare-runtime/auth/secret_map";
 const SESSION_PREFIX = "lccp_";
 const SESSION_BYTES = 32;
 const SESSION_TTL_SEC = 86400; // 24h cookie Max-Age.
+// A sign-in is recent for this many seconds after its session was created. Changing a way into
+// the account asks for one: setting or resetting a password without the current one (a Google,
+// GitHub or email-code session; routes/password.ts) and connecting a provider (any session;
+// oauth/accounts.ts). Each rule keeps its own sign-in-method condition.
+export const RECENT_SIGN_IN_SEC = 600;
 const COOKIE_NAME = "lccp_session";
 const textEncoder = new TextEncoder();
 

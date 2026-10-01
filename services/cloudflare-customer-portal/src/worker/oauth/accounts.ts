@@ -1,16 +1,15 @@
+import { RECENT_SIGN_IN_SEC } from "../../auth/portal_session.mjs";
 import type { Env } from "../env.js";
 import type { Identity } from "./providers.js";
 
-// Connecting a provider adds a lasting way in, so it needs a session created within this many
-// seconds: a stolen or borrowed older session cannot add its holder's own Google or GitHub account.
-export const LINK_SIGN_IN_MAX_AGE_SEC = 600;
-
-// Whether a session is recent enough to connect a provider. The routes ask before they record a
-// link flow or exchange a provider code, so an old session gets its own answer and nothing else.
+// Connecting a provider adds a lasting way in, so it needs a recent sign-in (RECENT_SIGN_IN_SEC,
+// any sign-in method): a stolen or borrowed older session cannot add its holder's own Google or
+// GitHub account. The routes ask before they record a link flow or exchange a provider code, so an
+// old session gets its own answer and nothing else.
 export async function recentSignIn(env: Env, sessionId: string, now: number): Promise<boolean> {
   const db = env.DB.withSession?.("first-primary") ?? env.DB;
   const row = await db.prepare("SELECT 1 AS recent FROM portal_sessions WHERE id = ? AND created_at >= ?")
-    .bind(sessionId, now - LINK_SIGN_IN_MAX_AGE_SEC).first<{ recent: number }>();
+    .bind(sessionId, now - RECENT_SIGN_IN_SEC).first<{ recent: number }>();
   return row !== null;
 }
 
@@ -31,7 +30,7 @@ export async function identityCustomer(env: Env, identity: Identity, linkSession
       "INSERT INTO portal_identities (provider, subject, customer_id, email, created_at) " +
       "SELECT ?, ?, s.customer_id, ?, ? FROM portal_sessions s JOIN customers c ON c.id = s.customer_id " +
       "WHERE s.id = ? AND s.status = 'active' AND s.expires_at > ? AND s.created_at >= ? AND c.status = 'active' RETURNING customer_id",
-    ).bind(identity.provider, identity.subject, identity.email, now, linkSessionId, now, now - LINK_SIGN_IN_MAX_AGE_SEC).first<{ customer_id: string }>();
+    ).bind(identity.provider, identity.subject, identity.email, now, linkSessionId, now, now - RECENT_SIGN_IN_SEC).first<{ customer_id: string }>();
     if (!linked) throw new Error("link_failed");
     return linked.customer_id;
   }

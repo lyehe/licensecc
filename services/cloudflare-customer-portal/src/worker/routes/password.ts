@@ -1,4 +1,5 @@
 import { authSession } from "./auth.js";
+import { RECENT_SIGN_IN_SEC } from "../../auth/portal_session.mjs";
 import { envelope, readJson, retryAfterHeaders } from "../support.js";
 import { hashPassword, loginEmail, validPassword, verifyPassword } from "@licensecc/cloudflare-runtime/auth/password";
 import { HEADERS, primary, gate, throttle, signedIn, RESET_ELIGIBLE_SQL } from "../password/shared.js";
@@ -43,7 +44,7 @@ async function settings(request: Request, env: Env, reqId: string, now: number):
     .bind(session.id, now).first<{ email: string; auth_method: string; created_at: number; recovery_eligible: number }>();
   if (!row) return envelope(reqId, "unauthorized", undefined, 401, HEADERS);
   const credential = await db.prepare("SELECT customer_id, email_lower, password_hash FROM portal_passwords WHERE customer_id = ?").bind(session.customer_id).first<Credential>();
-  const recentVerifiedSignIn = (row.auth_method === "oauth" || row.auth_method === "otp") && row.created_at >= now - 600;
+  const recentVerifiedSignIn = (row.auth_method === "oauth" || row.auth_method === "otp") && row.created_at >= now - RECENT_SIGN_IN_SEC;
   if (request.method === "GET") return envelope(reqId, "password_settings", {
     has_password: Boolean(credential), email: credential?.email_lower ?? row.email, can_reset: recentVerifiedSignIn,
     email_verified: Boolean(row.email && row.email.toLowerCase() === credential?.email_lower),
