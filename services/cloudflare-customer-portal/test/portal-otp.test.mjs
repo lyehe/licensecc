@@ -275,16 +275,128 @@ test("pepper-unset -> config_error on request and redeem", async () => {
   assert.equal(red.code, "config_error");
 });
 
-test("the attempt cap is enforced (5 live attempts max)", async () => {
+// Issue a live code for `email` through the operator-bootstrap seam, which is the only way a test
+// can learn the code the customer would have been emailed.
+async function issueCode(e, email, now = NOW) {
+  const req = await requestOtp(e, { email, clientIp: "10.0.0.1", returnSecret: true, now });
+  const secretBytes = Uint8Array.from(atob(req.secret.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+  return { secret: req.secret, code: codeFromSecretBytes(secretBytes) };
+}
+
+// The n-th wrong guess for `code`: a well-formed 8-digit code that is never the right one.
+function wrongCode(code, n = 0) {
+  return String((Number(code) + n + 1) % 100_000_000).padStart(8, "0");
+}
+
+// Each guess comes from its own client address, so only the per-code and per-email limits apply.
+async function guessWrong(e, email, code, count) {
+  for (let i = 0; i < count; i += 1) {
+    const r = await redeemOtp(e, { email, code: wrongCode(code, i), clientIp: `192.0.2.${i + 1}`, now: NOW });
+    assert.deepEqual(r, { ok: false, code: "invalid_otp" }, `wrong guess ${i + 1} is refused`);
+  }
+}
+
+test("every wrong code counts against the live code: 4 wrong guesses then the right code signs in", async () => {
   const db = freshDb();
   seedCustomer(db, "A", "a@x.com");
   const e = env(db);
-  const req = await requestOtp(e, { email: "a@x.com", clientIp: "1.1.1.1", returnSecret: true, now: NOW });
-  // Burn 5 wrong-but-matching-shape attempts on the live row by directly setting attempt_count to the cap.
-  db.prepare("UPDATE portal_otp SET attempt_count = 5 WHERE customer_id = 'A'").run();
-  // Now even the CORRECT secret is denied (attempt_count < 5 fails).
-  const r = await redeemOtp(e, { secret: req.secret, clientIp: "1.1.1.1", now: NOW });
-  assert.equal(r.ok, false, "a row at the attempt cap is denied even with the right secret");
+  const { code } = await issueCode(e, "a@x.com");
+  await guessWrong(e, "a@x.com", code, 4);
+  assert.equal(db.prepare("SELECT attempt_count FROM portal_otp WHERE customer_id = 'A'").get().attempt_count, 4,
+    "each wrong guess raised the live code's attempt count");
+  const r = await redeemOtp(e, { email: "a@x.com", code, clientIp: "198.51.100.1", now: NOW });
+  assert.equal(r.ok, true, "the fifth guess may still be the right one");
+  assert.equal(r.customerId, "A");
+});
+
+test("5 wrong guesses kill the live code: the right code and the same row's link secret are refused", async () => {
+  const db = freshDb();
+  seedCustomer(db, "A", "a@x.com");
+  const e = env(db);
+  const { code, secret } = await issueCode(e, "a@x.com");
+  await guessWrong(e, "a@x.com", code, 5);
+  const byCode = await redeemOtp(e, { email: "a@x.com", code, clientIp: "198.51.100.1", now: NOW });
+  assert.deepEqual(byCode, { ok: false, code: "invalid_otp" }, "the right code no longer signs in");
+  const bySecret = await redeemOtp(e, { secret, clientIp: "198.51.100.2", now: NOW });
+  assert.deepEqual(bySecret, { ok: false, code: "invalid_otp" }, "the same row's link secret no longer signs in");
+  assert.equal(db.prepare("SELECT attempt_count FROM portal_otp WHERE customer_id = 'A'").get().attempt_count, 5,
+    "guesses at a dead code no longer change it");
+});
+
+test("wrong guesses for one email leave another email's live code untouched", async () => {
+  const db = freshDb();
+  seedCustomer(db, "A", "a@x.com");
+  seedCustomer(db, "B", "b@x.com");
+  const e = env(db);
+  const a = await issueCode(e, "a@x.com");
+  const b = await issueCode(e, "b@x.com");
+  await guessWrong(e, "a@x.com", a.code, 5);
+  assert.equal(db.prepare("SELECT attempt_count FROM portal_otp WHERE customer_id = 'B'").get().attempt_count, 0);
+  const r = await redeemOtp(e, { email: "b@x.com", code: b.code, clientIp: "198.51.100.1", now: NOW });
+  assert.equal(r.ok, true, "B still signs in with B's code");
+  assert.equal(r.customerId, "B");
+});
+
+test("unknown email, no live code, wrong code and dead code answer identically and run the same code statements", async () => {
+  const db = freshDb();
+  seedCustomer(db, "A", "a@x.com");
+  seedCustomer(db, "B", "b@x.com");
+  seedCustomer(db, "C", "c@x.com");
+  const e = env(db);
+  const a = await issueCode(e, "a@x.com");
+  const c = await issueCode(e, "c@x.com");
+  await guessWrong(e, "c@x.com", c.code, 5);
+
+  // Record the portal_otp statements each failed verify prepares (the rate-limit counters are keyed
+  // per address and email, so their bookkeeping differs by design).
+  const statements = [];
+  const recordingEnv = env(db);
+  const real = recordingEnv.DB;
+  recordingEnv.DB = { prepare(sql) { if (/portal_otp/.test(sql)) statements.push(sql); return real.prepare(sql); } };
+  async function attempt(email, code, clientIp) {
+    statements.length = 0;
+    const result = await redeemOtp(recordingEnv, { email, code, clientIp, now: NOW });
+    return { result, statements: [...statements] };
+  }
+
+  const cases = {
+    "unknown email": await attempt("nobody@x.com", "12345678", "198.51.100.1"),
+    "no live code": await attempt("b@x.com", "12345678", "198.51.100.2"),
+    "wrong code": await attempt("a@x.com", wrongCode(a.code, 50), "198.51.100.3"),
+    "dead code": await attempt("c@x.com", c.code, "198.51.100.4"),
+  };
+  const [first, ...rest] = Object.entries(cases);
+  assert.deepEqual(first[1].result, { ok: false, code: "invalid_otp" });
+  assert.ok(first[1].statements.length >= 2, "a failed verify both tries the claim and counts the guess");
+  for (const [name, outcome] of rest) {
+    assert.deepEqual(outcome.result, first[1].result, `${name}: same response as ${first[0]}`);
+    assert.deepEqual(outcome.statements, first[1].statements, `${name}: same code statements as ${first[0]}`);
+  }
+});
+
+test("the per-email verify budget refuses the 11th attempt for an address, whatever the client address", async () => {
+  const db = freshDb();
+  seedCustomer(db, "A", "a@x.com");
+  const e = env(db);
+  // Five codes' worth of wrong guesses: each code dies after five, so a fresh one is requested in
+  // between, as an attacker keeping a live code would.
+  let { code } = await issueCode(e, "a@x.com");
+  for (let i = 0; i < 10; i += 1) {
+    if (i === 5) ({ code } = await issueCode(e, "a@x.com", NOW + 1));
+    const r = await redeemOtp(e, { email: "A@X.com ", code: wrongCode(code, i), clientIp: `203.0.113.${i + 1}`, now: NOW });
+    assert.equal(r.code, "invalid_otp", `attempt ${i + 1} is within the budget`);
+  }
+  ({ code } = await issueCode(e, "a@x.com", NOW + 2));
+  const limited = await redeemOtp(e, { email: "a@x.com", code, clientIp: "203.0.113.200", now: NOW });
+  assert.equal(limited.code, "rate_limited", "even a fresh, right code is refused once the address's budget is spent");
+  const period = 900;
+  assert.equal(limited.retryAfter, Math.floor(NOW / period) * period + period - NOW);
+  const other = await redeemOtp(e, { email: "b@x.com", code: "12345678", clientIp: "203.0.113.200", now: NOW });
+  assert.equal(other.code, "invalid_otp", "another address keeps its own budget");
+
+  // An address with no account gets the same budget, so the limit itself is no oracle.
+  for (let i = 0; i < 10; i += 1) await redeemOtp(e, { email: "nobody@x.com", code: "12345678", clientIp: `203.0.113.${100 + i}`, now: NOW });
+  assert.equal((await redeemOtp(e, { email: "nobody@x.com", code: "12345678", clientIp: "203.0.113.201", now: NOW })).code, "rate_limited");
 });
 
 // The UI's rate-limit sentence needs the exact seconds left in the window, so requestOtp/
@@ -306,7 +418,8 @@ test("redeemOtp reports retryAfter when the per-IP verify cap trips", async () =
   const db = freshDb();
   seedCustomer(db, "A", "a@x.com");
   const e = env(db);
-  for (let i = 0; i < 30; i += 1) await redeemOtp(e, { email: "a@x.com", code: "00000000", clientIp: "1.1.1.1", now: NOW });
+  // A different address each time, so the per-email budget never trips first.
+  for (let i = 0; i < 30; i += 1) await redeemOtp(e, { email: `user${i}@x.com`, code: "00000000", clientIp: "1.1.1.1", now: NOW });
   const limited = await redeemOtp(e, { email: "a@x.com", code: "00000000", clientIp: "1.1.1.1", now: NOW });
   assert.equal(limited.ok, false);
   assert.equal(limited.code, "rate_limited");

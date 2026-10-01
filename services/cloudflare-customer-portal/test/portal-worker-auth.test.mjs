@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, FP_A, FP_B, cookieFor, sameSiteHeaders, call, baseFixture, seedEntitlement, CTX, NOW, within } from "./portal-worker-fixtures.mjs";
+// Namespace import: a missing export fails its own test instead of the whole suite's module load.
+import * as support from "../dist-worker/worker/support.js";
 
 const textEncoder = new TextEncoder();
 
@@ -257,6 +259,52 @@ test("auth magic redeem (JSON caller) over the per-IP cap answers 429 with the e
   assert.equal(result.body.code, "rate_limited");
   assert.equal(result.res.headers.get("retry-after"), String(window + 900 - NOW));
   db.close();
+});
+
+// One IPv6 subscriber usually holds a whole /64, so the per-address verify budget is shared across
+// that prefix; IPv4 keeps one budget per address.
+async function verifyFrom(env, address, n) {
+  return call(env, "POST", "/portal/v1/auth/verify", {
+    // A different address each time, so only the per-client budget can trip.
+    body: { email: `guess${n}@x.com`, code: "12345678" },
+    headers: { "cf-connecting-ip": address },
+  });
+}
+
+test("auth/verify shares one per-client budget across an IPv6 /64; another /64 has its own", async (t) => {
+  t.mock.method(Date, "now", () => NOW * 1000);
+  const { db, env } = baseFixture();
+  for (let i = 0; i < 30; i += 1) {
+    assert.equal((await verifyFrom(env, `2001:db8:1:2:${(i + 1).toString(16)}::9`, i)).status, 401);
+  }
+  const sameSlash64 = await verifyFrom(env, "2001:0DB8:0001:0002:ffff:ffff:ffff:ffff", 30);
+  assert.equal(sameSlash64.status, 429, "another address in the same /64 shares the spent budget");
+  assert.equal(sameSlash64.body.code, "rate_limited");
+  assert.equal((await verifyFrom(env, "[2001:db8:1:2::77]", 31)).status, 429, "bracketed form of the same /64");
+  assert.equal((await verifyFrom(env, "2001:db8:1:3::1", 32)).status, 401, "a different /64 has its own budget");
+  db.close();
+});
+
+test("auth/verify keeps a per-address budget for IPv4", async (t) => {
+  t.mock.method(Date, "now", () => NOW * 1000);
+  const { db, env } = baseFixture();
+  for (let i = 0; i < 30; i += 1) assert.equal((await verifyFrom(env, "198.51.100.7", i)).status, 401);
+  assert.equal((await verifyFrom(env, "198.51.100.7", 30)).status, 429, "the same IPv4 address is limited");
+  assert.equal((await verifyFrom(env, "198.51.100.8", 31)).status, 401, "the neighbouring IPv4 address is not");
+  assert.equal((await verifyFrom(env, "::ffff:198.51.100.8", 32)).status, 401, "an IPv4-mapped address is that IPv4 address");
+  db.close();
+});
+
+// Every portal limiter that uses the client address (email-code request and verify, OAuth start and
+// callback, password sign-in, registration, reset and completion) takes it from clientIp().
+test("clientIp() reduces IPv6 to its /64 and keeps IPv4 and a missing header as sent", () => {
+  const from = (value) => support.clientIp(new Request("https://portal.test/", value === undefined ? {} : { headers: { "cf-connecting-ip": value } }));
+  assert.equal(from("2001:db8:1:2::1"), "2001:db8:1:2::/64");
+  assert.equal(from("2001:DB8:1:2:aaaa:bbbb:cccc:dddd"), "2001:db8:1:2::/64");
+  assert.equal(from("2001:db8:1:3::1"), "2001:db8:1:3::/64");
+  assert.equal(from("::ffff:192.0.2.1"), "192.0.2.1");
+  assert.equal(from("192.0.2.1"), "192.0.2.1");
+  assert.equal(from(undefined), "");
 });
 
 test("auth magic GET renders a POST interstitial without consuming the secret", async () => {
