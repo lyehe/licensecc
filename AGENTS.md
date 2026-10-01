@@ -32,8 +32,9 @@ changes also require
 `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug`.
 
 The documentation split is deliberate: `doc/` contains maintained project and
-architecture documentation; `docs/superpowers/plans/` contains protected
-execution plans; `docs/implementation/` contains evidence reports.
+architecture documentation; `docs/superpowers/specs/` contains design specs
+that precede a plan; `docs/superpowers/plans/` contains protected execution
+plans; `docs/implementation/` contains evidence reports.
 
 For multi-person or multi-agent work, use the task-packet and handoff convention
 in [`CONTRIBUTING.md`](CONTRIBUTING.md#task-packets-and-handoffs). Status must

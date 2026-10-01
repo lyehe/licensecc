@@ -136,7 +136,8 @@ Use [`doc/architecture/change-guide.md`](doc/architecture/change-guide.md) to
 route API, Worker, D1, policy, UI, SDK, and OpenAPI changes. Read
 [`doc/architecture/ownership.md`](doc/architecture/ownership.md) before
 crossing a deployable boundary. The documentation split is deliberate:
-maintained project docs live under `doc/`, protected execution plans under
+maintained project docs live under `doc/`, design specs that precede a plan
+under `docs/superpowers/specs/`, protected execution plans under
 `docs/superpowers/plans/`, and evidence reports under `docs/implementation/`.
 New or moved repository scripts must also be recorded once in
 [`scripts/script-catalog.json`](scripts/script-catalog.json).
