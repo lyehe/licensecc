@@ -7569,7 +7569,7 @@
       },
       "/api/admin/catalog/projects": {
         "get": {
-          "description": "Union of catalog features/plans, policies, entitlements, licenses, orders and order events, including disabled and unassigned records. No independent app registry. Lexical project ordering; offset pages can shift under concurrent changes. Audit-only and token-scope-only project names are not configuration records.",
+          "description": "Union of catalog features/plans, policies, entitlements, licenses, orders and order events, including disabled and unassigned records. No independent app registry. Lexical project ordering; offset pages can shift under concurrent changes. Audit-only project names are not configuration records.",
           "operationId": "listCatalogProjects",
           "parameters": [
             {
@@ -8291,7 +8291,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Get detailed customer profile with related entitlements, tokens, licenses, orders, and events",
+          "summary": "Get detailed customer profile with related entitlements, licenses, orders, and events",
           "tags": [
             "admin:customers"
           ]

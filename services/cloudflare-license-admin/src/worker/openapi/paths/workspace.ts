@@ -38,7 +38,7 @@ export const workspacePaths: LabeledPathFragment = {
     ["/api/admin/catalog/projects", { get: {
       tags: ["admin:catalog"], operationId: "listCatalogProjects", security: ADMIN_SECURITY,
       summary: "Discover projects from configuration and retained business records",
-      description: "Union of catalog features/plans, policies, entitlements, licenses, orders and order events, including disabled and unassigned records. No independent app registry. Lexical project ordering; offset pages can shift under concurrent changes. Audit-only and token-scope-only project names are not configuration records.",
+      description: "Union of catalog features/plans, policies, entitlements, licenses, orders and order events, including disabled and unassigned records. No independent app registry. Lexical project ordering; offset pages can shift under concurrent changes. Audit-only project names are not configuration records.",
       parameters: limitCursorParams(),
       responses: { "200": { description: "Project page.", content: { "application/json": { schema: {
         type: "object", required: ["ok", "code", "request_id", "data"], properties: {

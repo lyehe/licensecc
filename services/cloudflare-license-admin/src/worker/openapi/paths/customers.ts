@@ -56,7 +56,7 @@ export const customerPaths: LabeledPathFragment = {
     ["/api/admin/customers/{id}", {
     get: {
       tags: ["admin:customers"],
-      summary: "Get detailed customer profile with related entitlements, tokens, licenses, orders, and events",
+      summary: "Get detailed customer profile with related entitlements, licenses, orders, and events",
       operationId: "getCustomer",
       security: ADMIN_SECURITY,
       parameters: [idParam],
