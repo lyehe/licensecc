@@ -1304,6 +1304,7 @@ export function makeAdminApiFixture() {
       const rows = Array.isArray(behavior.deliveryRows) ? behavior.deliveryRows : [];
       const row = rows.find((delivery) => delivery.id === deliveryId);
       if (row === undefined) return fulfill(404, { ok: false, code: "not_found", request_id: "ui-e2e-delivery-missing" });
+      if (row.status === "canceled") return fulfill(409, { ok: false, code: "webhook_delivery_canceled", request_id: "ui-e2e-delivery-canceled", data: { status: "canceled" } });
       if (row.status !== "failed") return fulfill(409, { ok: false, code: "webhook_delivery_not_failed", request_id: "ui-e2e-delivery-not-failed" });
       row.status = "pending";
       row.attempts = 0;

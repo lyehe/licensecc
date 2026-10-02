@@ -240,3 +240,29 @@ test("a delivery refused for its URL shows the human rule, with the raw code und
   await deliveryRow.getByText("Technical details", { exact: true }).click();
   await expect(deliveryRow.getByText("invalid_url", { exact: true })).toBeVisible();
 });
+
+// A delivery canceled because its endpoint's URL or scope changed after it was queued (last_error
+// "endpoint_changed") says so in plain words, even when an earlier attempt recorded an HTTP status;
+// it cannot be retried, and the reason code stays under Technical details.
+test("a delivery canceled because its endpoint moved says why and cannot be retried", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const endpoint = api.seed.webhook("wh_moved", "https://hooks.example.test/moved");
+  api.behavior.deliveryRows = [
+    { id: 801, endpoint_id: endpoint.id, event_id: 1, event_source: "entitlement", event_type: "disabled", status: "canceled", attempts: 2, last_status: 503, last_error: "endpoint_changed", next_attempt_at: 1_760_000_000, created_at: 1_760_000_000, delivered_at: null },
+    { id: 802, endpoint_id: endpoint.id, event_id: 2, event_source: "entitlement", event_type: "disabled", status: "delivered", attempts: 1, last_status: 200, last_error: "", next_attempt_at: 1_760_000_000, created_at: 1_760_000_000, delivered_at: 1_760_000_000 },
+  ];
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/webhooks");
+  const row = page.locator("tr").filter({ hasText: "https://hooks.example.test/moved" });
+  await row.getByRole("button", { name: "Deliveries", exact: true }).click();
+  const deliveries = page.getByRole("region", { name: "Recent webhook deliveries" });
+  await deliveries.getByLabel("Filter deliveries by status").selectOption("canceled");
+  const canceled = deliveries.locator("tbody tr");
+  await expect(canceled).toHaveCount(1);
+  await expect(canceled.locator("td").nth(3)).toHaveText(/canceled/i);
+  await expect(canceled.locator("td").nth(5)).toContainText("address or scope changed");
+  await expect(canceled.locator("td").nth(5)).not.toContainText("503");
+  await expect(canceled.getByRole("button", { name: "Retry delivery", exact: true })).toBeDisabled();
+  await canceled.getByText("Technical details", { exact: true }).click();
+  await expect(canceled.getByText("endpoint_changed", { exact: true })).toBeVisible();
+});
