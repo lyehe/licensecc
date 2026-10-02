@@ -75,7 +75,7 @@ those identifiers, but the words a person reads are "Disconnect".
 **Capacity.** The maximum concurrent devices an entitlement or policy
 allows (`max_active_devices`/`device_limit`). Both apps call this the
 **device limit** wherever it names that one field specifically (the portal
-already does, in the consent page and in `device_limit_exceeded` copy). The
+already does, in the consent page and in `device_limit_reached` copy). The
 device limit is a grant's only capacity.
 
 ## Applying this glossary

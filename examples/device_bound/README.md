@@ -22,8 +22,10 @@ Configure the application with developer-controlled endpoint/issuer/audience
 values and its **public RSA-3072 DER signing key**. These settings are compiled
 into the executable, rather than accepted from an end user's command line.
 Replace the example `.test` values with the registered pilot configuration.
-The installed package component (`LCC_PROJECT_NAME=test`) is separate from the
-backend licensing project (`LCC_BOUND_PROJECT=CAD`).
+The configured portal URL must exactly match the portal's consent origin and
+path; a mismatch fails as `INVALID_RESPONSE` (16). The installed package
+component (`LCC_PROJECT_NAME=test`) is separate from the backend licensing
+project (`LCC_BOUND_PROJECT=CAD`).
 
 ```powershell
 cmake -S examples/device_bound -B build/device-bound-public-example `
@@ -33,7 +35,7 @@ cmake -S examples/device_bound -B build/device-bound-public-example `
   -DLCC_PROJECT_NAME=test `
   -DLCC_BOUND_APPLICATION_ID=com.example.cad `
   -DLCC_BOUND_ENDPOINT_ORIGIN=https://backend.test `
-  -DLCC_BOUND_PORTAL_URL=https://portal.test/authorize `
+  -DLCC_BOUND_PORTAL_URL=https://portal.test/connect `
   -DLCC_BOUND_ISSUER=https://issuer.test/ `
   -DLCC_BOUND_LEASE_AUDIENCE=CAD-client `
   -DLCC_BOUND_PROOF_AUDIENCE=proof-audience `
@@ -117,8 +119,8 @@ project. Enroll each feature once, selecting its matching feature in the portal:
 These modes use the same configured app/project key and separate feature
 checkpoints; `LCC_BOUND_FEATURE` still controls the original `enroll`/`resume`
 modes. The feature enrollment modes finish after enrollment without starting
-protected work. Selecting another feature in consent cannot enable the requested
-feature and can leave an unwanted binding needing explicit review.
+protected work. Consent now lists only licenses for the requested feature, so
+there is nothing else to select there.
 
 Ordinary feature-session starts do not open a browser. The example renews when
 the native signed deadline is due, preserves a pending retry, checks permission
@@ -187,7 +189,7 @@ cmake -S examples/device_bound -B build/device-bound-public-example \
   -DLCC_PROJECT_NAME=test \
   -DLCC_BOUND_APPLICATION_ID=com.example.cad \
   -DLCC_BOUND_ENDPOINT_ORIGIN=https://backend.test \
-  -DLCC_BOUND_PORTAL_URL=https://portal.test/authorize \
+  -DLCC_BOUND_PORTAL_URL=https://portal.test/connect \
   -DLCC_BOUND_ISSUER=https://issuer.test/ \
   -DLCC_BOUND_LEASE_AUDIENCE=CAD-client \
   -DLCC_BOUND_PROOF_AUDIENCE=proof-audience \
