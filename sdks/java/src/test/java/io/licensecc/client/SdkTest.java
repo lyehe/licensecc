@@ -22,6 +22,7 @@ public final class SdkTest {
     public static void main(String[] args) throws Exception {
         Path root = Path.of(args[0]).toAbsolutePath().normalize();
         configGolden(root);
+        configKeyFloor(root);
         failClosedParsing();
         DeviceBoundVectorsTest.run(root);
         DeviceBoundAdapterTest.run();
@@ -29,7 +30,7 @@ public final class SdkTest {
         System.out.println("Java SDK tests passed");
     }
 
-    private static void configGolden(Path root) throws IOException, GeneralSecurityException {
+    private static void configGolden(Path root) throws IOException {
         Path vectors = root.resolve("test/vectors/config_attestation");
         String token = text(vectors.resolve("golden.token"));
         TrustedPublicKey key = TrustedPublicKey.fromHex(text(vectors.resolve("golden.public_key.pkcs1.der.hex")));
@@ -53,15 +54,21 @@ public final class SdkTest {
                 ConfigAttestation.verify("lccoa1." + parts[1] + "." + parts[2], expected, List.of(key));
         check(!otherPrefix.ok() && otherPrefix.code() == RejectionCode.PREFIX_MISMATCH,
                 "another envelope prefix rejects");
+    }
 
-        // Every verifier applies the same 3072-bit floor, so even a correctly signed token from a
-        // trusted key below it is refused; the same re-signing with a 3072-bit key verifies.
+    // Every verifier applies the same 3072-bit floor, so even a correctly signed token from a
+    // trusted key below it is refused; the same re-signing with a 3072-bit key verifies.
+    private static void configKeyFloor(Path root) throws IOException, GeneralSecurityException {
+        Path vectors = root.resolve("test/vectors/config_attestation");
+        String payloadB64 = text(vectors.resolve("golden.token")).split("\\.", -1)[1];
         String goldenKeyId = text(vectors.resolve("golden.key_id"));
+        var expected = new ConfigAttestation.Expected(Files.readAllBytes(vectors.resolve("golden.config")),
+                "DEFAULT", "EXPORT", "a".repeat(64), "", BigInteger.valueOf(9), BigInteger.valueOf(1500));
         for (int bits : new int[] {1024, 2048}) {
-            VerificationResult<ConfigAttestation.Claims> weak = verifyResigned(parts[1], goldenKeyId, bits, expected);
+            VerificationResult<ConfigAttestation.Claims> weak = verifyResigned(payloadB64, goldenKeyId, bits, expected);
             check(!weak.ok() && weak.code() == RejectionCode.KEY_TOO_WEAK, bits + "-bit trusted key rejects");
         }
-        check(verifyResigned(parts[1], goldenKeyId, 3072, expected).ok(), "3072-bit trusted key verifies");
+        check(verifyResigned(payloadB64, goldenKeyId, 3072, expected).ok(), "3072-bit trusted key verifies");
     }
 
     // The golden payload, re-keyed to a fresh trusted key of the given size and signed by it.
