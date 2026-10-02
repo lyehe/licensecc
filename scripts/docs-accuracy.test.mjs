@@ -401,6 +401,19 @@ test("the device-bound example README configures the portal's /connect consent p
   assert.match(deviceBoundReadme, /[Cc]onsent (?:now )?lists only licenses for the requested feature/u);
 });
 
+test("the device-bound example and its CI config sample never hard-code the retired /authorize consent path", () => {
+  for (const relativePath of [
+    "examples/device_bound/README.md",
+    "scripts/ci/build-device-bound-example.ps1",
+  ]) {
+    assert.doesNotMatch(
+      source(relativePath),
+      /portal\.test\/authorize/u,
+      `${relativePath} still configures the retired /authorize consent path; use /connect`,
+    );
+  }
+});
+
 test("the architecture glossary cites the current device-limit refusal code", () => {
   const glossary = source("doc/architecture/glossary.md");
   assert.doesNotMatch(glossary, /device_limit_exceeded/u);
