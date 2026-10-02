@@ -681,6 +681,46 @@ test("webhook deliveries: redrive refuses a canceled delivery, and the list filt
   assert.deepEqual(listed.data.items.map((item) => [item.id, item.status, item.last_error]), [[canceledId, "canceled", "endpoint_changed"]]);
 });
 
+test("webhook deliveries: a redrive that loses its race to a cancellation reports the cancellation", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const ep = await createWebhook(env, { url: "https://race.example.com/h" });
+  const failedId = seedDelivery(db, { endpoint_id: ep.id, status: "failed", attempts: 6, last_error: "gateway down", event_id: 1 });
+
+  // An endpoint PATCH cancels the delivery after redrive has read it as failed and before its
+  // guarded UPDATE runs.
+  const real = env.DB;
+  let raced = false;
+  const racing = {
+    ...env,
+    DB: {
+      batch: (statements) => real.batch(statements),
+      prepare(sql) {
+        const prepared = real.prepare(sql);
+        if (raced || !/^SELECT .+ FROM webhook_deliveries WHERE id = \?/su.test(sql)) return prepared;
+        return {
+          bind: (...values) => ({
+            async first() {
+              const row = await prepared.bind(...values).first();
+              raced = true;
+              db.prepare("UPDATE webhook_deliveries SET status = 'canceled', last_error = 'endpoint_changed' WHERE id = ?").run(failedId);
+              return row;
+            },
+          }),
+        };
+      },
+    },
+  };
+
+  const res = await worker.fetch(devReq(`/api/admin/webhooks/deliveries/${failedId}/redrive`, { method: "POST", body: "{}" }), racing);
+  assert.equal(raced, true, "the cancellation landed between the read and the UPDATE");
+  assert.equal(res.status, 409);
+  const refusal = await body(res);
+  assert.equal(refusal.code, "webhook_delivery_canceled");
+  assert.deepEqual(refusal.data, { status: "canceled" });
+  assert.deepEqual(deliveryState(db, failedId), CANCELED, "the cancellation stands");
+});
+
 test("webhook: reader can read but cannot run any webhook write", async (t) => {
   const db = freshDb();
   const fixture = await accessFixture(t);
