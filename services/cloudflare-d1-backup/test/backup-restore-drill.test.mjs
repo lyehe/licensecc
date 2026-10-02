@@ -835,7 +835,7 @@ test("table and named schema-object checks cover migrated identity", () => {
     assert.ok(sql.includes(`'${table}'`), `tableListSql does not assert ${table} present`);
   }
 
-  assert.equal(Object.keys(EXPECTED_INDEXES).length, 63);
+  assert.equal(Object.keys(EXPECTED_INDEXES).length, 64);
   assert.equal(EXPECTED_INDEXES.idx_bound_unconsumed_attempt_cleanup, "device_bound_authorizations");
   assert.equal(Object.keys(EXPECTED_TRIGGERS).length, 48);
   assert.equal(EXPECTED_INDEXES.idx_license_plan_projection_previews_expiry_id, "license_plan_projection_previews");
@@ -848,14 +848,14 @@ test("table and named schema-object checks cover migrated identity", () => {
   assert.match(schemaSql, /bump_license_plan_projection_generation_assignments_delete/);
   const snapshot = readFileSync(new URL("../../cloudflare-licensing-backend/schema.sql", import.meta.url), "utf8");
   const rows = schemaRowsFromGeneratedSnapshot(snapshot);
-  assert.equal(rows.length, 153);
+  assert.equal(rows.length, 154);
   assert.equal(schemaSignature(rows), EXPECTED_SCHEMA_SIGNATURE_SHA256);
   assert.deepEqual(validateSchemaObjectRows(rows), {
     verified: true,
     algorithm: "sha256",
     digest: EXPECTED_SCHEMA_SIGNATURE_SHA256,
     table_count: 42,
-    named_index_count: 63,
+    named_index_count: 64,
     trigger_count: 48,
   });
   assert.throws(() => validateSchemaObjectRows(rows.filter((row) => row.name !== "entitlements")), /restored_schema_objects_missing:table:entitlements/);

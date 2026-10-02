@@ -20,7 +20,7 @@ const MAX_BACKUP_MANIFEST_BYTES = 16 * 1024;
 const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const MAX_MANIFEST_STRING_LENGTH = 2048;
 const SQL_HASH_CHUNK_BYTES = 64 * 1024;
-const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "6faf6913aa9b51354f8da728a6b1ab21e8b10063acf7c5aab095826382660e5a";
+const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "6c825b216d163d90c7e50ae56e2c1b246699ed9ffd83f5a243582aac7d411118";
 const SNAPSHOT_INVENTORY_ALGORITHM = "d1-export-sql-insert-count-v1";
 const DEFAULT_BACKEND_MIGRATIONS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -162,6 +162,7 @@ const EXPECTED_INDEXES = {
   idx_policy_events_policy: "policy_events",
   idx_portal_bootstrap_customer: "portal_bootstrap_events",
   idx_portal_otp_code: "portal_otp",
+  idx_portal_otp_email_live: "portal_otp",
   idx_portal_otp_expires: "portal_otp",
   idx_portal_otp_secret: "portal_otp",
   idx_portal_oauth_states_expires: "portal_oauth_states",

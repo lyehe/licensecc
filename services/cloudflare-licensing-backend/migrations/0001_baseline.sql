@@ -551,7 +551,7 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
   event_id        INTEGER NOT NULL,
   event_type      TEXT NOT NULL DEFAULT '',
   payload_json    TEXT NOT NULL DEFAULT '',
-  status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'failed')),
+  status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'failed', 'canceled')),
   attempts        INTEGER NOT NULL DEFAULT 0,
   last_status     INTEGER NOT NULL DEFAULT 0,
   last_error      TEXT NOT NULL DEFAULT '',
@@ -732,6 +732,9 @@ CREATE INDEX IF NOT EXISTS idx_portal_bootstrap_customer ON portal_bootstrap_eve
 CREATE INDEX IF NOT EXISTS idx_portal_oauth_states_expires ON portal_oauth_states(expires_at);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_otp_code ON portal_otp(code_hmac);
+
+-- The one-statement code check filters live codes by address; a consumed code never matches it.
+CREATE INDEX IF NOT EXISTS idx_portal_otp_email_live ON portal_otp(email_lower) WHERE consumed_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_portal_otp_expires ON portal_otp(expires_at);
 
