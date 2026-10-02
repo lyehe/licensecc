@@ -22,7 +22,7 @@
     "test:docs-quickstart": "node --test scripts/ci/run-offline-docs-quickstart.test.mjs && pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-offline-docs-quickstart.ps1",
     "test:wrangler-pins": "node --test scripts/wrangler-pin-consistency.test.mjs",
     "test:wrangler-env-drift": "node --test scripts/wrangler-env-drift.test.mjs",
-    "test:clean-checkout": "node --test scripts/clean-checkout-regressions.test.mjs scripts/generate-wrangler-types.test.mjs scripts/generate-device-label-table.test.mjs && pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity-tool-resolution.test.ps1",
+    "test:clean-checkout": "node --test scripts/clean-checkout-regressions.test.mjs scripts/generate-wrangler-types.test.mjs scripts/generate-device-label-table.test.mjs scripts/generate-v201-golden-vectors.test.mjs && pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity-tool-resolution.test.ps1",
     "test:workflow-pins": "node --test scripts/workflow-action-pins.test.mjs",
     "test:security-governance": "node --test scripts/ci/security-governance.test.mjs",
     "test:native-security": "node --test scripts/native-security-contract.test.mjs",

@@ -578,7 +578,7 @@ BOOST_AUTO_TEST_CASE(license_issue_rejects_active_custom_key_output_aliases_with
 }
 
 BOOST_AUTO_TEST_CASE(test_sign_does_not_truncate_existing_output_before_safe_publication) {
-	const fs::path private_key = fs::path(PROJECT_TEST_SRC_DIR) / "data" / PRIVATE_KEY_FNAME;
+	const fs::path private_key = fs::path(PROJECT_TEST_SRC_DIR) / "data" / "private_key_3072.rsa";
 	const fs::path output = fs::path(PROJECT_TEST_TEMP_DIR) / "test_sign_preserves_output.sig";
 	write_binary_file(output, "previous-signature");
 	const string private_key_str = private_key.string();
@@ -621,7 +621,7 @@ static void check_test_sign_active_key_output_is_rejected(const fs::path& primar
 
 BOOST_AUTO_TEST_CASE(test_sign_rejects_active_private_key_output_aliases_without_mutation) {
 	const fs::path sandbox(fs::path(PROJECT_TEST_TEMP_DIR) / "test_sign_active_key_output_guard");
-	const fs::path source_key(fs::path(PROJECT_TEST_SRC_DIR) / "data" / PRIVATE_KEY_FNAME);
+	const fs::path source_key(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "private_key_3072.rsa");
 	fs::remove_all(sandbox);
 	fs::create_directories(sandbox);
 #ifdef _WIN32

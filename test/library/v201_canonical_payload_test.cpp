@@ -19,7 +19,7 @@ using license::v201::build_canonical_payload;
 using license::v201::canonical_payload_hex;
 using namespace std;
 
-static const char* kGoldenKeyId = "sha256:9d1797cf21f0341f364b7af016a745580fd36b78b17cd1630d1049879fe9ecf2";
+static const char* kGoldenKeyId = "sha256:93bf1b631bc7846ce69d1cc0ef2d72ce19b94c9633dd6d37b855b2c7d84747d1";
 
 static vector<CanonicalField> minimal_fields() {
 	return {

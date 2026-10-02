@@ -31,3 +31,10 @@ an omitted `--valid-from` leaves the license without a start date, and a
 license written to a file is reported with its path and a one-line summary of
 the project, features, `valid-from` and `valid-to`, and client-signature
 binding.
+
+The test fixtures that carry golden values use the 3072-bit
+`test/data/private_key_3072.rsa`: the crypto-helper public key and signature
+in `test/cryptohelper_test.cpp`, and the v201 payloads under `test/data/v201/`,
+which `scripts/generate-v201-golden-vectors.mjs` in `licensecc` writes together
+with the runtime's `test/vectors/v201/`. The 1024-bit `test/data/private_key.rsa`
+remains only to prove that issuance refuses a weak project key.

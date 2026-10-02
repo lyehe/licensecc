@@ -74,3 +74,12 @@ accept ownership.
   the derived subset; checks and plain `--write` runs use only the committed
   subset and never the network, and refuse a subset that does not match its
   pinned digest.
+* `scripts/generate-v201-golden-vectors.mjs` (Release and CI tooling) signs the
+  v201 golden licenses with the vendored generator's 3072-bit fixture key,
+  `extern/license-generator/test/data/private_key_3072.rsa`, and writes both
+  `test/vectors/v201/` and the generator's payload copies under
+  `extern/license-generator/test/data/v201/`. No build runs it; a developer
+  runs `node scripts/generate-v201-golden-vectors.mjs --write` deliberately,
+  and the vendored-generator steward reviews the generator-side diff. `npm run
+  test:clean-checkout` fails while the committed vectors differ from its
+  output.

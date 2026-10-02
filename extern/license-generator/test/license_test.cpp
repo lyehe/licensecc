@@ -40,10 +40,8 @@ struct MyGlobalFixture {
 		// v201 issuance (the only format now) reads the project's generated
 		// public_key.h and refuses a private key below the 3072-bit floor, so the
 		// fixture project needs a private key at or above that floor plus its
-		// matching generated header. This is a dedicated fixture key generated
-		// for this test project; it is unrelated to the 1024-bit key at
-		// test/data/private_key.rsa, which other suites (including the core
-		// runtime's signature-verifier golden vectors) still pin to exactly.
+		// matching generated header. The same 3072-bit fixture key also signs
+		// the v201 golden vectors (scripts/generate-v201-golden-vectors.mjs).
 		const fs::path pkf = fs::path(PROJECT_TEST_SRC_DIR) / "data" / "private_key_3072.rsa";
 		fs::copy_file(pkf, project_path / PRIVATE_KEY_FNAME);
 		const fs::path include_folder = project_path / "include" / "licensecc" / project_path.filename();
@@ -279,10 +277,8 @@ BOOST_AUTO_TEST_CASE(extend_license) {
 // The removed CLI opt-in options (--legacy-rsa1024, --allow-insecure-key-size)
 // only ever governed key *generation*; this refusal is separate, live
 // security behavior in write_license() itself and stays regardless. The
-// shared 1024-bit fixture at test/data/private_key.rsa is deliberately never
-// regenerated (see MyGlobalFixture::setup()'s comment: the core runtime's
-// signature-verifier golden vectors pin its exact bytes), which makes it the
-// right fixture to prove this refusal is still enforced.
+// 1024-bit fixture at test/data/private_key.rsa exists only to prove this
+// refusal; every golden value is signed with the 3072-bit fixture key.
 BOOST_AUTO_TEST_CASE(write_license_refuses_an_existing_weak_project_key) {
 	const fs::path lic_location = MyGlobalFixture::licenses_path / "weak_key_refused.lic";
 	const string lic_location_str = lic_location.string();

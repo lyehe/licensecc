@@ -33,7 +33,7 @@ namespace license {
 namespace test {
 using namespace std;
 
-static const char* kGoldenV201KeyId = "sha256:9d1797cf21f0341f364b7af016a745580fd36b78b17cd1630d1049879fe9ecf2";
+static const char* kGoldenV201KeyId = "sha256:93bf1b631bc7846ce69d1cc0ef2d72ce19b94c9633dd6d37b855b2c7d84747d1";
 
 static string project_name() {
 	return string(LCC_PROJECT_NAME);
@@ -132,7 +132,7 @@ static vector<uint8_t> hex_to_bytes(const string& fixture_text) {
 
 static string sign_fixture_payload_bytes(const vector<uint8_t>& payload) {
 	unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
-	crypto->loadPrivateKey_file(string(PROJECT_TEST_SRC_DIR) + "/../extern/license-generator/test/data/private_key.rsa");
+	crypto->loadPrivateKey_file(string(PROJECT_TEST_SRC_DIR) + "/../extern/license-generator/test/data/private_key_3072.rsa");
 	const string payload_text(payload.begin(), payload.end());
 	return crypto->signString(payload_text);
 }

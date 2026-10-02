@@ -14,18 +14,35 @@
 #include "../src/base_lib/base64.h"
 #include "../src/base_lib/crypto_helper.hpp"
 #include "../src/base_lib/base.h"
-#define SIGNATURE                                          \
-	"0pBQSdgwE6amOQJ1T+byZhJetVl86OWLHC+ICJ/IENVoNqcJF2pD" \
-	"aoRuNtDEq5v/lqmQbQJg4d08VtRCen3Q3VuUrge2e7hQ3ktkkK8"  \
-	"DwTtUJA+pcB540sofcdbXabF+L+vwmj5jUWsamJzp/fhg8xpQ72L54UzjcbKsGVgsc2Y="
-#define PUBKEY                                                                                                         \
-	{                                                                                                                  \
-		48, 129, 137, 2, 129, 129, 0, 242, 27, 37, 44, 100, 25, 53, 107, 167, 151, 101, 105, 53, 119, 68, 227, 137,    \
-			62, 246, 187, 227, 178, 59, 225, 20, 142, 0, 56, 55, 116, 45, 49, 162, 188, 82, 33, 155, 220, 4, 169, 49,  \
-			33, 41, 65, 178, 196, 44, 191, 232, 167, 5, 94, 182, 158, 245, 5, 116, 79, 247, 201, 162, 218, 114, 209,   \
-			244, 247, 215, 73, 89, 239, 242, 161, 210, 117, 236, 188, 216, 193, 212, 143, 58, 153, 6, 213, 171, 39,    \
-			166, 127, 48, 234, 167, 232, 161, 212, 66, 141, 198, 93, 235, 88, 210, 38, 172, 25, 109, 107, 153, 133, 0, \
-			231, 128, 203, 216, 110, 161, 24, 230, 50, 152, 74, 215, 115, 246, 146, 152, 193, 20, 209, 2, 3, 1, 0, 1   \
+// Golden values for the 3072-bit fixture key at test/data/private_key_3072.rsa: its PKCS#1 public
+// key and its RSASSA-PKCS1-v1_5 SHA-256 signature of "testString".
+#define SIGNATURE \
+	"IyzVW3vqXtmqj0uBe8jKjkr61DEamvIOD0wOCDlSi2RaO/soZBqQf9olxBbm7ZtOrWqJxp/llTxe" \
+	"ST3RhBB5QOeD0e3nc5jnBA+hX1TH3KvU+WxcKgTAvFby52hP8MA700VQ9cdRONpI1XxqOP7HSPNh" \
+	"I8h+JuCsHdeeA3ODFO1X8JQlOdoGmjxIIMuqkGFcyADPbQocikVg6XoyIfmMI5d7kG7VjnHfGb3y" \
+	"N0/YObKwD2d25edSjYD5mrTnbAFTAlcOS0kI+psRVDYoRfdNn6G6wDYI7JfuwSKacUJOVQSqWJfZ" \
+	"0RnQ6kxbv1BZ9z7kiPizWVbXsVAlMM76RrnLFWI1M9//x8bbP8Cn6mynBcXPQSq+UJZzjZ2a+oxG" \
+	"0/8YmM9BFRNFuhE3dGtNrFaP000K3vPhJQGduZj9xypHjjcJ0gPBntQW8CUu8NQvrWBmL/87AABk" \
+	"wWj2zzEgc8L8dg514kkKN80wAVmX/uw0CuvP0L6GYtcWDLCDFIdL4AWo"
+#define PUBKEY \
+	{ \
+		48, 130, 1, 138, 2, 130, 1, 129, 0, 194, 91, 228, 139, 41, 230, 251, 246, 184, 189, 139, 32, 67, 89, 72, \
+		177, 241, 216, 116, 213, 250, 84, 90, 136, 175, 222, 9, 165, 59, 47, 116, 200, 2, 176, 107, 60, 194, 149, 67, \
+		88, 107, 227, 115, 214, 245, 190, 31, 99, 140, 97, 252, 135, 193, 131, 214, 218, 113, 194, 153, 173, 151, 121, 16, \
+		194, 151, 174, 177, 99, 142, 178, 41, 200, 18, 183, 255, 90, 253, 158, 243, 195, 182, 64, 21, 23, 198, 64, 11, \
+		109, 178, 154, 40, 7, 91, 180, 35, 175, 223, 174, 211, 101, 13, 220, 141, 12, 43, 247, 69, 176, 186, 174, 31, \
+		238, 79, 57, 118, 236, 237, 72, 89, 58, 178, 3, 126, 152, 203, 143, 125, 216, 248, 122, 3, 164, 252, 35, 168, \
+		109, 242, 218, 77, 200, 112, 98, 155, 125, 110, 82, 83, 125, 73, 38, 76, 65, 0, 90, 111, 47, 224, 186, 182, \
+		7, 60, 228, 127, 138, 24, 164, 187, 129, 162, 60, 253, 11, 190, 58, 189, 223, 188, 20, 187, 4, 157, 123, 209, \
+		163, 20, 67, 200, 144, 85, 51, 99, 251, 48, 188, 15, 241, 145, 248, 215, 104, 67, 2, 154, 98, 219, 198, 238, \
+		18, 213, 153, 96, 210, 176, 72, 225, 49, 64, 131, 121, 107, 67, 163, 5, 115, 207, 120, 249, 251, 76, 42, 60, \
+		128, 103, 131, 193, 206, 190, 85, 205, 169, 119, 191, 200, 162, 214, 43, 107, 249, 93, 171, 16, 72, 104, 7, 197, \
+		198, 79, 35, 134, 104, 89, 83, 195, 83, 51, 30, 92, 43, 173, 53, 117, 71, 117, 4, 180, 100, 175, 132, 198, \
+		123, 54, 156, 34, 245, 211, 85, 60, 240, 254, 52, 159, 157, 37, 138, 135, 50, 172, 45, 4, 172, 230, 222, 21, \
+		17, 26, 149, 168, 181, 142, 167, 67, 83, 16, 138, 53, 83, 136, 180, 128, 20, 147, 186, 130, 194, 26, 239, 147, \
+		22, 115, 167, 143, 217, 25, 158, 36, 76, 166, 255, 250, 242, 128, 166, 190, 14, 106, 55, 142, 244, 235, 30, 228, \
+		37, 153, 163, 238, 167, 117, 158, 183, 28, 133, 28, 11, 46, 232, 119, 214, 181, 29, 29, 2, 221, 247, 110, 138, \
+		205, 187, 160, 27, 254, 100, 209, 87, 141, 2, 3, 1, 0, 1 \
 	}
 
 namespace fs = boost::filesystem;
@@ -35,7 +52,7 @@ using namespace std;
 namespace test {
 
 const std::string loadPrivateKey() {
-	fs::path pkf = fs::path(PROJECT_TEST_SRC_DIR) / "data" / PRIVATE_KEY_FNAME;
+	fs::path pkf = fs::path(PROJECT_TEST_SRC_DIR) / "data" / "private_key_3072.rsa";
 	std::ifstream private_key_linux(pkf.string());
 	BOOST_REQUIRE_MESSAGE(private_key_linux.good(), "test file found");
 	const std::string pk_str((std::istreambuf_iterator<char>(private_key_linux)), std::istreambuf_iterator<char>());
@@ -99,7 +116,8 @@ BOOST_AUTO_TEST_CASE(test_load_and_sign) {
 	const std::string pk_str = loadPrivateKey();
 	crypto->loadPrivateKey(pk_str);
 	const std::string signature = crypto->signString("testString");
-	BOOST_CHECK_MESSAGE(signature.size() == 172, "signature is the right size");
+	// 3072-bit RSA signatures are 384 bytes, base64 encoded without newlines.
+	BOOST_CHECK_MESSAGE(signature.size() == 512, "signature is the right size");
 	BOOST_CHECK_MESSAGE(signature == SIGNATURE, "signature is repeatable");
 }
 

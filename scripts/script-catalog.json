@@ -47,6 +47,8 @@
         "scripts/dev-check.ps1",
         "scripts/generate-device-label-table.mjs",
         "scripts/generate-device-label-table.test.mjs",
+        "scripts/generate-v201-golden-vectors.mjs",
+        "scripts/generate-v201-golden-vectors.test.mjs",
         "scripts/generate-wrangler-types.mjs",
         "scripts/generate-wrangler-types.test.mjs",
         "scripts/test-java-sdk.mjs",
