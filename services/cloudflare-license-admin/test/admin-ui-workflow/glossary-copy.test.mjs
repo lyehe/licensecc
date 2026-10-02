@@ -26,6 +26,9 @@ const RETIRED_TERMS = [
   // Quoted (not bare) so this never matches the lowercase `row.state==='retiring'` comparison
   // value — only a capitalized, quoted display string such as `?'Retiring':...`.
   { name: "'Retiring' connection-state label (protected binding)", pattern: /(['"])Retiring\1/, useInstead: '"Disconnecting"' },
+  // Quoted (not bare) so this never matches the lowercase `row.state==='released'` comparison
+  // value — only a capitalized, quoted display string such as `?'Released':...`.
+  { name: "'Released' connection-state label (protected binding)", pattern: /(['"])Released\1/, useInstead: '"Disconnected"' },
   // The wire code stays `disabled`; a count of such entitlements or customers reads "suspended".
   { name: "'Disabled' entitlement count label (status)", pattern: /<span>Disabled<\/span>/, useInstead: '"Suspended"' },
   { name: "'Customers disabled' count label (customer status)", pattern: /Customers disabled/, useInstead: '"Customers suspended"' },

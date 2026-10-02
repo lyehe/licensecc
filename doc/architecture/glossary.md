@@ -95,6 +95,6 @@ device limit is a grant's only capacity.
   in the portal; any case of "activated device(s)" in the admin). The portal
   guard also retires `Registered machines`. The admin guard also retires
   `Registered nodes`, the floating-seat list label in any case, a quoted `Retiring`
-  connection state, the `Disabled` entitlement count label, and `Customers
+  or `Released` connection state, the `Disabled` entitlement count label, and `Customers
   disabled`. Extend these lists rather than reintroducing a retired word under
   a new name.
