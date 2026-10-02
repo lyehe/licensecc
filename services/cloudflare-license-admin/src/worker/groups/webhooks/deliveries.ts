@@ -74,6 +74,13 @@ export async function listWebhookDeliveries(request: Request, env: Env, requestI
   });
 }
 
+// The 409 for a delivery that is not failed. A canceled one has its own code: its endpoint's address
+// or scope changed after it was queued, so it can never be retried.
+function notRedrivable(requestIdValue: string, status: string | undefined): Response {
+  if (status === "canceled") return envelope(requestIdValue, "webhook_delivery_canceled", { status }, 409);
+  return envelope(requestIdValue, "webhook_delivery_not_failed", status === undefined ? undefined : { status }, 409);
+}
+
 // Redrive: reset a 'failed' delivery back to 'pending' with next_attempt_at = now so the next
 // cron tick re-attempts it. A guarded UPDATE (status = 'failed' in the WHERE) makes this safe
 // and idempotent: a delivery already pending/delivered is a 409, never silently re-queued, and a
@@ -91,11 +98,8 @@ export async function redriveWebhookDelivery(request: Request, env: Env, actor: 
     if (existing === null) {
       return envelope(requestIdValue, "not_found", undefined, 404);
     }
-    if (existing.status === "canceled") {
-      return envelope(requestIdValue, "webhook_delivery_canceled", { status: existing.status }, 409);
-    }
     if (existing.status !== "failed") {
-      return envelope(requestIdValue, "webhook_delivery_not_failed", { status: existing.status }, 409);
+      return notRedrivable(requestIdValue, existing.status);
     }
     const now = Math.floor(Date.now() / 1000);
     let row: Record<string, unknown> | null;
@@ -108,8 +112,15 @@ export async function redriveWebhookDelivery(request: Request, env: Env, actor: 
       return envelope(requestIdValue, "mutation_failed", undefined, 500);
     }
     if (row === null) {
-      // Lost the guarded race — status changed between the pre-read and the UPDATE.
-      return envelope(requestIdValue, "webhook_delivery_not_failed", undefined, 409);
+      // Lost the guarded race: the status changed between the pre-read and the UPDATE. Report what it
+      // changed to, so a cancellation that won the race reads as one.
+      let current: { status: string } | null = null;
+      try {
+        current = await env.DB.prepare("SELECT status FROM webhook_deliveries WHERE id = ? LIMIT 1").bind(deliveryId).first<{ status: string }>();
+      } catch {
+        // The status stays unknown; the generic refusal still holds.
+      }
+      return notRedrivable(requestIdValue, current?.status);
     }
     return { data: row, idempotencyRecorded: false };
   });
