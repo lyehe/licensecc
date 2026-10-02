@@ -13,7 +13,8 @@
 // + 404; patch (and the not-patchable status rejection); disable/reenable guard + 409 on a stale status;
 // the test_send audit row an operator test send leaves (and none for a refused send);
 // the deliveries status view filtered by status/endpoint; redrive resets a 'failed' delivery to pending
-// (and is 409 on a non-failed one). RBAC: a reader can read webhooks but cannot run any webhook write.
+// (and is 409 on a non-failed one); a PATCH that moves the URL or scope cancels the endpoint's queued
+// deliveries in the same batch, and redrive refuses a canceled delivery. RBAC: a reader can read webhooks but cannot run any webhook write.
 // Plus a sign/verify roundtrip against the backend's exported verifyWebhookSignature (the SAME verifier
 // a receiver imports), proving the signing contract documented for receivers.
 //
@@ -565,6 +566,119 @@ test("webhook deliveries: redrive resets a failed delivery to pending; non-faile
   // Redriving an unknown delivery id is a 404.
   const missing = await worker.fetch(devReq("/api/admin/webhooks/deliveries/999999/redrive", { method: "POST", body: "{}" }), env);
   assert.equal(missing.status, 404);
+});
+
+// An event is delivered only under the endpoint address and scope in effect when it was queued.
+// A PATCH that moves either cancels the endpoint's deliveries still pending (first try or backoff
+// retry) or failed (an operator could redrive those), in the same batch as the endpoint UPDATE.
+
+function seedQueue(db, endpointId, otherEndpointId) {
+  return {
+    pending: seedDelivery(db, { endpoint_id: endpointId, status: "pending", event_id: 1 }),
+    retrying: seedDelivery(db, { endpoint_id: endpointId, status: "pending", attempts: 2, last_error: "gateway down", event_id: 2 }),
+    failed: seedDelivery(db, { endpoint_id: endpointId, status: "failed", attempts: 6, last_error: "gateway down", event_id: 3 }),
+    delivered: seedDelivery(db, { endpoint_id: endpointId, status: "delivered", event_id: 4 }),
+    otherEndpoint: seedDelivery(db, { endpoint_id: otherEndpointId, status: "pending", event_id: 5 }),
+  };
+}
+
+function deliveryState(db, id) {
+  return { ...db.prepare("SELECT status, last_error FROM webhook_deliveries WHERE id = ?").get(id) };
+}
+
+const CANCELED = { status: "canceled", last_error: "endpoint_changed" };
+
+function assertQueueCanceled(db, queue) {
+  for (const name of ["pending", "retrying", "failed"]) assert.deepEqual(deliveryState(db, queue[name]), CANCELED, name);
+  assert.deepEqual(deliveryState(db, queue.delivered), { status: "delivered", last_error: "" }, "a delivered row is history");
+  assert.deepEqual(deliveryState(db, queue.otherEndpoint), { status: "pending", last_error: "" }, "another endpoint's queue is untouched");
+}
+
+// The batches the Worker sends, as lists of SQL text, around the real D1-like adapter.
+function recordBatches(env) {
+  const batches = [];
+  const db = env.DB;
+  return {
+    batches,
+    env: { ...env, DB: { prepare: (sql) => db.prepare(sql), batch: async (statements) => { batches.push(statements.map((statement) => statement.sql)); return db.batch(statements); } } },
+  };
+}
+
+async function patchWebhook(env, id, payload) {
+  const res = await worker.fetch(devReq(`/api/admin/webhooks/${id}`, { method: "PATCH", body: JSON.stringify(payload) }), env);
+  assert.equal(res.status, 200, `patch webhook: ${await res.clone().text()}`);
+  return (await body(res)).data;
+}
+
+test("webhook: a PATCH that changes the URL cancels the endpoint's queued deliveries in the same batch", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const ep = await createWebhook(env, { url: "https://old.example.com/h" });
+  const other = await createWebhook(env, { url: "https://other.example.com/h" });
+  const queue = seedQueue(db, ep.id, other.id);
+
+  const recorded = recordBatches(env);
+  const patched = await patchWebhook(recorded.env, ep.id, { url: "https://new.example.com/h" });
+  assert.equal(patched.url, "https://new.example.com/h");
+  assertQueueCanceled(db, queue);
+  assert.equal(recorded.batches.length, 1, "one batch carries the cancellation and the change");
+  assert.ok(recorded.batches[0].some((sql) => /^\s*UPDATE webhook_deliveries\b/.test(sql)), "the batch cancels the queue");
+  assert.ok(recorded.batches[0].some((sql) => /^\s*UPDATE webhook_endpoints\b/.test(sql)), "the batch changes the endpoint");
+});
+
+test("webhook: a PATCH that changes the scope cancels the endpoint's queued deliveries", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const ep = await createWebhook(env, { url: "https://scope.example.com/h" });
+  const other = await createWebhook(env, { url: "https://other.example.com/h" });
+  const queue = seedQueue(db, ep.id, other.id);
+
+  await patchWebhook(env, ep.id, { scope_kind: "project", scope_project: "DEFAULT" });
+  assertQueueCanceled(db, queue);
+
+  // Moving only the scope value, to another project, cancels what was queued for the old one.
+  const queuedForDefault = seedDelivery(db, { endpoint_id: ep.id, status: "pending", event_id: 6 });
+  await patchWebhook(env, ep.id, { scope_project: "OTHER" });
+  assert.deepEqual(deliveryState(db, queuedForDefault), CANCELED);
+});
+
+test("webhook: a PATCH that leaves the URL and scope as they are cancels nothing", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const ep = await createWebhook(env, { url: "https://same.example.com/h", event_types: "create" });
+  const other = await createWebhook(env, { url: "https://other.example.com/h" });
+  const queue = seedQueue(db, ep.id, other.id);
+  const before = Object.fromEntries(Object.entries(queue).map(([name, id]) => [name, deliveryState(db, id)]));
+
+  for (const payload of [
+    { description: "renamed" },
+    { event_types: "create,revoke" },
+    { url: "https://same.example.com/h" },
+    { scope_kind: "global", scope_project: "", scope_customer_id: "" },
+  ]) {
+    await patchWebhook(env, ep.id, payload);
+    const after = Object.fromEntries(Object.entries(queue).map(([name, id]) => [name, deliveryState(db, id)]));
+    assert.deepEqual(after, before, JSON.stringify(payload));
+  }
+});
+
+test("webhook deliveries: redrive refuses a canceled delivery, and the list filters by canceled", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const ep = await createWebhook(env, { url: "https://c.example.com/h" });
+  const canceledId = seedDelivery(db, { endpoint_id: ep.id, status: "canceled", last_error: "endpoint_changed", event_id: 1 });
+  seedDelivery(db, { endpoint_id: ep.id, status: "failed", event_id: 2 });
+
+  const refused = await worker.fetch(devReq(`/api/admin/webhooks/deliveries/${canceledId}/redrive`, { method: "POST", body: "{}" }), env);
+  assert.equal(refused.status, 409);
+  const refusal = await body(refused);
+  assert.equal(refusal.code, "webhook_delivery_canceled");
+  assert.deepEqual(refusal.data, { status: "canceled" });
+  assert.deepEqual(deliveryState(db, canceledId), CANCELED, "a refused redrive changes nothing");
+
+  const listed = await (await worker.fetch(devReq("/api/admin/webhooks/deliveries?status=canceled"), env)).json();
+  assert.equal(listed.code, "webhook_deliveries_listed");
+  assert.deepEqual(listed.data.items.map((item) => [item.id, item.status, item.last_error]), [[canceledId, "canceled", "endpoint_changed"]]);
 });
 
 test("webhook: reader can read but cannot run any webhook write", async (t) => {
