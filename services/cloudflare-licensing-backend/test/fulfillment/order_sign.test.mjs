@@ -199,3 +199,43 @@ test("without --body and with a terminal on standard input, the CLI prints its u
   assert.match(err.join(""), /--body/u);
   assert.match(err.join(""), /usage/iu);
 });
+
+test("--secret-b64=<value> is refused by name only: the value after = is never echoed", () => {
+  const secretB64 = freshSecretB64();
+  const result = withTempDir((dir) => {
+    const bodyPath = join(dir, "order.json");
+    writeFileSync(bodyPath, ORDER_BODY);
+    return runCli(["--key-id", KEY_ID, `--secret-b64=${secretB64}`, "--audience", AUDIENCE, "--body", bodyPath]);
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /unknown option --secret-b64\n/u);
+  assert.equal(result.stdout, "");
+  assert.ok(!result.stderr.includes(secretB64), "the refused value is never printed");
+  assert.ok(!result.stderr.includes("="), "not even the = form of the refused argument is printed");
+});
+
+test("value options also take the --name=value form", async () => {
+  const secretB64 = freshSecretB64();
+  const result = withTempDir((dir) => {
+    const bodyPath = join(dir, "order.json");
+    const secretPath = join(dir, "order-signing.secret");
+    writeFileSync(bodyPath, ORDER_BODY);
+    writeFileSync(secretPath, secretB64);
+    return runCli([`--key-id=${KEY_ID}`, `--audience=${AUDIENCE}`, `--body=${bodyPath}`, `--secret-file=${secretPath}`]);
+  });
+  assert.equal(result.status, 0, result.stderr);
+  await assertVerifies(result.stdout, secretB64, ORDER_BODY);
+});
+
+test("an empty secret file is reported as empty", () => {
+  const result = withTempDir((dir) => {
+    const bodyPath = join(dir, "order.json");
+    const secretPath = join(dir, "order-signing.secret");
+    writeFileSync(bodyPath, ORDER_BODY);
+    writeFileSync(secretPath, " \n");
+    return runCli(["--key-id", KEY_ID, "--audience", AUDIENCE, "--body", bodyPath, "--secret-file", secretPath]);
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /secret file is empty/u);
+  assert.equal(result.stdout, "");
+});
