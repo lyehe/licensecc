@@ -27,6 +27,15 @@ path; a mismatch fails as `INVALID_RESPONSE` (16). The installed package
 component (`LCC_PROJECT_NAME=test`) is separate from the backend licensing
 project (`LCC_BOUND_PROJECT=CAD`).
 
+The approval page shows a device label beside the comparison code, and the
+customer later picks a device to disconnect by it. The example labels each
+device with its computer name (the DNS host name on Windows, `gethostname` on
+Linux), so installations can be told apart. When the native client refuses that
+name under the device-label rule (a control or format character, or text shaped
+like a comparison code), the example retries once with `Computer`. Pass
+`-DLCC_BOUND_DEVICE_LABEL=<label>` to compile one fixed label instead; the
+example never replaces a configured label.
+
 ```powershell
 cmake -S examples/device_bound -B build/device-bound-public-example `
   -G "Visual Studio 17 2022" -A x64 `
@@ -70,8 +79,9 @@ Set `LCC_BOUND_ADDITIONAL_SIGNING_SPKIS` to an empty string explicitly when clea
 the cached list after an approved trust-retirement decision.
 
 The optional isolated example tests stub update/save outcomes and exercise quit,
-unresolved storage recovery, provider-error preservation and configured UTF-8
-bytes. They do not contact a backend or provision a key:
+unresolved storage recovery, provider-error preservation and the device label:
+the configured UTF-8 bytes below, or the computer name when no label is set, and
+the `Computer` fallback. They do not contact a backend or provision a key:
 
 ```powershell
 cmake -S examples/device_bound -B build/device-bound-public-example `

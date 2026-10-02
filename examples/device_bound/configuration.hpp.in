@@ -10,6 +10,7 @@ constexpr char proof_audience[] = "@CONFIG_PROOF_AUDIENCE@";
 constexpr char project[] = "@CONFIG_PROJECT@";
 constexpr char feature[] = "@CONFIG_FEATURE@";
 constexpr char client_id[] = "@CONFIG_CLIENT_ID@";
+// Empty unless LCC_BOUND_DEVICE_LABEL pinned a label; the example then uses the computer name.
 constexpr char device_label[] = "@CONFIG_DEVICE_LABEL@";
 struct SigningKey { unsigned char bytes[512]; unsigned int size; };
 constexpr SigningKey signing_keys[] = {@CONFIG_SIGNING_KEYS@};

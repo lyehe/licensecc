@@ -108,8 +108,10 @@ int main(int argc, char** argv) {
 	LccDeviceBoundOutcome detail;
 	lcc_init_device_bound_outcome(&detail);
 	LccDeviceBoundClient* raw = nullptr;
-	const auto opened = enrollment ? lcc_device_bound_open_enrollment(&config, &raw, &detail)
-								   : lcc_device_bound_open_resume(&config, &raw, &detail);
+	const auto opened = example_configuration::open_labelled(config, [&](LccDeviceBoundOptions& labelled) {
+		return enrollment ? lcc_device_bound_open_enrollment(&labelled, &raw, &detail)
+						  : lcc_device_bound_open_resume(&labelled, &raw, &detail);
+	});
 	std::unique_ptr<LccDeviceBoundClient, decltype(&lcc_device_bound_close)> client(raw, lcc_device_bound_close);
 	if (opened != LCC_BOUND_OK) {
 		std::cerr << "Open failed: " << opened << ", provider " << detail.provider_result << ", checkpoint "

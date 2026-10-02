@@ -354,6 +354,12 @@ native table. The Unicode data is used under the Unicode License v3; its
 copyright and permission notice is in :doc:`../other/CREDITS`. Registration
 retries preserve their original inputs and five-minute inclusive-clock deadline.
 
+Choose a label that tells the customer's devices apart. The device-bound
+example (``examples/device_bound``) uses the operating system's computer name
+and, when the native client refuses that name under this rule, retries once
+with ``Computer``. A label set at configure time with
+``LCC_BOUND_DEVICE_LABEL`` is used as given.
+
 The owner accepts exactly one canonical code/state callback for the registered
 loopback URI. Invalid callbacks leave the valid attempt usable; duplicates
 cannot replace its code. A pending exchange can recover with the same operation

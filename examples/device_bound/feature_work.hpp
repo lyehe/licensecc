@@ -51,7 +51,9 @@ public:
 		LccFeatureSessionOutcome detail;
 		lcc_init_feature_session_outcome(&detail);
 		LccFeatureSession* raw = nullptr;
-		auto result = lcc_feature_session_open(&config, &raw, &detail);
+		auto result = example_configuration::open_labelled(config, [&](LccDeviceBoundOptions& labelled) {
+			return lcc_feature_session_open(&labelled, &raw, &detail);
+		});
 		owner_.reset(raw);
 		if (result != LCC_BOUND_OK) {
 			std::cerr << feature << ": ";

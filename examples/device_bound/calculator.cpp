@@ -22,7 +22,9 @@ int activate() {
 	LccDeviceBoundOutcome detail;
 	lcc_init_device_bound_outcome(&detail);
 	LccDeviceBoundClient* raw = nullptr;
-	const auto opened = lcc_device_bound_open_enrollment(&config, &raw, &detail);
+	const auto opened = example_configuration::open_labelled(config, [&](LccDeviceBoundOptions& labelled) {
+		return lcc_device_bound_open_enrollment(&labelled, &raw, &detail);
+	});
 	std::unique_ptr<LccDeviceBoundClient, decltype(&lcc_device_bound_close)> client(raw, lcc_device_bound_close);
 	if (opened == LCC_BOUND_RESUME_REQUIRED) {
 		std::cerr << "This device already has activation state. Run mul or div to verify it online.\n";

@@ -14,9 +14,10 @@ if(NOT LCC_ENABLE_DEVICE_IDENTITY OR
 endif()
 
 set(LCC_BOUND_FEATURE "DEFAULT" CACHE STRING "Licensed feature")
-set(LCC_BOUND_DEVICE_LABEL "Workstation" CACHE STRING "Consent display label")
+# Empty labels each device with its computer name at run time; set a value to pin one label instead.
+set(LCC_BOUND_DEVICE_LABEL "" CACHE STRING "Consent display label; empty uses the computer name")
 foreach(field APPLICATION_ID ENDPOINT_ORIGIN PORTAL_URL ISSUER LEASE_AUDIENCE PROOF_AUDIENCE PROJECT FEATURE CLIENT_ID DEVICE_LABEL)
-    if(NOT DEFINED LCC_BOUND_${field} OR "${LCC_BOUND_${field}}" STREQUAL "")
+    if(NOT field STREQUAL "DEVICE_LABEL" AND (NOT DEFINED LCC_BOUND_${field} OR "${LCC_BOUND_${field}}" STREQUAL ""))
         message(FATAL_ERROR "Set LCC_BOUND_${field} to the developer-owned application configuration")
     endif()
     set(value "${LCC_BOUND_${field}}")
