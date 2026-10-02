@@ -156,6 +156,50 @@ BOOST_AUTO_TEST_CASE(registration_refuses_hidden_or_lookalike_comparison_codes) 
 		BOOST_CHECK_MESSAGE(encode_bound_authorization(input, out), "label must be accepted: " << label);
 	}
 }
+// A label may not spell a comparison code with characters from other scripts whose Unicode
+// confusable prototype is a code digit, letter or dash. Ordinary names in those scripts stay valid.
+BOOST_AUTO_TEST_CASE(registration_refuses_comparison_codes_spelled_with_lookalikes_from_other_scripts) {
+	const auto r = vector("registration_wire.json").get_child("request");
+	BoundAuthorizationInput input{r.get<std::string>("client_id"),		 r.get<std::string>("project"),
+								  r.get<std::string>("public_key_spki"), r.get<std::string>("device_label"),
+								  r.get<std::string>("redirect_uri"),	 r.get<std::string>("state"),
+								  r.get<std::string>("code_challenge"),	 r.get<std::string>("requested_feature")};
+	SensitiveVector out;
+	const std::string refused[] = {
+		// Cyrillic capital A (U+0410), Greek capital Alpha (U+0391) and Cyrillic small a (U+0430).
+		"4F2\xd0\x90-0C12-B7E4", "4F2\xce\x91-0C12-B7E4", "4f2\xd0\xb0-0c12-b7e4",
+		// Mathematical bold digit four (U+1D7D2).
+		"\xf0\x9d\x9f\x92"
+		"F2A-0C12-B7E4",
+		// One code mixing U+1D7D2, Cyrillic A and Es, Greek Beta and Cyrillic Ie with Latin.
+		"\xf0\x9d\x9f\x92"
+		"F2\xd0\x90-0\xd0\xa1"
+		"12-\xce\x92"
+		"7\xd0\x95"
+		"4",
+		// A code separated by minus signs (U+2212).
+		"4F2A\xe2\x88\x92"
+		"0C12\xe2\x88\x92"
+		"B7E4"};
+	for (const auto& label : refused) {
+		input.device_label = label;
+		BOOST_CHECK_MESSAGE(!encode_bound_authorization(input, out), "label must be refused: " << label);
+		std::string normalized;
+		BOOST_CHECK_MESSAGE(!normalize_bound_device_label(label, normalized), "label must be refused: " << label);
+	}
+	// "Computer" in Cyrillic, "Delta-PC" in Greek, "workstation" in CJK, "Buero-PC" with u-umlaut and
+	// "DESKTOP-7Q2K1AB".
+	const std::string accepted[] = {"\xd0\x9a\xd0\xbe\xd0\xbc\xd0\xbf\xd1\x8c\xd1\x8e\xd1\x82\xd0\xb5\xd1\x80",
+									"\xce\x94\xce\xad\xce\xbb\xcf\x84\xce\xb1-PC", "\xe5\xb7\xa5\xe4\xbd\x9c\xe7\xab\x99",
+									"B\xc3\xbcro-PC", "DESKTOP-7Q2K1AB"};
+	for (const auto& label : accepted) {
+		input.device_label = label;
+		BOOST_CHECK_MESSAGE(encode_bound_authorization(input, out), "label must be accepted: " << label);
+		std::string normalized;
+		BOOST_CHECK_MESSAGE(normalize_bound_device_label(label, normalized) && normalized == label,
+							"label must be accepted unchanged: " << label);
+	}
+}
 BOOST_AUTO_TEST_CASE(registration_response_requires_exact_schema_and_status) {
 	const auto v = vector("registration_wire.json");
 	const auto response = v.get<std::string>("response_json");

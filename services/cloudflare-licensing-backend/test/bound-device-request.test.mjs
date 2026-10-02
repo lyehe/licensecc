@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createHash, createPublicKey, verify } from "node:crypto";
 import { parseBoundJson, readBoundJson, validateBoundRequest, validateBoundClient } from "../src/device/bound_request.mjs";
+import { deviceLabelComparisonForm } from "../src/device/device_label.mjs";
 import { encodeBase64url, deviceOperationBody, deviceProofSigningInput, decodeDeviceLeaseEnvelope, deviceLeaseSigningInput, deviceEnrollmentComparisonInput, formatDeviceEnrollmentComparison } from "@licensecc/licensing-domain/lease/device_protocol";
 
 const encoded = size => encodeBase64url(new Uint8Array(size).fill(7));
@@ -212,6 +213,36 @@ test("a device label still accepts letters, digits, spaces and punctuation in an
   }
   // Surrounding whitespace is still trimmed before the rule applies.
   assert.equal(validateBoundRequest("authorize", { ...enrollment(), device_label: "\ufeff\t Büro-PC \r\n" }).device_label, "Büro-PC");
+});
+
+// A label may not spell a comparison code with characters from other scripts whose Unicode
+// confusable prototype is a code digit, letter or dash.
+const CROSS_SCRIPT_LABELS = {
+  "a Cyrillic capital A (U+0410) in a code": `4F2${cp(0x410)}-0C12-B7E4`,
+  "a Greek capital Alpha (U+0391) in a code": `4F2${cp(0x391)}-0C12-B7E4`,
+  "a Cyrillic small a (U+0430) in a code": `4f2${cp(0x430)}-0c12-b7e4`,
+  "a mathematical bold digit four (U+1D7D2) in a code": `${cp(0x1d7d2)}F2A-0C12-B7E4`,
+  "a code mixing Latin, Cyrillic, Greek and mathematical characters": `${cp(0x1d7d2)}F2${cp(0x410)}-0${cp(0x421)}12-${cp(0x392)}7${cp(0x415)}4`,
+  "a code separated by minus signs (U+2212)": `4F2A${cp(0x2212)}0C12${cp(0x2212)}B7E4`,
+};
+
+test("a device label cannot spell a comparison code with look-alike characters from other scripts", () => {
+  for (const [label, device_label] of Object.entries(CROSS_SCRIPT_LABELS)) {
+    assert.throws(
+      () => validateBoundRequest("authorize", { ...enrollment(), device_label }),
+      error => error.code === "invalid_request" && error.status === 400,
+      label,
+    );
+  }
+  // The comparison form folds each look-alike to the code character it imitates.
+  assert.equal(deviceLabelComparisonForm(CROSS_SCRIPT_LABELS["a code mixing Latin, Cyrillic, Greek and mathematical characters"]), "4F2A-0C12-B7E4");
+  assert.equal(deviceLabelComparisonForm(`${cp(0x430)}${cp(0x2212)} ${cp(0x2010)}x`), "a-x");
+});
+
+test("a device label still accepts ordinary names in scripts that have code look-alikes", () => {
+  for (const device_label of ["Компьютер", "Δέλτα-PC", "工作站", "Büro-PC", "DESKTOP-7Q2K1AB"]) {
+    assert.equal(validateBoundRequest("authorize", { ...enrollment(), device_label }).device_label, device_label, device_label);
+  }
 });
 
 test("an authorization without requested_feature is refused", () => {
