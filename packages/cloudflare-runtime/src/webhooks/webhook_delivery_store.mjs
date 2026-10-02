@@ -5,7 +5,7 @@
 // is outside the endpoint's current scope.
 
 import { safeErrorType } from "../http/kit.mjs";
-import { WEBHOOK_ENDPOINT_CHANGED } from "./webhook_endpoint.mjs";
+import { WEBHOOK_ENDPOINT_CHANGED, WEBHOOK_INVALID_URL } from "./webhook_endpoint.mjs";
 
 export const WEBHOOK_CLAIM_TTL_SECONDS = 60;
 const BACKOFF_SCHEDULE_SECONDS = [30, 120, 600, 3600, 21600];
@@ -79,7 +79,7 @@ export async function refuseUnsafeWebhookDelivery(db, delivery, now, claimUntil,
   try {
     persisted = await persistWebhookDeliveryOutcome(db, {
       deliveryId, claimUntil, now, ok: false, statusCode: 0,
-      errorText: "invalid_url", attempts, terminal: true, retryAt: null,
+      errorText: WEBHOOK_INVALID_URL, attempts, terminal: true, retryAt: null,
     });
   } catch (error) {
     try {
@@ -92,7 +92,7 @@ export async function refuseUnsafeWebhookDelivery(db, delivery, now, claimUntil,
   if (persisted) {
     try {
       logEvent?.("warn", "webhook.delivery_failed", {
-        delivery_id: deliveryId, endpoint_id: delivery.endpoint_id, attempts, last_status: 0, reason: "invalid_url",
+        delivery_id: deliveryId, endpoint_id: delivery.endpoint_id, attempts, last_status: 0, reason: WEBHOOK_INVALID_URL,
       });
     } catch {
       // Same: a throwing logger must never escape.

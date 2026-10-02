@@ -1,5 +1,6 @@
 import type { Env } from "../env.js";
 import { safeErrorType } from "@licensecc/cloudflare-runtime/http/kit";
+import { WEBHOOK_STOP_REASONS } from "@licensecc/cloudflare-runtime/webhooks/webhook_endpoint";
 
 export type LogSeverity = "info" | "warn" | "error";
 
@@ -25,10 +26,10 @@ const LOG_FIELD_NAMES = new Set([
   "target",
 ]);
 
-// The webhook dispatcher's `reason` is always one of its own closed codes (such as invalid_url),
-// never a URL, a receiver's text or a customer value. Only that code shape is logged, so a value
-// of any other shape is dropped rather than trusted.
-const REASON_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
+// The webhook dispatcher's `reason` is one of its own closed codes (WEBHOOK_STOP_REASONS, next to the
+// dispatcher), never a URL, a receiver's text or a customer or license value. Any other value is
+// dropped rather than trusted, however code-like it looks.
+const DISPATCHER_REASONS: ReadonlySet<string> = new Set(WEBHOOK_STOP_REASONS);
 
 function safeLogValue(value: unknown): string | number | boolean | null | string[] | undefined {
   if (value === null || typeof value === "boolean") return value;
@@ -49,7 +50,7 @@ export function logEvent(severity: LogSeverity, event: string, fields: Record<st
       continue;
     }
     if (name === "reason") {
-      if (typeof value === "string" && REASON_CODE.test(value)) safeFields[name] = value;
+      if (typeof value === "string" && DISPATCHER_REASONS.has(value)) safeFields[name] = value;
       continue;
     }
     const safe = safeLogValue(value);

@@ -55,6 +55,16 @@ export const WEBHOOK_TEST_STATUS_CLASSES = Object.freeze(/** @type {const} */ ([
  */
 export const WEBHOOK_ENDPOINT_CHANGED = "endpoint_changed";
 
+/** The reason recorded on a delivery refused before sending because its stored URL no longer passes
+ * safeWebhookUrl. */
+export const WEBHOOK_INVALID_URL = "invalid_url";
+
+/**
+ * Every reason the dispatcher records and logs for a delivery it stops without sending. A closed
+ * set: the backend's structured logger keeps a `reason` field only when it is one of these.
+ */
+export const WEBHOOK_STOP_REASONS = Object.freeze(/** @type {const} */ ([WEBHOOK_INVALID_URL, WEBHOOK_ENDPOINT_CHANGED]));
+
 /**
  * Per-tenant scope filter, decided by the endpoint's explicit scope_kind. 'global' (operator-wide)
  * receives every event; 'project' ONLY entitlement/order events whose `project` is scope_project;

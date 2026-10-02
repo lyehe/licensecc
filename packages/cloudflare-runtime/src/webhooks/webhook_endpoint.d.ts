@@ -8,6 +8,10 @@ export type WebhookTestStatusClass = (typeof WEBHOOK_TEST_STATUS_CLASSES)[number
 
 export declare const WEBHOOK_ENDPOINT_CHANGED: "endpoint_changed";
 
+export declare const WEBHOOK_INVALID_URL: "invalid_url";
+
+export declare const WEBHOOK_STOP_REASONS: readonly ["invalid_url", "endpoint_changed"];
+
 export interface WebhookEndpointScope {
   scope_kind?: unknown;
   scope_project?: unknown;
