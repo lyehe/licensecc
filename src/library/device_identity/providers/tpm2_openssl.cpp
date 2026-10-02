@@ -233,13 +233,6 @@ std::shared_ptr<PosixStorageApi> native_posix_storage_api() noexcept {
 
 constexpr const char* kErrorQueueSentinel = "licensecc-tpm2-error-queue-sentinel";
 constexpr std::size_t kErrorQueueTextCapacity = ERR_MAX_DATA_SIZE;
-// A thread's OpenSSL error queue holds at most ERR_NUM_ERRORS (16) entries. OpenSSL 3 declares that
-// macro only beside the deprecated ERR_STATE, which the runtime compiles without, so the capacity is
-// restated here and checked against the macro wherever the header still declares it.
-constexpr std::size_t kErrorQueueCapacity = 16U;
-#ifdef ERR_NUM_ERRORS
-static_assert(kErrorQueueCapacity == ERR_NUM_ERRORS, "OpenSSL error queue capacity");
-#endif
 thread_local unsigned long g_error_queue_sentinel = 0U;
 thread_local unsigned int g_error_queue_scope_depth = 0U;
 
@@ -345,7 +338,7 @@ private:
 
 	bool owns_queue_ = false;
 	unsigned long previous_sentinel_ = 0U;
-	std::array<PreservedError, kErrorQueueCapacity> preserved_{};
+	std::array<PreservedError, kOpenSslErrorQueueCapacity> preserved_{};
 	std::size_t preserved_count_ = 0U;
 };
 

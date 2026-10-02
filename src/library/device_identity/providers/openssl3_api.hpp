@@ -2,6 +2,7 @@
 #define LICENSECC_DEVICE_IDENTITY_OPENSSL3_API_HPP_
 
 #include <openssl/encoder.h>
+#include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/params.h>
 #include <openssl/provider.h>
@@ -13,6 +14,15 @@
 
 namespace license {
 namespace device_identity {
+
+/* A thread's OpenSSL error queue holds at most ERR_NUM_ERRORS (16) entries. OpenSSL 3 declares that
+ * macro only beside the deprecated ERR_STATE, which the runtime compiles without, so the capacity is
+ * restated here. The provider tests include this header with the full OpenSSL declarations, so they
+ * check it against the macro. */
+constexpr std::size_t kOpenSslErrorQueueCapacity = 16U;
+#ifdef ERR_NUM_ERRORS
+static_assert(kOpenSslErrorQueueCapacity == ERR_NUM_ERRORS, "OpenSSL error queue capacity");
+#endif
 
 /* Internal OpenSSL seam.  Keeping every provider-facing call here makes the
  * storage/provider state machine deterministic in the shim without exposing
