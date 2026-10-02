@@ -5,7 +5,8 @@
  *      Author: GC
  */
 
-#include <openssl/pem.h>
+#include <openssl/decoder.h>
+#include <openssl/evp.h>
 #include <stdlib.h>
 #include <errno.h>
 
@@ -33,6 +34,44 @@ static void free_resources(EVP_PKEY* pkey, EVP_MD_CTX* mdctx) {
 	}
 }
 
+// True when the bytes are exactly one PKCS#1 RSAPublicKey DER: a SEQUENCE of two positive, minimally
+// encoded INTEGERs with nothing after it. This is the shape the Windows CNG verifier parses.
+static bool is_pkcs1_rsa_public_key_der(const std::vector<uint8_t>& der) {
+	size_t offset = 0;
+	size_t sequence_length = 0;
+	size_t value_start = 0;
+	size_t value_length = 0;
+	return !der.empty() && der[offset++] == 0x30U && signature_read_der_length(der, offset, sequence_length) &&
+		   sequence_length == der.size() - offset &&
+		   signature_read_der_integer_value(der, offset, value_start, value_length) &&
+		   signature_read_der_integer_value(der, offset, value_start, value_length) && offset == der.size();
+}
+
+// Decodes a PKCS#1 RSAPublicKey DER, the only public-key encoding the verifier accepts, through the
+// OpenSSL 3 decoder: DER input, the RSA type-specific structure and the public key only. OpenSSL
+// 3.0's decoder also takes a SubjectPublicKeyInfo for that structure, so the shape is checked first,
+// and, like the Windows CNG verifier, no bytes may be left after the key.
+static EVP_PKEY* decode_pkcs1_rsa_public_key(const std::vector<uint8_t>& public_key_der) {
+	if (!is_pkcs1_rsa_public_key_der(public_key_der)) {
+		return NULL;
+	}
+	EVP_PKEY* pkey = NULL;
+	OSSL_DECODER_CTX* decoder =
+		OSSL_DECODER_CTX_new_for_pkey(&pkey, "DER", "type-specific", "RSA", EVP_PKEY_PUBLIC_KEY, NULL, NULL);
+	if (decoder == NULL) {
+		return NULL;
+	}
+	const unsigned char* data = public_key_der.data();
+	size_t remaining = public_key_der.size();
+	const int decoded = OSSL_DECODER_from_data(decoder, &data, &remaining);
+	OSSL_DECODER_CTX_free(decoder);
+	if (decoded != 1 || pkey == NULL || remaining != 0) {
+		EVP_PKEY_free(pkey);
+		return NULL;
+	}
+	return pkey;
+}
+
 static FUNCTION_RETURN verify_signature_bytes(const std::vector<uint8_t>& payload,
 											  const std::vector<uint8_t>& signature,
 											  const std::vector<uint8_t>& public_key_der) {
@@ -41,27 +80,14 @@ static FUNCTION_RETURN verify_signature_bytes(const std::vector<uint8_t>& payloa
 		LOG_ERROR("No public key selected");
 		return FUNC_RET_ERROR;
 	}
-	const std::vector<uint8_t>& selected_public_key = public_key_der;
 	int func_ret = 0;
 
-	BIO* bio = BIO_new_mem_buf((void*)selected_public_key.data(), selected_public_key.size());
-	RSA* rsa = d2i_RSAPublicKey_bio(bio, NULL);
-	BIO_free(bio);
-	if (rsa == NULL) {
+	EVP_PKEY* pkey = decode_pkcs1_rsa_public_key(public_key_der);
+	if (pkey == NULL) {
 		LOG_ERROR("Error reading public key");
 		return FUNC_RET_ERROR;
 	}
-	EVP_PKEY* pkey = EVP_PKEY_new();
-	EVP_PKEY_assign_RSA(pkey, rsa);
 
-	/*BIO* bo = BIO_new(BIO_s_mem());
-	 BIO_write(bo, pubKey, strlen(pubKey));
-	 RSA *key = 0;
-	 PEM_read_bio_RSAPublicKey(bo, &key, 0, 0);
-	 BIO_free(bo);*/
-
-	// RSA* rsa = EVP_PKEY_get1_RSA( key );
-	// RSA * pubKey = d2i_RSA_PUBKEY(NULL, <der encoded byte stream pointer>, <num bytes>);
 	/* Create the Message Digest Context */
 	if (!(mdctx = EVP_MD_CTX_new())) {
 		free_resources(pkey, mdctx);
