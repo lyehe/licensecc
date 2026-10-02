@@ -2,12 +2,16 @@
 // version 17.0.0:
 //   https://www.unicode.org/Public/17.0.0/security/confusables.txt
 //   SHA-256 091c7f82fc39ef208faf8f94d29c244de99254675e09de163160c810d13ef22a
-// Unicode data files are provided under the Unicode License v3: https://www.unicode.org/license.txt
+// Copyright © 1991-2025 Unicode, Inc. Unicode data files are provided under the Unicode
+// License v3; the copyright and permission notice is in doc/other/CREDITS.md.
 //
-// A device label is compared as its UTS #39 skeleton, in which each code point becomes its confusable
-// prototype. Only the part of the skeleton that can spell a comparison code matters, so this subset
-// holds the skeleton of each comparison-code character [0-9A-Fa-f-] and every code point whose
-// prototype is one of those skeletons, grouped by that skeleton.
+// A device label is compared as its UTS #39 skeleton, in which each code point becomes its
+// confusable prototype, read only as far as a comparison code goes: each code skeleton is kept, each
+// separator reads as "-", and any other character reads as ".", which no code group holds. This
+// subset holds what that needs: the skeleton of each comparison-code character [0-9A-Fa-f-], the
+// code points whose prototype is one of those skeletons, the code points that share a separator's
+// skeleton, and the code points whose prototype of several characters holds a code skeleton or a
+// separator. Every other code point reads as "." and is left out.
 // Do not edit: run
 // `node scripts/generate-device-label-table.mjs --write --confusables <path or URL of that file>`.
 
@@ -15,6 +19,7 @@ export const DEVICE_LABEL_CONFUSABLES_SOURCE = Object.freeze({
   unicode: "17.0.0",
   url: "https://www.unicode.org/Public/17.0.0/security/confusables.txt",
   sha256: "091c7f82fc39ef208faf8f94d29c244de99254675e09de163160c810d13ef22a",
+  copyright: "1991-2025 Unicode, Inc.",
 });
 
 /** The skeleton of each comparison-code character: its confusable prototype, or itself. */
@@ -90,3 +95,82 @@ export const DEVICE_LABEL_CONFUSABLES = Object.freeze({
   "-": Object.freeze([0x02D7, 0x06D4, 0x2010, 0x2011, 0x2012, 0x2013, 0x2043, 0x2212, 0x2796,
     0x2CBA, 0x2CBB, 0xFE58]),
 });
+
+/** Every code point, not itself a dash or space, whose skeleton is the skeleton of one; each reads as "-". */
+export const DEVICE_LABEL_SEPARATOR_LOOKALIKES = Object.freeze([0x003D, 0x1173, 0x2028, 0x2029,
+    0x2500, 0x2501, 0x2502, 0x2503, 0x2F00, 0x30FC, 0x3161, 0x31D0, 0x4E00, 0xA4FF, 0xA7F7, 0xFF5C,
+    0xFF5E]);
+
+/** Every code point whose prototype of several characters holds a code skeleton or a separator, with
+ *  what it reads as. */
+export const DEVICE_LABEL_EXPANSIONS = Object.freeze([
+  [0x00A2, "c."], [0x00C6, "AE"], [0x00C7, "C."], [0x00D0, "D."], [0x00D8, "O."], [0x00E6, "ae"],
+  [0x00E7, "c."], [0x0110, "D."], [0x0111, "d."], [0x0132, "l."], [0x013F, "l."], [0x0140, "l."],
+  [0x0142, "l."], [0x0152, "OE"], [0x0153, ".e"], [0x0180, "b."], [0x0181, ".B"], [0x0182, "b."],
+  [0x0183, "b."], [0x0187, "C."], [0x0189, "D."], [0x018A, ".D"], [0x018C, "d."], [0x0191, "F."],
+  [0x0197, "l."], [0x019A, "l."], [0x019F, "O."], [0x01A0, "O."], [0x01BB, "2."], [0x01C1, "ll"],
+  [0x01C4, "D."], [0x01C5, "D."], [0x01C6, "d."], [0x01C9, "l."], [0x01F1, "D."], [0x01F2, "D."],
+  [0x01F3, "d."], [0x01FE, "O.."], [0x023C, "c."], [0x0246, "E."], [0x0247, "e."], [0x0253, "b."],
+  [0x0256, "d."], [0x0257, "d."], [0x026B, "l."], [0x026D, "l."], [0x026E, "l."], [0x02A3, "d."],
+  [0x02A4, "d."], [0x02A5, "d."], [0x02A9, "f.."], [0x02AA, "l."], [0x02AB, "l."], [0x0398, "O."],
+  [0x03B8, "O."], [0x03D1, "O."], [0x03F4, "O."], [0x0411, "b."], [0x042B, "bl"], [0x042E, "lO"],
+  [0x044A, ".b"], [0x0462, "b."], [0x0463, "b."], [0x0472, "O."], [0x048C, "b."], [0x048D, "b."],
+  [0x0498, "3."], [0x04AA, "C."], [0x04AB, "c."], [0x04BF, "e."], [0x04D4, "AE"], [0x04D5, "ae"],
+  [0x04E8, "O."], [0x05F0, "ll"], [0x05F1, "l."], [0x0623, "l."], [0x0625, "l."], [0x0672, "l."],
+  [0x0673, "l."], [0x0675, "l."], [0x1174, "-."], [0x117C, ".-"], [0x118B, "..-"], [0x1195, "-."],
+  [0x1196, "--"], [0x1197, "-.."], [0x119C, ".-"], [0x11A3, ".-"], [0x13A4, "O."], [0x13BE, "O."],
+  [0x13EB, "O."], [0x1473, "b."], [0x147A, ".d"], [0x147B, "d."], [0x147E, ".b"], [0x147F, "b."],
+  [0x1480, ".b."], [0x1481, "b.."], [0x1487, "d."], [0x1488, "b."], [0x14B7, "l."], [0x150E, ".b"],
+  [0x152F, ".4"], [0x1530, "4."], [0x1581, ".d"], [0x1583, ".b"], [0x1584, ".b."], [0x1D6B, ".e"],
+  [0x1D6E, "f."], [0x2016, "ll"], [0x20A1, "C."], [0x20AB, "d.."], [0x20B6, "l."], [0x20C1, "..l."],
+  [0x2100, "a.c"], [0x2101, "a.."], [0x2103, ".C"], [0x2105, "c.."], [0x2106, "c.."],
+  [0x2109, ".F"], [0x2121, ".E."], [0x213B, "FA."], [0x2161, "ll"], [0x2162, "lll"], [0x2163, "l."],
+  [0x2165, ".l"], [0x2166, ".ll"], [0x2167, ".lll"], [0x2168, "l."], [0x216A, ".l"],
+  [0x216B, ".ll"], [0x2225, "ll"], [0x2238, "-."], [0x2250, "-."], [0x2251, "-.."], [0x2257, "-."],
+  [0x2259, "-."], [0x225A, "-."], [0x225E, "-."], [0x2296, "O."], [0x229D, "O."], [0x236C, "O."],
+  [0x2376, "a."], [0x2474, ".l."], [0x2475, ".2."], [0x2476, ".3."], [0x2477, ".4."],
+  [0x2478, ".5."], [0x2479, ".6."], [0x247A, ".7."], [0x247B, ".8."], [0x247C, ".9."],
+  [0x247D, ".lO."], [0x247E, ".ll."], [0x247F, ".l2."], [0x2480, ".l3."], [0x2481, ".l4."],
+  [0x2482, ".l5."], [0x2483, ".l6."], [0x2484, ".l7."], [0x2485, ".l8."], [0x2486, ".l9."],
+  [0x2487, ".2O."], [0x2488, "l."], [0x2489, "2."], [0x248A, "3."], [0x248B, "4."], [0x248C, "5."],
+  [0x248D, "6."], [0x248E, "7."], [0x248F, "8."], [0x2490, "9."], [0x2491, "lO."], [0x2492, "ll."],
+  [0x2493, "l2."], [0x2494, "l3."], [0x2495, "l4."], [0x2496, "l5."], [0x2497, "l6."],
+  [0x2498, "l7."], [0x2499, "l8."], [0x249A, "l9."], [0x249B, "2O."], [0x249C, ".a."],
+  [0x249D, ".b."], [0x249E, ".c."], [0x249F, ".d."], [0x24A0, ".e."], [0x24A1, ".f."],
+  [0x24A7, ".l."], [0x2A29, "-."], [0x2A2A, "-."], [0x2A6E, "-."], [0x2A74, "..-"], [0x2A75, "--"],
+  [0x2A76, "---"], [0x2B96, "-."], [0x2C90, "O."], [0x2CB2, "-."], [0x2CB3, "-."], [0x2D31, "O."],
+  [0x2D41, "O."], [0x2ED1, ".-.."], [0x2FA7, ".-.."], [0x3162, "-."], [0x3220, ".-."],
+  [0x32C0, "l."], [0x32C1, "2."], [0x32C2, "3."], [0x32C3, "4."], [0x32C4, "5."], [0x32C5, "6."],
+  [0x32C6, "7."], [0x32C7, "8."], [0x32C8, "9."], [0x32C9, "lO."], [0x32CA, "ll."], [0x32CB, "l2."],
+  [0x3358, "O."], [0x3359, "l."], [0x335A, "2."], [0x335B, "3."], [0x335C, "4."], [0x335D, "5."],
+  [0x335E, "6."], [0x335F, "7."], [0x3360, "8."], [0x3361, "9."], [0x3362, "lO."], [0x3363, "ll."],
+  [0x3364, "l2."], [0x3365, "l3."], [0x3366, "l4."], [0x3367, "l5."], [0x3368, "l6."],
+  [0x3369, "l7."], [0x336A, "l8."], [0x336B, "l9."], [0x336C, "2O."], [0x336D, "2l."],
+  [0x336E, "22."], [0x336F, "23."], [0x3370, "24."], [0x33E0, "l."], [0x33E1, "2."], [0x33E2, "3."],
+  [0x33E3, "4."], [0x33E4, "5."], [0x33E5, "6."], [0x33E6, "7."], [0x33E7, "8."], [0x33E8, "9."],
+  [0x33E9, "lO."], [0x33EA, "ll."], [0x33EB, "l2."], [0x33EC, "l3."], [0x33ED, "l4."],
+  [0x33EE, "l5."], [0x33EF, "l6."], [0x33F0, "l7."], [0x33F1, "l8."], [0x33F2, "l9."],
+  [0x33F3, "2O."], [0x33F4, "2l."], [0x33F5, "22."], [0x33F6, "23."], [0x33F7, "24."],
+  [0x33F8, "25."], [0x33F9, "26."], [0x33FA, "27."], [0x33FB, "28."], [0x33FC, "29."],
+  [0x33FD, "3O."], [0x33FE, "3l."], [0x4E1B, "..-"], [0x4ECA, ".-."], [0x5408, ".-."],
+  [0x9577, ".-.."], [0xA4FE, "-."], [0xA650, ".l"], [0xA651, ".b."], [0xA698, "OO"], [0xA728, ".3"],
+  [0xA732, "AA"], [0xA733, "aa"], [0xA734, "AO"], [0xA735, "a."], [0xA736, "A."], [0xA737, "a."],
+  [0xA738, "A."], [0xA739, "a."], [0xA73A, "A."], [0xA73B, "a."], [0xA73C, "A."], [0xA73D, "a."],
+  [0xA74A, "O."], [0xA74E, "OO"], [0xA777, ".f"], [0xAB62, ".e"], [0xD7B9, "-."], [0xD7BA, "-."],
+  [0xD7BB, "-.."], [0xD7BC, "-."], [0xFB00, "ff"], [0xFB01, "f."], [0xFB02, "fl"], [0xFB03, "ff."],
+  [0xFB04, "ffl"], [0xFB29, "-."], [0xFBEA, "..l"], [0xFBEB, "..l"], [0xFC37, ".l"], [0xFC80, ".l"],
+  [0xFC88, ".l"], [0xFD3C, "l."], [0xFD3D, "l."], [0xFDF2, "l....."], [0xFDF3, "l..."],
+  [0xFDFA, "...-l...-....-...."], [0xFDFB, "..-..l.."], [0xFDFC, "..l."], [0xFE83, "l."],
+  [0xFE84, "l."], [0xFE87, "l."], [0xFE88, "l."], [0xFEF7, ".l."], [0xFEF8, ".l."], [0xFEF9, ".l."],
+  [0xFEFA, ".l."], [0xFEFB, ".l"], [0xFEFC, ".l"], [0x10198, "l.l..."], [0x10199, "l.l."],
+  [0x1D21A, "O."], [0x1D6AF, "O."], [0x1D6B9, "O."], [0x1D6C9, "O."], [0x1D6DD, "O."],
+  [0x1D6E9, "O."], [0x1D6F3, "O."], [0x1D703, "O."], [0x1D717, "O."], [0x1D723, "O."],
+  [0x1D72D, "O."], [0x1D73D, "O."], [0x1D751, "O."], [0x1D75D, "O."], [0x1D767, "O."],
+  [0x1D777, "O."], [0x1D78B, "O."], [0x1D797, "O."], [0x1D7A1, "O."], [0x1D7B1, "O."],
+  [0x1D7C5, "O."], [0x1F100, "O."], [0x1F101, "O."], [0x1F102, "l."], [0x1F103, "2."],
+  [0x1F104, "3."], [0x1F105, "4."], [0x1F106, "5."], [0x1F107, "6."], [0x1F108, "7."],
+  [0x1F109, "8."], [0x1F10A, "9."], [0x1F110, ".A."], [0x1F111, ".B."], [0x1F112, ".C."],
+  [0x1F113, ".D."], [0x1F114, ".E."], [0x1F115, ".F."], [0x1F118, ".l."], [0x1F11E, ".O."],
+  [0x1F16E, "C."], [0x1F700, ".E"], [0x1F707, "A."], [0x1F714, "O."], [0x1F76B, ".B"],
+  [0x1F76C, ".B"]
+].map((pair) => Object.freeze(pair)));

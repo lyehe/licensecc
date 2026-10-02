@@ -144,15 +144,24 @@ bool in_ranges(const bound_label_table::Range (&ranges)[N], std::uint32_t point)
 	}
 	return false;
 }
-// A code point whose Unicode confusable prototype is the skeleton of a comparison-code character
-// becomes that skeleton (0 becomes O, 1 becomes l); any other code point is unchanged.
-std::uint32_t fold_confusable(std::uint32_t point) {
+// What a listed code point reads as, from its UTS #39 skeleton: a code skeleton (0 reads as O, 1 as
+// l), "-" for a code point that shares a separator's skeleton, or a prototype of several characters
+// with each code skeleton kept, each separator read as '-' and anything else read as '.'. Unlisted
+// code points give nullptr and read as themselves.
+const char* fold_confusable(std::uint32_t point) {
 	const auto* first = std::begin(bound_label_table::confusables);
 	const auto* last = std::end(bound_label_table::confusables);
 	const auto* found =
 		std::lower_bound(first, last, point,
 						 [](const bound_label_table::Fold& fold, std::uint32_t value) { return fold.point < value; });
-	return found != last && found->point == point ? static_cast<unsigned char>(found->to) : point;
+	return found != last && found->point == point ? found->to : nullptr;
+}
+// Appends one comparison-form character, collapsing each run of '-' to one.
+void append_form(std::string& form, char c) {
+	if (c != '-')
+		form.push_back(c);
+	else if (form.empty() || form.back() != '-')
+		form.push_back('-');
 }
 // One of the skeletons of the comparison-code digits and letters: O, l, 2-9, A-F or a-f.
 bool code_skeleton(char c) {
@@ -172,10 +181,9 @@ bool holds_comparison_code(const std::string& form) {
 	return false;
 }
 // The label is already valid UTF-8, trimmed only at sequence boundaries. The comparison form folds
-// fullwidth ASCII to ASCII and each code point whose confusable prototype is the skeleton of a
-// comparison-code character to that skeleton, maps every dash and space to '-' and collapses runs of
-// '-'. It keeps only what the code shape can match, so any other code point becomes a non-matching
-// placeholder.
+// fullwidth ASCII to ASCII, reads every dash and space as '-', reads each listed code point as the
+// table says and collapses runs of '-'. It keeps only what the code shape can match, so any other
+// code point becomes a non-matching placeholder.
 bool misleading_label(std::string_view label) {
 	namespace table = bound_label_table;
 	std::string form;
@@ -188,9 +196,10 @@ bool misleading_label(std::string_view label) {
 		i += size;
 		if (in_ranges(table::refused, point)) return true;
 		if (point >= table::fullwidth_first && point <= table::fullwidth_last) point -= table::fullwidth_offset;
-		point = fold_confusable(point);
 		if (in_ranges(table::separators, point)) {
-			if (form.empty() || form.back() != '-') form.push_back('-');
+			append_form(form, '-');
+		} else if (const char* read = fold_confusable(point)) {
+			for (; *read != '\0'; ++read) append_form(form, *read);
 		} else {
 			form.push_back(point < 0x80 ? static_cast<char>(point) : '\0');
 		}
