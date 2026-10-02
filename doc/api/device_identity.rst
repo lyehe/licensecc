@@ -305,21 +305,34 @@ variation selector, filler or tag character
 UTS #39 skeleton as far as a comparison code goes, also must not contain the
 skeleton of a comparison code, ``XXXX-XXXX-XXXX`` in hexadecimal digits of
 either case. The comparison form folds fullwidth ASCII (U+FF01–U+FF5E) to
-ASCII, then folds every code point whose Unicode confusable prototype
-(``confusables.txt``) is the skeleton of a character of ``[0-9A-Fa-f-]`` to that
-skeleton, maps every dash (``\p{Pd}``) and space (``\p{Zs}``) to ``-``, and
-collapses runs of ``-``. The skeleton of ``0`` is ``O`` and the skeleton of
-``1`` is ``l``; every other code character is its own skeleton. The label is
-refused when its comparison form holds three groups of four code skeletons
-(``O``, ``l``, ``2``–``9``, ``A``–``F``, ``a``–``f``) joined by ``-``. So
-``4F2A 0C12 B7E4``, a code written with en dashes, minus signs or fullwidth
-digits, a code with ``O`` for ``0`` or with ``I``, ``l`` or ``|`` for ``1``,
-and a code that uses look-alikes in any script, such as Cyrillic ``А``
+ASCII and reads every dash (``\p{Pd}``) and space (``\p{Zs}``) as ``-``. It
+then reads each other code point through its Unicode confusable prototype
+(``confusables.txt``): each character of the prototype that is the skeleton of
+a character of ``[0-9A-Fa-f]`` stays, each that is the skeleton of a dash or
+space reads as ``-``, and any other character reads as ``.``, which no code
+group holds. Runs of ``-`` collapse to one. The skeleton of ``0`` is ``O`` and
+the skeleton of ``1`` is ``l``; every other code character is its own skeleton.
+A code point whose whole skeleton is a dash's or space's skeleton therefore
+separates groups like a dash: CJK ``一`` (U+4E00), the box-drawing ``─`` and
+``━``, the prolonged sound mark ``ー``, Hangul ``ㅡ``, the Kangxi radical ``⼀``
+and the equals sign ``=``, whose skeleton is that of the double hyphen ``゠``.
+A code point whose prototype has several characters stands for all of them:
+``Ⅱ`` and ``‖`` read as ``ll``, ``Ꝏ`` as ``OO``, ``Ю`` as ``lO``, ``ﬀ`` as
+``ff``, ``Æ`` as ``AE``, and ``⒋`` as ``4.``. A code point is left out of the
+data only when its prototype holds no code skeleton and no separator, because
+it then breaks a code group exactly as any other unlisted character does. The
+label is refused when its comparison form holds three groups of four code
+skeletons (``O``, ``l``, ``2``–``9``, ``A``–``F``, ``a``–``f``) joined by
+``-``. So ``4F2A 0C12 B7E4``, a code written with en dashes, minus signs or
+fullwidth digits, a code with ``O`` for ``0`` or with ``I``, ``l`` or ``|`` for
+``1``, a code that uses look-alikes in any script, such as Cyrillic ``А``
 (U+0410), Greek ``Α`` (U+0391), Cyrillic ``а`` (U+0430), Cyrillic ``О``
 (U+041E) for ``0``, Cyrillic ``І`` (U+0406) for ``1`` or the mathematical
-digit ``𝟒`` (U+1D7D2), are refused as well. Only three dash-separated groups
-of four count, so letters, digits, spaces and punctuation in any script remain
-valid, for example ``Компьютер``, ``Δέλτα-PC``, ``Büro-PC``, ``工作站``,
+digit ``𝟒`` (U+1D7D2), ``4F2A-0CⅡ-B7E4``, ``4ﬀA-0C12-B7E4``,
+``4F2A-0C12-B7E⒋`` and ``4F2A一0C12一B7E4`` are refused as well. Only three
+dash-separated groups of four count, so letters, digits, spaces and
+punctuation in any script remain valid, for example ``Компьютер``,
+``Δέλτα-PC``, ``Büro-PC``, ``工作站``, ``一号机``, ``Room Ⅲ``,
 ``DESKTOP-7Q2K1AB``, ``OLD-BOX`` and ``Lab-PC-01``. ``4F2A-0C1Z-B7E4`` is also
 accepted, because ``Z`` is not the skeleton of any code character.
 The licensing backend owns the rule
@@ -330,11 +343,16 @@ using ``src/library/device_identity/bound_label_table.hpp``, which
 ``scripts/generate-device-label-table.mjs`` generates from the same Unicode
 property escapes and the same confusables subset, so both apply the identical
 fold and shape. That subset, ``device_label_confusables.mjs`` beside the rule,
-holds the code skeletons and every code point that folds to one; it is derived
-from the Unicode 17.0.0 ``confusables.txt`` and names its URL and SHA-256 in
-its header. Only ``--write --confusables <path or URL>`` re-derives it, and
-that run refuses a file with any other SHA-256. Registration retries preserve
-their original inputs and five-minute inclusive-clock deadline.
+holds the code skeletons, the code points that fold to one, the separator
+look-alikes and the expansions. It is derived from the Unicode 17.0.0
+``confusables.txt`` and names its URL and SHA-256 in its header. Only
+``--write --confusables <path or URL>`` re-derives it; that run refuses a file
+with any other SHA-256 and a derived subset whose own SHA-256 is not the one
+pinned in the generator. A check and a plain ``--write`` refuse a subset that
+does not match that pinned digest, so a hand edit is never copied into the
+native table. The Unicode data is used under the Unicode License v3; its
+copyright and permission notice is in :doc:`../other/CREDITS`. Registration
+retries preserve their original inputs and five-minute inclusive-clock deadline.
 
 The owner accepts exactly one canonical code/state callback for the registered
 loopback URI. Invalid callbacks leave the valid attempt usable; duplicates

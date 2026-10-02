@@ -41,13 +41,17 @@ ID is a 128-bit secret. A challenge for an unknown binding returns
 The reason a renewal is refused is returned only after the proof verifies, on
 ``/v2/device-leases/renew``. A retiring or released binding, or a disabled
 device, is refused with ``403 device_retired`` before any license or account
-check, so a disconnected device never learns the state behind it. An inactive,
-revoked, expired or not-yet-valid license, an ineligible trial or a disabled
-account is refused with ``403 access_denied``. The other refusals and every
-rate limit are unchanged. The native client classifies these refusals exactly as
-it classified a refused challenge: ``lcc_device_bound_renew`` returns
-``LCC_BOUND_DENIED``, and protected work stays denied until a fresh renewal is
-accepted.
+check. The same order applies when a device replays its original exchange inside
+the 48-hour recovery window, so a disconnected device never learns the state
+behind it. An inactive, revoked, expired or not-yet-valid license, an ineligible
+trial or a disabled account is refused with ``403 access_denied``. The other
+refusals and every rate limit are unchanged. The native client classifies these
+refusals exactly as it classified a refused challenge: ``lcc_device_bound_renew``
+returns ``LCC_BOUND_DENIED``, and protected work stays denied until a fresh
+renewal is accepted. Because the device now signs the challenge before it
+learns of the refusal, a failing key provider makes a refused renewal return
+``LCC_BOUND_PROVIDER_ERROR`` instead, as it would for a renewal the backend
+accepts.
 
 Enrollment comparison
 ---------------------
@@ -91,8 +95,9 @@ app-supplied device label beside the code, registration refuses a label that
 holds control, format, line-separator or default-ignorable characters, or text
 whose UTS #39 skeleton is shaped like the skeleton of a comparison code once
 dashes, spaces and fullwidth forms are folded, so ``O`` for ``0``, ``I`` or
-``l`` for ``1`` and look-alike characters in any script cannot spell one;
-:doc:`device_identity` lists the exact rule.
+``l`` for ``1``, look-alike characters in any script, characters such as ``Ⅱ``
+or ``ﬀ`` that stand for several, and dash look-alikes such as ``一`` cannot
+spell one; :doc:`device_identity` lists the exact rule.
 
 The code is a 48-bit human comparison aid, not a credential, lookup key,
 signature or proof of key possession. State verification, PKCE, fresh challenges

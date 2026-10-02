@@ -70,5 +70,7 @@ accept ownership.
   test:clean-checkout` fails while the committed table is stale. The same tool
   writes the subset only on an explicit
   `--write --confusables <path or URL>` run, which requires the pinned
-  SHA-256 of the upstream Unicode `confusables.txt`; checks and plain
-  `--write` runs use only the committed subset and never the network.
+  SHA-256 of the upstream Unicode `confusables.txt` and the pinned SHA-256 of
+  the derived subset; checks and plain `--write` runs use only the committed
+  subset and never the network, and refuse a subset that does not match its
+  pinned digest.

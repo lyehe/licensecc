@@ -667,7 +667,7 @@
                       "const": "S256"
                     },
                     "device_label": {
-                      "description": "Trimmed display-only Unicode label, 1–80 code points. It is shown beside the comparison code on the approval page, so a label holding a control, format (including bidi), line or paragraph separator, or default-ignorable code point is refused with invalid_request, as is a label whose comparison form, its UTS #39 skeleton as far as a comparison code goes (fullwidth ASCII folded to ASCII, every code point whose confusable prototype in confusables.txt is the skeleton of a character of [0-9A-Fa-f-] folded to that skeleton, so 0 reads as O and 1 as l, every dash and space mapped to a hyphen, runs of hyphens collapsed), contains three groups of four code skeletons (O, l, 2-9, A-F, a-f) joined by hyphens.",
+                      "description": "Trimmed display-only Unicode label, 1–80 code points. It is shown beside the comparison code on the approval page, so a label holding a control, format (including bidi), line or paragraph separator, or default-ignorable code point is refused with invalid_request, as is a label whose comparison form, its UTS #39 skeleton as far as a comparison code goes (fullwidth ASCII folded to ASCII; every dash and space, and every code point whose skeleton is a dash's or space's, read as a hyphen; every other code point read through its confusable prototype in confusables.txt, keeping each character that is the skeleton of a character of [0-9A-Fa-f], so 0 reads as O and 1 as l, reading each dash or space skeleton as a hyphen and anything else as a character no code group holds; runs of hyphens collapsed), contains three groups of four code skeletons (O, l, 2-9, A-F, a-f) joined by hyphens.",
                       "type": "string"
                     },
                     "project": {
@@ -1111,7 +1111,7 @@
       },
       "/v2/device-authorizations/exchange": {
         "post": {
-          "description": "Protected device protocol; no configuration switch disables its checks. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
+          "description": "Protected device protocol; no configuration switch disables its checks. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries. A replayed exchange recovery whose binding is retiring or released, or whose device is disabled, is refused with 403 device_retired after the proof verifies, before and instead of any license or account state.",
           "operationId": "exchangeDeviceAuthorization",
           "requestBody": {
             "content": {
