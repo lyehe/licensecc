@@ -19,8 +19,18 @@ test("the committed v201 golden vectors match the generator output", () => {
   assert.deepEqual(v201GoldenVectorDrift(), []);
 });
 
+// A working copy may already carry CRLF line endings: with core.autocrlf, Git checks out the
+// generator's payload copies (text=auto) as CRLF, while test/vectors keeps eol=lf.
+const readLf = (path) => read(path).replace(/\r\n/gu, "\n");
+const crlf = (text) => text.replace(/\n/gu, "\r\n");
+
 test("a CRLF checkout of the vectors still matches", () => {
-  assert.deepEqual(v201GoldenVectorDrift((path) => read(path).replace(/\n/gu, "\r\n")), []);
+  assert.deepEqual(v201GoldenVectorDrift((path) => crlf(readLf(path))), []);
+});
+
+test("converting a checkout that is already CRLF still matches", () => {
+  const crlfCheckout = (path) => crlf(readLf(path));
+  assert.deepEqual(v201GoldenVectorDrift((path) => crlf(crlfCheckout(path))), []);
 });
 
 test("an edited vector is reported", () => {
