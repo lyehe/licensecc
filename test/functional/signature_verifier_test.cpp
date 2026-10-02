@@ -730,6 +730,79 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_malformed_public_key_der) {
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
 }
 
+static void append_der_length(vector<uint8_t>& out, const size_t length) {
+	if (length < 0x80U) {
+		out.push_back(static_cast<uint8_t>(length));
+		return;
+	}
+	vector<uint8_t> bytes;
+	for (size_t rest = length; rest != 0; rest >>= 8U) {
+		bytes.insert(bytes.begin(), static_cast<uint8_t>(rest & 0xffU));
+	}
+	out.push_back(static_cast<uint8_t>(0x80U | bytes.size()));
+	out.insert(out.end(), bytes.begin(), bytes.end());
+}
+
+static vector<uint8_t> der_element(const uint8_t tag, const vector<uint8_t>& content) {
+	vector<uint8_t> out(1, tag);
+	append_der_length(out, content.size());
+	out.insert(out.end(), content.begin(), content.end());
+	return out;
+}
+
+// SubjectPublicKeyInfo ::= SEQUENCE { AlgorithmIdentifier { rsaEncryption, NULL }, BIT STRING { RSAPublicKey } }
+static vector<uint8_t> spki_der_from_pkcs1(const vector<uint8_t>& pkcs1_der) {
+	const vector<uint8_t> rsa_encryption = {0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
+											0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00};
+	vector<uint8_t> bit_string_content(1, 0x00);
+	bit_string_content.insert(bit_string_content.end(), pkcs1_der.begin(), pkcs1_der.end());
+	vector<uint8_t> body(rsa_encryption);
+	const vector<uint8_t> bit_string = der_element(0x03, bit_string_content);
+	body.insert(body.end(), bit_string.begin(), bit_string.end());
+	return der_element(0x30, body);
+}
+
+static vector<uint8_t> pem_bytes(const string& label, const vector<uint8_t>& der) {
+	const string text = "-----BEGIN " + label + "-----\n" + base64(der.data(), der.size(), 64) + "\n-----END " +
+						label + "-----\n";
+	return vector<uint8_t>(text.begin(), text.end());
+}
+
+// The platform verifiers (OpenSSL, Windows CNG) accept a public key only as PKCS#1 RSAPublicKey
+// DER. The requests below carry no key-size floor, so the platform's key decoding, not the
+// policy's own DER parser, is what accepts or refuses each encoding.
+BOOST_AUTO_TEST_CASE(verify_signature_decodes_only_pkcs1_der_public_keys) {
+	const string test_data("test_data");
+	unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
+	crypto->generateKeyPair(3072);
+	const string signature = crypto->signString(test_data);
+	const vector<uint8_t> pkcs1_der = crypto->exportPublicKey();
+
+	const auto verify_with = [&](const vector<uint8_t>& encoded_key) {
+		license::os::SignatureVerificationRequest request = signature_request_for(test_data, signature);
+		bind_request_to_public_key_der(request, encoded_key);
+		request.policy.min_public_key_bits = 0;
+		return license::os::verify_signature(request);
+	};
+
+	vector<uint8_t> truncated(pkcs1_der.begin(), pkcs1_der.end() - 1);
+	vector<uint8_t> trailing(pkcs1_der);
+	trailing.push_back(0x00);
+	const vector<uint8_t> spki_der = spki_der_from_pkcs1(pkcs1_der);
+	const vector<pair<string, vector<uint8_t>>> refused = {
+		{"SubjectPublicKeyInfo DER", spki_der},
+		{"PKCS#1 PEM", pem_bytes("RSA PUBLIC KEY", pkcs1_der)},
+		{"SubjectPublicKeyInfo PEM", pem_bytes("PUBLIC KEY", spki_der)},
+		{"truncated PKCS#1 DER", truncated},
+		{"PKCS#1 DER with a trailing byte", trailing},
+	};
+
+	BOOST_CHECK_EQUAL(verify_with(pkcs1_der), FUNC_RET_OK);
+	for (const auto& encoding : refused) {
+		BOOST_TEST_CONTEXT(encoding.first) { BOOST_CHECK_NE(verify_with(encoding.second), FUNC_RET_OK); }
+	}
+}
+
 BOOST_AUTO_TEST_CASE(verify_v201_minimal_license_ok) {
 	LicenseInfo license{};
 	const LCC_EVENT_TYPE result = acquire_from_plain_data(v201_minimal_license(), license);
