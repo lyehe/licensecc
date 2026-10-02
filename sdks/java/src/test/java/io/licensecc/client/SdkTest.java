@@ -36,6 +36,15 @@ public final class SdkTest {
                 BigInteger.ZERO, BigInteger.valueOf(1500));
         VerificationResult<ConfigAttestation.Claims> rejected = ConfigAttestation.verify(token, mismatch, List.of(key));
         check(!rejected.ok() && rejected.code() == RejectionCode.CONFIG_HASH_MISMATCH, "config hash rejects");
+
+        // The golden payload and signature under another envelope prefix: a valid signature
+        // cannot make a token of another kind acceptable as a config token.
+        String[] parts = token.split("\\.", -1);
+        check(parts.length == 3, "golden token has three parts");
+        VerificationResult<ConfigAttestation.Claims> otherPrefix =
+                ConfigAttestation.verify("lccoa1." + parts[1] + "." + parts[2], expected, List.of(key));
+        check(!otherPrefix.ok() && otherPrefix.code() == RejectionCode.PREFIX_MISMATCH,
+                "another envelope prefix rejects");
     }
 
     private static void failClosedParsing() {

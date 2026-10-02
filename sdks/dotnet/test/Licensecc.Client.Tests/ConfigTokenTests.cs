@@ -194,6 +194,19 @@ namespace Licensecc.Client.Tests
             Assert.AreEqual(VerifyFailureCode.Envelope, result.Code);
         }
 
+        [TestMethod]
+        public void Negative_OtherEnvelopePrefix_Rejected()
+        {
+            // The golden payload and signature under another envelope prefix: a valid signature
+            // cannot make a token of another kind acceptable as a config token.
+            string[] parts = Token.Split('.');
+            Assert.AreEqual(3, parts.Length);
+            VerifyResult<ConfigTokenClaims> result =
+                ConfigTokenVerifier.Verify("lccoa1." + parts[1] + "." + parts[2], BaseExpected());
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(VerifyFailureCode.Envelope, result.Code);
+        }
+
         // The embedded golden's PKCS#1 DER is published only as a CMake byte-array record; reproduce it
         // here so the embedded-ring golden is covered without re-reading the cmake file.
         private static byte[] EmbeddedGoldenPublicKeyDer()

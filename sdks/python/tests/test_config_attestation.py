@@ -161,6 +161,15 @@ def test_config_unknown_key_id_rejected(config_golden, embedded_config_golden):
     assert result.code == RejectionCode.UNKNOWN_KEY_ID
 
 
+def test_config_token_with_another_prefix_rejected(config_golden, trusted):
+    # The golden payload and signature under another envelope prefix: a valid signature
+    # cannot make a token of another kind acceptable as a config token.
+    _, payload_b64, sig_b64 = config_golden.token.split(".")
+    result = verify_config_token(f"lccoa1.{payload_b64}.{sig_b64}", _expected(config_golden), trusted)
+    assert not result.ok
+    assert result.code == RejectionCode.PREFIX_MISMATCH
+
+
 @pytest.mark.parametrize(
     "bad_token",
     ["", "lcccfg1", "lcccfg1.onlyone", "lcccfg1.a.b.c", "lccdl1.aGVsbG8=.aGVsbG8="],
