@@ -789,12 +789,34 @@ BOOST_AUTO_TEST_CASE(verify_signature_decodes_only_pkcs1_der_public_keys) {
 	vector<uint8_t> trailing(pkcs1_der);
 	trailing.push_back(0x00);
 	const vector<uint8_t> spki_der = spki_der_from_pkcs1(pkcs1_der);
+
+	// Non-minimal (BER) forms of the same key. The PKCS#1 DER is SEQUENCE { modulus, exponent }; a
+	// generated key has the exponent 65537, encoded as the five bytes 02 03 01 00 01.
+	const vector<uint8_t> exponent_tlv = {0x02, 0x03, 0x01, 0x00, 0x01};
+	BOOST_REQUIRE_GT(pkcs1_der.size(), exponent_tlv.size() + 4);
+	BOOST_REQUIRE(equal(exponent_tlv.begin(), exponent_tlv.end(), pkcs1_der.end() - exponent_tlv.size()));
+	BOOST_REQUIRE_EQUAL(pkcs1_der[1], 0x82);  // a 3072-bit key needs a two-byte SEQUENCE length
+	const vector<uint8_t> modulus_tlv(pkcs1_der.begin() + 4, pkcs1_der.end() - exponent_tlv.size());
+	const auto with_exponent = [&](const vector<uint8_t>& exponent) {
+		vector<uint8_t> body(modulus_tlv);
+		body.insert(body.end(), exponent.begin(), exponent.end());
+		return der_element(0x30, body);
+	};
+	BOOST_REQUIRE(with_exponent(exponent_tlv) == pkcs1_der);
+	vector<uint8_t> zero_padded_length(pkcs1_der);
+	zero_padded_length[1] = 0x83;
+	zero_padded_length.insert(zero_padded_length.begin() + 2, 0x00);
+
 	const vector<pair<string, vector<uint8_t>>> refused = {
 		{"SubjectPublicKeyInfo DER", spki_der},
 		{"PKCS#1 PEM", pem_bytes("RSA PUBLIC KEY", pkcs1_der)},
 		{"SubjectPublicKeyInfo PEM", pem_bytes("PUBLIC KEY", spki_der)},
 		{"truncated PKCS#1 DER", truncated},
 		{"PKCS#1 DER with a trailing byte", trailing},
+		{"SEQUENCE length with a leading zero byte", zero_padded_length},
+		{"exponent length in long form though it fits the short form",
+		 with_exponent({0x02, 0x81, 0x03, 0x01, 0x00, 0x01})},
+		{"exponent INTEGER with a redundant leading zero byte", with_exponent({0x02, 0x04, 0x00, 0x01, 0x00, 0x01})},
 	};
 
 	BOOST_CHECK_EQUAL(verify_with(pkcs1_der), FUNC_RET_OK);
