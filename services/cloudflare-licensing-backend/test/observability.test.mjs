@@ -105,10 +105,15 @@ test("structured logs keep a dispatcher reason only when it is a closed reason c
     reason: "invalid_url",
   });
 
-  // Anything that is not a lowercase code (a URL, an address, free text, a non-string) is dropped.
-  for (const reason of ["https://hooks.example.com/secret?token=1", "ops@example.com", "Connection refused", "a".repeat(65), 42, ["invalid_url"]]) {
+  const canceled = capture("warn", () => logEvent("warn", "webhook.delivery_canceled", { delivery_id: 17, reason: "endpoint_changed" }))[0];
+  assert.equal(JSON.parse(canceled).reason, "endpoint_changed");
+
+  // Anything but one of the dispatcher's own reason codes is dropped: a URL, an address, free text,
+  // a non-string, and lowercase identifiers such as a fingerprint-like hex digest or a customer id.
+  const fingerprint = "ab".repeat(32);
+  for (const reason of ["https://hooks.example.com/secret?token=1", "ops@example.com", "Connection refused", "a".repeat(65), 42, ["invalid_url"], fingerprint, "cus_8f2a91"]) {
     const line = capture("warn", () => logEvent("warn", "webhook.delivery_failed", { delivery_id: 17, reason }))[0];
     assert.equal(JSON.parse(line).reason, undefined, String(reason));
-    assert.doesNotMatch(line, /hooks\.example|example\.com|refused/u);
+    assert.doesNotMatch(line, /hooks\.example|example\.com|refused|abab|cus_8f2a91/u);
   }
 });
