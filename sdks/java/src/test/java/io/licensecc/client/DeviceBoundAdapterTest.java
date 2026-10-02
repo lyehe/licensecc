@@ -26,7 +26,7 @@ final class DeviceBoundAdapterTest {
         throw new AssertionError("Expected " + type.getName());
     }
     static DeviceBoundConfiguration configuration(String label) {
-        return new DeviceBoundConfiguration("invalid APPLICATION", "https://backend.invalid", "https://portal.invalid/authorize",
+        return new DeviceBoundConfiguration("invalid APPLICATION", "https://backend.invalid", "https://portal.invalid/connect",
             "issuer", "lease", "proof", "APP", "PRO", "desktop", label, "/callback",
             List.of(new DeviceBoundConfiguration.TrustedSigner(new byte[]{1}, false)));
     }

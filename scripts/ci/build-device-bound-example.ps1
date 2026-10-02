@@ -73,7 +73,7 @@ $generatorArguments = if (-not $Generator) { @() } elseif ($IsWindows -and $Gene
     "-DCMAKE_PREFIX_PATH=$resolvedInstallPrefix" "-Dlicensecc_DIR=$packageDirectory" `
     "-DLCC_PROJECT_NAME=test" "-DLCC_BOUND_EXAMPLE_TESTS=ON" `
     "-DLCC_BOUND_APPLICATION_ID=com.example.cad" "-DLCC_BOUND_ENDPOINT_ORIGIN=https://backend.test" `
-    "-DLCC_BOUND_PORTAL_URL=https://portal.test/authorize" "-DLCC_BOUND_ISSUER=https://issuer.test/" `
+    "-DLCC_BOUND_PORTAL_URL=https://portal.test/connect" "-DLCC_BOUND_ISSUER=https://issuer.test/" `
     "-DLCC_BOUND_LEASE_AUDIENCE=CAD-client" "-DLCC_BOUND_PROOF_AUDIENCE=proof-audience" `
     "-DLCC_BOUND_PROJECT=CAD" "-DLCC_BOUND_FEATURE=DEFAULT" "-DLCC_BOUND_CLIENT_ID=CAD-client" `
     "-DLCC_BOUND_SIGNING_SPKI=$key"

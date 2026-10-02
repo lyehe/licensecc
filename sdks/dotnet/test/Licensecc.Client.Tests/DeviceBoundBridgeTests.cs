@@ -13,7 +13,7 @@ namespace Licensecc.Client.Tests;
 public sealed unsafe class DeviceBoundBridgeTests
 {
     private static Configuration Config(string label="Workstation",TrustedSigner[]? keys=null,string project="CAD") =>
-        new("com.example.cad","https://backend.test","https://portal.test/authorize","https://issuer.test/",
+        new("com.example.cad","https://backend.test","https://portal.test/connect","https://issuer.test/",
             "CAD-client","proof-audience",project,"DEFAULT","CAD-client",label,keys??new[]{new TrustedSigner(new byte[]{1})});
 
     [TestMethod]

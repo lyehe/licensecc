@@ -19,7 +19,7 @@ from licensecc.device_bound import (
 
 def config(**changes):
     values = dict(application_id="bridge-test", endpoint_origin="https://license.example.test",
-                  portal_authorization_url="https://portal.example.test/authorize",
+                  portal_authorization_url="https://portal.example.test/connect",
                   issuer="https://license.example.test", lease_audience="desktop", proof_audience="desktop",
                   project="CAD", feature="DEFAULT", client_id="desktop", device_label="Workstation é",
                   trust_keys=(TrustedSigner(b"invalid-public-key"),))
