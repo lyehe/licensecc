@@ -622,3 +622,70 @@ test("a queued delivery outside its endpoint's current scope at send time is can
   ]);
   db.close();
 });
+
+// An endpoint PATCH that moves the URL or scope cancels the endpoint's queued deliveries, including
+// one whose request is already in flight. That request still goes to the old URL, the destination
+// in effect when the event was queued, so its outcome is the truth: an acknowledged send is recorded
+// as delivered, while a failed one stays canceled and is never retried to the new destination.
+function cancelMidFlight(db, endpointId) {
+  // The same transition the admin PATCH batches, applied while the request is in flight.
+  db.prepare(
+    "UPDATE webhook_deliveries SET status = 'canceled', last_error = 'endpoint_changed' " +
+      "WHERE endpoint_id = ? AND status IN ('pending', 'failed')",
+  ).run(endpointId);
+  db.prepare("UPDATE webhook_endpoints SET url = 'https://hook.test/moved' WHERE id = ?").run(endpointId);
+}
+
+test("a delivery acknowledged after a mid-flight cancellation is recorded as delivered", async () => {
+  const db = freshDb();
+  const env = { DB: new D1Like(db), ...SIGNING_ENV };
+  addEndpoint(db, "ep1");
+  addEntitlementEvent(db, "create", 100);
+  await enqueueWebhooks(env, 200);
+
+  const sent = [];
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    sent.push(String(url));
+    cancelMidFlight(db, "ep1");
+    return new Response(null, { status: 204 });
+  };
+  try {
+    await deliverWebhooks(env, 201, () => {});
+  } finally {
+    globalThis.fetch = orig;
+  }
+
+  assert.deepEqual(sent, ["https://hook.test/ep1"], "the in-flight request went to the queued destination");
+  const row = db.prepare("SELECT status, attempts, last_status, last_error, delivered_at FROM webhook_deliveries").get();
+  assert.deepEqual({ ...row }, { status: "delivered", attempts: 1, last_status: 204, last_error: "", delivered_at: 201 });
+  db.close();
+});
+
+test("a delivery that fails after a mid-flight cancellation stays canceled and is never retried", async () => {
+  const db = freshDb();
+  const env = { DB: new D1Like(db), ...SIGNING_ENV };
+  addEndpoint(db, "ep1");
+  addEntitlementEvent(db, "create", 100);
+  await enqueueWebhooks(env, 200);
+
+  const sent = [];
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    sent.push(String(url));
+    if (sent.length === 1) cancelMidFlight(db, "ep1");
+    return new Response("busy", { status: 503 });
+  };
+  try {
+    await deliverWebhooks(env, 201, () => {});
+    // Whatever the clock, the canceled row is never due again.
+    await deliverWebhooks(env, 201 + 100_000, () => {});
+  } finally {
+    globalThis.fetch = orig;
+  }
+
+  assert.deepEqual(sent, ["https://hook.test/ep1"], "nothing is retried to the new destination");
+  const row = db.prepare("SELECT status, attempts, last_error FROM webhook_deliveries").get();
+  assert.deepEqual({ ...row }, { status: "canceled", attempts: 0, last_error: "endpoint_changed" });
+  db.close();
+});
