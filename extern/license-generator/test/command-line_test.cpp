@@ -1,6 +1,7 @@
 #define BOOST_TEST_MODULE test_command_line
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <ctime>
 #include <string>
@@ -1706,6 +1707,93 @@ BOOST_AUTO_TEST_CASE(issue_license_help) {
 						"the removed license-version option is not documented in help " + stdout_str);
 	BOOST_CHECK_MESSAGE(stdout_str.find("Version 2.1.0.") != string::npos,
 						"standalone CLI reports the configured generator release version " + stdout_str);
+
+	// Option descriptions wrap at word boundaries, so compare them with whitespace collapsed.
+	string help_text;
+	for (const char ch : stdout_str) {
+		const bool space = isspace(static_cast<unsigned char>(ch)) != 0;
+		if (!space) {
+			help_text.push_back(ch);
+		} else if (!help_text.empty() && help_text.back() != ' ') {
+			help_text.push_back(' ');
+		}
+	}
+	BOOST_CHECK_MESSAGE(help_text.find("Format YYYY-MM-DD") != string::npos,
+						"dates are documented in the format the docs and the date error use " + help_text);
+	BOOST_CHECK_MESSAGE(help_text.find("YYYYMMDD") == string::npos,
+						"the compact date form is accepted but not advertised " + help_text);
+	BOOST_CHECK_MESSAGE(help_text.find("defaults to today") == string::npos,
+						"an omitted valid-from is not described as today " + help_text);
+	BOOST_CHECK_MESSAGE(help_text.find("interpreted as subfolders") != string::npos,
+						"the output option describes subfolders correctly " + help_text);
+}
+
+static void issue_license_capturing_stdout(const vector<string>& arguments, int& result, string& stdout_str) {
+	vector<const char*> argv;
+	for (const string& argument : arguments) {
+		argv.push_back(argument.c_str());
+	}
+	boost::test_tools::output_test_stream output;
+	{
+		cout_redirect guard(output.rdbuf());
+		result = CommandLineParser::parseCommandLine(static_cast<int>(argv.size()), argv.data());
+	}
+	stdout_str = output.str();
+}
+
+BOOST_AUTO_TEST_CASE(issue_license_reports_the_written_path_and_a_summary) {
+	const string project_name("TEST");
+	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
+	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_issue_summary");
+	const fs::path project_folder(projects_folder / project_name);
+	const fs::path private_key(project_folder / PRIVATE_KEY_FNAME);
+	const fs::path public_key(project_folder / "include" / "licensecc" / project_name / PUBLIC_KEY_INC_FNAME);
+	create_project(projects_folder, private_key, public_key, mock_source_folder, project_name);
+
+	const fs::path bound_license(projects_folder / "licenses" / "bound.lic");
+	const string client_signature = valid_client_signature();
+	int result = -1;
+	string stdout_str;
+	issue_license_capturing_stdout({"lcc", "license", "issue", "--" PARAM_PROJECT_FOLDER, project_folder.string(),
+									"--" PARAM_LICENSE_OUTPUT, bound_license.string(), "--" PARAM_FEATURE_NAMES,
+									"alpha,Beta", "--" PARAM_BEGIN_DATE, "20240102", "--" PARAM_EXPIRY_DATE,
+									"2035-12-31", "--" PARAM_CLIENT_SIGNATURE, client_signature},
+								   result, stdout_str);
+	BOOST_CHECK_EQUAL(result, 0);
+	BOOST_REQUIRE_MESSAGE(fs::exists(bound_license), "bound license written");
+	BOOST_CHECK_EQUAL(stdout_str, "License written to " + bound_license.string() +
+									  "\nProject TEST, features ALPHA,BETA, valid-from 2024-01-02, valid-to "
+									  "2035-12-31, bound to client signature " +
+									  client_signature + ".\n");
+
+	const fs::path open_license(projects_folder / "licenses" / "open.lic");
+	issue_license_capturing_stdout({"lcc", "license", "issue", "--" PARAM_PROJECT_FOLDER, project_folder.string(),
+									"--" PARAM_LICENSE_OUTPUT, open_license.string()},
+								   result, stdout_str);
+	BOOST_CHECK_EQUAL(result, 0);
+	BOOST_REQUIRE_MESSAGE(fs::exists(open_license), "unbound license written");
+	BOOST_CHECK_EQUAL(stdout_str, "License written to " + open_license.string() +
+									  "\nProject TEST, features TEST, valid-from not set, valid-to not set (no "
+									  "expiry), not bound to a client signature.\n");
+}
+
+BOOST_AUTO_TEST_CASE(issue_license_to_stdout_prints_only_the_license) {
+	const string project_name("TEST");
+	const fs::path mock_source_folder(fs::path(PROJECT_TEST_SRC_DIR) / "data" / "src");
+	const fs::path projects_folder(fs::path(PROJECT_TEST_TEMP_DIR) / "lcc_projects_issue_stdout");
+	const fs::path project_folder(projects_folder / project_name);
+	const fs::path private_key(project_folder / PRIVATE_KEY_FNAME);
+	const fs::path public_key(project_folder / "include" / "licensecc" / project_name / PUBLIC_KEY_INC_FNAME);
+	create_project(projects_folder, private_key, public_key, mock_source_folder, project_name);
+
+	int result = -1;
+	string stdout_str;
+	issue_license_capturing_stdout({"lcc", "license", "issue", "--" PARAM_PROJECT_FOLDER, project_folder.string()},
+								   result, stdout_str);
+	BOOST_CHECK_EQUAL(result, 0);
+	BOOST_CHECK_MESSAGE(stdout_str.rfind("[TEST]", 0) == 0, "the license is the whole output " + stdout_str);
+	BOOST_CHECK_MESSAGE(stdout_str.find("License written") == string::npos,
+						"no report is mixed into a license printed to stdout " + stdout_str);
 }
 
 /**
