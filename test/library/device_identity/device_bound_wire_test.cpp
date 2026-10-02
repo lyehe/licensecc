@@ -190,8 +190,8 @@ BOOST_AUTO_TEST_CASE(registration_refuses_comparison_codes_spelled_with_lookalik
 	// "Computer" in Cyrillic, "Delta-PC" in Greek, "workstation" in CJK, "Buero-PC" with u-umlaut and
 	// "DESKTOP-7Q2K1AB".
 	const std::string accepted[] = {"\xd0\x9a\xd0\xbe\xd0\xbc\xd0\xbf\xd1\x8c\xd1\x8e\xd1\x82\xd0\xb5\xd1\x80",
-									"\xce\x94\xce\xad\xce\xbb\xcf\x84\xce\xb1-PC", "\xe5\xb7\xa5\xe4\xbd\x9c\xe7\xab\x99",
-									"B\xc3\xbcro-PC", "DESKTOP-7Q2K1AB"};
+									"\xce\x94\xce\xad\xce\xbb\xcf\x84\xce\xb1-PC",
+									"\xe5\xb7\xa5\xe4\xbd\x9c\xe7\xab\x99", "B\xc3\xbcro-PC", "DESKTOP-7Q2K1AB"};
 	for (const auto& label : accepted) {
 		input.device_label = label;
 		BOOST_CHECK_MESSAGE(encode_bound_authorization(input, out), "label must be accepted: " << label);

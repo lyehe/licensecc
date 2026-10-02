@@ -5,6 +5,7 @@
 #include "bound_lease.hpp"
 #include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <stdexcept>
 #include <string_view>
 
@@ -126,7 +127,8 @@ void quoted(SensitiveVector& out, const std::string& text) {
 // The device-label rule, mirrored from the licensing backend (device_label.mjs) through the
 // generated bound_label_table.hpp. The approval page shows the label beside the comparison code, so
 // a label may not hold a control, format, line or paragraph separator, or default-ignorable code
-// point, and its comparison form may not hold anything shaped like a comparison code.
+// point, and its comparison form may not hold anything shaped like a comparison code, including one
+// spelled with look-alike characters from other scripts.
 template <std::size_t N>
 bool in_ranges(const bound_label_table::Range (&ranges)[N], std::uint32_t point) {
 	std::size_t low = 0;
@@ -142,6 +144,16 @@ bool in_ranges(const bound_label_table::Range (&ranges)[N], std::uint32_t point)
 	}
 	return false;
 }
+// A code point whose Unicode confusable prototype is a comparison-code character becomes that
+// character; any other code point is unchanged.
+std::uint32_t fold_confusable(std::uint32_t point) {
+	const auto* first = std::begin(bound_label_table::confusables);
+	const auto* last = std::end(bound_label_table::confusables);
+	const auto* found =
+		std::lower_bound(first, last, point,
+						 [](const bound_label_table::Fold& fold, std::uint32_t value) { return fold.point < value; });
+	return found != last && found->point == point ? static_cast<unsigned char>(found->to) : point;
+}
 bool hex_digit(char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
 // XXXX-XXXX-XXXX in hex digits of either case, which could tell the approver which code to match.
 bool holds_comparison_code(const std::string& form) {
@@ -155,8 +167,9 @@ bool holds_comparison_code(const std::string& form) {
 	return false;
 }
 // The label is already valid UTF-8, trimmed only at sequence boundaries. The comparison form folds
-// fullwidth ASCII to ASCII, maps every dash and space to '-' and collapses runs of '-'. It keeps
-// only what the code shape can match, so any other code point becomes a non-matching placeholder.
+// fullwidth ASCII to ASCII and each confusable of a comparison-code character to that character,
+// maps every dash and space to '-' and collapses runs of '-'. It keeps only what the code shape can
+// match, so any other code point becomes a non-matching placeholder.
 bool misleading_label(std::string_view label) {
 	namespace table = bound_label_table;
 	std::string form;
@@ -169,6 +182,7 @@ bool misleading_label(std::string_view label) {
 		i += size;
 		if (in_ranges(table::refused, point)) return true;
 		if (point >= table::fullwidth_first && point <= table::fullwidth_last) point -= table::fullwidth_offset;
+		point = fold_confusable(point);
 		if (in_ranges(table::separators, point)) {
 			if (form.empty() || form.back() != '-') form.push_back('-');
 		} else {

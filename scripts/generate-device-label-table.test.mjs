@@ -25,7 +25,8 @@ import {
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const committed = readFileSync(resolve(repositoryRoot, TABLE_PATH), "utf8");
 const committedConfusables = readFileSync(resolve(repositoryRoot, CONFUSABLES_PATH), "utf8");
-const CODE_ALPHABET = [..."-0123456789ABCDEFabcdef"];
+// The order the subset keeps: JavaScript enumerates the digit keys first.
+const CODE_ALPHABET = [..."0123456789ABCDEFabcdef-"];
 
 test("the committed native device-label table matches the backend rule", () => {
   assert.deepEqual(deviceLabelTableDrift(committed), []);
