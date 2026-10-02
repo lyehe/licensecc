@@ -485,3 +485,14 @@ test("root CMake requires OpenSSL 3.0 and the public-key template carries its ow
   assert.doesNotMatch(root, /VERSION_LESS_EQUAL 1\.0\.2/u);
   assert.match(template, /#define LCC_PUBLIC_KEY_ID/u);
 });
+
+test("the runtime library compiles against the OpenSSL 3.0 API with deprecated declarations hidden", () => {
+  const library = source("src/library/CMakeLists.txt");
+  const guard = library.indexOf("if(UNIX OR OPENSSL_FOUND)");
+  const definitions = library.indexOf("add_compile_definitions(OPENSSL_API_COMPAT=30000 OPENSSL_NO_DEPRECATED)");
+  const firstModule = library.indexOf("add_subdirectory(");
+  // Directory-scoped, before any runtime module, and only where the runtime uses OpenSSL.
+  assert.ok(guard !== -1 && definitions > guard && definitions < firstModule, "runtime OpenSSL API definitions");
+  // The vendored generator keeps its own OpenSSL usage unchanged.
+  assert.doesNotMatch(source("extern/license-generator/CMakeLists.txt"), /OPENSSL_NO_DEPRECATED/u);
+});
