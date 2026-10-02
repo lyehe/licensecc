@@ -49,7 +49,7 @@ jobs:
       - name: Install native dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build libssl-dev zlib1g-dev \
+          sudo apt-get install -y clang cmake ninja-build libssl-dev \
             libboost-dev libboost-test-dev libboost-filesystem-dev \
             libboost-iostreams-dev libboost-program-options-dev \
             libboost-system-dev libboost-thread-dev libboost-date-time-dev
@@ -82,7 +82,7 @@ jobs:
       - name: Install native dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build libssl-dev zlib1g-dev \
+          sudo apt-get install -y clang cmake ninja-build libssl-dev \
             libboost-dev libboost-test-dev libboost-filesystem-dev \
             libboost-iostreams-dev libboost-program-options-dev \
             libboost-system-dev libboost-thread-dev libboost-date-time-dev \
