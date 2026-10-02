@@ -16,7 +16,7 @@ async function prove(db, purpose, request, config) {
   const subjectId = purpose === "exchange" ? await boundSecretHash(request.attempt_handle) : request.binding_id;
   const subject = purpose === "exchange"
     ? await db.prepare("SELECT a.*,unixepoch() AS now FROM device_bound_authorizations a WHERE handle_hash=?").bind(subjectId).first()
-    : await db.prepare(`SELECT b.*,d.key_id,d.public_key_spki,d.customer_id,d.status AS device_status,unixepoch() AS now
+    : await db.prepare(`SELECT b.*,d.key_id,d.public_key_spki,d.customer_id,unixepoch() AS now
         FROM device_bound_bindings b JOIN device_bound_devices d ON d.id=b.device_id WHERE b.id=?`).bind(subjectId).first();
   if (!subject) deny(purpose === "exchange" ? "authorization_unavailable" : "binding_unavailable", 404);
   const challenge = await db.prepare("SELECT *,unixepoch() AS now FROM device_bound_challenges WHERE id=?").bind(request.proof.challenge_id).first();
@@ -39,10 +39,6 @@ async function prove(db, purpose, request, config) {
 
 async function authority(db, purpose, request, verified, operation) {
   const { subject } = verified;
-  // Any binding gets a renewal challenge, so a disconnected device (a retiring or released binding,
-  // or a disabled device) reaches this point. It learns only that it is disconnected, never the
-  // license or account state behind it.
-  if (purpose === "renew" && (subject.state !== "active" || subject.device_status !== "active")) deny("device_retired", 403);
   if (purpose === "exchange") {
     if (!["approved", "consumed"].includes(subject.status)) deny("authorization_unavailable", 404);
     const pkce = encodeBase64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(request.code_verifier))));
@@ -51,6 +47,15 @@ async function authority(db, purpose, request, verified, operation) {
     if (!operation && (subject.status !== "approved" || subject.expires_at <= subject.now || subject.code_expires_at <= subject.now)) deny("authorization_expired", 410);
     if (operation && (subject.status !== "consumed" || subject.consumed_operation_id !== request.operation_id
         || subject.consumed_invocation_id !== operation.invocation_id)) deny("authorization_unavailable", 404);
+  }
+  // A request for an existing binding, a renewal or a replayed exchange, can come from a disconnected
+  // device: any binding gets a renewal challenge, and a device keeps its exchange for the recovery
+  // window. A retiring or released binding, or a disabled device, learns only that it is
+  // disconnected, never the license or account state behind it.
+  if (operation || purpose === "renew") {
+    const bound = await db.prepare(`SELECT b.state,d.status AS device_status FROM device_bound_bindings b
+      JOIN device_bound_devices d ON d.id=b.device_id WHERE b.id=?`).bind(operation ? operation.binding_id : request.binding_id).first();
+    if (bound && (bound.state !== "active" || bound.device_status !== "active")) deny("device_retired", 403);
   }
   const entitlement = await db.prepare(`SELECT e.*,c.status AS customer_status,c.authority_revision AS customer_revision,unixepoch() AS now
     FROM entitlements e JOIN customers c ON c.id=e.customer_id
