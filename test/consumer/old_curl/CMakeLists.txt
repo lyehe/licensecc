@@ -4,8 +4,11 @@ cmake_minimum_required(VERSION 3.16)
 project(old_curl_consumer NONE)
 set(LCC_ENABLE_DEVICE_IDENTITY ON)
 set(LCC_ENABLE_LINUX_DESKTOP ON)
+include(CMakePackageConfigHelpers)
 set(package "${CMAKE_BINARY_DIR}/package")
-configure_file("${LCC_CONFIG_TEMPLATE}" "${package}/lib/cmake/licensecc-config.cmake" @ONLY)
+configure_package_config_file("${LCC_CONFIG_TEMPLATE}" "${package}/lib/cmake/licensecc-config.cmake"
+	INSTALL_DESTINATION lib/cmake
+	INSTALL_PREFIX "${package}")
 file(WRITE "${package}/licensecc/${PROJECT_NAME}/cmake/licensecc.cmake"
 	"add_library(licensecc::licensecc_static INTERFACE IMPORTED)\n")
 file(WRITE "${CMAKE_BINARY_DIR}/modules/FindCURL.cmake"

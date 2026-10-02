@@ -55,6 +55,10 @@ link its imported target:
    add_executable(my_application main.cpp)
    target_link_libraries(my_application PRIVATE licensecc::licensecc_static)
 
+A required component that is not installed fails ``find_package`` at once, and
+the error lists the installed components. A loaded component sets
+``licensecc_<component>_FOUND``.
+
 Configure the application with the install prefix and the directory containing
 ``licensecc-config.cmake``. From the Licensecc repository root, the Windows
 layout is:

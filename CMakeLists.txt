@@ -432,10 +432,13 @@ file(TO_CMAKE_PATH "${LCC_INCLUDE_DIR}" _lcc_include_dir_for_install)
 install(DIRECTORY "${_lcc_include_dir_for_install}" DESTINATION include/${PROJECT_NAME})
 unset(_lcc_include_dir_for_install)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION include)
-configure_file(src/cmake/licensecc-config.cmake
-	${CMAKE_BINARY_DIR}/licensecc-config.cmake @ONLY)
+include(CMakePackageConfigHelpers)
+# The package-config helpers provide check_required_components(), which fails find_package for a
+# required project component that is not installed.
+configure_package_config_file(src/cmake/licensecc-config.cmake
+	${CMAKE_BINARY_DIR}/licensecc-config.cmake
+	INSTALL_DESTINATION ${pkg_config_dest})
 install(FILES ${CMAKE_BINARY_DIR}/licensecc-config.cmake DESTINATION ${pkg_config_dest})
 
-include(CMakePackageConfigHelpers)
 write_basic_package_version_file(${CMAKE_BINARY_DIR}/licensecc-config-version.cmake COMPATIBILITY SameMajorVersion)
 install(FILES ${CMAKE_BINARY_DIR}/licensecc-config-version.cmake DESTINATION ${pkg_config_dest})
