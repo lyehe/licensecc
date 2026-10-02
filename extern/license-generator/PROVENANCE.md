@@ -37,4 +37,5 @@ The test fixtures that carry golden values use the 3072-bit
 in `test/cryptohelper_test.cpp`, and the v201 payloads under `test/data/v201/`,
 which `scripts/generate-v201-golden-vectors.mjs` in `licensecc` writes together
 with the runtime's `test/vectors/v201/`. The 1024-bit `test/data/private_key.rsa`
-remains only to prove that issuance refuses a weak project key.
+remains only to prove that issuance refuses a weak project key; the unused
+1024-bit `test/data/public_key.rsa` was removed.
