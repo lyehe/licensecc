@@ -78,12 +78,10 @@ BOOST_AUTO_TEST_CASE(verify_config_rejects_malformed_input) {
 	BOOST_CHECK_EQUAL(lcc_verify_config(&caller, nullptr, &info, &input, &decision, nullptr), LICENSE_MALFORMED);
 }
 
-BOOST_AUTO_TEST_CASE(config_verify_options_with_old_size_are_rejected) {
+BOOST_AUTO_TEST_CASE(config_verify_options_with_another_size_or_version_are_rejected) {
 	CallerInformations caller;
 	lcc_init_caller_informations(&caller);
 	LicenseInfo info{};
-	LccConfigDecision decision;
-	lcc_init_config_decision(&decision);
 
 	LccConfigInput input;
 	lcc_init_config_input(&input);
@@ -92,15 +90,26 @@ BOOST_AUTO_TEST_CASE(config_verify_options_with_old_size_are_rejected) {
 	input.config_bytes = bytes;
 	input.config_len = sizeof(bytes);
 
-	// The old config-options v2 struct size (before custom_limit_check was
-	// added) is no longer accepted; only the current size and version verify.
-	LccConfigVerifyOptions options;
-	lcc_init_config_verify_options(&options);
-	options.size = offsetof(LccConfigVerifyOptions, custom_limit_check);
-	options.version = 2;
+	// The size and version are exact-match: a truncated struct with the
+	// current version, or the current struct with any other version, fails
+	// closed before the token is read.
+	LccConfigVerifyOptions truncated;
+	lcc_init_config_verify_options(&truncated);
+	truncated.size = offsetof(LccConfigVerifyOptions, custom_limit_check);
+	LccConfigDecision truncated_decision;
+	lcc_init_config_decision(&truncated_decision);
+	BOOST_CHECK_EQUAL(lcc_verify_config(&caller, nullptr, &info, &input, &truncated_decision, &truncated),
+					  LICENSE_MALFORMED);
+	BOOST_CHECK_EQUAL(truncated_decision.decision, LCC_LICENSE_DECISION_DENY);
 
-	BOOST_CHECK_EQUAL(lcc_verify_config(&caller, nullptr, &info, &input, &decision, &options), LICENSE_MALFORMED);
-	BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
+	LccConfigVerifyOptions next_version;
+	lcc_init_config_verify_options(&next_version);
+	next_version.version = LCC_CONFIG_VERIFY_OPTIONS_VERSION + 1;
+	LccConfigDecision next_version_decision;
+	lcc_init_config_decision(&next_version_decision);
+	BOOST_CHECK_EQUAL(lcc_verify_config(&caller, nullptr, &info, &input, &next_version_decision, &next_version),
+					  LICENSE_MALFORMED);
+	BOOST_CHECK_EQUAL(next_version_decision.decision, LCC_LICENSE_DECISION_DENY);
 }
 
 BOOST_AUTO_TEST_CASE(config_verify_options_with_nonzero_reserved_are_rejected) {
