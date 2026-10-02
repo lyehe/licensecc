@@ -7,7 +7,8 @@
 //     and max-attempts (-> failed),
 //   - a fetch that THROWS/TIMES OUT never escapes the dispatcher,
 //   - fail-closed: no usable signing secret -> nothing is delivered (never sent unsigned),
-//   - the signature on a real delivery round-trips through verifyWebhookSignature.
+//   - the signature on a real delivery round-trips through verifyWebhookSignature,
+//   - a delivery outside its endpoint's current scope at send time is canceled, never sent.
 //
 // Requires node:sqlite (Node >= 22 with --experimental-sqlite). Run via `npm run test:sql`.
 
@@ -574,5 +575,50 @@ test("a delivery refused for its stored URL keeps its reason in the backend's st
   assert.equal(failed?.reason, "invalid_url");
   assert.equal(failed?.endpoint_id, "ep1");
   assert.doesNotMatch(lines.join("\n"), /receiver\.internal/u, "the stored URL never reaches the log");
+  db.close();
+});
+
+// Defence in depth for the admin PATCH cancellation: whatever moved an endpoint's scope after a
+// delivery was queued, the delivery pass re-checks the event against the endpoint's current scope
+// before signing, and cancels the delivery instead of sending it.
+test("a queued delivery outside its endpoint's current scope at send time is canceled, not sent", async () => {
+  const db = freshDb();
+  const env = { DB: new D1Like(db), ...SIGNING_ENV };
+  addEndpoint(db, "projP", { scopeKind: "project", scopeProject: "P" });
+  addEndpoint(db, "custC", { scopeKind: "customer", scopeCustomer: "cust_1" });
+  addEndpoint(db, "global");
+  addEntitlementEvent(db, "create", 100); // project P
+  addCustomerEvent(db, "cust_1", "disable", 101);
+  await enqueueWebhooks(env, 200);
+  assert.equal(countDeliveries(db), 4, "projP and custC one each, global both");
+
+  // The scopes move after the deliveries were queued, by a path that canceled nothing.
+  db.prepare("UPDATE webhook_endpoints SET scope_project = 'X' WHERE id = 'projP'").run();
+  db.prepare("UPDATE webhook_endpoints SET scope_customer_id = 'cust_2' WHERE id = 'custC'").run();
+
+  const sent = [];
+  const logs = [];
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    sent.push(String(url));
+    return new Response(null, { status: 204 });
+  };
+  try {
+    await deliverWebhooks(env, 201, (severity, event, fields) => logs.push({ severity, event, fields }));
+  } finally {
+    globalThis.fetch = orig;
+  }
+
+  assert.deepEqual(sent, ["https://hook.test/global", "https://hook.test/global"], "only the in-scope deliveries are sent");
+  for (const endpointId of ["projP", "custC"]) {
+    const row = db.prepare("SELECT status, last_error, attempts FROM webhook_deliveries WHERE endpoint_id = ?").get(endpointId);
+    assert.deepEqual({ ...row }, { status: "canceled", last_error: "endpoint_changed", attempts: 0 }, endpointId);
+  }
+  assert.equal(countDeliveries(db, "WHERE endpoint_id = 'global' AND status = 'delivered'"), 2);
+  const canceled = logs.filter((entry) => entry.event === "webhook.delivery_canceled");
+  assert.deepEqual(canceled.map((entry) => [entry.severity, entry.fields.endpoint_id, entry.fields.reason]).sort(), [
+    ["warn", "custC", "endpoint_changed"],
+    ["warn", "projP", "endpoint_changed"],
+  ]);
   db.close();
 });
