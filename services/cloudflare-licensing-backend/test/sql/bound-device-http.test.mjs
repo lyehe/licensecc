@@ -61,7 +61,8 @@ function fixture(t) {
   async function call(path,body,headers={}) {
     const response=await worker.fetch(new Request(`https://untrusted-host.test${path}`,{method:"POST",headers:{"content-type":"application/json","cf-connecting-ip":"127.0.0.2",...headers},body:typeof body==="string"?body:JSON.stringify(body)}),env);
     assert.equal(response.headers.get("cache-control"),"no-store");
-    return {status:response.status,headers:response.headers,body:await response.json()};
+    const text=await response.text();
+    return {status:response.status,headers:response.headers,body:JSON.parse(text),text};
   }
   return {sql,db,env,call,clock(value){now=value;}};
 }
@@ -162,6 +163,85 @@ test("retirement rejects already prepared renewal and cached exchange proofs wit
   const after=f.sql.prepare('SELECT * FROM device_bound_bindings').get();
   assert.equal(after.hold_until,before.hold_until);assert.equal(after.generation,before.generation+1);
   assert.equal(f.sql.prepare('SELECT count(*) n FROM device_bound_leases').get().n,1);
+});
+
+// Before the device proves its key, a renewal challenge may say only that the binding exists. Each
+// state below is applied to an enrolled binding; the reason for a refusal follows a verified proof.
+const RENEWAL_STATES={
+  "an active licence":{refusal:null},
+  "a suspended licence":{sql:"UPDATE entitlements SET status='disabled',revocation_seq=revocation_seq+1",refusal:[403,"access_denied"]},
+  "a revoked licence":{sql:"UPDATE entitlements SET status='revoked',revocation_seq=revocation_seq+1",refusal:[403,"access_denied"]},
+  "an expired licence":{sql:"UPDATE entitlements SET valid_until=1100",refusal:[403,"access_denied"]},
+  "a licence that has not started":{sql:"UPDATE entitlements SET valid_from=5000",refusal:[403,"access_denied"]},
+  "a suspended customer":{sql:"UPDATE customers SET status='disabled'",refusal:[403,"access_denied"]},
+  "a retiring binding":{retire:true,refusal:[403,"device_retired"]},
+  "a released binding":{retire:true,sql:"UPDATE device_bound_bindings SET state='released',revision=revision+1",refusal:[403,"device_retired"]},
+  "a disconnected device":{sql:"UPDATE device_bound_devices SET status='disabled'",refusal:[403,"device_retired"]},
+};
+const CHALLENGE_AT=4800; // after the enrolled binding's hold, so a retired binding may be released
+
+async function enrolledInState(t,state) {
+  const f=fixture(t),d=await enrollment(f);
+  const activated=await f.call("/v2/device-authorizations/exchange",await signed(f,d,"exchange"));
+  assert.equal(activated.status,200,JSON.stringify(activated.body));
+  const binding=f.sql.prepare("SELECT * FROM device_bound_bindings").get();
+  if(state.retire) await retireBoundBinding(f.db,"customer",{binding_id:binding.id,expected_revision:binding.revision,operation_id:boundRandomId(32)});
+  f.clock(CHALLENGE_AT);
+  if(state.sql) f.sql.exec(state.sql);
+  const generation=f.sql.prepare("SELECT generation FROM device_bound_bindings").get().generation;
+  return {f,d,renewal:{binding_id:binding.id,generation,operation_id:boundRandomId(32)}};
+}
+
+// Everything a caller can see of a response except its random values: status, every header, the
+// body's key order and value types, the length of each random value and the challenge lifetime.
+function challengeShape(response,now) {
+  const {ok,code,request_id,data}=response.body;
+  return {status:response.status,headers:[...response.headers],bytes:response.text.length,ok,code,request_id:request_id.length,
+    data:data&&{keys:Object.keys(data),challenge_id:data.challenge_id.length,nonce:data.nonce.length,lifetime:data.expires_at-now}};
+}
+
+test("before proof, a renewal challenge is the same for every licence, account and binding state",async t=>{
+  const shapes=new Map();
+  for(const [name,state] of Object.entries(RENEWAL_STATES)) {
+    const {f,renewal}=await enrolledInState(t,state);
+    const response=await f.call("/v2/device-challenges",{purpose:"renew",binding_id:renewal.binding_id,operation_id:renewal.operation_id});
+    shapes.set(name,challengeShape(response,CHALLENGE_AT));
+  }
+  const active=shapes.get("an active licence");
+  assert.equal(active.status,200);assert.equal(active.code,"challenge_created");
+  for(const [name,shape] of shapes) assert.deepEqual(shape,active,name);
+});
+
+test("after proof, a renewal refusal names the state that refused it",async t=>{
+  for(const [name,state] of Object.entries(RENEWAL_STATES)) {
+    const {f,d,renewal}=await enrolledInState(t,state);
+    const response=await f.call("/v2/device-leases/renew",await signed(f,d,"renew",renewal));
+    if(state.refusal===null) { assert.equal(response.status,200,`${name}: ${JSON.stringify(response.body)}`); continue; }
+    assert.deepEqual([response.status,response.body.code],state.refusal,name);
+    assert.deepEqual(Object.keys(response.body),["ok","code","request_id"],name);
+    assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_leases").get().n,1,`${name} issues no lease`);
+    assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace IN ('device-v2-device','device-v2-customer') AND window_start>=?").get(CHALLENGE_AT-60).n,0,
+      `${name} spends no verified budget`);
+  }
+});
+
+test("a disconnected device learns only that it is disconnected, never the licence or account state",async t=>{
+  for(const [name,state] of Object.entries(RENEWAL_STATES)) {
+    if(state.refusal?.[1]!=="device_retired") continue;
+    const {f,d,renewal}=await enrolledInState(t,state);
+    f.sql.exec("UPDATE entitlements SET status='revoked',revocation_seq=revocation_seq+1; UPDATE customers SET status='disabled'");
+    const response=await f.call("/v2/device-leases/renew",await signed(f,d,"renew",renewal));
+    assert.deepEqual([response.status,response.body.code],[403,"device_retired"],name);
+  }
+});
+
+test("a renewal challenge for an unknown binding is still a generic 404",async t=>{
+  const {f}=await enrolledInState(t,RENEWAL_STATES["an active licence"]);
+  const response=await f.call("/v2/device-challenges",{purpose:"renew",binding_id:boundRandomId(),operation_id:boundRandomId(32)});
+  assert.equal(response.status,404);
+  assert.deepEqual(Object.keys(response.body),["ok","code","request_id"]);
+  assert.equal(response.body.code,"binding_unavailable");
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_challenges WHERE purpose='renew'").get().n,0);
 });
 
 test("HTTP erased renewal results cannot be reissued after a database clock rollback",async t=>{
@@ -630,8 +710,8 @@ test("two feature entitlements share a device key but keep permissions and capac
   assert.equal(denied.status,409);assert.equal(denied.body.code,"device_limit_reached");
   f.clock(1200);
   f.sql.exec("UPDATE entitlements SET status='disabled',revocation_seq=revocation_seq+1 WHERE feature='BATCH_RUN'");
-  const batchDenied=await f.call("/v2/device-challenges",{purpose:"renew",binding_id:bindings[0],operation_id:boundRandomId(32)});
-  assert.equal(batchDenied.status,404);assert.equal(batchDenied.body.code,"binding_unavailable");
+  const batchDenied=await f.call("/v2/device-leases/renew",await signed(f,batch,"renew",{binding_id:bindings[0],generation:1,operation_id:boundRandomId(32)}));
+  assert.equal(batchDenied.status,403);assert.equal(batchDenied.body.code,"access_denied");
   const body={binding_id:bindings[1],generation:1,operation_id:boundRandomId(32)};
   const exportRenewal=await f.call("/v2/device-leases/renew",await signed(f,exporter,"renew",body));
   assert.equal(exportRenewal.status,200,JSON.stringify(exportRenewal.body));

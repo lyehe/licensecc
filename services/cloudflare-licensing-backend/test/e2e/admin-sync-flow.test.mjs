@@ -110,13 +110,14 @@ test("user database sync yields a protected grant that supports a signed exchang
   assert.equal(revoked.status, 200, JSON.stringify(revoked.body));
   assert.equal(revoked.body.data.status, "revoked");
   assert.equal((await authorize()).page.entitlements.length, 0);
-  // The already-enrolled binding cannot renew: the issuer refuses the proved renewal, and no new one can start.
+  // The already-enrolled binding cannot renew: the issuer refuses the proved renewal, and a new one
+  // gets a challenge (which says only that the binding exists) but is refused once proved.
   const refused = await send("/v2/device-leases/renew", pendingRenewal);
   assert.equal(refused.status, 403, JSON.stringify(refused.result));
   assert.equal(refused.result.code, "access_denied");
-  const unavailable = await send("/v2/device-challenges", { purpose: "renew", binding_id: bindingId, operation_id: boundRandomId(32) });
-  assert.equal(unavailable.status, 404, JSON.stringify(unavailable.result));
-  assert.equal(unavailable.result.code, "binding_unavailable");
+  const fresh = await send("/v2/device-leases/renew", await renewal());
+  assert.equal(fresh.status, 403, JSON.stringify(fresh.result));
+  assert.equal(fresh.result.code, "access_denied");
   assert.equal(db.prepare("SELECT count(*) AS n FROM device_bound_leases").get().n, 2, "only the exchange and the renewal before the revocation issued leases");
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
 });
@@ -124,7 +125,7 @@ test("user database sync yields a protected grant that supports a signed exchang
 // A revocation always applies, even when the owner can no longer pass the protected checks; the
 // device stays refused after the customer is restored, because the grant itself is revoked.
 test("a synced revocation applies after the customer is disabled, and the enrolled device cannot renew", async t => {
-  const { db, grant, sync, send, renewal, bindingId } = await enrolledSyncGrant(t);
+  const { db, grant, sync, send, renewal } = await enrolledSyncGrant(t);
   // Proved and challenged while the grant and its customer are still active.
   const pendingRenewal = await renewal();
   db.exec("UPDATE customers SET status='disabled' WHERE id='cus_sync'");
@@ -135,9 +136,9 @@ test("a synced revocation applies after the customer is disabled, and the enroll
   const refused = await send("/v2/device-leases/renew", pendingRenewal);
   assert.equal(refused.status, 403, JSON.stringify(refused.result));
   assert.equal(refused.result.code, "access_denied");
-  const unavailable = await send("/v2/device-challenges", { purpose: "renew", binding_id: bindingId, operation_id: boundRandomId(32) });
-  assert.equal(unavailable.status, 404, JSON.stringify(unavailable.result));
-  assert.equal(unavailable.result.code, "binding_unavailable");
+  const fresh = await send("/v2/device-leases/renew", await renewal());
+  assert.equal(fresh.status, 403, JSON.stringify(fresh.result));
+  assert.equal(fresh.result.code, "access_denied");
   assert.equal(db.prepare("SELECT count(*) AS n FROM device_bound_leases").get().n, 1, "only the exchange issued a lease");
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
 });

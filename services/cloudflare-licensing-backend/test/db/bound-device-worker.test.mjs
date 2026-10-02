@@ -161,7 +161,10 @@ for(const trial of [false,true])test(`actual local Worker and D1 execute ${trial
   assert.equal(retiringList.data.items[0].state,'retiring');assert.equal(retiringList.data.items[0].revision,persisted.revision);
   assert.equal(persisted.revision,binding.revision+1);
   assert.equal((await db.prepare("SELECT count(*) n FROM device_bound_events WHERE binding_id=? AND event_type='retire'").bind(retireInput.binding_id).first()).n,1);
-  assert.equal((await call('/v2/device-challenges',{purpose:'renew',binding_id:activated.data.binding_id,operation_id:boundRandomId(32)},404)).code,'binding_unavailable');
+  // The retired binding still gets a renewal challenge; its renewal is refused after proof.
+  const retiredRenewal={binding_id:activated.data.binding_id,generation:persisted.generation,operation_id:boundRandomId(32)};
+  assert.equal((await call('/v2/device-leases/renew',await signed('renew',retiredRenewal),403)).code,'device_retired');
+  assert.equal((await call('/v2/device-challenges',{purpose:'renew',binding_id:boundRandomId(),operation_id:boundRandomId(32)},404)).code,'binding_unavailable');
   const cancelAttempt=await call("/v2/device-authorizations",{client_id:"desktop",project:"APP",requested_feature:"DEFAULT",public_key_spki:spki,device_label:"Cancel test",redirect_uri:redirect,state:boundRandomId(32),code_challenge:encodeBase64url(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier)))),code_challenge_method:"S256"});
   const cancelInput={attempt_handle:cancelAttempt.data.attempt_handle,expected_attempt_revision:0,operation_id:boundRandomId(32)};
   for(const malformed of ["undefined","bigint","negative-zero","oversized"]) {

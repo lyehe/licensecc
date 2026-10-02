@@ -54,8 +54,10 @@ test("challenge issuance honors exclusive deadlines and consumed-operation recov
   assert.equal((await createBoundChallenge(f.db,input)).expires_at,173800);
   f.clock(173800);
   await assert.rejects(createBoundChallenge(f.db,input),/authorization_unavailable/);
+  // A disconnected device still gets a renewal challenge; its renewal is refused only after proof.
   f.sql.prepare("UPDATE device_bound_devices SET status='disabled' WHERE id=?").run(c.deviceId);
-  await assert.rejects(createBoundChallenge(f.db,renew),/binding_unavailable/);
+  assert.equal((await createBoundChallenge(f.db,renew)).expires_at,173860);
+  await assert.rejects(createBoundChallenge(f.db,{...renew,binding_id:boundRandomId()}),/binding_unavailable/);
 });
 
 test("pending challenge lifetime is clamped to the authorization deadline", async t => {
@@ -91,14 +93,19 @@ test("consumed challenge admission rejects missing, incomplete or unrelated oper
   }
 });
 
-test("renewal challenges reject current inactive or unsupported authority", async t => {
-  for (const mutation of ["UPDATE customers SET status='disabled'", "UPDATE entitlements SET status='disabled'", "UPDATE entitlements SET is_trial=1", "UPDATE entitlements SET valid_until=1000", "UPDATE entitlements SET valid_from=1001"]) {
+// Before proof a renewal challenge may reveal only that the binding exists, so current licence and
+// account authority is checked after proof, at renewal, and never at challenge admission.
+test("renewal challenges are issued whatever the current licence or account authority", async t => {
+  for (const mutation of ["UPDATE customers SET status='disabled'", "UPDATE entitlements SET status='disabled'", "UPDATE entitlements SET status='revoked'", "UPDATE entitlements SET is_trial=1", "UPDATE entitlements SET valid_until=1000", "UPDATE entitlements SET valid_from=1001"]) {
     const f=fixture(); t.after(()=>f.sql.close());
     const c={...candidate(),bindingId:boundRandomId()};
     c.responseJson=JSON.stringify({ok:true,code:"device_activated",request_id:c.operationId,data:{binding_id:c.bindingId,lease:c.token,expires_at:c.expiresAt}});
     seed(f,c); await commitBoundDeviceLease(f.db,c);
     f.sql.exec(mutation);
-    await assert.rejects(createBoundChallenge(f.db,{purpose:"renew",binding_id:c.bindingId,operation_id:boundRandomId(32)}),/binding_unavailable/);
+    const challenge=await createBoundChallenge(f.db,{purpose:"renew",binding_id:c.bindingId,operation_id:boundRandomId(32)});
+    assert.equal(challenge.expires_at,1060,mutation);
+    const row=f.sql.prepare("SELECT purpose,subject_id,key_id FROM device_bound_challenges WHERE id=?").get(challenge.challenge_id);
+    assert.deepEqual({...row},{purpose:"renew",subject_id:c.bindingId,key_id:c.keyId},mutation);
   }
 });
 
