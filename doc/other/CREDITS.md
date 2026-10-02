@@ -9,7 +9,7 @@ MIT License
 Copyright (c) 2013-2017 Niels Lohmann
 
 
-## [hwid generation](https://github.com/789sdf987s/hwid_generation)
+## [hwid generation](https://github.com/certifiedpaster/hwid_generation)
 Thanks for the great smbios parsing code. It saved me days.
 
 MIT License
