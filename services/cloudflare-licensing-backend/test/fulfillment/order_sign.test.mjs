@@ -211,7 +211,7 @@ test("--secret-b64=<value> is refused by name only: the value after = is never e
   assert.match(result.stderr, /unknown option --secret-b64\n/u);
   assert.equal(result.stdout, "");
   assert.ok(!result.stderr.includes(secretB64), "the refused value is never printed");
-  assert.ok(!result.stderr.includes("="), "not even the = form of the refused argument is printed");
+  assert.ok(!result.stderr.includes("--secret-b64="), "not even the = form of the refused argument is printed");
 });
 
 test("value options also take the --name=value form", async () => {

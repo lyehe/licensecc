@@ -281,12 +281,16 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   against the `customer.id` every event carries.
 - **Signing helper.** `npm run order:sign --workspace
   @licensecc/cloudflare-licensing-backend -- --key-id <id> --audience <aud>
-  --body order.json` prints the three headers, and a ready-to-run `curl` when
-  `--url <endpoint>` is added. It reads the base64 secret from the
+  --body /abs/path/order.json` prints the three headers, and a ready-to-run
+  `curl` when `--url <endpoint>` is added. It reads the base64 secret from the
   `ORDER_SIGNING_SECRET_B64` environment variable or from the file named by
-  `--secret-file <path>`, never from the command line. Without `--body` it
-  signs an order piped on standard input; a terminal on standard input gets the
-  usage and a non-zero exit instead of a silent wait.
+  `--secret-file <path>`, never from the command line. A workspace script runs
+  from `services/cloudflare-licensing-backend/`, so a relative
+  `--body` or `--secret-file` path resolves from there; pass absolute paths, or
+  run `node services/cloudflare-licensing-backend/scripts/order-sign.mjs` from
+  the directory the paths are relative to. Without `--body` it signs an order
+  piped on standard input; a terminal on standard input gets the usage and a
+  non-zero exit instead of a silent wait.
 - **No rollout selector.** HMAC verification and signer-scope authorization
   always apply; there is no dev-only bypass. `ORDER_INGEST_AUDIENCE` blocks
   cross-environment replay and is asserted non-empty. `ORDER_MAX_SKEW_SECONDS`

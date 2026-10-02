@@ -29,11 +29,16 @@ const USAGE =
   "usage: order-sign --key-id <id> --audience <aud> [--body <file>] [--timestamp <unix>] [--url <endpoint>] [--secret-file <path>]\n" +
   "  Signs an order body for POST /v1/orders.\n" +
   `  The base64 HMAC secret comes from ${SECRET_ENV} or from the file named by --secret-file, not both.\n` +
-  "  Without --body the order is read from standard input, which must be piped, not a terminal.\n";
+  "  Without --body the order is read from standard input, which must be piped, not a terminal.\n" +
+  "  An option takes its value as the next argument or as --name=value. Relative paths resolve\n" +
+  "  from the current directory.\n";
 
 class UsageError extends Error {}
 
-/** Parse argv strictly: only the known options, each value option exactly once and with a value. */
+/**
+ * Parse argv strictly: only the known options, each value option exactly once and with a value,
+ * given either as the next argument or as --name=value.
+ */
 function parseArgs(argv) {
   const options = {};
   for (let i = 0; i < argv.length; i += 1) {
@@ -42,15 +47,22 @@ function parseArgs(argv) {
       options.help = true;
       continue;
     }
-    const name = arg.startsWith("--") ? arg.slice(2) : null;
-    // Name only the option, never its value: a refused value may be a secret.
-    if (name === null) throw new UsageError(`unexpected argument at position ${i + 1}`);
+    // Name only the option, never its value (whether the next argument or after =): a refused value
+    // may be a secret.
+    if (!arg.startsWith("--")) throw new UsageError(`unexpected argument at position ${i + 1}`);
+    const equals = arg.indexOf("=");
+    const name = equals === -1 ? arg.slice(2) : arg.slice(2, equals);
     if (!VALUE_OPTIONS.has(name)) throw new UsageError(`unknown option --${name}`);
     if (Object.hasOwn(options, name)) throw new UsageError(`--${name} is given more than once`);
-    const value = argv[i + 1];
-    if (value === undefined || value.startsWith("--")) throw new UsageError(`--${name} needs a value`);
+    let value;
+    if (equals !== -1) {
+      value = arg.slice(equals + 1);
+    } else {
+      value = argv[i + 1];
+      i += 1;
+    }
+    if (value === undefined || value === "" || value.startsWith("--")) throw new UsageError(`--${name} needs a value`);
     options[name] = value;
-    i += 1;
   }
   return options;
 }
@@ -60,7 +72,11 @@ function readSecret(options, env, readFile) {
   const hasEnv = typeof fromEnv === "string" && fromEnv.trim() !== "";
   const file = options["secret-file"];
   if (hasEnv && file !== undefined) throw new UsageError(`set ${SECRET_ENV} or pass --secret-file, not both`);
-  if (file !== undefined) return readFile(file).trim();
+  if (file !== undefined) {
+    const secret = readFile(file).trim();
+    if (secret === "") throw new Error("secret file is empty");
+    return secret;
+  }
   if (hasEnv) return fromEnv.trim();
   throw new UsageError(`no signing secret: set ${SECRET_ENV} or pass --secret-file <path>`);
 }
