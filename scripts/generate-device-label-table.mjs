@@ -505,7 +505,7 @@ async function main() {
       source = CONFUSABLES_SOURCE;
       const digest = confusablesSubsetSha256(subset);
       if (digest !== CONFUSABLES_SUBSET_SHA256) {
-        throw new Error(`the subset derived from confusables.txt ${source.unicode} has SHA-256 ${digest}, not the pinned ${CONFUSABLES_SUBSET_SHA256}; review the difference and change CONFUSABLES_SUBSET_SHA256 with it`);
+        throw new Error(`the subset derived from confusables.txt ${source.unicode} has SHA-256 ${digest}, not the pinned ${CONFUSABLES_SUBSET_SHA256}; inspect what changed and update CONFUSABLES_SUBSET_SHA256 with it`);
       }
       writeFileSync(subsetPath, renderConfusablesModule(subset, source));
       console.log(`Wrote ${CONFUSABLES_PATH} from confusables.txt ${source.unicode} (SHA-256 ${source.sha256}).`);
