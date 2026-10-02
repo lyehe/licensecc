@@ -45,3 +45,11 @@ export function safeWebhookUrl(value) {
  * one of these; the admin Worker relays nothing else.
  */
 export const WEBHOOK_TEST_STATUS_CLASSES = Object.freeze(/** @type {const} */ (["2xx", "3xx", "4xx", "5xx", "network_error"]));
+
+/**
+ * The reason recorded on a delivery canceled because its endpoint's URL or scope changed after it
+ * was queued: an event is delivered only under the destination in effect when it was queued. The
+ * admin Worker writes it when a PATCH moves the destination; the backend writes it when its delivery
+ * pass finds the event outside the endpoint's current scope.
+ */
+export const WEBHOOK_ENDPOINT_CHANGED = "endpoint_changed";

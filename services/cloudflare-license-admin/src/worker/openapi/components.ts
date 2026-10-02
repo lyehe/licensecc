@@ -803,7 +803,7 @@ export const openApiComponents: LabeledComponentFragment = {
           event_source: { type: "string", enum: ["entitlement", "customer", "order"] },
           event_id: { type: "integer" },
           event_type: { type: "string" },
-          status: { type: "string", enum: ["pending", "delivered", "failed"] },
+          status: { type: "string", enum: ["pending", "delivered", "failed", "canceled"], description: "canceled: never sent, because the endpoint URL or scope changed after the delivery was queued (last_error endpoint_changed)." },
           attempts: { type: "integer" },
           last_status: { type: "integer", description: "HTTP status of the last attempt (0 if never attempted)." },
           last_error: { type: "string" },

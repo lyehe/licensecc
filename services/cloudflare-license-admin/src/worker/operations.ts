@@ -44,11 +44,11 @@ import { listPolicies, getPolicy, handlePolicyMutation } from "./groups/policies
 import {
   getWebhook,
   handleWebhookMutation,
-  listWebhookDeliveries,
   listWebhooks,
   validateWebhookInput,
   validateWebhookPatch,
 } from "./webhooks.js";
+import { listWebhookDeliveries } from "./groups/webhooks/deliveries.js";
 import { sendWebhookTest } from "./groups/webhooks/test-send.js";
 import { validatePolicyInput, validatePolicyPatch } from "./policy_validation.js";
 import { validateEntitlementInput, validateEntitlementPatch } from "./groups/entitlements/validation.js";

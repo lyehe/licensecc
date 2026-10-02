@@ -76,7 +76,7 @@ export const webhookPaths: LabeledPathFragment = {
       operationId: "listWebhookDeliveries",
       security: ADMIN_SECURITY,
       parameters: [
-        { name: "status", in: "query", required: false, description: "Exact-match delivery status filter.", schema: { type: "string", enum: ["pending", "delivered", "failed"] } },
+        { name: "status", in: "query", required: false, description: "Exact-match delivery status filter.", schema: { type: "string", enum: ["pending", "delivered", "failed", "canceled"] } },
         { name: "endpoint_id", in: "query", required: false, description: "Filter to one endpoint id (max 128 chars).", schema: { type: "string", maxLength: 128 } },
         ...limitCursorParams(),
       ],
@@ -104,7 +104,7 @@ export const webhookPaths: LabeledPathFragment = {
         "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No delivery with that id.", "not_found"),
-        "409": errorResponse("Delivery is not in the 'failed' status (only failed deliveries can be redriven).", "webhook_delivery_not_failed"),
+        "409": errorResponse("Delivery is not in the 'failed' status (only failed deliveries can be redriven), or was canceled because its endpoint URL or scope changed after it was queued.", "webhook_delivery_not_failed", "webhook_delivery_canceled"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },
@@ -126,6 +126,7 @@ export const webhookPaths: LabeledPathFragment = {
     patch: {
       tags: ["admin:webhooks"],
       summary: "Update a webhook endpoint's url / event_types / description / scope (admin-only)",
+      description: "An event is delivered only under the endpoint URL and scope in effect when it was queued. A PATCH that changes url or any scope field therefore cancels, in the same batch, every delivery of the endpoint still pending or failed (status canceled, last_error endpoint_changed). A PATCH that resends the stored values, or changes only event_types or description, cancels nothing.",
       operationId: "patchWebhook",
       security: ADMIN_SECURITY,
       parameters: [idParam, idempotencyKeyHeader],

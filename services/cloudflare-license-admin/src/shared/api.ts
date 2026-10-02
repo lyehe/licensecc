@@ -351,7 +351,7 @@ export interface WebhookEndpointPatch {
   scope_customer_id?: string;
 }
 
-export type WebhookDeliveryStatus = "pending" | "delivered" | "failed";
+export type WebhookDeliveryStatus = "pending" | "delivered" | "failed" | "canceled";
 export type WebhookEventSource = "entitlement" | "customer" | "order";
 
 export interface WebhookDelivery {

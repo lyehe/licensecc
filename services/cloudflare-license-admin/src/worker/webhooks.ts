@@ -1,10 +1,10 @@
 // ── Webhook endpoint domain module (extracted from index.ts) ──────────────────
-// CRUD over webhook_endpoints (the dispatcher's config rows) + a read/redrive view over
-// webhook_deliveries (the cron-drained outbox). Reads are reader+admin; writes require
-// requireAdmin. The signing secret is NEVER stored or surfaced here — it lives only in the
-// Worker-env WEBHOOK_SIGNING_SECRETS map. There is no webhook audit table, so create/patch/
-// disable/reenable are single-statement RETURNING mutations (idempotent), NOT a write+audit
-// batch (audit "where applicable" — it is not applicable to a config row with no event log).
+// CRUD over webhook_endpoints (the dispatcher's config rows); the delivery list, redrive and the
+// queue cancellation an endpoint PATCH batches live in groups/webhooks/deliveries.ts. Reads are
+// reader+admin; writes require requireAdmin. The signing secret is NEVER stored or surfaced here —
+// it lives only in the backend's WEBHOOK_SIGNING_SECRETS map. Disable/reenable write their
+// webhook_events audit row in the same batch as the flip. Create is a RETURNING insert; a PATCH is
+// a RETURNING update, batched with the cancellation when it moves the endpoint's URL or scope.
 
 import { envelope } from "./responses.js";
 import {
@@ -17,6 +17,8 @@ import type { Env } from "./env.js";
 import { parseJsonBody, safeNotes } from "./request.js";
 import { boundedCursor } from "./query.js";
 import { transitionWithGuard } from "./transitions.js";
+import { cancelQueuedDeliveries, redriveWebhookDelivery, WEBHOOK_DELIVERY_COLUMNS } from "./groups/webhooks/deliveries.js";
+import { batchReturnedRow } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type { D1PreparedStatementLike, Actor, MutationContext } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type {
   WebhookEndpoint,
@@ -170,8 +172,6 @@ export function validateWebhookPatch(value: unknown): WebhookEndpointPatch | "in
 
 const WEBHOOK_ENDPOINT_COLUMNS =
   "id, url, event_types, status, description, created_at, updated_at, scope_kind, scope_project, scope_customer_id";
-const WEBHOOK_DELIVERY_COLUMNS =
-  "id, endpoint_id, event_source, event_id, event_type, status, attempts, last_status, last_error, next_attempt_at, created_at, delivered_at";
 
 async function findWebhookEndpoint(env: Env, endpointId: string): Promise<WebhookEndpoint | null> {
   return env.DB.prepare(`SELECT ${WEBHOOK_ENDPOINT_COLUMNS} FROM webhook_endpoints WHERE id = ? LIMIT 1`)
@@ -215,43 +215,6 @@ export async function getWebhook(env: Env, endpointId: string, requestIdValue: s
     `SELECT ${WEBHOOK_DELIVERY_COLUMNS} FROM webhook_deliveries WHERE endpoint_id = ? ORDER BY id DESC LIMIT 50`,
   ).bind(endpointId).all();
   return envelope(requestIdValue, "webhook", { endpoint, deliveries: deliveries.results });
-}
-
-// Delivery status view: filter by status / endpoint_id, cursor-paginated. Read-only; the
-// payload_json body is deliberately NOT selected (operators see metadata, not the full body).
-export async function listWebhookDeliveries(request: Request, env: Env, requestIdValue: string): Promise<Response> {
-  const url = new URL(request.url);
-  const filters: string[] = [];
-  const values: unknown[] = [];
-  const status = url.searchParams.get("status");
-  if (status === "pending" || status === "delivered" || status === "failed") {
-    filters.push("status = ?");
-    values.push(status);
-  } else if (status !== null && status !== "") {
-    return envelope(requestIdValue, "invalid_request", undefined, 400);
-  }
-  const endpointId = url.searchParams.get("endpoint_id");
-  if (endpointId !== null && endpointId !== "") {
-    if (endpointId.length > 128) {
-      return envelope(requestIdValue, "invalid_request", undefined, 400);
-    }
-    filters.push("endpoint_id = ?");
-    values.push(endpointId);
-  }
-  const pagination = boundedCursor(url);
-  if (pagination === null) {
-    return envelope(requestIdValue, "invalid_request", undefined, 400);
-  }
-  const { limit, cursor } = pagination;
-  const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
-  values.push(limit + 1, cursor);
-  const rows = await env.DB.prepare(
-    `SELECT ${WEBHOOK_DELIVERY_COLUMNS} FROM webhook_deliveries ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
-  ).bind(...values).all();
-  return envelope(requestIdValue, "webhook_deliveries_listed", {
-    items: rows.results.slice(0, limit),
-    next_cursor: rows.results.length > limit ? String(cursor + limit) : null,
-  });
 }
 
 async function handleWebhookCreate(request: Request, env: Env, actor: Actor, body: unknown, requestIdValue: string): Promise<Response> {
@@ -341,25 +304,28 @@ async function handleWebhookPatch(request: Request, env: Env, actor: Actor, endp
       return envelope(requestIdValue, "invalid_request", undefined, 400);
     }
     const assignments: string[] = [];
-    const values: unknown[] = [];
+    const stored: Record<string, string | null> = {};
     for (const field of ["url", "event_types", "description", "scope_kind", "scope_project", "scope_customer_id"] as const) {
-      const value = (patch as Record<string, unknown>)[field];
+      const value = patch[field];
       if (value !== undefined) {
         // A blank scope value clears it (NULL); other fields store their string.
         const isScope = field === "scope_project" || field === "scope_customer_id";
         assignments.push(`${field} = ?`);
-        values.push(isScope && value === "" ? null : value);
+        stored[field] = isScope && value === "" ? null : value;
       }
     }
     const now = Math.floor(Date.now() / 1000);
     // Always bump updated_at (even on an empty patch) so the list ordering reflects the touch.
     assignments.push("updated_at = ?");
-    values.push(now, endpointId);
+    const update = env.DB.prepare(`UPDATE webhook_endpoints SET ${assignments.join(", ")} WHERE id = ? RETURNING ${WEBHOOK_ENDPOINT_COLUMNS}`)
+      .bind(...Object.values(stored), now, endpointId);
+    // Moving the URL or scope cancels the queue under the old destination, in the same batch.
+    const cancel = cancelQueuedDeliveries(env, endpointId, stored);
     let row: WebhookEndpoint | null;
     try {
-      row = await env.DB.prepare(
-        `UPDATE webhook_endpoints SET ${assignments.join(", ")} WHERE id = ? RETURNING ${WEBHOOK_ENDPOINT_COLUMNS}`,
-      ).bind(...values).first<WebhookEndpoint>();
+      if (cancel === null) row = await update.first<WebhookEndpoint>();
+      else if (typeof env.DB.batch !== "function") return envelope(requestIdValue, "mutation_failed", undefined, 500);
+      else row = batchReturnedRow<WebhookEndpoint>((await env.DB.batch([cancel, update]))[1]);
     } catch {
       return envelope(requestIdValue, "mutation_failed", undefined, 500);
     }
@@ -418,43 +384,6 @@ async function handleWebhookTransition(request: Request, env: Env, actor: Actor,
   );
 }
 
-// Redrive: reset a 'failed' delivery back to 'pending' with next_attempt_at = now so the next
-// cron tick re-attempts it. A guarded UPDATE (status = 'failed' in the WHERE) makes this safe
-// and idempotent: a delivery already pending/delivered is a 409, never silently re-queued.
-async function handleWebhookRedrive(request: Request, env: Env, actor: Actor, deliveryId: number, requestIdValue: string): Promise<Response> {
-  const idempotencyKey = readIdempotencyKey(request);
-  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
-    return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
-  }
-  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
-  return mutationResponse(request, env, ctx, "webhook_delivery_redriven", async () => {
-    const existing = await env.DB.prepare(
-      `SELECT ${WEBHOOK_DELIVERY_COLUMNS} FROM webhook_deliveries WHERE id = ? LIMIT 1`,
-    ).bind(deliveryId).first<{ status: string }>();
-    if (existing === null) {
-      return envelope(requestIdValue, "not_found", undefined, 404);
-    }
-    if (existing.status !== "failed") {
-      return envelope(requestIdValue, "webhook_delivery_not_failed", { status: existing.status }, 409);
-    }
-    const now = Math.floor(Date.now() / 1000);
-    let row: Record<string, unknown> | null;
-    try {
-      row = await env.DB.prepare(
-        `UPDATE webhook_deliveries SET status = 'pending', attempts = 0, last_error = '', next_attempt_at = ?
-         WHERE id = ? AND status = 'failed' RETURNING ${WEBHOOK_DELIVERY_COLUMNS}`,
-      ).bind(now, deliveryId).first<Record<string, unknown>>();
-    } catch {
-      return envelope(requestIdValue, "mutation_failed", undefined, 500);
-    }
-    if (row === null) {
-      // Lost the guarded race — status changed between the pre-read and the UPDATE.
-      return envelope(requestIdValue, "webhook_delivery_not_failed", undefined, 409);
-    }
-    return { data: row, idempotencyRecorded: false };
-  });
-}
-
 // Dispatch the webhook writes (POST create, POST deliveries/:id/redrive, PATCH :id,
 // POST :id/disable|reenable). All require the admin role so reader RBAC blocks every write.
 // The /deliveries/:id/redrive route is matched BEFORE the generic /webhooks/:id regex.
@@ -474,7 +403,7 @@ export async function handleWebhookMutation(request: Request, env: Env, actor: A
   // Redrive lives under /deliveries/:id/redrive — match it before the endpoint :id regex.
   const redrive = /^\/api\/admin\/webhooks\/deliveries\/(\d+)\/redrive$/.exec(url.pathname);
   if (request.method === "POST" && redrive !== null) {
-    return handleWebhookRedrive(request, env, actor, Number(redrive[1]), requestIdValue);
+    return redriveWebhookDelivery(request, env, actor, Number(redrive[1]), requestIdValue);
   }
   const match = /^\/api\/admin\/webhooks\/([^/]+)(?:\/(disable|reenable))?$/.exec(url.pathname);
   if (match === null) {

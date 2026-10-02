@@ -3208,10 +3208,12 @@
               "type": "integer"
             },
             "status": {
+              "description": "canceled: never sent, because the endpoint URL or scope changed after the delivery was queued (last_error endpoint_changed).",
               "enum": [
                 "pending",
                 "delivered",
-                "failed"
+                "failed",
+                "canceled"
               ],
               "type": "string"
             }
@@ -16425,6 +16427,7 @@
           ]
         },
         "patch": {
+          "description": "An event is delivered only under the endpoint URL and scope in effect when it was queued. A PATCH that changes url or any scope field therefore cancels, in the same batch, every delivery of the endpoint still pending or failed (status canceled, last_error endpoint_changed). A PATCH that resends the stored values, or changes only event_types or description, cancels nothing.",
           "operationId": "patchWebhook",
           "parameters": [
             {
@@ -17529,7 +17532,8 @@
                 "enum": [
                   "pending",
                   "delivered",
-                  "failed"
+                  "failed",
+                  "canceled"
                 ],
                 "type": "string"
               }
@@ -17881,6 +17885,13 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "webhook_delivery_canceled": {
+                      "value": {
+                        "code": "webhook_delivery_canceled",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
                     "webhook_delivery_not_failed": {
                       "value": {
                         "code": "webhook_delivery_not_failed",
@@ -17894,7 +17905,7 @@
                   }
                 }
               },
-              "description": "Delivery is not in the 'failed' status (only failed deliveries can be redriven)."
+              "description": "Delivery is not in the 'failed' status (only failed deliveries can be redriven), or was canceled because its endpoint URL or scope changed after it was queued."
             },
             "413": {
               "content": {

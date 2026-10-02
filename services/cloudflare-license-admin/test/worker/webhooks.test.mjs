@@ -107,6 +107,21 @@ class WebhookRowDb {
   constructor(row) {
     this.row = { ...row };
     this.updates = 0;
+    this.cancellations = 0;
+  }
+
+  // A PATCH that moves the URL or scope batches the queue cancellation before the endpoint UPDATE.
+  async batch(statements) {
+    const results = [];
+    for (const statement of statements) {
+      if (statement.sql.trimStart().startsWith("UPDATE webhook_deliveries")) {
+        this.cancellations += 1;
+        results.push({ results: [] });
+      } else {
+        results.push({ results: [await statement.first()] });
+      }
+    }
+    return results;
   }
 
   prepare(sql) {
@@ -213,4 +228,20 @@ test("patching a webhook checks the full resulting scope", async () => {
   assert.equal(body.data.scope_kind, "customer");
   assert.equal(body.data.scope_project, null);
   assert.equal(body.data.scope_customer_id, "cus_1");
+  assert.equal(db.cancellations, 1, "moving the scope cancels the queue in the PATCH's batch");
+});
+
+test("a webhook PATCH that names no URL or scope field writes no queue cancellation", async () => {
+  const db = new WebhookRowDb(storedWebhookRow({ event_types: "create" }));
+  const response = await worker.fetch(
+    authed("/api/admin/webhooks/wh_retired", {
+      method: "PATCH",
+      headers: { "idempotency-key": "webhook-patch-description-only" },
+      body: JSON.stringify({ description: "renamed", event_types: "create,revoke" }),
+    }),
+    baseEnv(db),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(db.updates, 1);
+  assert.equal(db.cancellations, 0);
 });

@@ -496,6 +496,17 @@ database refuses both on its own: a `CHECK` on the scope and two triggers on
 `event_types`. Create and PATCH refuse a body naming any other field with 400
 `invalid_request`.
 
+An event is delivered only under the endpoint URL and scope in effect when it
+was queued. A PATCH that changes `url` or any scope field cancels, in the same
+batch as the change, every delivery of that endpoint that is still `pending`
+or `failed`: its status becomes `canceled` and its `last_error` the reason
+`endpoint_changed`. A PATCH that resends the stored values, or changes only
+`event_types` or `description`, cancels nothing. Redrive refuses a canceled
+delivery with 409 `webhook_delivery_canceled`, and the backend's delivery pass
+also re-checks each event against the endpoint's current scope before sending
+it, canceling it the same way when it no longer matches. The console's
+delivery list says why a delivery was canceled.
+
 Entitlements:
 
 - `GET /api/admin/entitlements`

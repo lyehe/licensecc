@@ -100,6 +100,7 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   webhook_reenabled: done("Webhook endpoint is active again."),
   webhook_delivery_redriven: done("Delivery queued for another attempt."),
   webhook_delivery_not_failed: failed("Only a failed delivery can be retried."),
+  webhook_delivery_canceled: failed("This delivery was canceled because the endpoint's address or scope changed after it was queued, so it can't be retried."),
   webhook_status_conflict: failed(`The endpoint's status changed. ${REFRESH_AND_RETRY}`),
   webhook_test_sent: done("Test event sent."),
   webhook_operator_not_configured: failed("Sending test events is not set up for this admin console yet."),

@@ -141,7 +141,7 @@ export const mutationFailurePolicies = {
   webhookRedrive: documentedMutationPolicy(
     { status: 400, codes: invalidRequest },
     { status: 404, codes: ["not_found"] },
-    { status: 409, codes: ["webhook_delivery_not_failed"] },
+    { status: 409, codes: ["webhook_delivery_not_failed", "webhook_delivery_canceled"] },
   ),
   catalogFeatureCreate: documentedMutationPolicy(
     { status: 400, codes: invalidRequest },
@@ -464,7 +464,7 @@ export function hasWebhookDeliveryListData(value: unknown): boolean {
     const row = record(item);
     return row !== null && nonNegativeIntegerField(row, "id") && stringField(row, "endpoint_id") && nonNegativeIntegerField(row, "event_id") &&
       enumField(row, "event_source", ["entitlement", "customer", "order"] as const) && stringField(row, "event_type") &&
-      enumField(row, "status", ["pending", "delivered", "failed"] as const) && nonNegativeIntegerField(row, "attempts") &&
+      enumField(row, "status", ["pending", "delivered", "failed", "canceled"] as const) && nonNegativeIntegerField(row, "attempts") &&
       integerInRangeField(row, "last_status", 0, 999) && typeof row.last_error === "string" &&
       nonNegativeIntegerField(row, "next_attempt_at") && nonNegativeIntegerField(row, "created_at") &&
       nullableIntegerInRangeField(row, "delivered_at", 0, Number.MAX_SAFE_INTEGER);
