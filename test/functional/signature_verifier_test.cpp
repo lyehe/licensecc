@@ -222,7 +222,11 @@ static license::os::SignatureVerificationRequest v201_golden_request(
 	const vector<uint8_t> public_key_der = hex_to_bytes(read_v201_fixture("public_key.pkcs1.der.hex"));
 	BOOST_CHECK_EQUAL(license::os::public_key_id_from_der(public_key_der), compact_ascii_whitespace(read_v201_fixture("public_key.id")));
 	BOOST_CHECK_EQUAL(compact_ascii_whitespace(read_v201_fixture(name + ".expected-result")), "FUNC_RET_OK");
+	// The golden key must meet the same floor the runtime applies to every v201 license.
+	BOOST_CHECK_GE(license::os::rsa_public_key_bits_from_pkcs1_der(public_key_der),
+				   license::os::current_v201_signature_policy().min_public_key_bits);
 
+	// The runtime's v201 policy, with the golden key in place of the embedded project key ring.
 	license::os::SignatureVerificationRequest request;
 	request.payload = payload.bytes;
 	request.signature = unbase64(signature_b64);
@@ -230,8 +234,10 @@ static license::os::SignatureVerificationRequest v201_golden_request(
 	request.declared_algorithm = license::os::LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256;
 	request.key_id = kGoldenV201KeyId;
 	request.license_version = 201;
-	request.policy.license_version = 201;
-	request.policy.allowed_algorithms.push_back(license::os::LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256);
+	request.policy = license::os::current_v201_signature_policy();
+	request.policy.public_keys.clear();
+	request.policy.allowed_key_ids.clear();
+	request.policy.retired_key_ids.clear();
 	request.policy.allowed_key_ids.push_back(kGoldenV201KeyId);
 	request.policy.allow_external_public_key_der = true;
 	return request;
@@ -604,8 +610,8 @@ BOOST_AUTO_TEST_CASE(additional_ring_key_verifies_and_retired_id_is_refused) {
 	request.policy.public_keys.push_back(license::os::SignaturePublicKey(
 		license::os::embedded_public_key_id(), license::os::embedded_public_key_der(),
 		license::os::embedded_public_key_bits()));
-	request.policy.public_keys.push_back(
-		license::os::SignaturePublicKey(kGoldenV201KeyId, additional_key_der, 1024));
+	request.policy.public_keys.push_back(license::os::SignaturePublicKey(
+		kGoldenV201KeyId, additional_key_der, license::os::rsa_public_key_bits_from_pkcs1_der(additional_key_der)));
 
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_OK);
 
