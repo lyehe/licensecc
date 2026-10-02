@@ -388,6 +388,23 @@ test("native public API documents offline licences and protected sessions only",
   assert.doesNotMatch(backendReadme, /lcc_acquire_license_decision|persisted revocation sequence/iu);
   assert.match(backendReadme, /C\+\+ client runtime\s+provides conditional Windows Platform KSP and Ubuntu TPM2\/OpenSSL provider\s+surfaces/isu);
   assert.match(backendReadme, /does not\s+claim\s+TPM\s+support/iu);
+  assert.doesNotMatch(backendReadme, /TPM-provider\/request-proof\s+integration remains\s+plan-only/isu);
+});
+
+test("the device-bound example README configures the portal's /connect consent path", () => {
+  const deviceBoundReadme = source("examples/device_bound/README.md");
+  assert.doesNotMatch(deviceBoundReadme, /LCC_BOUND_PORTAL_URL=https:\/\/portal\.test\/authorize/u);
+  const connectUses = deviceBoundReadme.match(/LCC_BOUND_PORTAL_URL=https:\/\/portal\.test\/connect/gu) ?? [];
+  assert.equal(connectUses.length, 2, "Windows and Linux configuration blocks must both use /connect");
+  assert.match(deviceBoundReadme, /a mismatch fails as `INVALID_RESPONSE`\s*\(16\)/u);
+  assert.doesNotMatch(deviceBoundReadme, /Selecting another feature in consent cannot enable the requested feature/u);
+  assert.match(deviceBoundReadme, /[Cc]onsent (?:now )?lists only licenses for the requested feature/u);
+});
+
+test("the architecture glossary cites the current device-limit refusal code", () => {
+  const glossary = source("doc/architecture/glossary.md");
+  assert.doesNotMatch(glossary, /device_limit_exceeded/u);
+  assert.match(glossary, /device_limit_reached/u);
 });
 
 test("organization evidence tracks the repository-owned generator snapshot", () => {
