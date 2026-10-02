@@ -86,3 +86,29 @@ test("structured logs drop fields that no remaining event emits", () => {
     limit_reached: false,
   });
 });
+
+test("structured logs keep a dispatcher reason only when it is a closed reason code", () => {
+  const kept = capture("warn", () => logEvent("warn", "webhook.delivery_failed", {
+    delivery_id: 17,
+    endpoint_id: "ep1",
+    attempts: 1,
+    last_status: 0,
+    reason: "invalid_url",
+  }))[0];
+  assert.deepEqual(JSON.parse(kept), {
+    event: "webhook.delivery_failed",
+    severity: "warn",
+    delivery_id: 17,
+    endpoint_id: "ep1",
+    attempts: 1,
+    last_status: 0,
+    reason: "invalid_url",
+  });
+
+  // Anything that is not a lowercase code (a URL, an address, free text, a non-string) is dropped.
+  for (const reason of ["https://hooks.example.com/secret?token=1", "ops@example.com", "Connection refused", "a".repeat(65), 42, ["invalid_url"]]) {
+    const line = capture("warn", () => logEvent("warn", "webhook.delivery_failed", { delivery_id: 17, reason }))[0];
+    assert.equal(JSON.parse(line).reason, undefined, String(reason));
+    assert.doesNotMatch(line, /hooks\.example|example\.com|refused/u);
+  }
+});

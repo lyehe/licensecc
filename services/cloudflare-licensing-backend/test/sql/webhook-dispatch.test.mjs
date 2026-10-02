@@ -19,6 +19,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { loadSecretMap } from "../../src/fulfillment/order_hmac.mjs";
+import { logEvent } from "../../dist/observability/index.js";
 import {
   enqueueWebhooks,
   deliverWebhooks,
@@ -546,5 +547,32 @@ test("order_events cursor on rowid enqueues each order exactly once", async () =
   assert.equal(payload.source, "order");
   assert.equal(payload.data.order_event_id, "evt_a");
   assert.deepEqual(payload.data.result, { ok: true });
+  db.close();
+});
+
+// The scheduled dispatcher logs through the backend's structured logger, which keeps only its field
+// allowlist. A refusal must still say why in that log, as a closed reason code.
+test("a delivery refused for its stored URL keeps its reason in the backend's structured log", async () => {
+  const db = freshDb();
+  const env = { DB: new D1Like(db), ...SIGNING_ENV };
+  addEndpoint(db, "ep1", { url: "https://receiver.internal/hook" });
+  addEntitlementEvent(db, "create", 100);
+  await enqueueWebhooks(env, 200);
+
+  const lines = [];
+  const originalWarn = console.warn;
+  const originalFetch = globalThis.fetch;
+  console.warn = (line) => lines.push(line);
+  globalThis.fetch = async () => assert.fail("a refused delivery is never fetched");
+  try {
+    await deliverWebhooks(env, 201, logEvent);
+  } finally {
+    console.warn = originalWarn;
+    globalThis.fetch = originalFetch;
+  }
+  const failed = lines.map((line) => JSON.parse(line)).find((entry) => entry.event === "webhook.delivery_failed");
+  assert.equal(failed?.reason, "invalid_url");
+  assert.equal(failed?.endpoint_id, "ep1");
+  assert.doesNotMatch(lines.join("\n"), /receiver\.internal/u, "the stored URL never reaches the log");
   db.close();
 });
