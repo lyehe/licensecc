@@ -147,3 +147,15 @@ test("workflow runs the full sanitizer suite and bounds the corpus fuzz smoke", 
   assert.deepEqual(processBudgets, [30]);
   assert.doesNotMatch(workflow, /\b(?:curl|wget)\b/);
 });
+
+test("the runtime compiles against the OpenSSL 3.0 API with deprecated declarations hidden", () => {
+  const library = readRepositoryFile("src/library/CMakeLists.txt");
+  const guard = library.indexOf("if(UNIX OR OPENSSL_FOUND)");
+  const definitions = library.indexOf("add_compile_definitions(OPENSSL_API_COMPAT=30000 OPENSSL_NO_DEPRECATED)");
+  const firstModule = library.indexOf("add_subdirectory(");
+  // Directory-scoped before every runtime module, and only where the runtime uses OpenSSL, so a
+  // deprecated call fails to compile instead of only warning.
+  assert.ok(guard !== -1 && definitions > guard && definitions < firstModule, "runtime OpenSSL API definitions");
+  // The vendored generator keeps its own OpenSSL usage unchanged.
+  assert.doesNotMatch(readRepositoryFile("extern/license-generator/CMakeLists.txt"), /OPENSSL_NO_DEPRECATED/);
+});
