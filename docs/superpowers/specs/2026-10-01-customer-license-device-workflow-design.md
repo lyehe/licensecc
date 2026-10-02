@@ -106,7 +106,7 @@ Rules:
 | Column | Meaning |
 | --- | --- |
 | `id` | Primary key |
-| `customer_id` | Owner |
+| `customer_id` | Owner. NOT NULL, like every owner and parent column in the new tables. |
 | `project` | The app |
 | `plan_id`, `plan_version` | The plan the license was granted on |
 | `addons_json` | Add-ons bought on top of the plan |
@@ -314,7 +314,7 @@ The security core is unchanged:
   - An abandoned or phished approval therefore never disconnects anything.
 - **Ineligible:** the reason sentence (section 8) and a link to the license.
 - **Phone or tablet:** the page says "Finish on the computer running Colmap" and shows no approve controls. If the hand-off fails, an approval that never reached exchange can be retried inside the window.
-- **Device label rules:** printable Unicode, 1–80 code points. No control, format, separator or default-ignorable characters. Nothing matching the code pattern once fullwidth forms are folded and every dash or space counts as a separator. Number matching makes look-alike labels more dangerous. So the Connect phase also refuses a label whose confusable skeleton contains the code pattern; the skeleton is defined by Unicode UTS #39 and catches look-alikes such as Cyrillic letters and mathematical digits. The backend rule stays authoritative, and the native mirror is generated from it.
+- **Device label rules:** printable Unicode, 1–80 code points. No control, format, separator or default-ignorable characters. Nothing matching the code pattern once fullwidth forms are folded and every dash or space counts as a separator. A label whose confusable skeleton (Unicode UTS #39) contains the code pattern is refused too, which catches look-alikes such as Cyrillic letters, mathematical digits and multi-character stand-ins. That rule is already in place. Number matching makes look-alike labels more dangerous, so it has to stay. The backend rule stays authoritative, and the native mirror is generated from it.
 
 ### 7.3 Freeing a slot
 
@@ -466,6 +466,10 @@ Across the console:
 
 - **The lease claims carry the license's feature list.** It is sorted and capped as in 4.2. `lcc_feature_session` checks the required feature against the list. A feature-session start renews first, so `feature_not_included` is final only after a fresh lease.
 - **Golden vectors** get a committed generator, and the vector allowlist in `scripts/check-architecture.mjs` is updated.
+- **Device-bound-only apps need no offline signing project.**
+  - Today `device_bound.h` includes `device_identity.h`, which includes `datatypes.h`, which stops compilation without an `lccgen` project header. A device-bound-only app therefore has to create an offline project it never uses.
+  - The header split moves the offline-only sizes behind the offline license API. Device identity, device-bound and feature-session consumers then compile without a project header.
+  - The docs call the remaining offline concept the "signing project".
 
 ## 11. Architecture
 
@@ -528,7 +532,9 @@ Across the console:
      - `license_store`;
      - order ingest v2 (state snapshot);
      - device binding keyed by license, with the lease format unchanged;
-     - removal of plan projection, sync and Add user.
+     - removal of plan projection, sync and Add user;
+     - the "online verifier" rename, done here because every database is recreated anyway. The D1 database becomes `licensecc-licensing`, the backend Worker becomes `licensecc-licensing-backend`, and the admin binding `PUBLIC_VERIFIER_URL` becomes `LICENSING_BACKEND_URL`. The rename covers the workflows, the D1 backup, the materializer, `/health`, the smoke tests and the docs;
+     - a schema-signature check after migration in the deploy workflows. A database that was not recreated then fails the deploy instead of silently keeping the old schema.
    - **Size:** about 180–230 files.
 3. **Three lanes in parallel:**
    - native and SDK wire v2: lease features, ABI, release, the error callback, generated reasons and vectors;
@@ -571,3 +577,29 @@ Several live defects on `main` are being fixed separately, before this design la
 - device labels being able to imitate the comparison code.
 
 Those fixes keep the current model. This design then replaces the order-identity and CLI fixes with the structural versions in sections 5.2 and 5.4.
+
+A second round closed every open item that is live today and sits in code this design keeps. It covered:
+
+- renewal challenges that revealed license state before proof;
+- look-alike device labels, now compared by confusable skeleton;
+- the RSA-3072 golden vectors and the SDK key-size floors;
+- the OpenSSL 3 decoder;
+- the CMake component check;
+- webhook deliveries after an endpoint change;
+- the `reason` log field;
+- the `portal_otp` lookup index;
+- `order-sign` secret handling;
+- the development-dependency advisories;
+- the consent URL and the stale docs.
+
+Items in code this design deletes or rewrites were left alone on purpose. P1 and the UI phases supersede them:
+
+- the sync endpoint's idempotency replay, owner-mismatch audit and option order;
+- plan-projection id trimming;
+- the admin PATCH pre-read;
+- the console's 300 ms debounce race;
+- the nullable owner columns;
+- the trial-basis CHECK;
+- the magic link burned for a suspended account;
+- the events index;
+- an upper bound on `valid_until`, which P1 adds to `licenses` as a CHECK.
