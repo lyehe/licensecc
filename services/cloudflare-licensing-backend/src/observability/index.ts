@@ -18,11 +18,17 @@ const LOG_FIELD_NAMES = new Set([
   "measured_at",
   "oldest_expired_at",
   "path",
+  "reason",
   "request_id",
   "skipped",
   "source",
   "target",
 ]);
+
+// The webhook dispatcher's `reason` is always one of its own closed codes (such as invalid_url),
+// never a URL, a receiver's text or a customer value. Only that code shape is logged, so a value
+// of any other shape is dropped rather than trusted.
+const REASON_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
 
 function safeLogValue(value: unknown): string | number | boolean | null | string[] | undefined {
   if (value === null || typeof value === "boolean") return value;
@@ -40,6 +46,10 @@ export function logEvent(severity: LogSeverity, event: string, fields: Record<st
     if (!LOG_FIELD_NAMES.has(name)) continue;
     if (name === "error_type") {
       safeFields[name] = safeErrorType(value);
+      continue;
+    }
+    if (name === "reason") {
+      if (typeof value === "string" && REASON_CODE.test(value)) safeFields[name] = value;
       continue;
     }
     const safe = safeLogValue(value);

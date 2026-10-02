@@ -29,7 +29,9 @@ identifiers, email addresses, request/response bodies, leases, proofs, tokens,
 OTPs, signing material, payloads, or arbitrary exception messages. Its events
 are `request.unhandled_error` (only `request_id`, `path`, and `error_type`),
 the protected-device cleanup events described under OBS-08, and the
-`webhook.*` dispatcher events. Rate-limit refusals and readiness are observed
+`webhook.*` dispatcher events. A dispatcher event that stops a delivery
+without sending it carries a `reason` code, such as `invalid_url`; the logger
+keeps `reason` only when it is a lowercase code. Rate-limit refusals and readiness are observed
 through invocation status codes and `/health`, not application events.
 The portal emits one closed-shape
 `portal.email_delivery_failed` error event when delivery is unconfigured,
