@@ -233,6 +233,64 @@ BOOST_AUTO_TEST_CASE(registration_refuses_o_i_and_l_standing_in_for_zero_and_one
 		BOOST_CHECK_MESSAGE(!normalize_bound_device_label(label, normalized), "label must be refused: " << label);
 	}
 }
+// A character whose confusable prototype is several characters stands in for all of them, and a
+// character that shares the skeleton of a dash or space separates code groups as one does.
+BOOST_AUTO_TEST_CASE(registration_refuses_expanding_lookalikes_and_dash_lookalike_separators) {
+	const auto r = vector("registration_wire.json").get_child("request");
+	BoundAuthorizationInput input{r.get<std::string>("client_id"),		 r.get<std::string>("project"),
+								  r.get<std::string>("public_key_spki"), r.get<std::string>("device_label"),
+								  r.get<std::string>("redirect_uri"),	 r.get<std::string>("state"),
+								  r.get<std::string>("code_challenge"),	 r.get<std::string>("requested_feature")};
+	SensitiveVector out;
+	// Roman numeral two (U+2161, ll), double vertical line (U+2016, ll), Latin double O (U+A74E, OO),
+	// Cyrillic yu (U+042E, lO), ff ligature (U+FB00), Latin AA (U+A732), AE ligature (U+00C6) and a
+	// digit four full stop (U+248B, 4.) ending a code; then codes separated by CJK one (U+4E00), box
+	// drawing horizontals (U+2500, U+2501), the prolonged sound mark (U+30FC), Hangul eu (U+3161)
+	// and the Kangxi radical one (U+2F00).
+	const std::string refused[] = {"4F2A-0C\xe2\x85\xa1-B7E4",
+								   "4F2A-0C\xe2\x80\x96-B7E4",
+								   "4F2A-\xea\x9d\x8e"
+								   "12-B7E4",
+								   "4F2A-\xd0\xae"
+								   "C2-B7E4",
+								   "4\xef\xac\x80"
+								   "A-0C12-B7E4",
+								   "\xea\x9c\xb2"
+								   "BC-0C12-B7E4",
+								   "\xc3\x86"
+								   "12-0C12-B7E4",
+								   "4F2A-0C12-B7E\xe2\x92\x8b",
+								   "4F2A\xe4\xb8\x80"
+								   "0C12\xe4\xb8\x80"
+								   "B7E4",
+								   "4F2A\xe2\x94\x80"
+								   "0C12\xe2\x94\x80"
+								   "B7E4",
+								   "4F2A\xe2\x94\x81"
+								   "0C12\xe2\x94\x81"
+								   "B7E4",
+								   "4F2A\xe3\x83\xbc"
+								   "0C12\xe3\x83\xbc"
+								   "B7E4",
+								   "4F2A\xe3\x85\xa1"
+								   "0C12\xe3\x85\xa1"
+								   "B7E4",
+								   "4F2A\xe2\xbc\x80"
+								   "0C12\xe2\xbc\x80"
+								   "B7E4"};
+	for (const auto& label : refused) {
+		input.device_label = label;
+		BOOST_CHECK_MESSAGE(!encode_bound_authorization(input, out), "label must be refused: " << label);
+		std::string normalized;
+		BOOST_CHECK_MESSAGE(!normalize_bound_device_label(label, normalized), "label must be refused: " << label);
+	}
+	// "Machine one" in CJK, which starts with U+4E00, and "Room" with a Roman numeral three (U+2162).
+	const std::string accepted[] = {"\xe4\xb8\x80\xe5\x8f\xb7\xe6\x9c\xba", "Room \xe2\x85\xa2"};
+	for (const auto& label : accepted) {
+		input.device_label = label;
+		BOOST_CHECK_MESSAGE(encode_bound_authorization(input, out), "label must be accepted: " << label);
+	}
+}
 BOOST_AUTO_TEST_CASE(registration_response_requires_exact_schema_and_status) {
 	const auto v = vector("registration_wire.json");
 	const auto response = v.get<std::string>("response_json");

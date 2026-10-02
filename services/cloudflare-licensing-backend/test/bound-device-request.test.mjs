@@ -262,9 +262,57 @@ test("a device label cannot stand O, I, l or their look-alikes in for the digits
   }
 });
 
+// A character whose confusable prototype is several characters stands in for all of them: its
+// prototype's code skeletons count, each separator in it reads as a dash, and anything else in it
+// breaks a group, as it would in the label itself.
+const EXPANDING_LABELS = {
+  "a Roman numeral two (U+2161, ll) for 1 1": `4F2A-0C${cp(0x2161)}-B7E4`,
+  "a double vertical line (U+2016, ll) for 1 1": `4F2A-0C${cp(0x2016)}-B7E4`,
+  "a Latin double O (U+A74E, OO) for 0 0": `4F2A-${cp(0xa74e)}12-B7E4`,
+  "a Cyrillic yu (U+042E, lO) for 1 0": `4F2A-${cp(0x42e)}C2-B7E4`,
+  "an ff ligature (U+FB00, ff)": `4${cp(0xfb00)}A-0C12-B7E4`,
+  "a Latin AA (U+A732, AA)": `${cp(0xa732)}BC-0C12-B7E4`,
+  "an AE ligature (U+00C6, AE)": `${cp(0xc6)}12-0C12-B7E4`,
+  "a digit four full stop (U+248B, 4.) ending a code": `4F2A-0C12-B7E${cp(0x248b)}`,
+};
+
+// A character that shares the skeleton of a dash or space separates code groups as one does.
+const DASH_LOOKALIKE_LABELS = {
+  "CJK one (U+4E00)": `4F2A${cp(0x4e00)}0C12${cp(0x4e00)}B7E4`,
+  "a box-drawing horizontal (U+2500)": `4F2A${cp(0x2500)}0C12${cp(0x2500)}B7E4`,
+  "a heavy box-drawing horizontal (U+2501)": `4F2A${cp(0x2501)}0C12${cp(0x2501)}B7E4`,
+  "a prolonged sound mark (U+30FC)": `4F2A${cp(0x30fc)}0C12${cp(0x30fc)}B7E4`,
+  "a Hangul letter eu (U+3161)": `4F2A${cp(0x3161)}0C12${cp(0x3161)}B7E4`,
+  "a Kangxi radical one (U+2F00)": `4F2A${cp(0x2f00)}0C12${cp(0x2f00)}B7E4`,
+};
+
+test("a device label cannot spell a code with characters whose prototype is several characters", () => {
+  for (const [label, device_label] of Object.entries(EXPANDING_LABELS)) {
+    assert.throws(
+      () => validateBoundRequest("authorize", { ...enrollment(), device_label }),
+      error => error.code === "invalid_request" && error.status === 400,
+      label,
+    );
+  }
+  assert.equal(deviceLabelComparisonForm(EXPANDING_LABELS["a Roman numeral two (U+2161, ll) for 1 1"]), "4F2A-OCll-B7E4");
+  assert.equal(deviceLabelComparisonForm(EXPANDING_LABELS["a digit four full stop (U+248B, 4.) ending a code"]), "4F2A-OCl2-B7E4.");
+});
+
+test("a device label cannot separate code groups with a character that shares a dash's skeleton", () => {
+  for (const [label, device_label] of Object.entries(DASH_LOOKALIKE_LABELS)) {
+    assert.throws(
+      () => validateBoundRequest("authorize", { ...enrollment(), device_label }),
+      error => error.code === "invalid_request" && error.status === 400,
+      label,
+    );
+  }
+  assert.equal(deviceLabelComparisonForm(DASH_LOOKALIKE_LABELS["CJK one (U+4E00)"]), "4F2A-OCl2-B7E4");
+});
+
 test("a device label still accepts ordinary names in scripts that have code look-alikes", () => {
   // 4F2A-0C1Z-B7E4 is the control: Z is neither a code character nor the skeleton of one.
-  for (const device_label of ["Компьютер", "Δέλτα-PC", "工作站", "Büro-PC", "DESKTOP-7Q2K1AB", "OLD-BOX", "Lab-PC-01", "4F2A-0C1Z-B7E4"]) {
+  for (const device_label of ["Компьютер", "Δέλτα-PC", "工作站", "Büro-PC", "DESKTOP-7Q2K1AB", "OLD-BOX", "Lab-PC-01", "4F2A-0C1Z-B7E4",
+    `${cp(0x4e00)}${cp(0x53f7)}${cp(0x673a)}`, `Room ${cp(0x2162)}`]) {
     assert.equal(validateBoundRequest("authorize", { ...enrollment(), device_label }).device_label, device_label, device_label);
   }
 });

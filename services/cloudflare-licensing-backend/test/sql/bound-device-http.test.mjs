@@ -235,6 +235,29 @@ test("a disconnected device learns only that it is disconnected, never the licen
   }
 });
 
+// A device keeps its original exchange for the recovery window, so replaying it is the other way a
+// disconnected device reaches the authority checks after proof. It too learns only that it is
+// disconnected; a device that is still connected learns its own license state.
+test("a disconnected device that replays its original exchange learns only that it is disconnected",async t=>{
+  const blocked=["UPDATE entitlements SET status='disabled',revocation_seq=revocation_seq+1",
+    "UPDATE entitlements SET status='revoked',revocation_seq=revocation_seq+1","UPDATE entitlements SET valid_until=1100",
+    "UPDATE customers SET status='disabled'"];
+  for(const [name,state] of Object.entries(RENEWAL_STATES)) {
+    if(state.refusal?.[1]!=="device_retired") continue;
+    for(const license of [null,...blocked]) {
+      const {f,d}=await enrolledInState(t,state);
+      if(license) f.sql.exec(license);
+      const response=await f.call("/v2/device-authorizations/exchange",await signed(f,d,"exchange"));
+      assert.deepEqual([response.status,response.body.code],[403,"device_retired"],`${name}; ${license??"an active license"}`);
+      assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_leases").get().n,1,`${name} issues no lease`);
+    }
+  }
+  const {f,d}=await enrolledInState(t,RENEWAL_STATES["an active license"]);
+  f.sql.exec(blocked[1]);
+  const connected=await f.call("/v2/device-authorizations/exchange",await signed(f,d,"exchange"));
+  assert.deepEqual([connected.status,connected.body.code],[403,"access_denied"]);
+});
+
 test("a renewal challenge for an unknown binding is still a generic 404",async t=>{
   const {f}=await enrolledInState(t,RENEWAL_STATES["an active license"]);
   const response=await f.call("/v2/device-challenges",{purpose:"renew",binding_id:boundRandomId(),operation_id:boundRandomId(32)});
