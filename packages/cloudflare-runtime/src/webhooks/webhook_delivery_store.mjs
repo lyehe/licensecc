@@ -34,13 +34,18 @@ export async function claimPendingWebhookDelivery(db, deliveryId, dueAt, claimUn
   return row !== null && row !== undefined;
 }
 
+// An acknowledged send is recorded as delivered even when an endpoint change canceled the row while
+// the request was in flight: that request went to the destination in effect when the event was
+// queued. A cancellation never touches next_attempt_at and a canceled row is never claimed again, so
+// a canceled row still holding this claim's lease value was canceled after the claim. A failed send
+// leaves the cancellation standing, so nothing is retried to the new destination.
 export async function persistWebhookDeliveryOutcome(db, outcome) {
   let statement;
   if (outcome.ok) {
     statement = db.prepare(
       "UPDATE webhook_deliveries SET status = 'delivered', attempts = attempts + 1, last_status = ?, " +
         "last_error = '', delivered_at = ? " +
-        "WHERE id = ? AND status = 'pending' AND next_attempt_at = ? RETURNING id",
+        "WHERE id = ? AND status IN ('pending', 'canceled') AND next_attempt_at = ? RETURNING id",
     ).bind(outcome.statusCode, outcome.now, outcome.deliveryId, outcome.claimUntil);
   } else if (outcome.terminal) {
     statement = db.prepare(

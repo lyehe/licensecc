@@ -126,7 +126,7 @@ export const webhookPaths: LabeledPathFragment = {
     patch: {
       tags: ["admin:webhooks"],
       summary: "Update a webhook endpoint's url / event_types / description / scope (admin-only)",
-      description: "An event is delivered only under the endpoint URL and scope in effect when it was queued. A PATCH that changes url or any scope field therefore cancels, in the same batch, every delivery of the endpoint still pending or failed (status canceled, last_error endpoint_changed). A PATCH that resends the stored values, or changes only event_types or description, cancels nothing.",
+      description: "An event is delivered only under the endpoint URL and scope in effect when it was queued. A PATCH that changes url or any scope field therefore cancels, in the same batch, every delivery of the endpoint still pending or failed (status canceled, last_error endpoint_changed). A delivery whose request is already in flight finishes under the old URL and records its outcome: delivered when the receiver acknowledges it, otherwise canceled and never retried. A PATCH that resends the stored values, or changes only event_types or description, cancels nothing.",
       operationId: "patchWebhook",
       security: ADMIN_SECURITY,
       parameters: [idParam, idempotencyKeyHeader],

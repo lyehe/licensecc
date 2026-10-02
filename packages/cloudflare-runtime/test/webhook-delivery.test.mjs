@@ -70,7 +70,9 @@ function makeEnvironment(overrides = {}) {
                 if (sql.includes("status = 'delivered'")) id = values[2];
                 else if (sql.includes("status = 'failed'")) id = values[3];
                 const expectedClaimUntil = values.at(-1);
-                if (state.id !== id || state.status !== "pending" || state.next_attempt_at !== expectedClaimUntil) return null;
+                // Like the SQL: only a delivered outcome may land on a row canceled under its lease.
+                const writable = state.status === "pending" || (state.status === "canceled" && sql.includes("status = 'delivered'"));
+                if (state.id !== id || !writable || state.next_attempt_at !== expectedClaimUntil) return null;
                 if (sql.includes("status = 'delivered'")) {
                   state.status = "delivered";
                   state.attempts += 1;
