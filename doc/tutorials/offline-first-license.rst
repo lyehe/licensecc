@@ -70,7 +70,15 @@ Shell: PowerShell.
    cmake --build build/minimal --config Debug
    & "$repo/build/minimal/Debug/minimal.exe" "$project/licenses/quickstart.lic"
 
-The issuer prints ``License written``. The final command prints:
+The issuer prints the license path and a summary of what it signed, where
+``<repo>`` is the repository root:
+
+.. code-block:: text
+
+   License written to <repo>/build/dev-debug/projects/test/licenses/quickstart.lic
+   Project test, features TEST, valid-from not set, valid-to not set (no expiry), not bound to a client signature.
+
+The final command prints:
 
 .. code-block:: text
 

@@ -56,7 +56,14 @@ cmake --build build/minimal
 "$repo/build/minimal/minimal" "$project/licenses/quickstart.lic"
 ```
 
-The issuer prints `License written`. The final command should print:
+The issuer prints the license path and a summary of what it signed:
+
+```text
+License written to <repo>/build/dev-debug/projects/test/licenses/quickstart.lic
+Project test, features TEST, valid-from not set, valid-to not set (no expiry), not bound to a client signature.
+```
+
+Here `<repo>` is the repository root. The final command should print:
 
 ```text
 license OK (days left: ...)
