@@ -1,6 +1,8 @@
 #include <licensecc/device_bound.h>
 #include <sstream>
 #include <stdexcept>
+#include <string>
+#include <vector>
 namespace example_fault {
 LCC_BOUND_RESULT primary = LCC_BOUND_RETRY;
 bool busy_save = false;
@@ -147,12 +149,58 @@ int main() {
 			require(std::memcmp(configured.trust_keys[i].spki, configuration::signing_keys[i].bytes,
 								configured.trust_keys[i].spki_size) == 0);
 		}
+		// A configure-time LCC_BOUND_DEVICE_LABEL is used byte for byte (UTF-8 included). Without one,
+		// each run labels the device with this computer's name, so installations differ.
 		const std::string hex = LCC_BOUND_LABEL_HEX;
-		require(std::strlen(configured.device_label) * 2 == hex.size());
+		std::string pinned;
 		for (std::size_t i = 0; i < hex.size(); i += 2)
-			require(static_cast<unsigned char>(configured.device_label[i / 2]) ==
-					std::stoul(hex.substr(i, 2), nullptr, 16));
-		std::cout << "Example quit, persistence, provider-result and UTF-8 checks passed.\n";
+			pinned.push_back(static_cast<char>(std::stoul(hex.substr(i, 2), nullptr, 16)));
+		require(example_configuration::device_label_configured == !pinned.empty());
+		if (!pinned.empty()) {
+			require(configured.device_label == pinned);
+		} else {
+			require(!example_device_label::computer_name().empty());
+			require(configured.device_label == example_device_label::computer_name());
+		}
+		require(example_device_label::preferred("Pinned", "build-host") == "Pinned");
+		require(example_device_label::preferred("", "build-host") == "build-host");
+		require(example_device_label::preferred("", "") == "Computer");
+		require(example_device_label::preferred("", std::string(sizeof(configured.device_label), 'a')) == "Computer");
+
+		// The native client refuses a label that breaks the device-label rule before it provisions
+		// or sends anything; the example then retries once with "Computer".
+		for (const char* refused : {"4F2A-0C12-B7E4", "PC\x07"}) {
+			auto labelled = options();
+			std::strcpy(labelled.device_label, refused);
+			LccDeviceBoundOutcome outcome;
+			lcc_init_device_bound_outcome(&outcome);
+			LccDeviceBoundClient* handle = nullptr;
+			require(lcc_device_bound_open_enrollment(&labelled, &handle, &outcome) == LCC_BOUND_INVALID_ARGUMENT &&
+					!handle);
+		}
+		std::vector<std::string> offered;
+		const auto open_unless_computer = [&](LccDeviceBoundOptions& attempt) {
+			offered.emplace_back(attempt.device_label);
+			return offered.back() == "Computer" ? LCC_BOUND_OK : LCC_BOUND_INVALID_ARGUMENT;
+		};
+		auto labelled = options();
+		std::strcpy(labelled.device_label, "4F2A-0C12-B7E4");
+		require(example_device_label::open_with_fallback(labelled, false, open_unless_computer) == LCC_BOUND_OK);
+		require(offered == std::vector<std::string>({"4F2A-0C12-B7E4", "Computer"}));
+		offered.clear();
+		std::strcpy(labelled.device_label, "4F2A-0C12-B7E4");
+		require(example_device_label::open_with_fallback(labelled, true, open_unless_computer) ==
+				LCC_BOUND_INVALID_ARGUMENT);
+		require(offered.size() == 1);  // A configure-time label is never replaced.
+		offered.clear();
+		std::strcpy(labelled.device_label, "build-host");
+		const auto busy = [&](LccDeviceBoundOptions& attempt) {
+			offered.emplace_back(attempt.device_label);
+			return LCC_BOUND_BUSY;
+		};
+		require(example_device_label::open_with_fallback(labelled, false, busy) == LCC_BOUND_BUSY);
+		require(offered.size() == 1);  // Only a refused label is retried.
+		std::cout << "Example quit, persistence, provider-result, UTF-8 and device-label checks passed.\n";
 		return 0;
 	} catch (const std::exception& e) {
 		std::cerr << e.what() << '\n';
