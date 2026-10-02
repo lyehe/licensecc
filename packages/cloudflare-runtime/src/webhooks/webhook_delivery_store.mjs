@@ -1,9 +1,11 @@
 // Internal D1 persistence for webhook delivery leases. Network delivery stays in webhook.mjs; this
 // module owns the parameterized compare-and-set statements that establish and finalize one pending
-// delivery's lease, plus recording and logging a delivery refused before it was ever fetched (its
-// stored URL no longer passes safeWebhookUrl).
+// delivery's lease, plus recording and logging a delivery stopped before it was ever fetched: one
+// refused because its stored URL no longer passes safeWebhookUrl, or one canceled because its event
+// is outside the endpoint's current scope.
 
 import { safeErrorType } from "../http/kit.mjs";
+import { WEBHOOK_ENDPOINT_CHANGED } from "./webhook_endpoint.mjs";
 
 export const WEBHOOK_CLAIM_TTL_SECONDS = 60;
 const BACKOFF_SCHEDULE_SECONDS = [30, 120, 600, 3600, 21600];
@@ -86,6 +88,37 @@ export async function refuseUnsafeWebhookDelivery(db, delivery, now, claimUntil,
     try {
       logEvent?.("warn", "webhook.delivery_failed", {
         delivery_id: deliveryId, endpoint_id: delivery.endpoint_id, attempts, last_status: 0, reason: "invalid_url",
+      });
+    } catch {
+      // Same: a throwing logger must never escape.
+    }
+  }
+}
+
+/** Cancel a claimed delivery whose event is outside its endpoint's current scope, without fetching:
+ * an event goes out only under the destination in effect when it was queued. The compare-and-set
+ * on the lease keeps a concurrent outcome write authoritative. Never throws, like the refusal above. */
+export async function cancelOutOfScopeWebhookDelivery(db, delivery, claimUntil, logEvent) {
+  const deliveryId = Number(delivery.id);
+  let canceled;
+  try {
+    const row = await db.prepare(
+      "UPDATE webhook_deliveries SET status = 'canceled', last_error = ? " +
+        "WHERE id = ? AND status = 'pending' AND next_attempt_at = ? RETURNING id",
+    ).bind(WEBHOOK_ENDPOINT_CHANGED, deliveryId, claimUntil).first();
+    canceled = row !== null && row !== undefined;
+  } catch (error) {
+    try {
+      logEvent?.("error", "webhook.deliver_error", { source: "persistence", delivery_id: deliveryId, error_type: safeErrorType(error) });
+    } catch {
+      // A throwing logger must never escape this best-effort recording path.
+    }
+    return;
+  }
+  if (canceled) {
+    try {
+      logEvent?.("warn", "webhook.delivery_canceled", {
+        delivery_id: deliveryId, endpoint_id: delivery.endpoint_id, reason: WEBHOOK_ENDPOINT_CHANGED,
       });
     } catch {
       // Same: a throwing logger must never escape.

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  deliveryWithinEndpointScope,
   MAX_WEBHOOK_URL_SIZE,
   safeWebhookUrl,
   WEBHOOK_TEST_STATUS_CLASSES,
@@ -72,4 +73,29 @@ test("webhookSigningConfig is the one fail-closed signing selector real and test
   assert.equal(webhookSigningConfig({ WEBHOOK_SIGNING_SECRETS: JSON.stringify({ k1: secret }) }).error, "webhook.signing_key_missing");
   assert.equal(webhookSigningConfig({ WEBHOOK_SIGNING_SECRETS: JSON.stringify({ k1: secret }), WEBHOOK_SIGNING_KEY_ID: "k2" }).error, "webhook.signing_key_missing");
   assert.equal(WEBHOOK_DELIVER_TIMEOUT_MS, 5000);
+});
+
+test("a queued delivery is within scope only when its payload names the endpoint's current project or customer", () => {
+  const entitlement = (project) => JSON.stringify({ id: 1, type: "create", source: "entitlement", occurred_at: 1, data: { project } });
+  const customer = (customerId) => JSON.stringify({ id: 2, type: "disable", source: "customer", occurred_at: 1, data: { customer_id: customerId } });
+  const project = { scope_kind: "project", scope_project: "P", scope_customer_id: null };
+  const tenant = { scope_kind: "customer", scope_project: null, scope_customer_id: "cust_1" };
+  const global = { scope_kind: "global", scope_project: null, scope_customer_id: null };
+
+  assert.equal(deliveryWithinEndpointScope({ ...project, event_source: "entitlement", payload_json: entitlement("P") }), true);
+  assert.equal(deliveryWithinEndpointScope({ ...project, event_source: "order", payload_json: entitlement("P") }), true);
+  assert.equal(deliveryWithinEndpointScope({ ...project, event_source: "entitlement", payload_json: entitlement("X") }), false);
+  assert.equal(deliveryWithinEndpointScope({ ...project, event_source: "customer", payload_json: customer("cust_1") }), false);
+  assert.equal(deliveryWithinEndpointScope({ ...tenant, event_source: "customer", payload_json: customer("cust_1") }), true);
+  assert.equal(deliveryWithinEndpointScope({ ...tenant, event_source: "customer", payload_json: customer("cust_2") }), false);
+  assert.equal(deliveryWithinEndpointScope({ ...tenant, event_source: "entitlement", payload_json: entitlement("P") }), false);
+  assert.equal(deliveryWithinEndpointScope({ ...global, event_source: "customer", payload_json: customer("cust_9") }), true);
+
+  // An unreadable payload names no project or customer, so only an operator-wide endpoint matches.
+  for (const payload_json of ["{", "", "null", "[]", JSON.stringify({ data: "P" })]) {
+    assert.equal(deliveryWithinEndpointScope({ ...project, event_source: "entitlement", payload_json }), false, payload_json);
+    assert.equal(deliveryWithinEndpointScope({ ...global, event_source: "entitlement", payload_json }), true, payload_json);
+  }
+  // A row without a usable scope kind receives nothing.
+  assert.equal(deliveryWithinEndpointScope({ scope_kind: "all", event_source: "entitlement", payload_json: entitlement("P") }), false);
 });

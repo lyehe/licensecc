@@ -24,6 +24,10 @@ function makeDelivery(overrides = {}) {
     payload_json: '{"ok":true}',
     attempts: 0,
     url: "https://hook.test/ep1",
+    // The endpoint's current scope, joined onto the due row; operator-wide matches every event.
+    scope_kind: "global",
+    scope_project: null,
+    scope_customer_id: null,
     ...overrides,
   };
 }

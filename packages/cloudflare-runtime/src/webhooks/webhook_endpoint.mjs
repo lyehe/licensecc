@@ -1,5 +1,6 @@
 // Webhook endpoint rules shared by the admin Worker (which stores endpoints) and the backend (which
-// sends to them). Kept out of webhook.mjs, which is near its hotspot line budget.
+// sends to them): the destination URL rule, the scope rule and the reason a delivery is canceled
+// when its endpoint moves. Kept out of webhook.mjs, which is at its hotspot line budget.
 
 export const MAX_WEBHOOK_URL_SIZE = 2048;
 
@@ -53,3 +54,47 @@ export const WEBHOOK_TEST_STATUS_CLASSES = Object.freeze(/** @type {const} */ ([
  * pass finds the event outside the endpoint's current scope.
  */
 export const WEBHOOK_ENDPOINT_CHANGED = "endpoint_changed";
+
+/**
+ * Per-tenant scope filter, decided by the endpoint's explicit scope_kind. 'global' (operator-wide)
+ * receives every event; 'project' ONLY entitlement/order events whose `project` is scope_project;
+ * 'customer' ONLY customer events whose `customer_id` is scope_customer_id (entitlement_events carry
+ * no customer_id, so not that customer's entitlement changes). Any other kind, or a scoped kind
+ * without its value, receives nothing: an endpoint is never global by omission.
+ *
+ * @param {{ scope_kind?: unknown, scope_project?: unknown, scope_customer_id?: unknown }} endpoint
+ * @param {string} source the event source: entitlement, customer or order
+ * @param {{ project?: unknown, customer_id?: unknown }} event the event's project / customer_id
+ */
+export function endpointScopeMatches(endpoint, source, event) {
+  const scopeProject = endpoint.scope_project;
+  const scopeCustomer = endpoint.scope_customer_id;
+  switch (endpoint.scope_kind) {
+    case "global":
+      return true;
+    case "project":
+      return source !== "customer" && typeof scopeProject === "string" && scopeProject !== "" && event.project === scopeProject;
+    case "customer":
+      return source === "customer" && typeof scopeCustomer === "string" && scopeCustomer !== "" && event.customer_id === scopeCustomer;
+    default:
+      return false;
+  }
+}
+
+/**
+ * The same rule for a queued delivery, read from the payload the dispatcher built when it queued
+ * the event (its `data` carries the project or customer_id) against the endpoint's CURRENT scope
+ * columns joined onto the delivery row. A payload that does not parse matches only a global scope.
+ *
+ * @param {{ event_source: string, payload_json: unknown, scope_kind?: unknown, scope_project?: unknown, scope_customer_id?: unknown }} delivery
+ */
+export function deliveryWithinEndpointScope(delivery) {
+  let data = {};
+  try {
+    const parsed = JSON.parse(String(delivery.payload_json));
+    if (parsed !== null && typeof parsed.data === "object" && parsed.data !== null) data = parsed.data;
+  } catch {
+    // An unreadable payload names no project or customer.
+  }
+  return endpointScopeMatches(delivery, delivery.event_source, data);
+}

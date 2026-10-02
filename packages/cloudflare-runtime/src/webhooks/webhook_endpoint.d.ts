@@ -7,3 +7,19 @@ export declare const WEBHOOK_TEST_STATUS_CLASSES: readonly ["2xx", "3xx", "4xx",
 export type WebhookTestStatusClass = (typeof WEBHOOK_TEST_STATUS_CLASSES)[number];
 
 export declare const WEBHOOK_ENDPOINT_CHANGED: "endpoint_changed";
+
+export interface WebhookEndpointScope {
+  scope_kind?: unknown;
+  scope_project?: unknown;
+  scope_customer_id?: unknown;
+}
+
+export declare function endpointScopeMatches(
+  endpoint: WebhookEndpointScope,
+  source: string,
+  event: { project?: unknown; customer_id?: unknown },
+): boolean;
+
+export declare function deliveryWithinEndpointScope(
+  delivery: WebhookEndpointScope & { event_source: string; payload_json: unknown },
+): boolean;

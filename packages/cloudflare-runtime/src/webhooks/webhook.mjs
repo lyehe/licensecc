@@ -28,10 +28,10 @@
 import { loadSecretMap, lookupSecret } from "../auth/secret_map.mjs";
 import { safeErrorType } from "../http/kit.mjs";
 import {
-  WEBHOOK_CLAIM_TTL_SECONDS, claimPendingWebhookDelivery, nextBackoff,
+  WEBHOOK_CLAIM_TTL_SECONDS, cancelOutOfScopeWebhookDelivery, claimPendingWebhookDelivery, nextBackoff,
   persistWebhookDeliveryOutcome, readWebhookClock, refuseUnsafeWebhookDelivery,
 } from "./webhook_delivery_store.mjs";
-import { safeWebhookUrl } from "./webhook_endpoint.mjs";
+import { deliveryWithinEndpointScope, endpointScopeMatches, safeWebhookUrl } from "./webhook_endpoint.mjs";
 
 export { WEBHOOK_CLAIM_TTL_SECONDS, nextBackoff };
 
@@ -368,27 +368,8 @@ async function loadActiveEndpoints(env) {
   return res.results ?? [];
 }
 
-/**
- * Per-tenant scope filter, decided by the endpoint's explicit scope_kind. 'global' (operator-wide)
- * receives every event; 'project' ONLY entitlement/order events whose `project` is scope_project;
- * 'customer' ONLY customer events whose `customer_id` is scope_customer_id (entitlement_events carry
- * no customer_id, so not that customer's entitlement changes). Any other kind, or a scoped kind
- * without its value, receives nothing: an endpoint is never global by omission.
- */
-function endpointScopeMatches(endpoint, source, row) {
-  const scopeProject = endpoint.scope_project;
-  const scopeCustomer = endpoint.scope_customer_id;
-  switch (endpoint.scope_kind) {
-    case "global":
-      return true;
-    case "project":
-      return source !== "customer" && typeof scopeProject === "string" && scopeProject !== "" && row.project === scopeProject;
-    case "customer":
-      return source === "customer" && typeof scopeCustomer === "string" && scopeCustomer !== "" && row.customer_id === scopeCustomer;
-    default:
-      return false;
-  }
-}
+// The per-tenant scope rule (endpointScopeMatches) lives with the other endpoint rules in
+// webhook_endpoint.mjs: enqueue applies it to each event, and delivery re-applies it before sending.
 
 /** Read the per-source cursor high-water mark (0 if never run). */
 async function readCursor(env, source) {
@@ -497,7 +478,8 @@ export async function deliverWebhooks(env, now, logEvent, clock = () => now) {
   let due;
   try {
     const res = await env.DB.prepare(
-      "SELECT d.id, d.endpoint_id, d.event_source, d.event_id, d.event_type, d.payload_json, d.attempts, e.url " +
+      "SELECT d.id, d.endpoint_id, d.event_source, d.event_id, d.event_type, d.payload_json, d.attempts, e.url, " +
+        "e.scope_kind, e.scope_project, e.scope_customer_id " +
         "FROM webhook_deliveries d JOIN webhook_endpoints e ON e.id = d.endpoint_id " +
         "WHERE d.status = 'pending' AND d.next_attempt_at <= ? AND e.status = 'active' " +
         "ORDER BY d.next_attempt_at ASC, d.id ASC LIMIT ?",
@@ -528,6 +510,8 @@ export async function deliverWebhooks(env, now, logEvent, clock = () => now) {
 /** Deliver one row; failures are recorded as retry/terminal outcomes and never rethrown. */
 async function deliverOne(env, delivery, secretsMap, keyId, now, claimUntil, logEvent, clock) {
   if (safeWebhookUrl(delivery.url) === null) { await refuseUnsafeWebhookDelivery(env.DB, delivery, now, claimUntil, logEvent); return; }
+  // Never send an event the endpoint's current scope excludes; whatever moved it, the event was queued elsewhere.
+  if (!deliveryWithinEndpointScope(delivery)) { await cancelOutOfScopeWebhookDelivery(env.DB, delivery, claimUntil, logEvent); return; }
   const body = delivery.payload_json;
 
   let signatureHeader;
