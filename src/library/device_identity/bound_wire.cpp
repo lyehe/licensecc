@@ -127,8 +127,8 @@ void quoted(SensitiveVector& out, const std::string& text) {
 // The device-label rule, mirrored from the licensing backend (device_label.mjs) through the
 // generated bound_label_table.hpp. The approval page shows the label beside the comparison code, so
 // a label may not hold a control, format, line or paragraph separator, or default-ignorable code
-// point, and its comparison form may not hold anything shaped like a comparison code, including one
-// spelled with look-alike characters from other scripts.
+// point, and its comparison form, its UTS #39 skeleton as far as a comparison code goes, may not hold
+// anything shaped like the skeleton of a comparison code, whatever script spells it.
 template <std::size_t N>
 bool in_ranges(const bound_label_table::Range (&ranges)[N], std::uint32_t point) {
 	std::size_t low = 0;
@@ -144,8 +144,8 @@ bool in_ranges(const bound_label_table::Range (&ranges)[N], std::uint32_t point)
 	}
 	return false;
 }
-// A code point whose Unicode confusable prototype is a comparison-code character becomes that
-// character; any other code point is unchanged.
+// A code point whose Unicode confusable prototype is the skeleton of a comparison-code character
+// becomes that skeleton (0 becomes O, 1 becomes l); any other code point is unchanged.
 std::uint32_t fold_confusable(std::uint32_t point) {
 	const auto* first = std::begin(bound_label_table::confusables);
 	const auto* last = std::end(bound_label_table::confusables);
@@ -154,22 +154,28 @@ std::uint32_t fold_confusable(std::uint32_t point) {
 						 [](const bound_label_table::Fold& fold, std::uint32_t value) { return fold.point < value; });
 	return found != last && found->point == point ? static_cast<unsigned char>(found->to) : point;
 }
-bool hex_digit(char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
-// XXXX-XXXX-XXXX in hex digits of either case, which could tell the approver which code to match.
+// One of the skeletons of the comparison-code digits and letters: O, l, 2-9, A-F or a-f.
+bool code_skeleton(char c) {
+	const std::string_view skeletons(bound_label_table::code_skeletons, sizeof(bound_label_table::code_skeletons) - 1);
+	return skeletons.find(c) != std::string_view::npos;
+}
+// The skeleton of XXXX-XXXX-XXXX in hex digits of either case, which could tell the approver which
+// code to match.
 bool holds_comparison_code(const std::string& form) {
 	constexpr std::size_t length = 14;
 	for (std::size_t start = 0; start + length <= form.size(); ++start) {
 		bool match = true;
 		for (std::size_t i = 0; i < length && match; ++i)
-			match = (i == 4 || i == 9) ? form[start + i] == '-' : hex_digit(form[start + i]);
+			match = (i == 4 || i == 9) ? form[start + i] == '-' : code_skeleton(form[start + i]);
 		if (match) return true;
 	}
 	return false;
 }
 // The label is already valid UTF-8, trimmed only at sequence boundaries. The comparison form folds
-// fullwidth ASCII to ASCII and each confusable of a comparison-code character to that character,
-// maps every dash and space to '-' and collapses runs of '-'. It keeps only what the code shape can
-// match, so any other code point becomes a non-matching placeholder.
+// fullwidth ASCII to ASCII and each code point whose confusable prototype is the skeleton of a
+// comparison-code character to that skeleton, maps every dash and space to '-' and collapses runs of
+// '-'. It keeps only what the code shape can match, so any other code point becomes a non-matching
+// placeholder.
 bool misleading_label(std::string_view label) {
 	namespace table = bound_label_table;
 	std::string form;

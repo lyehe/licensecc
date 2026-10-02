@@ -4,10 +4,10 @@
 //   SHA-256 091c7f82fc39ef208faf8f94d29c244de99254675e09de163160c810d13ef22a
 // Unicode data files are provided under the Unicode License v3: https://www.unicode.org/license.txt
 //
-// Every code point whose confusable prototype is a single character of the comparison-code alphabet
-// [0-9A-Fa-f-], grouped by that character, so a device label cannot spell a comparison code with
-// look-alikes from other scripts.
-// No code point has 0 or 1 as its prototype, so those groups are empty.
+// A device label is compared as its UTS #39 skeleton, in which each code point becomes its confusable
+// prototype. Only the part of the skeleton that can spell a comparison code matters, so this subset
+// holds the skeleton of each comparison-code character [0-9A-Fa-f-] and every code point whose
+// prototype is one of those skeletons, grouped by that skeleton.
 // Do not edit: run
 // `node scripts/generate-device-label-table.mjs --write --confusables <path or URL of that file>`.
 
@@ -17,9 +17,28 @@ export const DEVICE_LABEL_CONFUSABLES_SOURCE = Object.freeze({
   sha256: "091c7f82fc39ef208faf8f94d29c244de99254675e09de163160c810d13ef22a",
 });
 
+/** The skeleton of each comparison-code character: its confusable prototype, or itself. */
+export const DEVICE_LABEL_CODE_SKELETONS = Object.freeze({
+  "0": "O", "1": "l", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8",
+  "9": "9", "A": "A", "B": "B", "C": "C", "D": "D", "E": "E", "F": "F", "a": "a", "b": "b",
+  "c": "c", "d": "d", "e": "e", "f": "f", "-": "-",
+});
+
+/** Every code point whose confusable prototype is one of those skeletons, grouped by that skeleton. */
 export const DEVICE_LABEL_CONFUSABLES = Object.freeze({
-  "0": Object.freeze([]),
-  "1": Object.freeze([]),
+  "O": Object.freeze([0x0030, 0x039F, 0x041E, 0x0555, 0x07C0, 0x0B20, 0x0CE6, 0x12D0, 0x2C9E,
+    0x2D54, 0x3007, 0xA4F3, 0xFF2F, 0x10292, 0x102AB, 0x10404, 0x104C2, 0x10516, 0x118B5, 0x118E0,
+    0x11DE0, 0x1CCE4, 0x1CCF0, 0x1D40E, 0x1D442, 0x1D476, 0x1D4AA, 0x1D4DE, 0x1D512, 0x1D546,
+    0x1D57A, 0x1D5AE, 0x1D5E2, 0x1D616, 0x1D64A, 0x1D67E, 0x1D6B6, 0x1D6F0, 0x1D72A, 0x1D764,
+    0x1D79E, 0x1D7CE, 0x1D7D8, 0x1D7E2, 0x1D7EC, 0x1D7F6, 0x1FBF0]),
+  "l": Object.freeze([0x0031, 0x0049, 0x007C, 0x0196, 0x01C0, 0x0399, 0x0406, 0x04C0, 0x04CF,
+    0x05C0, 0x05D5, 0x05DF, 0x0627, 0x0661, 0x06F1, 0x07CA, 0x16C1, 0x2110, 0x2111, 0x2113, 0x2160,
+    0x217C, 0x2223, 0x23FD, 0x2C92, 0x2D4F, 0xA4F2, 0xFE8D, 0xFE8E, 0xFF29, 0xFF4C, 0xFFE8, 0x1028A,
+    0x10309, 0x10320, 0x11DDA, 0x11DE1, 0x16EAA, 0x16F28, 0x1CCDE, 0x1CCF1, 0x1D408, 0x1D425,
+    0x1D43C, 0x1D459, 0x1D470, 0x1D48D, 0x1D4C1, 0x1D4D8, 0x1D4F5, 0x1D529, 0x1D540, 0x1D55D,
+    0x1D574, 0x1D591, 0x1D5A8, 0x1D5C5, 0x1D5DC, 0x1D5F9, 0x1D610, 0x1D62D, 0x1D644, 0x1D661,
+    0x1D678, 0x1D695, 0x1D6B0, 0x1D6EA, 0x1D724, 0x1D75E, 0x1D798, 0x1D7CF, 0x1D7D9, 0x1D7E3,
+    0x1D7ED, 0x1D7F7, 0x1E8C7, 0x1EE00, 0x1EE80, 0x1FBF1]),
   "2": Object.freeze([0x01A7, 0x03E8, 0x14BF, 0xA644, 0xA6EF, 0xA75A, 0x1CCF2, 0x1D7D0, 0x1D7DA,
     0x1D7E4, 0x1D7EE, 0x1D7F8, 0x1FBF2]),
   "3": Object.freeze([0x01B7, 0x021C, 0x0417, 0x04E0, 0x0969, 0x0AE9, 0x2C9C, 0x2CC4, 0x2CCC,
