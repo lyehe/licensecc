@@ -234,13 +234,37 @@ test("a device label cannot spell a comparison code with look-alike characters f
       label,
     );
   }
-  // The comparison form folds each look-alike to the code character it imitates.
-  assert.equal(deviceLabelComparisonForm(CROSS_SCRIPT_LABELS["a code mixing Latin, Cyrillic, Greek and mathematical characters"]), "4F2A-0C12-B7E4");
+  // The comparison form is the label's skeleton: each look-alike becomes the confusable prototype of
+  // the code character it imitates, so the digits 0 and 1 read as O and l.
+  assert.equal(deviceLabelComparisonForm(CROSS_SCRIPT_LABELS["a code mixing Latin, Cyrillic, Greek and mathematical characters"]), "4F2A-OCl2-B7E4");
   assert.equal(deviceLabelComparisonForm(`${cp(0x430)}${cp(0x2212)} ${cp(0x2010)}x`), "a-x");
 });
 
+// The skeleton of 0 is O and the skeleton of 1 is l, so O, I, l, | and their look-alikes in any script
+// stand in for those digits as well as the digits themselves do.
+const DIGIT_STAND_IN_LABELS = {
+  "a letter O for 0": "4F2A-OC12-B7E4",
+  "a capital I for 1": "4F2A-0CI2-B7E4",
+  "a small l for 1": "4F2A-0Cl2-B7E4",
+  "a vertical line for 1": "4F2A-0C|2-B7E4",
+  "a Cyrillic capital O (U+041E) for 0": `4F2A-${cp(0x41e)}C12-B7E4`,
+  "a Cyrillic capital I (U+0406) for 1": `4F2A-0C${cp(0x406)}2-B7E4`,
+  "a code made only of O, l and I": "OOOO-llll-IIII",
+};
+
+test("a device label cannot stand O, I, l or their look-alikes in for the digits 0 and 1", () => {
+  for (const [label, device_label] of Object.entries(DIGIT_STAND_IN_LABELS)) {
+    assert.throws(
+      () => validateBoundRequest("authorize", { ...enrollment(), device_label }),
+      error => error.code === "invalid_request" && error.status === 400,
+      label,
+    );
+  }
+});
+
 test("a device label still accepts ordinary names in scripts that have code look-alikes", () => {
-  for (const device_label of ["Компьютер", "Δέλτα-PC", "工作站", "Büro-PC", "DESKTOP-7Q2K1AB"]) {
+  // 4F2A-0C1Z-B7E4 is the control: Z is neither a code character nor the skeleton of one.
+  for (const device_label of ["Компьютер", "Δέλτα-PC", "工作站", "Büro-PC", "DESKTOP-7Q2K1AB", "OLD-BOX", "Lab-PC-01", "4F2A-0C1Z-B7E4"]) {
     assert.equal(validateBoundRequest("authorize", { ...enrollment(), device_label }).device_label, device_label, device_label);
   }
 });

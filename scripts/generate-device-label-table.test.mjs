@@ -18,6 +18,7 @@ import {
   unexplainedDifference,
 } from "./generate-device-label-table.mjs";
 import {
+  DEVICE_LABEL_CODE_SKELETONS,
   DEVICE_LABEL_CONFUSABLES,
   DEVICE_LABEL_CONFUSABLES_SOURCE,
 } from "../services/cloudflare-licensing-backend/src/device/device_label_confusables.mjs";
@@ -27,6 +28,8 @@ const committed = readFileSync(resolve(repositoryRoot, TABLE_PATH), "utf8");
 const committedConfusables = readFileSync(resolve(repositoryRoot, CONFUSABLES_PATH), "utf8");
 // The order the subset keeps: JavaScript enumerates the digit keys first.
 const CODE_ALPHABET = [..."0123456789ABCDEFabcdef-"];
+// The UTS #39 skeleton of each code character: 0 reads as O and 1 as l; the rest are their own.
+const CODE_SKELETONS = Object.fromEntries(CODE_ALPHABET.map((character) => [character, { 0: "O", 1: "l" }[character] ?? character]));
 
 test("the committed native device-label table matches the backend rule", () => {
   assert.deepEqual(deviceLabelTableDrift(committed), []);
@@ -96,22 +99,26 @@ test("the generator is deterministic for one engine", () => {
   assert.equal(renderDeviceLabelTable("1.0"), renderDeviceLabelTable("1.0"));
 });
 
-test("the table folds look-alikes of the comparison-code alphabet from other scripts", () => {
-  const folds = new Map(parseDeviceLabelTable(committed).confusables);
-  // Cyrillic A, Greek Alpha, Cyrillic small a, mathematical bold four and the minus sign.
-  for (const [point, to] of [[0x410, "A"], [0x391, "A"], [0x430, "a"], [0x1d7d2, "4"], [0x2212, "-"]]) {
+test("the table folds every look-alike of a comparison-code character to that character's skeleton", () => {
+  const table = parseDeviceLabelTable(committed);
+  const folds = new Map(table.confusables);
+  // Cyrillic A, Greek Alpha, Cyrillic small a, mathematical bold four, the minus sign, and the
+  // stand-ins for 0 and 1: Cyrillic O to O, Cyrillic I to l.
+  for (const [point, to] of [[0x410, "A"], [0x391, "A"], [0x430, "a"], [0x1d7d2, "4"], [0x2212, "-"], [0x41e, "O"], [0x406, "l"]]) {
     assert.equal(folds.get(point), to, `U+${point.toString(16)} folds to ${to}`);
   }
-  // ASCII is never folded, and nothing folds outside the code alphabet.
-  assert.ok([...folds.keys()].every((point) => point > 0x7f));
-  assert.ok([...folds.values()].every((to) => CODE_ALPHABET.includes(to)));
+  // In ASCII only 0 folds to O, and 1, I and | fold to l; nothing folds outside the skeletons.
+  assert.deepEqual([...folds].filter(([point]) => point < 0x80), [[0x30, "O"], [0x31, "l"], [0x49, "l"], [0x7c, "l"]]);
+  assert.ok([...folds.values()].every((to) => Object.values(CODE_SKELETONS).includes(to)));
+  // The code shape is made of the skeletons of the code digits and letters.
+  assert.equal(table.skeletons, "Ol23456789ABCDEFabcdef");
 });
 
 test("the table folds exactly the committed confusables subset, in code-point order", () => {
   const expected = Object.entries(DEVICE_LABEL_CONFUSABLES)
     .flatMap(([to, points]) => points.map((point) => [point, to]))
     .sort((left, right) => left[0] - right[0]);
-  assert.ok(expected.length > 300);
+  assert.ok(expected.length > 500);
   assert.deepEqual(parseDeviceLabelTable(committed).confusables, expected);
 });
 
@@ -122,7 +129,8 @@ test("the committed confusables subset names the pinned upstream file and is the
   for (const header of [CONFUSABLES_SOURCE.unicode, CONFUSABLES_SOURCE.url, CONFUSABLES_SOURCE.sha256]) {
     assert.ok(committedConfusables.slice(0, committedConfusables.indexOf("export")).includes(header), `the header names ${header}`);
   }
-  assert.deepEqual(Object.keys(DEVICE_LABEL_CONFUSABLES), CODE_ALPHABET);
+  assert.deepEqual({ ...DEVICE_LABEL_CODE_SKELETONS }, CODE_SKELETONS);
+  assert.deepEqual(new Set(Object.keys(DEVICE_LABEL_CONFUSABLES)), new Set(Object.values(CODE_SKELETONS)));
   assert.deepEqual(confusablesModuleDrift(committedConfusables), []);
   assert.deepEqual(confusablesModuleDrift(committedConfusables.replace(/\r\n/gu, "\n").replace(/\n/gu, "\r\n")), []);
   assert.match(confusablesModuleDrift(committedConfusables.replace("0x0410", "0x0411")).join("\n"),
@@ -150,19 +158,30 @@ const SAMPLE_CONFUSABLES = [
   "2212 ;\t002D ;\tMA\t# ( − → - ) MINUS SIGN → HYPHEN-MINUS\t# ",
   "0430 ;\t0061 ;\tMA\t# ( а → a ) CYRILLIC SMALL LETTER A → LATIN SMALL LETTER A\t# ",
   "0030 ;\t004F ;\tMA\t# ( 0 → O ) DIGIT ZERO → LATIN CAPITAL LETTER O\t# ",
+  "041E ;\t004F ;\tMA\t# ( О → O ) CYRILLIC CAPITAL LETTER O → LATIN CAPITAL LETTER O\t# ",
+  "0031 ;\t006C ;\tMA\t# ( 1 → l ) DIGIT ONE → LATIN SMALL LETTER L\t# ",
+  "0049 ;\t006C ;\tMA\t# ( I → l ) LATIN CAPITAL LETTER I → LATIN SMALL LETTER L\t# ",
+  "03BF ;\t006F ;\tMA\t# ( ο → o ) GREEK SMALL LETTER OMICRON → LATIN SMALL LETTER O\t# ",
   "00C6 ;\t0041 0045 ;\tMA\t# ( Æ → AE ) LATIN CAPITAL LETTER AE → LATIN CAPITAL LETTER A, LATIN CAPITAL LETTER E\t# ",
   "0261 ;\t0067 ;\tMA\t# ( ɡ → g ) LATIN SMALL LETTER SCRIPT G → LATIN SMALL LETTER G\t# ",
   "",
 ].join("\n");
 
-test("deriving the subset keeps each code point whose prototype is one code-alphabet character", () => {
+test("deriving the subset keeps each code point whose prototype is the skeleton of a code character", () => {
   const subset = deriveConfusableSubset(SAMPLE_CONFUSABLES);
-  assert.deepEqual(Object.keys(subset), CODE_ALPHABET);
-  const nonEmpty = Object.fromEntries(Object.entries(subset).filter(([, points]) => points.length > 0));
-  assert.deepEqual(nonEmpty, { "-": [0x2212], 4: [0x1d7d2], A: [0x391, 0x410], a: [0x430] });
+  assert.deepEqual(subset.skeletons, CODE_SKELETONS);
+  const nonEmpty = Object.fromEntries(Object.entries(subset.confusables).filter(([, points]) => points.length > 0));
+  // A small o is the skeleton of no code character, so Greek omicron stays out.
+  assert.deepEqual(nonEmpty, { "-": [0x2212], 4: [0x1d7d2], A: [0x391, 0x410], a: [0x430], O: [0x30, 0x41e], l: [0x31, 0x49] });
   assert.throws(() => deriveConfusableSubset("0410 ; 0041\n"), /confusables\.txt line 1/u);
   assert.throws(() => deriveConfusableSubset("0410 ;\t0041 ;\tMA\n0410 ;\t0042 ;\tMA\n"), /U\+0410 .*more than once/u);
-  assert.match(renderConfusablesModule(subset, CONFUSABLES_SOURCE), /"A": Object\.freeze\(\[0x0391, 0x0410\]\)/u);
+  // A code character must fold to one ASCII letter, digit or dash that is not itself mapped again.
+  assert.throws(() => deriveConfusableSubset("0030 ;\t004F 004F ;\tMA\n"), /skeleton of "0" .*one ASCII/u);
+  assert.throws(() => deriveConfusableSubset("0030 ;\t004F ;\tMA\n004F ;\t0051 ;\tMA\n"), /skeleton O of "0" is itself mapped/u);
+  const rendered = renderConfusablesModule(subset, CONFUSABLES_SOURCE);
+  assert.match(rendered, /"0": "O", "1": "l", "2": "2"/u);
+  assert.match(rendered, /"A": Object\.freeze\(\[0x0391, 0x0410\]\)/u);
+  assert.match(rendered, /"O": Object\.freeze\(\[0x0030, 0x041E\]\)/u);
 });
 
 test("the upstream file is accepted only with the pinned SHA-256, from a path or a URL", async () => {

@@ -187,17 +187,50 @@ BOOST_AUTO_TEST_CASE(registration_refuses_comparison_codes_spelled_with_lookalik
 		std::string normalized;
 		BOOST_CHECK_MESSAGE(!normalize_bound_device_label(label, normalized), "label must be refused: " << label);
 	}
-	// "Computer" in Cyrillic, "Delta-PC" in Greek, "workstation" in CJK, "Buero-PC" with u-umlaut and
-	// "DESKTOP-7Q2K1AB".
+	// "Computer" in Cyrillic, "Delta-PC" in Greek, "workstation" in CJK, "Buero-PC" with u-umlaut,
+	// "DESKTOP-7Q2K1AB", "OLD-BOX" and "Lab-PC-01". 4F2A-0C1Z-B7E4 is the control: Z is neither a code
+	// character nor the skeleton of one.
 	const std::string accepted[] = {"\xd0\x9a\xd0\xbe\xd0\xbc\xd0\xbf\xd1\x8c\xd1\x8e\xd1\x82\xd0\xb5\xd1\x80",
 									"\xce\x94\xce\xad\xce\xbb\xcf\x84\xce\xb1-PC",
-									"\xe5\xb7\xa5\xe4\xbd\x9c\xe7\xab\x99", "B\xc3\xbcro-PC", "DESKTOP-7Q2K1AB"};
+									"\xe5\xb7\xa5\xe4\xbd\x9c\xe7\xab\x99",
+									"B\xc3\xbcro-PC",
+									"DESKTOP-7Q2K1AB",
+									"OLD-BOX",
+									"Lab-PC-01",
+									"4F2A-0C1Z-B7E4"};
 	for (const auto& label : accepted) {
 		input.device_label = label;
 		BOOST_CHECK_MESSAGE(encode_bound_authorization(input, out), "label must be accepted: " << label);
 		std::string normalized;
 		BOOST_CHECK_MESSAGE(normalize_bound_device_label(label, normalized) && normalized == label,
 							"label must be accepted unchanged: " << label);
+	}
+}
+// The skeleton of 0 is O and the skeleton of 1 is l, so O, I, l, | and their look-alikes in any
+// script stand in for those digits as well as the digits themselves do.
+BOOST_AUTO_TEST_CASE(registration_refuses_o_i_and_l_standing_in_for_zero_and_one) {
+	const auto r = vector("registration_wire.json").get_child("request");
+	BoundAuthorizationInput input{r.get<std::string>("client_id"),		 r.get<std::string>("project"),
+								  r.get<std::string>("public_key_spki"), r.get<std::string>("device_label"),
+								  r.get<std::string>("redirect_uri"),	 r.get<std::string>("state"),
+								  r.get<std::string>("code_challenge"),	 r.get<std::string>("requested_feature")};
+	SensitiveVector out;
+	// A letter O for 0; a capital I, a small l or a vertical line for 1; Cyrillic capital O (U+041E)
+	// for 0; Cyrillic capital I (U+0406) for 1; and a code made only of O, l and I.
+	const std::string refused[] = {"4F2A-OC12-B7E4",
+								   "4F2A-0CI2-B7E4",
+								   "4F2A-0Cl2-B7E4",
+								   "4F2A-0C|2-B7E4",
+								   "4F2A-\xd0\x9e"
+								   "C12-B7E4",
+								   "4F2A-0C\xd0\x86"
+								   "2-B7E4",
+								   "OOOO-llll-IIII"};
+	for (const auto& label : refused) {
+		input.device_label = label;
+		BOOST_CHECK_MESSAGE(!encode_bound_authorization(input, out), "label must be refused: " << label);
+		std::string normalized;
+		BOOST_CHECK_MESSAGE(!normalize_bound_device_label(label, normalized), "label must be refused: " << label);
 	}
 }
 BOOST_AUTO_TEST_CASE(registration_response_requires_exact_schema_and_status) {
