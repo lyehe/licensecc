@@ -1639,7 +1639,7 @@
       },
       "/v2/device-challenges": {
         "post": {
-          "description": "Protected device protocol; no configuration switch disables its checks. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
+          "description": "Protected device protocol; no configuration switch disables its checks. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries. A renewal challenge is issued for every existing binding, whatever the state of its license, account, binding or device, so before proof it reveals only that the binding exists; an unknown binding_id gets 404 binding_unavailable. The reason a renewal is refused is returned only after proof, by renewDeviceLease.",
           "operationId": "createDeviceChallenge",
           "requestBody": {
             "content": {
@@ -2091,7 +2091,7 @@
       },
       "/v2/device-leases/renew": {
         "post": {
-          "description": "Protected device protocol; no configuration switch disables its checks. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
+          "description": "Protected device protocol; no configuration switch disables its checks. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries. After the proof verifies, a retiring or released binding or a disabled device is refused with 403 device_retired, before and instead of any license or account state; an inactive, expired or not-yet-valid license, an ineligible trial or a disabled account is refused with 403 access_denied.",
           "operationId": "renewDeviceLease",
           "requestBody": {
             "content": {

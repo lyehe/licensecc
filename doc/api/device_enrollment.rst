@@ -29,6 +29,26 @@ Abandonment does not retire a binding, release capacity, delete a key or undo
 a possible server commit. Enrollment without an authenticated binding follows
 the enrollment recovery flow instead of this renewal procedure.
 
+Renewal refusals
+----------------
+
+The backend issues a renewal challenge for every existing binding, whatever the
+state of its license, account, binding or device. Before the device proves its
+key, a challenge therefore reveals only that the binding exists, and the binding
+ID is a 128-bit secret. A challenge for an unknown binding returns
+``404 binding_unavailable``.
+
+The reason a renewal is refused is returned only after the proof verifies, on
+``/v2/device-leases/renew``. A retiring or released binding, or a disabled
+device, is refused with ``403 device_retired`` before any license or account
+check, so a disconnected device never learns the state behind it. An inactive,
+revoked, expired or not-yet-valid license, an ineligible trial or a disabled
+account is refused with ``403 access_denied``. The other refusals and every
+rate limit are unchanged. The native client classifies these refusals exactly as
+it classified a refused challenge: ``lcc_device_bound_renew`` returns
+``LCC_BOUND_DENIED``, and protected work stays denied until a fresh renewal is
+accepted.
+
 Enrollment comparison
 ---------------------
 

@@ -31,7 +31,7 @@ const errors: Record<string, string[]> = {
   "409": ["device_limit_reached", "revision_conflict", "idempotency_conflict"],
   "410": ["authorization_expired", "challenge_expired"], "429": ["rate_limited"], "503": ["temporarily_unavailable"],
 };
-function operation(operationId: string, summary: string, request: unknown, code: string, data: unknown) {
+function operation(operationId: string, summary: string, request: unknown, code: string, data: unknown, note = "") {
   const headers = { "Cache-Control": { schema: { const: "no-store" }, description: "Never cache protocol responses." } };
   const responses: Record<string, unknown> = { "200": { description: code, headers,
     content: { "application/json": { schema: object({ ok: { const: true }, code: { const: code }, request_id: { type: "string" }, data }) } } } };
@@ -42,7 +42,7 @@ function operation(operationId: string, summary: string, request: unknown, code:
     content: { "application/json": { schema: object({ ok: { const: false }, code: { type: "string", enum: codes }, request_id: { type: "string" } }) } },
   };
   return { post: { tags: ["device"], operationId, summary, security: [],
-    description: "Protected device protocol; no configuration switch disables its checks. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
+    description: "Protected device protocol; no configuration switch disables its checks. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries." + note,
     requestBody: { required: true, content: { "application/json": { schema: request } } }, responses } };
 }
 
@@ -51,7 +51,9 @@ export const boundDevicePaths: LabeledPathFragment = { label: "protected devices
     object({ attempt_handle: secret, authorization_url: { type: "string", format: "uri", description: "Fixed configured portal destination; secret attempt_handle is carried in the fragment, not query parameters." }, expires_at: integer,
       comparison_code:{type:"string",pattern:"^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$",description:"Display-only 48-bit enrollment comparison. The app recomputes it from its original enrollment transcript before showing it; never use as a credential or proof."} }))],
   ["/v2/device-challenges", operation("createDeviceChallenge", "Obtain a fresh, single-use device-proof challenge.", challenge, "challenge_created",
-    object({ challenge_id: recordId, nonce: secret, expires_at: integer }))],
+    object({ challenge_id: recordId, nonce: secret, expires_at: integer }),
+    " A renewal challenge is issued for every existing binding, whatever the state of its license, account, binding or device, so before proof it reveals only that the binding exists; an unknown binding_id gets 404 binding_unavailable. The reason a renewal is refused is returned only after proof, by renewDeviceLease.")],
   ["/v2/device-authorizations/exchange", operation("exchangeDeviceAuthorization", "Exchange consent, PKCE and key proof for a device-bound lease.", exchange, "device_activated", lease)],
-  ["/v2/device-leases/renew", operation("renewDeviceLease", "Renew an active binding with fresh device proof.", renewal, "device_renewed", lease)],
+  ["/v2/device-leases/renew", operation("renewDeviceLease", "Renew an active binding with fresh device proof.", renewal, "device_renewed", lease,
+    " After the proof verifies, a retiring or released binding or a disabled device is refused with 403 device_retired, before and instead of any license or account state; an inactive, expired or not-yet-valid license, an ineligible trial or a disabled account is refused with 403 access_denied.")],
 ] };

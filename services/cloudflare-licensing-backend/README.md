@@ -634,6 +634,14 @@ a new process requires fresh online renewal. Customer/device denial stops new
 issuance, while a lease already accepted by a running process stays bounded by
 its signed expiry (at most 24 hours).
 
+A renewal challenge is issued for every existing binding, whatever the state of
+its license, account, binding or device, so before proof it reveals only that
+the binding exists; an unknown `binding_id` gets `404 binding_unavailable`. The
+refusal reason is returned only after the proof verifies, by
+`/v2/device-leases/renew`: a retiring or released binding or a disabled device
+gets `403 device_retired` before any license or account check, and an
+ineligible license, trial or account gets `403 access_denied`.
+
 The deployment entrypoint exports `DeviceConsent`, a named Workers RPC capability
 with `inspect`, `approve`, and `deny` methods. Bind only the authenticated customer
 portal to that entrypoint; the default/public Worker does not expose these methods.
