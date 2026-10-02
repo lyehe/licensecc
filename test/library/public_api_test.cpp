@@ -304,23 +304,36 @@ BOOST_AUTO_TEST_CASE(public_abi_enum_values_are_stable) {
 	BOOST_CHECK_EQUAL(static_cast<int>(VM), 2);
 }
 
-BOOST_AUTO_TEST_CASE(public_api_symbols_are_linkable) {
-	BOOST_CHECK(lcc_strerror != nullptr);
-	BOOST_CHECK(lcc_init_caller_informations != nullptr);
-	BOOST_CHECK(lcc_init_license_location != nullptr);
-	BOOST_CHECK(lcc_init_license_info != nullptr);
-	BOOST_CHECK(lcc_init_license_check_options != nullptr);
-	BOOST_CHECK(lcc_set_caller_feature_name != nullptr);
-	BOOST_CHECK(lcc_set_caller_version != nullptr);
-	BOOST_CHECK(lcc_set_license_location_data != nullptr);
-	BOOST_CHECK(lcc_set_license_path != nullptr);
-	BOOST_CHECK(print_error != nullptr);
-	BOOST_CHECK(identify_pc != nullptr);
-	BOOST_CHECK(acquire_license != nullptr);
-	BOOST_CHECK(acquire_license_ex != nullptr);
-	BOOST_CHECK(lcc_set_environment_license_sources_enabled != nullptr);
-	BOOST_CHECK(lcc_set_strict_source_fatal_enabled != nullptr);
+// Taking a symbol's address makes the linker resolve it. Reading the address back through a
+// volatile pointer keeps the null check a real runtime check rather than a comparison the
+// compiler can prove true.
+template <typename Function>
+static void check_symbol_links(Function* symbol, const char* name) {
+	Function* volatile address = symbol;
+	BOOST_CHECK_MESSAGE(address != nullptr, name << " links");
 }
+
+#define CHECK_SYMBOL_LINKS(symbol) check_symbol_links(&(symbol), #symbol)
+
+BOOST_AUTO_TEST_CASE(public_api_symbols_are_linkable) {
+	CHECK_SYMBOL_LINKS(lcc_strerror);
+	CHECK_SYMBOL_LINKS(lcc_init_caller_informations);
+	CHECK_SYMBOL_LINKS(lcc_init_license_location);
+	CHECK_SYMBOL_LINKS(lcc_init_license_info);
+	CHECK_SYMBOL_LINKS(lcc_init_license_check_options);
+	CHECK_SYMBOL_LINKS(lcc_set_caller_feature_name);
+	CHECK_SYMBOL_LINKS(lcc_set_caller_version);
+	CHECK_SYMBOL_LINKS(lcc_set_license_location_data);
+	CHECK_SYMBOL_LINKS(lcc_set_license_path);
+	CHECK_SYMBOL_LINKS(print_error);
+	CHECK_SYMBOL_LINKS(identify_pc);
+	CHECK_SYMBOL_LINKS(acquire_license);
+	CHECK_SYMBOL_LINKS(acquire_license_ex);
+	CHECK_SYMBOL_LINKS(lcc_set_environment_license_sources_enabled);
+	CHECK_SYMBOL_LINKS(lcc_set_strict_source_fatal_enabled);
+}
+
+#undef CHECK_SYMBOL_LINKS
 
 BOOST_AUTO_TEST_CASE(public_helpers_initialize_structs_safely) {
 	CallerInformations caller;
