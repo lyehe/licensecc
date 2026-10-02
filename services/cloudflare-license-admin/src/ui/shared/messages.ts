@@ -105,6 +105,8 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   webhook_test_sent: done("Test event sent."),
   webhook_operator_not_configured: failed("Sending test events is not set up for this admin console yet."),
   webhook_signing_unconfigured: failed("Webhook signing is not configured on the licensing backend."),
+  // A delivery's cancellation reason: its endpoint moved after the delivery was queued.
+  endpoint_changed: failed("Canceled: the endpoint's address or scope changed after this delivery was queued."),
   invalid_url: failed("Enter one https:// address on a public host name (no IP addresses, credentials, or internal names like localhost or .internal)."),
   invalid_event_types: failed("One or more event types aren't recognized. Choose from the listed event types."),
 
