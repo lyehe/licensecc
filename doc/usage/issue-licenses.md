@@ -96,10 +96,10 @@ Useful options:
 | Parameter | Description |
 | --- | --- |
 | `--base64`, `-b` | Encode the license for environment-variable transport. |
-| `--valid-from` | Start date, formatted `YYYY-MM-DD`; defaults to today. |
+| `--valid-from` | Start date, formatted `YYYY-MM-DD`; omitted means no start date. |
 | `--valid-to` | Expiration date, formatted `YYYY-MM-DD`; omitted means no expiration. |
 | `--client-signature` | Hardware identifier in `XXXX-XXXX-XXXX` format. |
-| `--output-file-name`, `-o` | License output file path. |
+| `--output-file-name`, `-o` | License output file path. `lccgen` then prints the path and a one-line summary of the project, features, dates and client-signature binding; without it, the license itself is printed. |
 | `--extra-data` | Application-specific data returned by `acquire_license`. |
 | `--feature-names` | Comma-separated licensed feature names. |
 

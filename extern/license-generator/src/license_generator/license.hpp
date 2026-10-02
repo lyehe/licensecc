@@ -32,12 +32,19 @@ public:
 	void set_allow_env_selected_binding(bool allow_env_selected_binding);
 	void set_allow_weak_disk_label_binding(bool allow_weak_disk_label_binding);
 	void write_license();
+	/**
+	 * One line describing the license the last successful write_license() issued: project,
+	 * features, valid-from and valid-to, and whether it is bound to a client signature.
+	 * Empty before a successful write.
+	 */
+	std::string issued_summary() const;
 	inline virtual ~License() {}
 
 private:
 	bool m_allow_ip_binding = false;
 	bool m_allow_env_selected_binding = false;
 	bool m_allow_weak_disk_label_binding = false;
+	std::string m_issued_summary;
 };
 
 } /* namespace license */

@@ -24,3 +24,10 @@ back to Zlib for pre-3.0 OpenSSL, and
 initialisation calls (unnecessary since OpenSSL 1.1.0 and removed outright in
 OpenSSL 3.0) and switched the digest context to the OpenSSL 3.0 allocation
 API.
+
+`licensecc` also changed the `license issue` command's text: its help gives
+dates as `YYYY-MM-DD` (the compact `YYYYMMDD` form is still accepted) and says
+an omitted `--valid-from` leaves the license without a start date, and a
+license written to a file is reported with its path and a one-line summary of
+the project, features, `valid-from` and `valid-to`, and client-signature
+binding.

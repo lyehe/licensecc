@@ -1775,6 +1775,17 @@ BOOST_AUTO_TEST_CASE(issue_license_reports_the_written_path_and_a_summary) {
 	BOOST_CHECK_EQUAL(stdout_str, "License written to " + open_license.string() +
 									  "\nProject TEST, features TEST, valid-from not set, valid-to not set (no "
 									  "expiry), not bound to a client signature.\n");
+
+	// Extending the bound file: the ALPHA section keeps its earlier dates and binding, while the
+	// new GAMMA section has none, so the summary says the terms differ instead of picking one.
+	issue_license_capturing_stdout({"lcc", "license", "issue", "--" PARAM_PROJECT_FOLDER, project_folder.string(),
+									"--" PARAM_LICENSE_OUTPUT, bound_license.string(), "--" PARAM_FEATURE_NAMES,
+									"alpha,gamma"},
+								   result, stdout_str);
+	BOOST_CHECK_EQUAL(result, 0);
+	BOOST_CHECK_EQUAL(stdout_str, "License written to " + bound_license.string() +
+									  "\nProject TEST, features ALPHA,GAMMA, valid-from varies by feature, "
+									  "valid-to varies by feature, client-signature binding varies by feature.\n");
 }
 
 BOOST_AUTO_TEST_CASE(issue_license_to_stdout_prints_only_the_license) {

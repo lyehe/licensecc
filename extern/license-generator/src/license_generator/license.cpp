@@ -871,7 +871,51 @@ License::License(const std::string *licenseName, const std::string &project_fold
 	m_private_key = (proj_folder / PRIVATE_KEY_FNAME).string();
 }
 
+// The value every issued section carries for `key` ("" when absent). `same` is false when the
+// sections disagree, which can happen when an existing license file keeps a section's old value.
+static string issued_sections_value(const CSimpleIniA &ini, const vector<string> &sections, const char *key,
+									bool &same) {
+	same = true;
+	string common;
+	for (size_t i = 0; i < sections.size(); ++i) {
+		const string value = ini.GetValue(sections[i].c_str(), key, "");
+		if (i == 0) {
+			common = value;
+		} else if (value != common) {
+			same = false;
+		}
+	}
+	return common;
+}
+
+static string issued_license_summary(const string &project_name, const vector<string> &features,
+									 const CSimpleIniA &ini) {
+	bool same_from = true;
+	bool same_to = true;
+	bool same_binding = true;
+	const string valid_from = issued_sections_value(ini, features, PARAM_BEGIN_DATE, same_from);
+	const string valid_to = issued_sections_value(ini, features, PARAM_EXPIRY_DATE, same_to);
+	const string client_signature = issued_sections_value(ini, features, PARAM_CLIENT_SIGNATURE, same_binding);
+	ostringstream summary;
+	summary << "Project " << project_name << ", features " << boost::algorithm::join(features, ",")
+			<< ", valid-from " << (!same_from ? "varies by feature" : valid_from.empty() ? "not set" : valid_from)
+			<< ", valid-to "
+			<< (!same_to ? "varies by feature" : valid_to.empty() ? "not set (no expiry)" : valid_to) << ", ";
+	if (!same_binding) {
+		summary << "client-signature binding varies by feature";
+	} else if (client_signature.empty()) {
+		summary << "not bound to a client signature";
+	} else {
+		summary << "bound to client signature " << client_signature;
+	}
+	summary << ".";
+	return summary.str();
+}
+
+std::string License::issued_summary() const { return m_issued_summary; }
+
 void License::write_license() {
+	m_issued_summary.clear();
 	CSimpleIniA ini;
 	bool existing_license_loaded = false;
 	const fs::path project_path(m_project_folder);
@@ -957,6 +1001,7 @@ void License::write_license() {
 		}
 		write_file_atomically(*m_license_fname, output);
 	}
+	m_issued_summary = issued_license_summary(project_name, feature_v, ini);
 }
 
 void License::set_allow_weak_disk_label_binding(bool allow_weak_disk_label_binding) {

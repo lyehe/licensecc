@@ -477,10 +477,10 @@ static int issueLicense(const po::parsed_options &parsed, po::variables_map &vm,
 		 "Encode license as base64 for inclusion in environment variables.")  //
 		(PARAM_BEGIN_DATE, po::value<string>(),
 		 "Specify the start of the validity for this license. "
-		 " Format YYYYMMDD. If not specified defaults to today")  //
+		 "Format YYYY-MM-DD. If not specified the license has no start date.")  //
 		(PARAM_EXPIRY_DATE ",e", po::value<string>(),
 		 "Specify the expire date for this license. "
-		 " Format YYYYMMDD. If not specified the license won't expire")  //
+		 "Format YYYY-MM-DD. If not specified the license won't expire.")  //
 		(PARAM_CLIENT_SIGNATURE ",s", po::value<string>(),
 		 "The signature of the hardware that requires the license. It should be in the format XXXX-XXXX-XXXX."
 		 " If not specified the license won't be linked to a specific hardware (eg. demo license).")  //
@@ -494,7 +494,7 @@ static int issueLicense(const po::parsed_options &parsed, po::variables_map &vm,
 		 "Allow issuing a hardware-bound license for a disk identifier produced from mutable disk fallback data. "
 		 "This binding is weak and disabled by default.")  //
 		(PARAM_LICENSE_OUTPUT ",o", po::value<string>(&license_name),
-		 "License output file name. May contain / that will be interpreded as subfolders.")  //
+		 "License output file name. May contain / that will be interpreted as subfolders.")  //
 		(PARAM_FEATURE_NAMES ",f", po::value<boost::optional<std::string>>(),
 		 "Feature names: comma separate list of project features to enable. if not specified will be taken as project "
 		 "name.")  //
@@ -537,8 +537,10 @@ static int issueLicense(const po::parsed_options &parsed, po::variables_map &vm,
 				}
 			}
 			license.write_license();
+			// A license printed to stdout is the whole output; only a written file gets a report.
 			if (license_name_ptr != nullptr) {
-				cout << "License written " << endl;
+				cout << "License written to " << license_name << endl;
+				cout << license.issued_summary() << endl;
 			}
 		} catch (exception &ex) {
 			cerr << "License issue error: " << ex.what() << endl;
