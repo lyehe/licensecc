@@ -304,18 +304,29 @@ variation selector, filler or tag character
 (``\p{Default_Ignorable_Code_Point}``). Its comparison form also must not
 contain text shaped like a comparison code, ``XXXX-XXXX-XXXX`` in hexadecimal
 digits of either case. The comparison form folds fullwidth ASCII
-(U+FF01–U+FF5E) to ASCII, maps every dash (``\p{Pd}``) and space (``\p{Zs}``)
-to ``-``, and collapses runs of ``-``, so ``4F2A 0C12 B7E4`` and a code written
-with en dashes or fullwidth digits are refused as well. Letters, digits, spaces
-and punctuation in any script remain valid, for example ``Büro-PC``, ``工作站``
-and ``DESKTOP-7Q2K1AB``. The licensing backend owns the rule
+(U+FF01–U+FF5E) to ASCII, then folds every code point whose Unicode confusable
+prototype (UTS #39 ``confusables.txt``) is a single character of
+``[0-9A-Fa-f-]`` to that character, maps every dash (``\p{Pd}``) and space
+(``\p{Zs}``) to ``-``, and collapses runs of ``-``. So ``4F2A 0C12 B7E4``, a
+code written with en dashes, minus signs or fullwidth digits, and a code that
+uses look-alikes from other scripts, such as Cyrillic ``А`` (U+0410), Greek
+``Α`` (U+0391), Cyrillic ``а`` (U+0430) or the mathematical digit ``𝟒``
+(U+1D7D2), are refused as well. No code point has ``0`` or ``1`` as its
+prototype (theirs are ``O`` and ``l``), so neither digit has a fold. Letters,
+digits, spaces and punctuation in any script remain valid, for example
+``Компьютер``, ``Δέλτα-PC``, ``Büro-PC``, ``工作站`` and ``DESKTOP-7Q2K1AB``.
+The licensing backend owns the rule
 (``services/cloudflare-licensing-backend/src/device/device_label.mjs``) and
 refuses such a label at registration with ``invalid_request``. The native
 client refuses it with ``LCC_BOUND_INVALID_ARGUMENT`` before it sends anything,
 using ``src/library/device_identity/bound_label_table.hpp``, which
 ``scripts/generate-device-label-table.mjs`` generates from the same Unicode
-property escapes. Registration retries preserve their original inputs and
-five-minute inclusive-clock deadline.
+property escapes and the same confusables subset, so both apply the identical
+fold. That subset, ``device_label_confusables.mjs`` beside the rule, is derived
+from the Unicode 17.0.0 ``confusables.txt`` and names its URL and SHA-256 in
+its header; only ``--write --confusables <path or URL>`` re-derives it, and
+that run refuses a file with any other SHA-256. Registration retries preserve
+their original inputs and five-minute inclusive-clock deadline.
 
 The owner accepts exactly one canonical code/state callback for the registered
 loopback URI. Invalid callbacks leave the valid attempt usable; duplicates

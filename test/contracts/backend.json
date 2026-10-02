@@ -667,7 +667,7 @@
                       "const": "S256"
                     },
                     "device_label": {
-                      "description": "Trimmed display-only Unicode label, 1–80 code points. It is shown beside the comparison code on the approval page, so a label holding a control, format (including bidi), line or paragraph separator, or default-ignorable code point is refused with invalid_request, as is a label whose comparison form (fullwidth ASCII folded to ASCII, every dash and space mapped to a hyphen, runs of hyphens collapsed) contains XXXX-XXXX-XXXX in hex digits.",
+                      "description": "Trimmed display-only Unicode label, 1–80 code points. It is shown beside the comparison code on the approval page, so a label holding a control, format (including bidi), line or paragraph separator, or default-ignorable code point is refused with invalid_request, as is a label whose comparison form (fullwidth ASCII folded to ASCII, every code point whose Unicode confusable prototype in UTS #39 confusables.txt is one character of [0-9A-Fa-f-] folded to that character, every dash and space mapped to a hyphen, runs of hyphens collapsed) contains XXXX-XXXX-XXXX in hex digits.",
                       "type": "string"
                     },
                     "project": {

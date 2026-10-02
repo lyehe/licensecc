@@ -58,11 +58,17 @@ accept ownership.
   to `bound_config.mjs` must therefore also run
   `npm run test:release-operations`, which exercises the materializer.
 * `scripts/generate-device-label-table.mjs` (Release and CI tooling) imports
-  `services/cloudflare-licensing-backend/src/device/device_label.mjs` and
-  renders `src/library/device_identity/bound_label_table.hpp`, the native
-  client's copy of the device-label rule, from the backend's own Unicode
-  property escapes. The backend owns the rule; the tooling only expands it, and
-  the native library only reads the committed table, so neither build runs the
-  generator. A change to `device_label.mjs` must regenerate the table with
+  `services/cloudflare-licensing-backend/src/device/device_label.mjs` and its
+  confusables subset `device_label_confusables.mjs`, and renders
+  `src/library/device_identity/bound_label_table.hpp`, the native client's copy
+  of the device-label rule, from the backend's own Unicode property escapes and
+  that subset. The backend owns the rule and the committed subset; the tooling
+  only expands and copies them, and the native library only reads the committed
+  table, so neither build runs the generator. A change to `device_label.mjs`
+  must regenerate the table with
   `node scripts/generate-device-label-table.mjs --write`; `npm run
-  test:clean-checkout` fails while the committed table is stale.
+  test:clean-checkout` fails while the committed table is stale. The same tool
+  writes the subset only on an explicit
+  `--write --confusables <path or URL>` run, which requires the pinned
+  SHA-256 of the upstream Unicode `confusables.txt`; checks and plain
+  `--write` runs use only the committed subset and never the network.

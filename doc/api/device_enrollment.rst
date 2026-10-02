@@ -89,8 +89,9 @@ Labels, customer/license selection, revisions and timestamps are not part of
 this immutable enrollment transcript. Because the browser shows the
 app-supplied device label beside the code, registration refuses a label that
 holds control, format, line-separator or default-ignorable characters, or text
-shaped like a comparison code once dashes, spaces and fullwidth forms are
-folded; :doc:`device_identity` lists the exact rule.
+shaped like a comparison code once dashes, spaces, fullwidth forms and
+look-alike characters from other scripts (their Unicode confusable prototypes)
+are folded; :doc:`device_identity` lists the exact rule.
 
 The code is a 48-bit human comparison aid, not a credential, lookup key,
 signature or proof of key possession. State verification, PKCE, fresh challenges
