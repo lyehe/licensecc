@@ -376,6 +376,29 @@ test("unknown email, no live code, wrong code and dead code answer identically a
   }
 });
 
+test("the one-statement code check reaches an address's live codes through an index on email_lower", async () => {
+  const db = freshDb();
+  seedCustomer(db, "A", "a@x.com");
+  const e = env(db);
+  const { code } = await issueCode(e, "a@x.com");
+
+  // Capture the code check exactly as redeemOtp prepares and binds it, then ask SQLite how it runs.
+  const checks = [];
+  const recordingEnv = env(db);
+  const real = recordingEnv.DB;
+  recordingEnv.DB = {
+    prepare(sql) {
+      const prepared = real.prepare(sql);
+      if (!/^UPDATE portal_otp SET attempt_count/.test(sql)) return prepared;
+      return { bind: (...values) => { checks.push({ sql, values }); return prepared.bind(...values); } };
+    },
+  };
+  assert.deepEqual(await redeemOtp(recordingEnv, { email: "a@x.com", code: wrongCode(code), clientIp: "198.51.100.9", now: NOW }), { ok: false, code: "invalid_otp" });
+  assert.equal(checks.length, 1, "one code-check statement");
+  const plan = db.prepare(`EXPLAIN QUERY PLAN ${checks[0].sql}`).all(...checks[0].values).map((row) => row.detail).join("\n");
+  assert.match(plan, /SEARCH portal_otp USING INDEX idx_portal_otp_email_live \(email_lower=\?\)/u, plan);
+});
+
 // A D1 stand-in for concurrent requests: it holds every portal_otp statement, then runs all the
 // held ones back to back in arrival order before any request sees its own result, as statements
 // from simultaneous requests reach D1 before their answers come back.
