@@ -9,6 +9,9 @@ from __future__ import annotations
 import hashlib
 
 import pytest
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from licensecc import (
     ConfigAttestationExpected,
@@ -159,6 +162,34 @@ def test_config_unknown_key_id_rejected(config_golden, embedded_config_golden):
     result = verify_config_token(config_golden.token, _expected(config_golden), other)
     assert not result.ok
     assert result.code == RejectionCode.UNKNOWN_KEY_ID
+
+
+def _resigned_golden_token(config_golden, bits):
+    """The golden payload, re-keyed to a fresh trusted key of ``bits`` bits and signed by it."""
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=bits)
+    public_der = private_key.public_key().public_bytes(Encoding.DER, PublicFormat.PKCS1)
+    trusted_key = TrustedPublicKey(public_key_der=public_der)
+    payload_text = decode_std_canonical(config_golden.token.split(".")[1]).decode("utf-8")
+    payload = payload_text.replace(config_golden.key_id, trusted_key.key_id).encode("utf-8")
+    assert payload != payload_text.encode("utf-8")
+    signature = private_key.sign(payload, padding.PKCS1v15(), hashes.SHA256())
+    return f"lcccfg1.{encode_std(payload)}.{encode_std(signature)}", [trusted_key]
+
+
+@pytest.mark.parametrize("bits", [1024, 2048])
+def test_config_token_signed_by_a_trusted_key_below_3072_bits_rejected(config_golden, bits):
+    # Every verifier applies the same 3072-bit floor, so even a correctly signed token from a
+    # trusted key below it is refused.
+    token, trusted_keys = _resigned_golden_token(config_golden, bits)
+    result = verify_config_token(token, _expected(config_golden), trusted_keys)
+    assert not result.ok
+    assert result.code == RejectionCode.KEY_TOO_WEAK
+
+
+def test_config_token_resigned_by_a_trusted_3072_bit_key_verifies(config_golden):
+    token, trusted_keys = _resigned_golden_token(config_golden, 3072)
+    result = verify_config_token(token, _expected(config_golden), trusted_keys)
+    assert result.ok, result.detail
 
 
 def test_config_token_with_another_prefix_rejected(config_golden, trusted):

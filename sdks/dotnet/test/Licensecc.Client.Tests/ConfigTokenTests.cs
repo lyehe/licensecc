@@ -207,6 +207,42 @@ namespace Licensecc.Client.Tests
             Assert.AreEqual(VerifyFailureCode.Envelope, result.Code);
         }
 
+        // The golden payload, re-keyed to a fresh trusted key of the given size and signed by it.
+        private static VerifyResult<ConfigTokenClaims> VerifyResignedGolden(int bits)
+        {
+            using RSA rsa = RSA.Create(bits);
+            TrustedPublicKey trusted = TrustedPublicKey.FromPkcs1DerHex(Convert.ToHexString(rsa.ExportRSAPublicKey()));
+            string[] parts = Token.Split('.');
+            string payloadText = Encoding.UTF8.GetString(Convert.FromBase64String(parts[1]));
+            byte[] payload = Encoding.UTF8.GetBytes(payloadText.Replace(KeyId, trusted.KeyId, StringComparison.Ordinal));
+            Assert.AreNotEqual(payloadText, Encoding.UTF8.GetString(payload));
+            byte[] signature = rsa.SignData(payload, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            ConfigTokenExpected expected = BaseExpected();
+            expected.TrustedKeys = new TrustedKeyRing(trusted);
+            return ConfigTokenVerifier.Verify(
+                "lcccfg1." + Convert.ToBase64String(payload) + "." + Convert.ToBase64String(signature), expected);
+        }
+
+        [TestMethod]
+        [DataRow(1024)]
+        [DataRow(2048)]
+        public void Negative_TrustedKeyBelow3072Bits_Rejected(int bits)
+        {
+            // Every verifier applies the same 3072-bit floor, so even a correctly signed token from a
+            // trusted key below it is refused.
+            VerifyResult<ConfigTokenClaims> result = VerifyResignedGolden(bits);
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(VerifyFailureCode.Signature, result.Code);
+            StringAssert.Contains(result.Detail, "3072-bit floor");
+        }
+
+        [TestMethod]
+        public void ResignedByTrusted3072BitKey_Verifies()
+        {
+            VerifyResult<ConfigTokenClaims> result = VerifyResignedGolden(3072);
+            Assert.IsTrue(result.Ok, result.Detail);
+        }
+
         // The embedded golden's PKCS#1 DER is published only as a CMake byte-array record; reproduce it
         // here so the embedded-ring golden is covered without re-reading the cmake file.
         private static byte[] EmbeddedGoldenPublicKeyDer()
