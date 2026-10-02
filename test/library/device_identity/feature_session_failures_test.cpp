@@ -113,10 +113,13 @@ BOOST_AUTO_TEST_CASE(accepted_renewal_final_check_failure_requires_another_onlin
 }
 
 BOOST_AUTO_TEST_CASE(authority_denial_is_terminal_and_conflict_requires_deliberate_new_owner) {
+	// Every renewal challenge is issued, so a license, account or binding refusal arrives here, on the
+	// proved renewal.
 	for (const auto& failure : std::vector<std::pair<unsigned, std::string>>{{404, "binding_unavailable"},
 																			 {409, "revision_conflict"},
 																			 {409, "idempotency_conflict"},
-																			 {403, "device_retired"}}) {
+																			 {403, "device_retired"},
+																			 {403, "access_denied"}}) {
 		for (bool started : {false, true}) {
 			Fixture f;
 			auto owner = f.open();

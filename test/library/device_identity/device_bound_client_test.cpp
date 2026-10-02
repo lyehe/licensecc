@@ -2,6 +2,7 @@
 #include <boost/test/unit_test.hpp>
 #include "bound_client.hpp"
 #include "bound_json.hpp"
+#include "bound_public.hpp"
 #include "bound_session_signer.hpp"
 #include "device_identity_handle.hpp"
 #include <cstring>
@@ -380,6 +381,56 @@ BOOST_AUTO_TEST_CASE(transport_failure_cannot_turn_poisoned_response_into_denial
 	f.normal();
 	expect(f.client->renew(), BoundRenewStatus::accepted);
 	authority(f, BoundSessionStatus::ok);
+}
+// The backend issues a renewal challenge for every existing binding, so a license, account or
+// binding refusal arrives after proof, on the renewal itself, instead of on the challenge. The app
+// must end exactly where a refused challenge left it: the same public result and outcome, the same
+// denied authority, and the same answer to the next renewal.
+BOOST_AUTO_TEST_CASE(renewal_refused_after_proof_ends_like_a_refused_challenge) {
+	struct Observed {
+		BoundRenewStatus status;
+		BoundSessionStatus decision;
+		LCC_BOUND_RESULT result;
+		LccDeviceBoundOutcome outcome;
+		BoundSessionStatus authority;
+		BoundRenewStatus next;
+	};
+	const auto observe = [](BoundWireOperation refused_at, unsigned http_status, const std::string& code) {
+		Fixture f;
+		expect(f.client->renew(), BoundRenewStatus::accepted);
+		const auto normal = f.transport->call;
+		f.transport->call = [=](BoundWireOperation op, const std::string& body, BoundHttpResponse& out) {
+			if (op != refused_at) return normal(op, body, out);
+			out = {http_status, "{\"ok\":false,\"code\":\"" + code + "\",\"request_id\":\"trace\"}"};
+			return BoundHttpStatus::complete;
+		};
+		const auto refused = f.client->renew();
+		Observed seen{refused.status, refused.decision.status, LCC_BOUND_INTERNAL_ERROR, {}, {}, {}};
+		seen.result = bound_public_result(refused, seen.outcome);
+		seen.authority = f.client->authorize_operation().status;
+		f.normal();
+		seen.next = f.client->renew().status;
+		return seen;
+	};
+	const auto before = observe(BoundWireOperation::renew_challenge, 404, "binding_unavailable");
+	BOOST_CHECK(before.status == BoundRenewStatus::denied);
+	BOOST_CHECK_EQUAL(before.result, LCC_BOUND_DENIED);
+	BOOST_CHECK(before.authority == BoundSessionStatus::denied);
+	BOOST_CHECK(before.next == BoundRenewStatus::accepted);
+	for (const auto& refusal : {std::pair<unsigned, std::string>{403, "access_denied"}, {403, "device_retired"}}) {
+		const auto after = observe(BoundWireOperation::renew, refusal.first, refusal.second);
+		BOOST_TEST_CONTEXT(refusal.second) {
+			BOOST_CHECK(after.status == before.status);
+			BOOST_CHECK(after.decision == before.decision);
+			BOOST_CHECK_EQUAL(after.result, before.result);
+			BOOST_CHECK_EQUAL(after.outcome.provider_result, before.outcome.provider_result);
+			BOOST_CHECK_EQUAL(after.outcome.renewal_due, before.outcome.renewal_due);
+			BOOST_CHECK_EQUAL(after.outcome.denial_detail, before.outcome.denial_detail);
+			BOOST_CHECK_EQUAL(after.outcome.effective_time, before.outcome.effective_time);
+			BOOST_CHECK(after.authority == before.authority);
+			BOOST_CHECK(after.next == before.next);
+		}
+	}
 }
 BOOST_AUTO_TEST_CASE(lost_response_reuses_original_operation_and_elapsed_time) {
 	Fixture f;
