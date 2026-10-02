@@ -1,7 +1,6 @@
 import { encodeBase64url, deviceEnrollmentComparisonInput, formatDeviceEnrollmentComparison } from "@licensecc/licensing-domain/lease/device_protocol";
 import { importBoundDeviceKey, sha256Hex } from "./bound_crypto.mjs";
 import { BoundRequestError, validateBoundClient, validateBoundRequest } from "./bound_request.mjs";
-import { boundTrialSql } from "@licensecc/cloudflare-runtime/device/bound_trial";
 
 const encoder = new TextEncoder();
 export const boundSecretHash = value => sha256Hex(encoder.encode(value));
@@ -49,15 +48,12 @@ const exchangeSubject = `SELECT a.handle_hash AS subject_id,a.key_id,
     OR (a.status='approved' AND a.expires_at>unixepoch() AND a.code_expires_at>unixepoch())
     OR (a.status='consumed' AND a.consumed_operation_id=?
       AND a.recovery_until>unixepoch() AND o.retain_until>unixepoch()))`;
+// Every existing binding of an existing device is admitted, whatever its license, account, binding or
+// device state. Before proof a renewal challenge may reveal only that the binding exists (its ID is a
+// 128-bit secret); the refusal reason for that state follows a verified proof, at renewal.
 const renewSubject = `SELECT b.id AS subject_id,d.key_id,unixepoch()+60 AS deadline
   FROM device_bound_bindings b JOIN device_bound_devices d ON d.id=b.device_id
-  JOIN entitlements e ON e.project=b.project AND e.feature=b.feature AND e.license_fingerprint=b.license_fingerprint
-  JOIN customers c ON c.id=d.customer_id AND c.id=e.customer_id
-  WHERE b.id=? AND b.state='active' AND d.status='active' AND c.status='active'
-    AND e.status='active'
-    AND ${boundTrialSql("e", "d.key_id", "unixepoch()", false)}
-    AND (e.valid_from IS NULL OR e.valid_from<=unixepoch())
-    AND (e.valid_until IS NULL OR e.valid_until>unixepoch())`;
+  WHERE b.id=?`;
 
 // Challenge admission and its deadline are computed in the INSERT itself.
 // A challenge grants no license; proof, current authority and single-use

@@ -93,9 +93,9 @@ test("consumed challenge admission rejects missing, incomplete or unrelated oper
   }
 });
 
-// Before proof a renewal challenge may reveal only that the binding exists, so current licence and
+// Before proof a renewal challenge may reveal only that the binding exists, so current license and
 // account authority is checked after proof, at renewal, and never at challenge admission.
-test("renewal challenges are issued whatever the current licence or account authority", async t => {
+test("renewal challenges are issued whatever the current license or account authority", async t => {
   for (const mutation of ["UPDATE customers SET status='disabled'", "UPDATE entitlements SET status='disabled'", "UPDATE entitlements SET status='revoked'", "UPDATE entitlements SET is_trial=1", "UPDATE entitlements SET valid_until=1000", "UPDATE entitlements SET valid_from=1001"]) {
     const f=fixture(); t.after(()=>f.sql.close());
     const c={...candidate(),bindingId:boundRandomId()};

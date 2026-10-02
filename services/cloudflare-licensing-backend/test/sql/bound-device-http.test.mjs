@@ -168,11 +168,11 @@ test("retirement rejects already prepared renewal and cached exchange proofs wit
 // Before the device proves its key, a renewal challenge may say only that the binding exists. Each
 // state below is applied to an enrolled binding; the reason for a refusal follows a verified proof.
 const RENEWAL_STATES={
-  "an active licence":{refusal:null},
-  "a suspended licence":{sql:"UPDATE entitlements SET status='disabled',revocation_seq=revocation_seq+1",refusal:[403,"access_denied"]},
-  "a revoked licence":{sql:"UPDATE entitlements SET status='revoked',revocation_seq=revocation_seq+1",refusal:[403,"access_denied"]},
-  "an expired licence":{sql:"UPDATE entitlements SET valid_until=1100",refusal:[403,"access_denied"]},
-  "a licence that has not started":{sql:"UPDATE entitlements SET valid_from=5000",refusal:[403,"access_denied"]},
+  "an active license":{refusal:null},
+  "a suspended license":{sql:"UPDATE entitlements SET status='disabled',revocation_seq=revocation_seq+1",refusal:[403,"access_denied"]},
+  "a revoked license":{sql:"UPDATE entitlements SET status='revoked',revocation_seq=revocation_seq+1",refusal:[403,"access_denied"]},
+  "an expired license":{sql:"UPDATE entitlements SET valid_until=1100",refusal:[403,"access_denied"]},
+  "a license that has not started":{sql:"UPDATE entitlements SET valid_from=5000",refusal:[403,"access_denied"]},
   "a suspended customer":{sql:"UPDATE customers SET status='disabled'",refusal:[403,"access_denied"]},
   "a retiring binding":{retire:true,refusal:[403,"device_retired"]},
   "a released binding":{retire:true,sql:"UPDATE device_bound_bindings SET state='released',revision=revision+1",refusal:[403,"device_retired"]},
@@ -200,14 +200,14 @@ function challengeShape(response,now) {
     data:data&&{keys:Object.keys(data),challenge_id:data.challenge_id.length,nonce:data.nonce.length,lifetime:data.expires_at-now}};
 }
 
-test("before proof, a renewal challenge is the same for every licence, account and binding state",async t=>{
+test("before proof, a renewal challenge is the same for every license, account and binding state",async t=>{
   const shapes=new Map();
   for(const [name,state] of Object.entries(RENEWAL_STATES)) {
     const {f,renewal}=await enrolledInState(t,state);
     const response=await f.call("/v2/device-challenges",{purpose:"renew",binding_id:renewal.binding_id,operation_id:renewal.operation_id});
     shapes.set(name,challengeShape(response,CHALLENGE_AT));
   }
-  const active=shapes.get("an active licence");
+  const active=shapes.get("an active license");
   assert.equal(active.status,200);assert.equal(active.code,"challenge_created");
   for(const [name,shape] of shapes) assert.deepEqual(shape,active,name);
 });
@@ -225,7 +225,7 @@ test("after proof, a renewal refusal names the state that refused it",async t=>{
   }
 });
 
-test("a disconnected device learns only that it is disconnected, never the licence or account state",async t=>{
+test("a disconnected device learns only that it is disconnected, never the license or account state",async t=>{
   for(const [name,state] of Object.entries(RENEWAL_STATES)) {
     if(state.refusal?.[1]!=="device_retired") continue;
     const {f,d,renewal}=await enrolledInState(t,state);
@@ -236,7 +236,7 @@ test("a disconnected device learns only that it is disconnected, never the licen
 });
 
 test("a renewal challenge for an unknown binding is still a generic 404",async t=>{
-  const {f}=await enrolledInState(t,RENEWAL_STATES["an active licence"]);
+  const {f}=await enrolledInState(t,RENEWAL_STATES["an active license"]);
   const response=await f.call("/v2/device-challenges",{purpose:"renew",binding_id:boundRandomId(),operation_id:boundRandomId(32)});
   assert.equal(response.status,404);
   assert.deepEqual(Object.keys(response.body),["ok","code","request_id"]);
@@ -292,8 +292,9 @@ test("HTTP trials start on exchange and preserve their deadline through renewal 
     // but expired trial authority must still deny the recovered response.
     const expired=await f.call('/v2/device-authorizations/exchange',await signed(f,d,'exchange'));
     assert.equal(expired.status,403); assert.equal(expired.body.code,'access_denied');
-    const challenge=await f.call('/v2/device-challenges',{purpose:'renew',binding_id:renew.binding_id,operation_id:boundRandomId(32)});
-    assert.equal(challenge.status,404);
+    // An expired trial still gets a renewal challenge; the renewal proved under it is refused.
+    const fresh=await f.call('/v2/device-leases/renew',await signed(f,d,'renew',{...renew,operation_id:boundRandomId(32)}));
+    assert.equal(fresh.status,403); assert.equal(fresh.body.code,'access_denied');
     const expiredRenewal=await f.call('/v2/device-leases/renew',pending);
     assert.equal(expiredRenewal.status,403); assert.equal(expiredRenewal.body.code,'access_denied');
     assert.deepEqual(state(),started);
