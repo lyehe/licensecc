@@ -8,7 +8,9 @@ already-installed Licensecc package (Windows TPM or Linux TPM2/OpenSSL).
 Generates a throwaway public/private RSA-3072 test key pair (the example
 never contacts a backend or a real TPM in this mode), configures the example
 with LCC_BOUND_EXAMPLE_TESTS=ON against the given install prefix, builds it,
-and runs its isolated recovery-flow CTest suite.
+and runs its isolated recovery-flow CTest suite twice: first with the default
+device label (the computer name), then with a non-ASCII LCC_BOUND_DEVICE_LABEL
+pinned at configure time.
 
 The installed package's CMake config directory differs by platform
 (Windows: <prefix>/cmake/licensecc; Linux/Unix: <prefix>/lib/cmake/licensecc).
@@ -82,3 +84,20 @@ if ($LASTEXITCODE -ne 0) { throw 'configure failed' }
 if ($LASTEXITCODE -ne 0) { throw 'build failed' }
 & ctest --test-dir $resolvedBuildDirectory -C $Configuration --no-tests=error --output-on-failure
 if ($LASTEXITCODE -ne 0) { throw 'example tests failed' }
+
+# Second pass: a label pinned at configure time must reach the executable byte for byte, UTF-8
+# included, and must never be replaced by the computer name. The configure reuses every cached
+# setting above. The label is built from code points so this file stays ASCII.
+$configuredLabel = 'B' + [char]0x00FC + 'ro ' + [char]0x5DE5 + [char]0x4F5C + [char]0x7AD9
+try {
+    & cmake -S $exampleSource -B $resolvedBuildDirectory "-DLCC_BOUND_DEVICE_LABEL=$configuredLabel"
+    if ($LASTEXITCODE -ne 0) { throw 'configure with a pinned device label failed' }
+    & cmake --build $resolvedBuildDirectory --config $Configuration
+    if ($LASTEXITCODE -ne 0) { throw 'build with a pinned device label failed' }
+    & ctest --test-dir $resolvedBuildDirectory -C $Configuration --no-tests=error --output-on-failure
+    if ($LASTEXITCODE -ne 0) { throw 'example tests with a pinned device label failed' }
+} finally {
+    # Restore the computer-name default so a later run of this script starts from it.
+    & cmake -S $exampleSource -B $resolvedBuildDirectory "-DLCC_BOUND_DEVICE_LABEL=" | Out-Null
+}
+if ($LASTEXITCODE -ne 0) { throw 'restoring the default device label failed' }
