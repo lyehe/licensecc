@@ -1,3 +1,10 @@
+# Where the runtime uses OpenSSL, every module compiles against the OpenSSL 3.0 API with the
+# deprecated declarations hidden, so a deprecated call fails to compile instead of only warning.
+# These definitions stay private to the runtime; the vendored generator is not affected.
+if(UNIX OR OPENSSL_FOUND)
+	add_compile_definitions(OPENSSL_API_COMPAT=30000 OPENSSL_NO_DEPRECATED)
+endif()
+
 add_subdirectory("signed_token")
 add_subdirectory("base")
 add_subdirectory("anti_tamper")
