@@ -85,7 +85,14 @@ accepted.
 The Python PEP 517 backend is pinned to Hatchling 1.27.0 in `pyproject.toml`.
 The assembler first checks the canonical `uv.lock`, then invokes `uv build`
 with the tracked hash-constrained `sdks/python/build-constraints.txt` and
-`--require-hashes`. NuGet packaging
+`--require-hashes`. Hatchling version updates are maintained manually: update
+the `[build-system]` pin and the constraint file together using verified
+registry hashes, then run SDK tests and the hash-checked wheel/sdist build.
+The uv Dependabot job excludes these version updates because the build-only
+requirement is absent from `uv.lock`, causing its updater to reject an
+unchanged lockfile. Dependency alerts remain enabled.
+
+NuGet packaging
 sets `SymbolPackageFormat=snupkg` both in the SDK project and the pack command.
 Its locked restore targets only
 `sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj` and its tracked

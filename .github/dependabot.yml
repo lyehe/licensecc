@@ -33,6 +33,15 @@ updates:
     directory: "/sdks/python"
     schedule:
       interval: weekly
+    ignore:
+      # Hatchling's build-only pin is maintained with build-constraints.txt hashes.
+      # The uv updater fails here because that requirement is absent from uv.lock
+      # (dependency_file_content_not_changed). Update the pin and hashes together.
+      - dependency-name: "hatchling"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
     groups:
       python-sdk:
         patterns:

@@ -23,6 +23,9 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   remains supported from 3.9.2 onward.
 - Documentation dependencies require urllib3 2.8.0 or newer. The repository
   and release uv toolchain is pinned to 0.12.18 for Dependabot compatibility.
+- Hatchling version updates are maintained with the release backend's verified
+  hash constraints; the uv Dependabot job excludes this build-only pin, whose
+  absent lockfile entry otherwise makes the updater fail.
 - Backend and native device-label validation preserve fullwidth separator
   skeletons when refusing labels that imitate the enrollment comparison code.
 - Playwright is updated to 1.64.0. Portal consent tests record and cancel their
