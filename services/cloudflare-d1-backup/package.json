@@ -17,8 +17,8 @@
     "restore-drill": "node scripts/restore-drill.mjs"
   },
   "devDependencies": {
-    "@types/node": "22.20.4",
+    "@types/node": "22.20.5",
     "typescript": "7.0.2",
-    "wrangler": "4.140.0"
+    "wrangler": "4.148.0"
   }
 }
