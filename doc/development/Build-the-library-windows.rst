@@ -4,7 +4,7 @@ Build - Windows
 
 Use Visual Studio 2022 with the Desktop development with C++ workload, CMake
 3.21 or later, and the OpenSSL 3.0 or later and Boost dependencies required by
-the selected configuration. The platform is at **0.1.0-rc.2** (a prerelease): accepted source
+the selected configuration. The platform is at **0.1.0-rc.3** (a prerelease): accepted source
 and automated checks are not a published binary support matrix or a remote CI
 attestation.
 

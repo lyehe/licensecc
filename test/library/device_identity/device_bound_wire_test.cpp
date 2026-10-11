@@ -246,7 +246,7 @@ BOOST_AUTO_TEST_CASE(registration_refuses_expanding_lookalikes_and_dash_lookalik
 	// Cyrillic yu (U+042E, lO), ff ligature (U+FB00), Latin AA (U+A732), AE ligature (U+00C6) and a
 	// digit four full stop (U+248B, 4.) ending a code; then codes separated by CJK one (U+4E00), box
 	// drawing horizontals (U+2500, U+2501), the prolonged sound mark (U+30FC), Hangul eu (U+3161)
-	// and the Kangxi radical one (U+2F00).
+	// and the Kangxi radical one (U+2F00), plus fullwidth tilde and vertical line (U+FF5E, U+FF5C).
 	const std::string refused[] = {"4F2A-0C\xe2\x85\xa1-B7E4",
 								   "4F2A-0C\xe2\x80\x96-B7E4",
 								   "4F2A-\xea\x9d\x8e"
@@ -277,6 +277,15 @@ BOOST_AUTO_TEST_CASE(registration_refuses_expanding_lookalikes_and_dash_lookalik
 								   "B7E4",
 								   "4F2A\xe2\xbc\x80"
 								   "0C12\xe2\xbc\x80"
+								   "B7E4",
+								   "4F2A\xef\xbd\x9e"
+								   "0C12\xef\xbd\x9e"
+								   "B7E4",
+								   "4F2A\xef\xbd\x9c"
+								   "0C12\xef\xbd\x9c"
+								   "B7E4",
+								   "4F2A\xef\xbd\x9e"
+								   "0C12\xef\xbd\x9c"
 								   "B7E4"};
 	for (const auto& label : refused) {
 		input.device_label = label;

@@ -15,7 +15,7 @@ Start with :doc:`../api/sdks` for the cross-language scope and token contract,
 then follow the README owned by the selected package:
 
 * `Python SDK guide
-  <https://github.com/lyehe/licensecc/tree/main/sdks/python>`_ — Python 3.9+
+  <https://github.com/lyehe/licensecc/tree/main/sdks/python>`_ — Python 3.9.2+
   config-token verification and protected adapters.
 * `.NET SDK guide
   <https://github.com/lyehe/licensecc/tree/main/sdks/dotnet>`_ — .NET 8,

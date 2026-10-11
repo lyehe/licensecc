@@ -54,7 +54,7 @@ Prerequisites by workflow
    * - Java SDK consumer
      - JDK 17 or newer.
    * - Repository contributor
-     - PowerShell 7, Node 22+, npm ``10.9.8``, Python 3.12, uv ``0.12.5``,
+     - PowerShell 7, Node 22+, npm ``10.9.8``, Python 3.12, uv ``0.12.18``,
        JDK 17.0.20, and only the optional platform tools required by the
        changed surface. Doxygen is required for documentation builds.
 

@@ -822,7 +822,7 @@ test("workflow execution scanning accepts only actual step run mappings and quot
 });
 
 test("workflow structural checks reject inert pin decoys, quoted guards, and commands after exit", () => {
-  const toolchains = { python_version: "3.12.8", uv_version: "0.12.5", dotnet_sdk_version: "8.0.423" };
+  const toolchains = { python_version: "3.12.8", uv_version: "0.12.18", dotnet_sdk_version: "8.0.423" };
   const decoy = workflowJobLinesFromSource([
     "jobs:",
     "  release:",
@@ -898,14 +898,14 @@ test("capability evidence remains a PR gate locally and in repository-quality", 
 });
 
 test("schema parity and SDK checks share one pinned uv and Python 3.12 contract", () => {
-  assert.equal(source("uv.toml"), 'required-version = "==0.12.5"\n');
+  assert.equal(source("uv.toml"), 'required-version = "==0.12.18"\n');
   const backend = JSON.parse(source("services/cloudflare-licensing-backend/package.json"));
   assert.equal(backend.scripts["schema:parity"], "uv run --no-project python scripts/check-schema-parity.py");
   const root = JSON.parse(source("package.json"));
   assert.equal(root.scripts["check:schema-parity"], "npm run schema:parity --workspace @licensecc/cloudflare-licensing-backend");
   for (const path of ["AGENTS.md", "CONTRIBUTING.md", "README.md"]) {
     assert.match(source(path), /Python 3\.12/u, path);
-    assert.match(source(path), /uv 0\.12\.5/u, path);
+    assert.match(source(path), /uv 0\.12\.18/u, path);
   }
   assert.ok((source(".github/workflows/services.yml").match(/uses: astral-sh\/setup-uv@/gu) ?? []).length > 0);
 });

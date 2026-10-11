@@ -6,7 +6,7 @@ Notable changes to this repository. The format loosely follows [Keep a Changelog
 
 - **C++ library** (`CMakeLists.txt`): `2.1.0` — versioned independently.
 - **Platform packages** (root/workspace Node packages, the four Cloudflare services, OpenAPI
-  documents, and the Python, .NET, and Java SDKs): `0.1.0-rc.2` (Python `0.1.0rc2`) — versioned
+  documents, and the Python, .NET, and Java SDKs): `0.1.0-rc.3` (Python `0.1.0rc3`) — versioned
   independently of the C++ core and not yet published to any registry.
 
 Platform release tags use `platform-v<version>`; future independent C++ release tags use
@@ -14,6 +14,22 @@ Platform release tags use `platform-v<version>`; future independent C++ release 
 are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-release-tags.md).
 
 ## [Unreleased] — initial release
+
+### Platform rc.3 compatibility and security
+
+- The Python SDK requires Python 3.9.2 or newer and cryptography 50.0.2 or newer.
+  Python 3.9.0 and 3.9.1 cannot resolve the patched dependency. SDK tests use
+  pytest 9.0.3 or newer and require Python 3.10 or newer; Python 3.9 runtime use
+  remains supported from 3.9.2 onward.
+- Documentation dependencies require urllib3 2.8.0 or newer. The repository
+  and release uv toolchain is pinned to 0.12.18 for Dependabot compatibility.
+- Backend and native device-label validation preserve fullwidth separator
+  skeletons when refusing labels that imitate the enrollment comparison code.
+- Playwright is updated to 1.64.0. Portal consent tests record and cancel their
+  external callback navigation while preserving all UI assertions and checking
+  the exact handoff URL, instead of holding the document with an HTTP 204 mock.
+- The C++ library retains its independent 2.1.0 version; no release is published
+  or tagged by this source update.
 
 ### Included
 - Offline v201 `.lic` licensing: the C++ runtime accepts only v201 license files, and `lccgen`

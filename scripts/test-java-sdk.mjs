@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { readVersionAuthorities } from "./check-version-contract.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoot = join(root, "sdks", "java", "src");
@@ -28,7 +29,7 @@ mkdirSync(tests, { recursive: true });
 
 run("javac", ["--release", "17", "-Xlint:all", "-Werror", "-d", classes,
   ...files(join(sourceRoot, "main", "java"))]);
-const artifact = join(output, "licensecc-client-0.1.0-rc.2.jar");
+const artifact = join(output, `licensecc-client-${readVersionAuthorities(root).platformVersion}.jar`);
 run("jar", ["--create", "--file", artifact,
   "--manifest", join(root, "sdks", "java", "MANIFEST.MF"), "-C", classes, "."]);
 run("javac", ["--release", "17", "-Xlint:all", "-Werror",

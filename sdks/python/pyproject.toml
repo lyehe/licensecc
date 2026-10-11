@@ -1,9 +1,9 @@
 [project]
 name = "licensecc"
-version = "0.1.0rc2"
+version = "0.1.0rc3"
 description = "Python client SDK for licensecc: offline verification of lcccfg1 config-attestation tokens."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.9.2"
 license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "licensecc" }]
 keywords = ["licensing", "license", "verification", "rsa", "token", "licensecc"]
@@ -16,11 +16,11 @@ classifiers = [
 
 # Zero hard dependencies beyond `cryptography`.
 dependencies = [
-    "cryptography>=41.0.0",
+    "cryptography>=50.0.2",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=7.0"]
+test = ["pytest>=9.0.3; python_version >= '3.10'"]
 
 [project.urls]
 Homepage = "https://github.com/lyehe/licensecc"
@@ -40,7 +40,7 @@ packages = ["src/licensecc"]
 artifacts = ["uv.lock"]
 
 [dependency-groups]
-dev = ["pytest>=7.0"]
+dev = ["pytest>=9.0.3; python_version >= '3.10'"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

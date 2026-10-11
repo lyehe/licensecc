@@ -147,7 +147,7 @@ jobs:
          if: matrix.preset == 'ci-windows-msvc-debug-dynamic-tpm'
          uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
          with:
-            version: "0.12.5"
+            version: "0.12.18"
             # Native filesystem tests leave inaccessible junction fixtures in build/.
             cache-dependency-glob: "sdks/python/uv.lock"
       -  name: Installed Python device-bound bridge

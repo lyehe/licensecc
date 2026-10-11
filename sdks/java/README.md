@@ -53,7 +53,7 @@ the parity and native-adapter ownership tests against the built
 JAR, and writes only ignored build output. Actual JNI loading requires the
 separate installed-adapter gate below; portable tests do not provision a device.
 
-The repository builds `build/java-sdk/licensecc-client-0.1.0-rc.2.jar`.
+The repository builds `build/java-sdk/licensecc-client-0.1.0-rc.3.jar`.
 
 The JAR is not published to Maven Central. Consume it as a checked local
 artifact or take it from a reviewed Licensecc release. Add that exact JAR to

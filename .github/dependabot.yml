@@ -15,10 +15,6 @@ updates:
     schedule:
       interval: weekly
     ignore:
-      # 1.64.0 stalls mocked HTTP 204 loopback handoffs in five portal consent E2E tests.
-      # Keep 1.63.0 until a later release passes those same tests.
-      - dependency-name: "@playwright/test"
-        versions: ["1.64.0"]
       # @types/node tracks the Node major that CI and the Workers tooling run on (22).
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]

@@ -183,7 +183,8 @@ bool holds_comparison_code(const std::string& form) {
 // The label is already valid UTF-8, trimmed only at sequence boundaries. The comparison form folds
 // fullwidth ASCII to ASCII, reads every dash and space as '-', reads each listed code point as the
 // table says and collapses runs of '-'. It keeps only what the code shape can match, so any other
-// code point becomes a non-matching placeholder.
+// code point becomes a non-matching placeholder. Preserve the original skeleton before width
+// folding, so a fullwidth separator does not turn into an ASCII non-separator.
 bool misleading_label(std::string_view label) {
 	namespace table = bound_label_table;
 	std::string form;
@@ -195,10 +196,14 @@ bool misleading_label(std::string_view label) {
 		for (std::size_t k = 1; k < size; ++k) point = (point << 6) | (static_cast<unsigned char>(label[i + k]) & 0x3f);
 		i += size;
 		if (in_ranges(table::refused, point)) return true;
-		if (point >= table::fullwidth_first && point <= table::fullwidth_last) point -= table::fullwidth_offset;
+		const char* read = fold_confusable(point);
+		if (point >= table::fullwidth_first && point <= table::fullwidth_last) {
+			point -= table::fullwidth_offset;
+			if (read == nullptr) read = fold_confusable(point);
+		}
 		if (in_ranges(table::separators, point)) {
 			append_form(form, '-');
-		} else if (const char* read = fold_confusable(point)) {
+		} else if (read != nullptr) {
 			for (; *read != '\0'; ++read) append_form(form, *read);
 		} else {
 			form.push_back(point < 0x80 ? static_cast<char>(point) : '\0');

@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { entitlementId } from "@licensecc/licensing-domain/entitlements/contracts";
 import { contrastRatio, parseRgb } from "./e2e-contrast.mjs";
+import { captureAppHandoffs } from "./e2e-app-handoff.mjs";
 
 const handle = "E".repeat(42) + "A";
 const storageKey = "licensecc.enrollment.v1";
@@ -290,12 +291,13 @@ test("consent: expired delayed approval never navigates to the callback", async 
 test("consent: resuming an approved page after expiry removes its in-memory callback", async ({page})=>{
   const now=Math.floor(Date.now()/1000)*1000;
   await page.clock.install({time:new Date(now)});
-  await page.route("http://127.0.0.1:44888/**",route=>route.fulfill({status:204}));
+  const callbacks=await captureAppHandoffs(page,"http://127.0.0.1:44888/**");
   await fixture(page,{approve:route=>route.fulfill({json:envelope("authorization_approved",{callback_url:callback,expires_at:now/1000+2,revision:1})})});
   await page.goto(entry);
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-pro");
   await approve(page);
   await expect(page.getByRole("link",{name:"Open app"})).toBeVisible();
+  await expect.poll(()=>callbacks).toEqual([callback]);
   await page.clock.setSystemTime(now+2000);
   await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent("pageshow")));
   await expect(page.getByRole("heading",{name:"Connection request expired"})).toBeVisible();
@@ -387,7 +389,7 @@ for(const sameAccount of [true,false]) test(`consent: reauthentication ${sameAcc
       return route.fulfill({json:envelope("authorization_approved",{callback_url:callback,expires_at:Math.floor(Date.now()/1000)+60,revision:1})});
     },
   });
-  await page.route("http://127.0.0.1:44888/**",route=>route.fulfill({status:204}));
+  const callbacks=await captureAppHandoffs(page,"http://127.0.0.1:44888/**");
   await page.goto(entry);
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-pro");
   await approve(page);
@@ -399,10 +401,12 @@ for(const sameAccount of [true,false]) test(`consent: reauthentication ${sameAcc
   if(sameAccount){
     await page.getByRole("button",{name:"Retry approval"}).click();
     await expect(page.getByRole("link",{name:"Open app"})).toBeVisible();
+    await expect.poll(()=>callbacks).toEqual([callback]);
     expect(attempts).toHaveLength(2);expect(attempts[1]).toEqual(attempts[0]);
   } else {
     await expect(page.getByRole("alert")).toContainText("Your account changed");
     expect(attempts).toHaveLength(1);
+    expect(callbacks).toEqual([]);
     expect(await page.evaluate(key=>sessionStorage.getItem(key),storageKey)).toBeNull();
   }
 });
@@ -611,7 +615,7 @@ test("consent: Approve reads Connecting… while approving",async({page})=>{
     await new Promise(resolve=>{releaseApproval=resolve;});
     return route.fulfill({json:envelope("authorization_approved",{callback_url:callback,expires_at:Math.floor(Date.now()/1000)+60,revision:1})});
   }});
-  await page.route("http://127.0.0.1:44888/**",route=>route.fulfill({status:204}));
+  const callbacks=await captureAppHandoffs(page,"http://127.0.0.1:44888/**");
   await page.goto(entry);
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-pro");
   await approve(page);
@@ -620,6 +624,7 @@ test("consent: Approve reads Connecting… while approving",async({page})=>{
   await expect(page.getByRole("button",{name:/Cancelling…|Checking…/})).toHaveCount(0);
   releaseApproval();
   await expect(page.getByRole("link",{name:"Open app"})).toBeVisible();
+  await expect.poll(()=>callbacks).toEqual([callback]);
 });
 
 test("consent: a changed comparison code cannot reuse a saved approval",async({page})=>{
@@ -667,7 +672,7 @@ test("consent: a full license disables Approve; Check again labels itself, keeps
     },
     approve:route=>{approveBody=route.request().postDataJSON();return route.fulfill({json:envelope("authorization_approved",{callback_url:callback,expires_at:Math.floor(Date.now()/1000)+60,revision:1})});},
   });
-  await page.route("http://127.0.0.1:44888/**",route=>route.fulfill({status:204}));
+  const callbacks=await captureAppHandoffs(page,"http://127.0.0.1:44888/**");
   await page.goto(entry);
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-pro");
   await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
@@ -689,6 +694,7 @@ test("consent: a full license disables Approve; Check again labels itself, keeps
   await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeFocused();
   await page.getByRole("button",{name:"Approve",exact:true}).click();
   await expect(page.getByRole("link",{name:"Open app"})).toBeVisible();
+  await expect.poll(()=>callbacks).toEqual([callback]);
   expect(approveBody).toEqual({attempt_handle:handle,expected_attempt_revision:0,entitlement_id:"license-pro"});
   expect(checks).toBe(2);
 });

@@ -27,7 +27,7 @@ Versions come from the same hardened readers used by
 platform authority, the Python PEP 440 form is derived and checked, and the
 CMake `project(licensecc VERSION ...)` remains the independent C++ authority.
 The separately tracked `release-toolchains.json` pins Python **3.12.8**, uv
-**0.12.5**, the .NET SDK **8.0.423**, and Temurin/OpenJDK **17.0.20+8**
+**0.12.18**, the .NET SDK **8.0.423**, and Temurin/OpenJDK **17.0.20+8**
 (compiler version **17.0.20**); `global.json` repeats the exact .NET
 SDK with roll-forward disabled. These are build-tool authorities, not package
 version authorities. The assembler checks all four executable version outputs
@@ -41,16 +41,16 @@ assert those authorities:
 
 ```powershell
 node scripts/assemble-release-artifacts.mjs `
-  --output build/release-artifacts/acme-0.1.0-rc.2 `
-  --repeat-output build/release-artifacts/acme-0.1.0-rc.2-repeat `
+  --output build/release-artifacts/acme-0.1.0-rc.3 `
+  --repeat-output build/release-artifacts/acme-0.1.0-rc.3-repeat `
   --consumer-id acme `
-  --expect-platform-version 0.1.0-rc.2 `
-  --expect-python-version 0.1.0rc2
+  --expect-platform-version 0.1.0-rc.3 `
+  --expect-python-version 0.1.0rc3
 ```
 
 The output contains exactly four parsed Worker bundle directories, the Python
 wheel and sdist, the primary NuGet package and matching `snupkg` symbol
-package, the deterministic `licensecc-client-0.1.0-rc.2.jar`, and one
+package, the deterministic `licensecc-client-0.1.0-rc.3.jar`, and one
 consumer-ID-labelled C++ source archive. `dotnet` is required by default;
 `--allow-partial` is the explicit exception and records a boolean `incomplete`
 field while omitting all NuGet payloads. The manifest records platform, Python,

@@ -14,7 +14,7 @@ registry publication is a separate release operation.
      - Primary entry points
      - Scope
      - Detailed reference
-   * - Python 3.9+
+   * - Python 3.9.2+
      - ``verify_config_token``
      - Offline ``lcccfg1`` config-token verification and the optional
        protected native adapters.

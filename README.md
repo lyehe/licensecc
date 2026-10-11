@@ -144,7 +144,7 @@ licensing under a flood. See the
 [production-readiness launch scope](doc/operations/production-readiness.md#launch-scope).
 
 **Versioning:** no namespaced release has been tagged yet. The C++ library is
-`2.1.0` in CMake. Platform services, SDKs, and Node packages are `0.1.0-rc.2`
+`2.1.0` in CMake. Platform services, SDKs, and Node packages are `0.1.0-rc.3`
 and versioned independently.
 [`version.json`](version.json) is the platform version authority. Platform tags
 use `platform-v*`, future independent C++ tags use `cpp-v*`, and new bare `v*`
@@ -158,7 +158,7 @@ Contributors need only the tools used by the surface they change:
 
 - PowerShell 7 (`pwsh`) for repository orchestration and purity checks.
 - Node 22+ with npm `10.9.8` for the root workspace and service checks.
-- Python 3.12 with uv 0.12.5 for repository and Python SDK checks.
+- Python 3.12 with uv 0.12.18 for repository and Python SDK checks.
 - JDK 17.0.20 for the Java SDK and deterministic release-artifact checks.
 - Doxygen for the strict documentation build.
 

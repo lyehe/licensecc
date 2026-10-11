@@ -47,7 +47,8 @@ const COMPARISON_CODE_SHAPE = new RegExp(`${CODE_SKELETON}{4}-${CODE_SKELETON}{4
 /**
  * The form a label is compared in, its skeleton as far as a comparison code goes: fullwidth ASCII
  * folded to ASCII, every dash and space read as "-", each listed code point read as SKELETON_FOLD
- * says, and each run of "-" collapsed to one.
+ * says, and each run of "-" collapsed to one. Preserve the original code point's skeleton before
+ * falling back to its ASCII form, so a fullwidth separator keeps its separator meaning.
  */
 export function deviceLabelComparisonForm(label) {
   let form = "";
@@ -56,11 +57,12 @@ export function deviceLabelComparisonForm(label) {
     else if (!form.endsWith("-")) form += "-";
   };
   for (const character of label) {
-    let point = character.codePointAt(0);
+    const originalPoint = character.codePointAt(0);
+    let point = originalPoint;
     if (point >= FULLWIDTH_ASCII.first && point <= FULLWIDTH_ASCII.last) point -= FULLWIDTH_ASCII.offset;
     const folded = String.fromCodePoint(point);
     if (DEVICE_LABEL_SEPARATOR.test(folded)) append("-");
-    else for (const read of SKELETON_FOLD.get(point) ?? folded) append(read);
+    else for (const read of SKELETON_FOLD.get(originalPoint) ?? SKELETON_FOLD.get(point) ?? folded) append(read);
   }
   return form;
 }

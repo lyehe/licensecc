@@ -284,6 +284,9 @@ const DASH_LOOKALIKE_LABELS = {
   "a prolonged sound mark (U+30FC)": `4F2A${cp(0x30fc)}0C12${cp(0x30fc)}B7E4`,
   "a Hangul letter eu (U+3161)": `4F2A${cp(0x3161)}0C12${cp(0x3161)}B7E4`,
   "a Kangxi radical one (U+2F00)": `4F2A${cp(0x2f00)}0C12${cp(0x2f00)}B7E4`,
+  "a fullwidth tilde (U+FF5E)": `4F2A${cp(0xff5e)}0C12${cp(0xff5e)}B7E4`,
+  "a fullwidth vertical line (U+FF5C)": `4F2A${cp(0xff5c)}0C12${cp(0xff5c)}B7E4`,
+  "mixed fullwidth separators and code characters": `${fullwidth("4F2A")}${cp(0xff5e)}0C12${cp(0xff5c)}${fullwidth("B7E4")}`,
 };
 
 test("a device label cannot spell a code with characters whose prototype is several characters", () => {

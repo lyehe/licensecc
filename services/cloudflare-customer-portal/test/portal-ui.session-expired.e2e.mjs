@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { captureAppHandoffs } from "./e2e-app-handoff.mjs";
 
 // A mid-session 401 (the server's `unauthorized` code, never a credential failure like
 // `invalid_otp`) must return the customer to sign-in on every api() path -- a background data read
@@ -181,7 +182,7 @@ test("consent: a page with a saved mutation survives a 401, then resumes after s
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error));
   setupConsent(page);
-  await page.route("http://127.0.0.1:44899/**", (route) => route.fulfill({ status: 204 }));
+  const callbacks = await captureAppHandoffs(page, "http://127.0.0.1:44899/**");
   await page.goto(consentEntry);
   await page.getByRole("checkbox", { name: "This code matches my app", exact: true }).check();
   await page.getByRole("button", { name: "Approve", exact: true }).click();
@@ -195,6 +196,7 @@ test("consent: a page with a saved mutation survives a 401, then resumes after s
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("button", { name: "Retry approval" }).click();
   await expect(page.getByRole("link", { name: "Open app" })).toBeVisible();
+  await expect.poll(() => callbacks).toEqual([consentCallback]);
   expect(pageErrors).toEqual([]);
 });
 

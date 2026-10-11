@@ -24,7 +24,7 @@ You need:
 - An operator who can create these resources and configure Access. Automated
   deployments should use a separately scoped API token rather than a personal
   interactive login.
-- Git, Node.js 22, npm 10.9.8, Python 3.12, and uv 0.12.5. Use the repository's
+- Git, Node.js 22, npm 10.9.8, Python 3.12, and uv 0.12.18. Use the repository's
   locked dependencies. Doxygen is needed for documentation validation, not for
   operating the deployed Workers.
 - A clean checkout of the reviewed commit. Do not deploy from a checkout

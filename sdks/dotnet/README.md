@@ -110,7 +110,7 @@ is built and checked; other SDK runs explicitly skip the installed-DLL test.
 ```
 sdks/dotnet/
   Licensecc.Client.sln
-  src/Licensecc.Client/            # the library (PackageId Licensecc.Client, 0.1.0-rc.2)
+  src/Licensecc.Client/            # the library (PackageId Licensecc.Client, 0.1.0-rc.3)
     SignedTokenCore.cs             #   shared: envelope split, canonical base64, RSA verify, field parse
     ConfigToken.cs                 #   lcccfg1 verifier -> ConfigTokenVerifier.Verify
     VerifyResult.cs                #   Result type + TrustedPublicKey / TrustedKeyRing

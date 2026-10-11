@@ -30,7 +30,7 @@ export const openApiSpec: OpenApiDocument = {
   openapi: "3.1.0",
   info: {
     title: "licensecc online verifier / licensing-backend",
-    version: "0.1.0-rc.2",
+    version: "0.1.0-rc.3",
     description:
       "Cloudflare Worker that issues protected device leases (lccdl1) and ingests subscription orders. Order ingest responses use { ok, code, ... }; device v2 responses use { ok, code, request_id, data? }. Protected enrollment remains staged until browser consent and native integration are delivered. This spec documents the routes the Worker's fetch handler dispatches.",
   },

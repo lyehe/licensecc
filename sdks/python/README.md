@@ -42,7 +42,12 @@ pip install ./sdks/python            # from the repo root
 
 or, with uv in your application: `uv add <path-to-repo>/sdks/python`.
 
-To run this SDK's tests: `uv run pytest -q` from this directory.
+Runtime requires Python 3.9.2 or newer and cryptography 50.0.2 or newer. Python
+3.9.0 and 3.9.1 cannot resolve the patched cryptography dependency.
+
+To run this SDK's tests, use Python 3.10 or newer and run `uv run pytest -q`
+from this directory. The test extras and development group require patched
+pytest 9.0.3 or newer on these Python versions.
 
 Runtime dependency: only [`cryptography`](https://pypi.org/project/cryptography/).
 
