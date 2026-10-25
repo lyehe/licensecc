@@ -8,3 +8,5 @@ sphinx-rtd-theme>=2,<4
 sphinx-sitemap>=2.6,<3
 # Keep the documentation HTTP client above the patched security floor.
 urllib3>=2.8.0,<3
+# Exclude the retired emSign trust roots from documentation HTTPS clients.
+certifi>=2026.10.19

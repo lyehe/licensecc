@@ -21,6 +21,8 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   dependencies. Wrangler is pinned to 4.152.0 consistently with release tooling.
 - Patch development-tool dependencies with Undici 7.30.1 (a Miniflare override)
   and Zod 4.6.7.
+- Require certifi 2026.10.19 or newer for documentation HTTPS clients to remove
+  the retired emSign trust roots.
 - Build the documentation with Sphinx 9.2 and Python 3.13, selected consistently
   by the local runner, CI, and Read the Docs. PR and SDK gates retain Python 3.12.
 
