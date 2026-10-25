@@ -9,7 +9,10 @@ npm run check:docs
 
 The command writes only ignored `doc/_doxygen/` and `doc/_build/` output. It
 requires Doxygen and `uv`; the Ubuntu CI job installs Doxygen before running the
-same command. The build installs `sdks/python` into an isolated `uv`
+same command. Sphinx 9.2 requires Python 3.13. The docs runner selects that
+interpreter explicitly, matching the docs CI and Read the Docs configuration;
+`uv` downloads it when needed. The repository PR and SDK gates use Python 3.12.
+The build installs `sdks/python` into an isolated `uv`
 environment so Sphinx autodoc validates the public Python surface instead of
 reading a copied signature list.
 
@@ -34,7 +37,7 @@ The editable dependency policy is `doc/requirements.in`. Regenerate the pinned
 lock file after an intentional dependency-policy change:
 
 ```console
-uv pip compile --generate-hashes doc/requirements.in --output-file doc/requirements.txt
+uv pip compile --python-version 3.13 --universal --generate-hashes doc/requirements.in --output-file doc/requirements.txt
 ```
 
 Do not edit `doc/requirements.txt` by hand. The network-sensitive link checker

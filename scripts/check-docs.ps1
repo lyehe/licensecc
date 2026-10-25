@@ -30,7 +30,7 @@ function Invoke-Checked {
 }
 
 if (-not (Test-Path $requirements)) {
-    throw "Pinned documentation requirements are missing at doc/requirements.txt. Regenerate them with 'uv pip compile --generate-hashes doc/requirements.in --output-file doc/requirements.txt'."
+    throw "Pinned documentation requirements are missing at doc/requirements.txt. Regenerate them with 'uv pip compile --python-version 3.13 --universal --generate-hashes doc/requirements.in --output-file doc/requirements.txt'."
 }
 
 $doxygen = Get-Command doxygen -ErrorAction SilentlyContinue
@@ -49,7 +49,7 @@ try {
         & $doxygen.Source $doxyfile
     }
     Invoke-Checked "Sphinx $builder" {
-        & $uv.Source run --no-project --with-requirements $requirements --with $pythonSdk python -m sphinx -E -a -b $builder -W --keep-going $docRoot $output
+        & $uv.Source run --no-project --python 3.13 --with-requirements $requirements --with $pythonSdk python -m sphinx -E -a -b $builder -W --keep-going $docRoot $output
     }
     if (-not $LinkCheck) {
         $llmsOutput = Join-Path $output "llms.txt"

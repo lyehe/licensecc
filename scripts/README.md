@@ -11,6 +11,11 @@ an npm command shim or an installation fallback. An alternate rollback root
 selects configuration and working directory; it does not select a different
 Wrangler installation. Run `npm ci` before using these wrappers.
 
+The root npm override selects Undici 7.30.1 for Miniflare to address its
+EventSource, content-encoding, and integrity-check advisories. Keep that override
+until Wrangler's Miniflare dependency selects a patched Undici itself; verify
+the replacement with `npm audit`, Worker dry-runs, and browser E2E checks.
+
 Wrangler JSON reads require `WRANGLER_LOG=log`; error-only logging suppresses
 the pinned CLI's JSON output. Wrappers capture bounded output and release only
 validated, redacted evidence. Mutations use error-level logging, and all three

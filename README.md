@@ -160,7 +160,7 @@ Contributors need only the tools used by the surface they change:
 - Node 22+ with npm `10.9.8` for the root workspace and service checks.
 - Python 3.12 with uv 0.12.18 for repository and Python SDK checks.
 - JDK 17.0.20 for the Java SDK and deterministic release-artifact checks.
-- Doxygen for the strict documentation build.
+- Doxygen and Python 3.13 (selected by `uv`) for the strict documentation build.
 
 Node dependencies have one owner: run `npm ci` at the repository root. Do not
 run service-local installs or create service-local lockfiles.
