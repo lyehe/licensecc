@@ -329,7 +329,7 @@ test("Back from Manage access returns to the app's access grants and Forward reo
 
   await page.getByRole("button", { name: "Manage access", exact: true }).click();
   await expect(scoped).toContainText(customer.id);
-  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Access details", exact: true }).locator("article")).toHaveCount(1);
   await expect.poll(currentHash(page)).toBe(`${appHash}&manage=1`);
   // The managed grant's id encodes its fingerprint: neither may reach the address or history.state.
   const state = await page.evaluate(() => JSON.stringify(window.history.state));
@@ -346,7 +346,7 @@ test("Back from Manage access returns to the app's access grants and Forward reo
 
   await page.goForward();
   await expect(scoped).toContainText(customer.id);
-  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Access details", exact: true }).locator("article")).toHaveCount(1);
   await expect.poll(currentHash(page)).toBe(`${appHash}&manage=1`);
   await expect(page.getByText("Reopen Manage access from the list.", { exact: true })).toHaveCount(0);
 });
@@ -363,7 +363,7 @@ test("leaving Manage access with an unsaved edit asks once, then returns to the 
   const appHash = `#/customers/${customer.id}?section=access&app=CAD`;
   await page.goto(`/${appHash}`);
   await page.getByRole("button", { name: "Manage access", exact: true }).click();
-  await page.locator(".desktopRecords tbody tr").getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("region", { name: "Access details", exact: true }).locator("article").getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("form", { name: "Edit entitlement" }).getByLabel("Notes").fill("unsaved note");
 
   await page.getByRole("button", { name: "Back to app", exact: true }).click();

@@ -121,16 +121,16 @@ test("add user defaults to inviting the customer, hides the password field, and 
   await page.goto("/#/customers");
   await page.getByRole("button", { name: "Add user", exact: true }).click();
   const form = page.getByRole("form", { name: "Add portal user" });
-  await expect(form.getByRole("radio", { name: "Invite", exact: true })).toBeChecked();
+  await expect(form.getByRole("radio", { name: "Customer sets password", exact: true })).toBeChecked();
   await expect(form.locator('input[type="password"]')).toHaveCount(0);
   await form.getByRole("radio", { name: "Set an initial password", exact: true }).check();
   await expect(form.getByLabel("Initial password", { exact: true })).toBeVisible();
   await form.getByLabel("Initial password", { exact: true }).fill("A temporary passphrase 123!");
-  await form.getByRole("radio", { name: "Invite", exact: true }).check();
+  await form.getByRole("radio", { name: "Customer sets password", exact: true }).check();
   await expect(form.locator('input[type="password"]')).toHaveCount(0);
   await form.getByRole("radio", { name: "Set an initial password", exact: true }).check();
   await expect(form.getByLabel("Initial password", { exact: true })).toHaveValue("");
-  await form.getByRole("radio", { name: "Invite", exact: true }).check();
+  await form.getByRole("radio", { name: "Customer sets password", exact: true }).check();
   await form.getByLabel("Name", { exact: true }).fill("Invited user");
   await form.getByLabel("Login email", { exact: true }).fill("invited@example.test");
   await form.getByRole("button", { name: "Add user", exact: true }).click();
@@ -138,7 +138,7 @@ test("add user defaults to inviting the customer, hides the password field, and 
   // The wire body must carry no `password` key at all in Invite mode -- toEqual fails closed if one
   // leaked in, since it requires an exact key set, not just a subset match.
   expect(input).toEqual({ name: "Invited user", email: "invited@example.test" });
-  await expect(page.getByText("Ask invited@example.test to open the customer portal and choose 'Forgot your password?' to set a password.", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Setup instructions")).toHaveValue("Open the customer portal and choose 'Set or reset password'. Enter invited@example.test, then follow the verification link in your email to choose your password.");
   await expect(page.getByText(/Share the initial password securely/)).toHaveCount(0);
   await expect(page.getByText("No licenses have been assigned.")).toBeVisible();
 });
@@ -167,10 +167,10 @@ test("customer app pages recover failed refreshes and manage only the selected o
   await expect(page.getByRole("button", { name: "Manage access", exact: true })).toHaveCount(1);
   await page.getByRole("button", { name: "Manage access", exact: true }).click();
   await expect(page.getByText(/License access for customer/)).toContainText(customer.id);
-  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Access details", exact: true }).locator("article")).toHaveCount(1);
   expect(page.url()).toContain(`/customers/${customer.id}`);
   await expect(page.getByRole("button", { name: "Clear filters", exact: true })).toHaveCount(0);
-  const grantRow = page.locator(".desktopRecords tbody tr");
+  const grantRow = page.getByRole("region", { name: "Access details", exact: true }).locator("article");
   await grantRow.locator("summary").filter({ hasText: "More actions" }).click();
   await grantRow.getByRole("button", { name: "Disable", exact: true }).click();
   const confirmation = page.getByRole("dialog");
@@ -205,15 +205,34 @@ test("Manage access offers no Show all and never lists another customer's grant"
   await page.getByRole("button", { name: "View app", exact: true }).click();
   await page.getByRole("button", { name: "Manage access", exact: true }).click();
   await expect(page.getByText(/License access for customer/)).toContainText(customer.id);
-  const rows = page.locator(".desktopRecords tbody tr");
+  const rows = page.getByRole("region", { name: "Access details", exact: true }).locator("article");
   await expect(rows).toHaveCount(1);
-  await expect(rows).toContainText(customer.id);
+  await expect(page.getByRole("region", { name: "Access details", exact: true })).toContainText(customer.id);
   // The scoped view's only exit is "Back to app": nothing in it may widen the list to all customers.
   await expect(page.getByRole("button", { name: "Show all", exact: true })).toHaveCount(0);
   await expect(page.getByText("Showing 1 entitlement")).toHaveCount(0);
-  await expect(page.locator(".desktopRecords")).not.toContainText("another-customer");
+  await expect(page.getByRole("region", { name: "Access details", exact: true })).not.toContainText("another-customer");
+  await expect(page.locator(".desktopRecords")).toHaveCount(0);
   expect(listReadCustomers.length).toBeGreaterThan(0);
   expect(listReadCustomers.every((id) => id === customer.id)).toBe(true);
+});
+
+test("access details reject a refresh that returns a different customer's grant",async({page})=>{
+  const api=makeAdminApiFixture(),customer=api.seed.customer({id:'cust_scoped'});
+  api.seed.entitlement({customer_id:customer.id,project:'APP',feature:'PRO'});
+  const foreign=api.seed.entitlement({customer_id:'cust_foreign',project:'APP',feature:'PRO'});
+  let reads=0;
+  await page.route('**/api/admin/**',api.route);
+  await page.route('**/api/admin/entitlements?**',route=>{
+    if(new URL(route.request().url()).searchParams.has('id') && ++reads>1)return route.fulfill({json:{ok:true,code:'entitlements_listed',request_id:'wrong-owner',data:{items:[foreign],next_cursor:null}}});
+    return route.fallback();
+  });
+  await page.goto(`/#/customers/${customer.id}?section=access&app=APP`);
+  await page.getByRole('button',{name:'Manage access',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Edit',exact:true})).toBeEnabled();
+  await page.getByRole('button',{name:'Refresh access',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Edit',exact:true})).toBeDisabled();
+  await expect(page.getByRole('region',{name:'Access details',exact:true})).not.toContainText('cust_foreign');
 });
 
 test("a customer workspace shows connected devices and no seat, legacy-device or account-token view", async ({ page }) => {

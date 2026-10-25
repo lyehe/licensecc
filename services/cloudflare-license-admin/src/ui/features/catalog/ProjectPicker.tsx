@@ -30,11 +30,11 @@ export function ProjectPicker({ onSelect }: { onSelect(project: string): void })
     finally { setBusy(false); }
   }
   return <section aria-label="App inventory">
-    <button disabled={busy} aria-expanded={open} onClick={() => { setOpen(!open); if (!open) void load(null); }}>Browse apps</button>
+    <button type="button" disabled={busy} aria-expanded={open} onClick={() => { setOpen(!open); if (!open) void load(null); }}>Browse apps</button>
     {open && <div aria-busy={busy}>
-      {error && <div role="alert"><FeedbackText feedback={error} /> <button disabled={busy} onClick={() => void load(failedCursor.current)}>Retry app list</button></div>}
-      <div className="actions">{projects.map(item => <button disabled={busy || !!error} key={item.project} onClick={() => { onSelect(item.project); setOpen(false); }}>{item.project}</button>)}</div>
-      <div className="tableFooter"><span>{busy ? "Loading apps…" : `${projects.length} apps loaded`}</span><button disabled={busy} onClick={() => void load(null)}>Refresh app list</button>{cursor !== null && <button disabled={busy} onClick={() => void load(cursor)}>More apps</button>}</div>
+      {error && <div role="alert"><FeedbackText feedback={error} /> <button type="button" disabled={busy} onClick={() => void load(failedCursor.current)}>Retry app list</button></div>}
+      <div className="actions">{projects.map(item => <button type="button" disabled={busy || !!error} key={item.project} onClick={() => { onSelect(item.project); setOpen(false); }}>{item.project}</button>)}</div>
+      <div className="tableFooter"><span>{busy ? "Loading apps…" : `${projects.length} apps loaded`}</span><button type="button" disabled={busy} onClick={() => void load(null)}>Refresh app list</button>{cursor !== null && <button type="button" disabled={busy} onClick={() => void load(cursor)}>More apps</button>}</div>
     </div>}
   </section>;
 }

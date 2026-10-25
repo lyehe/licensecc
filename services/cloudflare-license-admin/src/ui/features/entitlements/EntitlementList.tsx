@@ -8,6 +8,7 @@ import type { EntitlementBatch } from "./useEntitlementBatch";
 import { focusTargetInRow, type ConfirmActionOutcome, useOperatorControls } from "../../shared/controls";
 import { hasActiveFilter } from "../../shared/filters";
 import { formatUtcDate } from "../../shared/format";
+import { expiryDescription } from "./expiry";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { useMediaQuery } from "../../shared/useMediaQuery";
 import { focusWorkspaceTarget } from "../../shared/workspaceFocus";
@@ -43,7 +44,7 @@ interface ListProps {
 export function EntitlementValidity({ item }: { item: EntitlementRecord }): React.ReactElement {
   const now = Math.floor(Date.now() / 1000);
   const validity = item.valid_until !== null && item.valid_until <= now ? "Expired" : item.valid_from !== null && item.valid_from > now ? "Not started" : item.valid_until !== null && item.valid_until <= now + 30 * 86400 ? "Expires soon" : null;
-  return <><span className={`status ${item.status}`}>{item.status === "disabled" ? "suspended" : item.status}</span>{validity ? <span className={`healthBadge health-${validity === "Expired" ? "expired" : validity === "Expires soon" ? "expiring" : "pending"}`}>{validity}</span> : null}<div className="muted">{item.valid_until === null ? "No expiry" : `Expires ${formatUtcDate(item.valid_until)}`}</div></>;
+  return <><span className={`status ${item.status}`}>{item.status === "disabled" ? "suspended" : item.status}</span>{validity ? <span className={`healthBadge health-${validity === "Expired" ? "expired" : validity === "Expires soon" ? "expiring" : "pending"}`}>{validity}</span> : null}<div className="muted">{expiryDescription(item.valid_until)}</div></>;
 }
 
 function EntitlementDetails({ item }: { item: EntitlementRecord }): React.ReactElement {
@@ -103,6 +104,19 @@ export function EntitlementList(props: ListProps): React.ReactElement {
     });
   }
   const capacity = (item: EntitlementRecord): React.ReactElement => <><div>{item.license_mode?.replaceAll("_", " ") || "Default mode"}</div><span className="muted">Device limit {item.max_active_devices}</span></>;
+  if (props.scoped) return <section className="tablePane" data-focus-section="entitlements" aria-label="Access details">
+    <h3>Access details</h3><p>License access for customer {filter.customer_id}.</p>
+    <button type="button" disabled={busy||props.loading} onClick={props.onRetry}>Refresh access</button>
+    <ReadNotice loading={props.loading} error={props.error} hasData={items.length > 0} label="access details" onRetry={props.onRetry} />
+    {items.map(item=><article key={item.id} className="recordCard" data-focus-row={`entitlement:${item.id}`}>
+      <h4>{item.project} / {item.feature}</h4>
+      <EntitlementValidity item={item} />
+      <dl className="recordMeta"><div><dt>Device limit</dt><dd>{item.max_active_devices}</dd></div><div><dt>Policy</dt><dd>{item.policy_id || "No policy"}</dd></div><div><dt>Notes</dt><dd>{item.notes || "None"}</dd></div></dl>
+      {actions(item)}<EntitlementDetails item={item} />
+    </article>)}
+    {ready && items.length===0 && <p>This access is no longer available in this customer workspace. Return to the app to select a current grant.</p>}
+    <p className="muted">Lifecycle and date validity are shown; other access restrictions may still apply.</p>
+  </section>;
   // "Show all" drops the customer from the filter, so a scoped (Manage access) list never offers it:
   // its only way out is "Back to app", and its rows never widen to other customers' grants.
   return <section className="tablePane" data-focus-section="entitlements" aria-label="Entitlement list">

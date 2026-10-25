@@ -116,7 +116,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await expect(createForm.getByLabel(/device hash|assertion ttl/i)).toHaveCount(0);
   // Valid from / until are <input type="date"> (YYYY-MM-DD -> UTC-midnight epoch).
   await createForm.getByLabel("Valid from").fill("2024-03-09");
-  await createForm.getByLabel("Valid until").fill("");
+  await createForm.getByLabel("Valid through").fill("");
   await createForm.getByText("Enter customer ID manually", { exact: true }).click();
   await createForm.getByLabel("Customer ID").fill("cus_e2e");
   await createForm.getByText("Enter license ID manually", { exact: true }).click();
@@ -140,7 +140,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await page.getByRole("button", { name: "Edit" }).click();
   const editForm = page.locator("section.editorLayout form");
   await expect(editForm.getByLabel(/device hash|assertion ttl/i)).toHaveCount(0);
-  await editForm.getByLabel("Valid until").fill("2024-07-03");
+  await editForm.getByLabel("Valid through").fill("2024-07-03");
   await editForm.getByText("Enter customer ID manually", { exact: true }).click();
   await editForm.getByLabel("Customer ID").fill("");
   await editForm.getByLabel("Notes").fill("");
@@ -159,7 +159,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
     "license_id", "notes", "valid_from", "valid_until"]);
   expect(api.requests.patches[0]).toMatchObject({
     valid_from: 1709942400,
-    valid_until: 1719964800,
+    valid_until: 1720051200,
     notes: "",
     customer_id: "cus_e2e_moved",
     license_id: "lic_e2e",

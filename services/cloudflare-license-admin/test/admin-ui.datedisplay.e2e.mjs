@@ -17,7 +17,8 @@ test("an operator-typed validity date shows the same UTC day in the list and the
   await createForm.getByLabel("Feature").fill("utc-validity");
   await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
   // Valid until is a plain <input type="date">; New York vs UTC only matters for what renders next.
-  await createForm.getByLabel("Valid until").fill("2026-12-31");
+  await createForm.getByLabel("Valid through").fill("2026-12-31");
+  await expect(createForm).toContainText("Expiry: 2027-01-01T00:00:00Z (UTC).");
   await fillProtectedOwner(createForm);
   await createForm.getByRole("button", { name: "Create entitlement", exact: true }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();
@@ -27,7 +28,8 @@ test("an operator-typed validity date shows the same UTC day in the list and the
 
   await row.getByRole("button", { name: "Edit" }).click();
   const editForm = page.getByRole("form", { name: "Edit entitlement" });
-  await expect(editForm).toContainText("Stored expiry: 2026-12-31 UTC.");
+  await expect(editForm).toContainText("Stored expiry: Valid through 2026-12-31 UTC.");
+  await expect(editForm.getByLabel("Valid through")).toHaveValue("2026-12-31");
   await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
 
   if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
@@ -69,7 +71,7 @@ test("the reports expiring-soon deadline renders in UTC in a non-UTC browser tim
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Reports", exact: true }).click();
   const expiring = page.locator(".expiringPanel");
   // Fixture default (within_days=30) seeds a "pro-30" row with valid_until 1_760_500_000 = 2025-10-15T03:46:40Z.
-  await expect(expiring).toContainText("2025-10-15 03:46 UTC");
+  await expect(expiring).toContainText("2025-10-15T03:46:40Z");
 });
 
 test("an out-of-range validity date renders honestly instead of blanking the page", async ({ page }) => {
@@ -84,4 +86,27 @@ test("an out-of-range validity date renders honestly instead of blanking the pag
   await expect(row).toContainText("after 275760-09-13 UTC");
   // The rest of the page must stay usable: no render threw and blanked the workspace.
   await expect(page.getByRole("button", { name: "New entitlement", exact: true })).toBeVisible();
+});
+
+test("contextual edits preserve a precise expiry until the operator explicitly replaces it",async({page})=>{
+  const api=makeAdminApiFixture(),customer=api.seed.customer({id:'cust_exact'});
+  const exact=Date.parse('2026-12-20T18:42:03Z')/1000;
+  api.seed.entitlement({customer_id:customer.id,project:'APP',feature:'PRO',valid_until:exact});
+  await page.route('**/api/admin/**',api.route);
+  await page.goto(`/#/customers/${customer.id}?section=access&app=APP`);
+  await page.getByRole('button',{name:'Manage access',exact:true}).click();
+  await expect(page.getByRole('region',{name:'Access details',exact:true})).toContainText('2026-12-20T18:42:03Z');
+  await page.getByRole('button',{name:'Edit',exact:true}).click();
+  const form=page.getByRole('form',{name:'Edit entitlement'});
+  await expect(form.getByLabel('Valid through')).toHaveCount(0);
+  await form.getByLabel('Notes',{exact:true}).fill('Keep the exact deadline');
+  await form.getByRole('button',{name:'Save changes',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Access details',exact:true})).toBeVisible();
+  expect(api.requests.patches.at(-1).valid_until).toBe(exact);
+  await page.getByRole('button',{name:'Edit',exact:true}).click();
+  await form.getByRole('button',{name:'Change expiry',exact:true}).click();
+  await form.getByLabel('Valid through').fill('2026-12-31');
+  await form.getByRole('button',{name:'Save changes',exact:true}).click();
+  await expect(page.getByRole('region',{name:'Access details',exact:true})).toContainText('Valid through 2026-12-31 UTC');
+  expect(api.requests.patches.at(-1).valid_until).toBe(Date.parse('2027-01-01T00:00:00Z')/1000);
 });

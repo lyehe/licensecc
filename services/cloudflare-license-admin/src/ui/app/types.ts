@@ -45,6 +45,8 @@ export interface NavigationIntent {
   selectCustomerId?: string;
   customerSection?: CustomerSection;
   catalogView?: CatalogView;
+  /** Guided grant context stays in session memory, never in a URL or history.state. */
+  grantAccess?: { customerId: string; project: string };
 }
 
 export type NavigationTarget = Omit<NavigationIntent, "id">;

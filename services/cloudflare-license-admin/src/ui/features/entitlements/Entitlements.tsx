@@ -16,8 +16,10 @@ import { ReadNotice } from "../../shared/ReadNotice";
 import { focusWorkspaceTarget } from "../../shared/workspaceFocus";
 import { EntitlementEditor } from "./EntitlementEditor";
 import { EntitlementList } from "./EntitlementList";
-import { protectedCreateFailureMessage } from "./protectedCreate";
+import { generateLicenseFingerprint, protectedCreateFailureMessage } from "./protectedCreate";
 import { useEntitlementBatch } from "./useEntitlementBatch";
+import { useEntitlementCreate } from "./useEntitlementCreate";
+import { GuidedGrantFields, type GrantChoice } from "./GuidedGrantFields";
 import {
   editFormFromEntitlement,
   emptyEntitlementEditForm,
@@ -28,8 +30,6 @@ import {
   EntitlementAction,
   EntitlementFilter,
   EntitlementFormState,
-  normalizeCreateFromPolicy,
-  normalizeEntitlementForm,
   normalizeEntitlementPatch,
   patchPath,
   transitionPath,
@@ -54,6 +54,10 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const [filter, setFilter] = useState<EntitlementFilter>(scopedGrant ?? { project: "", feature: "", status: "" });
   const [form, setForm] = useState<EntitlementFormState>(emptyEntitlementForm);
   const [createOpen, setCreateOpen] = useState(false);
+  const [guided,setGuided]=useState<{customerId:string;project:string}|null>(null);
+  const [granted,setGranted]=useState<{customerId:string;project:string}|null>(null);
+  const [grantChoice,setGrantChoice]=useState<GrantChoice>({context:"",ready:false,createNew:false});
+  const createBaseline=useRef(JSON.stringify(emptyEntitlementForm));
   const [extendValidity, setExtendValidity] = useState(false);
   const [editBaseline, setEditBaseline] = useState("");
   const [listRead, setListRead] = useState<{ context: string; error: OperatorFeedback | null }>({ context: "", error: null });
@@ -66,7 +70,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const [activePolicies, setActivePolicies] = useState<Policy[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const previousEditorOpen = useRef(false);
-  const { navigate, rememberFilters } = useAdminNavigation();
+  const { navigate, rememberFilters, setCustomerAccess } = useAdminNavigation();
   const { busy: requestBusy, operationLocked, operationRetained, currentReason, runKeyedMutation, runMutation, setFeedback, setMessage, setReason } = useOperatorControls();
   const busy = requestBusy || operationLocked;
   const { refreshCore, registerCoreRefresh } = useCoreRefresh();
@@ -83,7 +87,6 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const reloadGeneration = useDebouncedValue(rawFilterGeneration, 300);
   const lastRequestedReload = useRef<number | null>(null);
   const formContextKey = JSON.stringify(form);
-  const { generation: formGeneration, isCurrent: isFormGenerationCurrent } = useContextGeneration(formContextKey);
   const editContextKey = `${editingId ?? ""}\u0000${JSON.stringify(editForm)}`;
   const { generation: editGeneration, isCurrent: isEditGenerationCurrent } = useContextGeneration(editContextKey);
   // Tab re-entry sends no request (see the reload effect below), so this fence must not depend on
@@ -98,7 +101,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   // draft stays in this mounted workspace until the operator comes back, with the new policy.
   const [policyDetour, setPolicyDetour] = useState<"leaving" | "away" | null>(null);
   const { requestLeave } = useNavigationGuard({
-    when: active && !operationRetained && policyDetour === null && ((createOpen && formContextKey !== JSON.stringify(emptyEntitlementForm)) || (editingId !== null && JSON.stringify(editForm) !== editBaseline)),
+    when: active && !operationRetained && policyDetour === null && ((createOpen && formContextKey !== createBaseline.current) || (editingId !== null && JSON.stringify(editForm) !== editBaseline)),
     onDiscard: () => { setCreateOpen(false); setForm(emptyEntitlementForm); cancelEdit(); },
   });
   useEffect(() => {
@@ -123,7 +126,11 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     setListRead({ context: filterContextKey, error: null });
     const response = await api<{ items: EntitlementRecord[]; next_cursor: string | null }>(entitlementsUrl);
     if (!isCurrent() || !entitlementsFence.isCurrent(ticket)) return null;
-    const parsed = parseExactApiSuccess<{ items: EntitlementRecord[]; next_cursor: string | null }>(response, "entitlements_listed", hasEntitlementListData);
+    const parsed = parseExactApiSuccess<{ items: EntitlementRecord[]; next_cursor: string | null }>(response, "entitlements_listed", value=>{
+      if(!hasEntitlementListData(value))return false;
+      const page=value as {items:EntitlementRecord[];next_cursor:string|null};
+      return !scopedGrant || (page.next_cursor===null && page.items.length<=1 && page.items.every(item=>item.id===scopedGrant.id && item.customer_id===scopedGrant.customer_id && item.project===scopedGrant.project && item.feature===scopedGrant.feature));
+    });
     if (parsed !== null) {
       if (entitlementsFence.settle(ticket, parsed.data.next_cursor ?? null)) {
         setEntitlements(parsed.data.items);
@@ -139,7 +146,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       }
     }
     return null;
-  }, [entitlementsFence, entitlementsUrl, filterContextKey]);
+  }, [entitlementsFence, entitlementsUrl, filterContextKey, scopedGrant]);
 
   useEffect(() => {
     return registerCoreRefresh(refresh);
@@ -179,15 +186,27 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   useEffect(() => {
     if (navigationIntent?.tab !== "entitlements") return;
     // Navigation has already passed the dirty-draft and pending-operation guards.
-    setCreateOpen(false); setForm(emptyEntitlementForm); cancelEdit();
+    const context=navigationIntent.grantAccess??null;
+    const initial=context?{...emptyEntitlementForm,project:context.project,feature:"",customer_id:context.customerId,license_fingerprint:generateLicenseFingerprint()}:{...emptyEntitlementForm};
+    createBaseline.current=JSON.stringify(initial);setGuided(context);setCreateOpen(context!==null);setForm(initial);cancelEdit();
     setFilter({ id: navigationIntent.filter.id, customer_id: navigationIntent.filter.customer_id, license_id: navigationIntent.filter.license_id, project: navigationIntent.filter.project ?? "", feature: navigationIntent.filter.feature ?? "", status: navigationIntent.filter.status ?? "" });
     onNavigationHandled(navigationIntent);
   }, [navigationIntent, onNavigationHandled]);
+  const autoLicense=useCallback((id:string):void=>{
+    createBaseline.current=JSON.stringify({...JSON.parse(createBaseline.current),license_id:id});
+    setForm(previous=>({...previous,license_id:id}));
+  },[]);
+  useEffect(()=>{
+    if(!granted || busy || operationRetained)return;
+    if(navigate({tab:"customers",filter:{},selectCustomerId:granted.customerId,customerSection:"access"})){
+      setCustomerAccess({app:granted.project});setGranted(null);setGuided(null);
+    }
+  },[granted,busy,operationRetained,navigate,setCustomerAccess]);
 
   useEffect(() => {
-    if (scopedGrant || !active || navigationIntent?.tab === "entitlements") return;
+    if (scopedGrant || guided || !active || navigationIntent?.tab === "entitlements") return;
     rememberFilters("entitlements", { ...filter });
-  }, [active, filter, navigationIntent, rememberFilters, scopedGrant]);
+  }, [active, filter, navigationIntent, rememberFilters, scopedGrant, guided]);
 
   // Selection survives a reload; a row only drops out of it once it is confirmed gone from the
   // freshly loaded list, never merely because the filter changed or the tab was left and reentered.
@@ -198,56 +217,15 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       return next.size === previous.size ? previous : next;
     });
   }, [entitlements]);
-  async function submitCreate(event: FormEvent): Promise<void> {
-    event.preventDefault();
-    if (form.policy_id !== "" && (!activePoliciesFence.canLoadMore() || !activePolicies.some((policy) => policy.id === form.policy_id))) {
-      setFeedback(codeFeedback("policy_not_available"));
-      return;
-    }
-    const contextGeneration = filterGeneration;
-    const capturedFormGeneration = formGeneration;
-    const isListCurrent = (): boolean => isFilterGenerationCurrent(contextGeneration);
-    const isCurrent = (): boolean => isListCurrent() && isFormGenerationCurrent(capturedFormGeneration);
-    let body: ReturnType<typeof normalizeEntitlementForm> | ReturnType<typeof normalizeCreateFromPolicy>;
-    try {
-      body = form.policy_id !== "" ? normalizeCreateFromPolicy(form) : normalizeEntitlementForm(form);
-    } catch (error) {
-      setFeedback(codeFeedback(validationCode(error)));
-      return;
-    }
-    const expectedStatus = body.status ?? "active";
-    const expectedLimit = "max_active_devices" in body ? body.max_active_devices : undefined;
-    const requestBody = JSON.stringify(body);
-    await runKeyedMutation({
-      request: { method: "POST", path: "/api/admin/entitlements", body: requestBody },
-      send: (attempt) => api<EntitlementRecord>(attempt.path, { method: attempt.method, headers: { "idempotency-key": attempt.idempotencyKey }, body: attempt.body }),
-      parse: (result, phase) => parseMutationResponse(result, "entitlement_saved", (value): value is EntitlementRecord => {
-        if (!hasEntitlementRecordData(value)) return false;
-        const row = value as EntitlementRecord;
-        return row.project === body.project && row.feature === body.feature && row.license_fingerprint === body.license_fingerprint && row.status === expectedStatus
-          && (expectedLimit === undefined || row.max_active_devices === expectedLimit);
-      }, mutationFailurePolicies.entitlementCreate, phase),
-      onApplied: async (parsed) => {
-        if (!isCurrent()) return;
-        setFeedback(codeFeedback(parsed.code, parsed.requestId));
-        // The new entitlement opens as its own row in the list (also after a reconciled replay).
-        if (!isFormGenerationCurrent(capturedFormGeneration)) return;
-        setCreateOpen(false);
-        setForm(emptyEntitlementForm);
-        // The list on screen when the save settled, not when it was submitted: a read that landed in
-        // between may predate the create, so the reveal waits for the read that follows it.
-        setReveal({ id: parsed.data.id, context: filterContextKey, shown: entitlementsRef.current });
-      },
-      refresh: async () => await refreshCore(true),
-      onUnapplied: (parsed) => {
-        if (!isCurrent()) return;
-        const refusal = protectedCreateFailureMessage(parsed);
-        setFeedback(refusal === null ? failureFeedback(parsed.code, parsed.requestId) : feedbackWith(refusal, parsed.code, parsed.requestId));
-      },
-      isCurrent,
-    });
-  }
-
+  const submitCreate = useEntitlementCreate({ form, guided: guided !== null, choice: grantChoice,
+    policyAvailable: activePoliciesFence.canLoadMore() && activePolicies.some(policy=>policy.id===form.policy_id),
+    isListCurrent: ()=>isFilterGenerationCurrent(filterGeneration), setForm,
+    onApplied: (item)=>{
+      setCreateOpen(false);setForm(emptyEntitlementForm);
+      setReveal({id:item.id,context:filterContextKey,shown:entitlementsRef.current});
+      if(guided)setGranted({customerId:item.customer_id,project:item.project});
+    }, refresh: async()=>await refreshCore(true),
+  });
   function beginEdit(item: EntitlementRecord, extend = false): void {
     requestLeave(() => {
       setCreateOpen(false);
@@ -412,16 +390,16 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const listError = listRead.context === filterContextKey ? listRead.error : null;
   const policyError = policyRead.context === activePoliciesContext ? policyRead.error : null;
   const editingItem = visibleEntitlements.find((item) => item.id === editingId);
-  const closeEditor = (): void => { requestLeave(() => { setCreateOpen(false); setForm(emptyEntitlementForm); cancelEdit(); }); };
+  const closeEditor = (): void => { requestLeave(() => { setCreateOpen(false); setForm(emptyEntitlementForm); cancelEdit(); if(guided){ navigate({tab:"customers",filter:{},selectCustomerId:guided.customerId,customerSection:"access"}); if(guided.project)setCustomerAccess({app:guided.project});setGuided(null); } }); };
   // A scoped (Manage access) list stays on its one customer's grant: nothing in it may change its filter.
   const pinnedFilter = (): void => undefined;
   return <section className="listPage">
     {onExit && <button disabled={busy} onClick={() => requestLeave(onExit)}>Back to app</button>}
     {createOpen || editingId !== null ? <>
       {editingId !== null && <ReadNotice loading={!ready && listError === null} error={listError} hasData={visibleEntitlements.length > 0} label="entitlements" onRetry={() => void refresh()} />}
-      {createOpen || editingItem ? <EntitlementEditor key={createOpen ? "create" : editingId} form={createOpen ? form : editForm} item={createOpen ? undefined : editingItem} extendValidity={extendValidity} busy={busy} locked={operationLocked || (!createOpen && (!ready || editingItem?.status === "revoked"))} lockMessage={operationLocked ? undefined : editingItem?.status === "revoked" ? "Revocation is permanent. This entitlement can no longer be edited." : "Refresh entitlements successfully before changing or saving this draft."} policies={activePoliciesFence.isSettled() ? activePolicies : []} policiesReady={activePoliciesFence.canLoadMore()} policiesError={policyError} onRetryPolicies={() => void refreshPolicies()} onCreatePolicy={createOpen && onCreatePolicy !== undefined ? () => setPolicyDetour("leaving") : undefined} onChange={(patch) => createOpen ? setForm((previous) => ({ ...previous, ...patch })) : setEditForm((previous) => ({ ...previous, ...patch }))} onSubmit={createOpen ? submitCreate : (event) => submitPatch(event, editingItem!)} onCancel={closeEditor} /> : <div className="emptyState"><p>{ready ? "This entitlement is no longer in the current list. Return to the list to select a current record." : "Waiting for the current entitlement record."}</p><button type="button" disabled={busy} onClick={closeEditor}>Back to entitlements</button></div>}
+      {createOpen || editingItem ? <EntitlementEditor key={createOpen ? "create" : editingId} guided={createOpen && guided!==null} createLicenseOnSave={grantChoice.createNew} lookupReady={grantChoice.ready} guidance={guided && <GuidedGrantFields form={form} onChange={patch=>setForm(previous=>({...previous,...patch}))} onAutoLicense={autoLicense} onChoice={setGrantChoice} />} form={createOpen ? form : editForm} item={createOpen ? undefined : editingItem} extendValidity={extendValidity} busy={busy} locked={operationLocked || (!createOpen && (!ready || editingItem?.status === "revoked"))} lockMessage={operationLocked ? undefined : editingItem?.status === "revoked" ? "Revocation is permanent. This entitlement can no longer be edited." : "Refresh entitlements successfully before changing or saving this draft."} policies={activePoliciesFence.isSettled() ? activePolicies : []} policiesReady={activePoliciesFence.canLoadMore()} policiesError={policyError} onRetryPolicies={() => void refreshPolicies()} onCreatePolicy={createOpen && onCreatePolicy !== undefined ? () => setPolicyDetour("leaving") : undefined} onChange={(patch) => createOpen ? setForm((previous) => ({ ...previous, ...patch })) : setEditForm((previous) => ({ ...previous, ...patch }))} onSubmit={createOpen ? submitCreate : (event) => submitPatch(event, editingItem!)} onCancel={closeEditor} /> : <div className="emptyState"><p>{ready ? "This entitlement is no longer in the current list. Return to the list to select a current record." : "Waiting for the current entitlement record."}</p><button type="button" disabled={busy} onClick={closeEditor}>Back to entitlements</button></div>}
     </> : <>
-      <EntitlementList scoped={scopedGrant !== undefined} items={visibleEntitlements} filter={filter} onFilter={scopedGrant === undefined ? setFilter : pinnedFilter} loading={!ready && listError === null} error={listError} ready={ready} busy={busy} selectedIds={selectedIds} selectedCount={selectedCount} allSelected={allSelected} onSelect={toggleSelected} onSelectAll={toggleSelectAll} onClearSelection={() => setSelectedIds(new Set())} onCreate={() => { requestLeave(() => { cancelEdit(); setForm({ ...emptyEntitlementForm, project:filter.project || emptyEntitlementForm.project, feature:filter.feature || emptyEntitlementForm.feature, customer_id:filter.customer_id || "" }); setCreateOpen(true); }); }} onEdit={beginEdit} onRetry={() => void refresh()} onExport={() => void downloadCsv(entitlementsUrl, "entitlements.csv", runMutation, setFeedback)} onLoadMore={visibleEntitlementsCursor === null ? null : () => void loadMore(entitlementsUrl, visibleEntitlementsCursor, visibleEntitlements, setEntitlements, setEntitlementsCursor, setFeedback, hasEntitlementListData, "entitlements_listed", entitlementsFence, (entitlement) => entitlement.id)} onTransition={transition} batch={batch} bulkConfirmBody={bulkConfirmBody} isCurrent={() => isFilterGenerationCurrent(filterGeneration)} onHistory={(item) => navigate({ tab: "events", filter: { entitlement_id: item.id } })} />
+      <EntitlementList scoped={scopedGrant !== undefined} items={visibleEntitlements} filter={filter} onFilter={scopedGrant === undefined ? setFilter : pinnedFilter} loading={!ready && listError === null} error={listError} ready={ready} busy={busy} selectedIds={selectedIds} selectedCount={selectedCount} allSelected={allSelected} onSelect={toggleSelected} onSelectAll={toggleSelectAll} onClearSelection={() => setSelectedIds(new Set())} onCreate={() => { requestLeave(() => { cancelEdit(); setGuided(null); const initial={ ...emptyEntitlementForm, project:filter.project || emptyEntitlementForm.project, feature:filter.feature || emptyEntitlementForm.feature, customer_id:filter.customer_id || "" }; createBaseline.current=JSON.stringify(initial);setForm(initial);setCreateOpen(true); }); }} onEdit={beginEdit} onRetry={() => void refresh()} onExport={() => void downloadCsv(entitlementsUrl, "entitlements.csv", runMutation, setFeedback)} onLoadMore={visibleEntitlementsCursor === null ? null : () => void loadMore(entitlementsUrl, visibleEntitlementsCursor, visibleEntitlements, setEntitlements, setEntitlementsCursor, setFeedback, hasEntitlementListData, "entitlements_listed", entitlementsFence, (entitlement) => entitlement.id)} onTransition={transition} batch={batch} bulkConfirmBody={bulkConfirmBody} isCurrent={() => isFilterGenerationCurrent(filterGeneration)} onHistory={(item) => navigate({ tab: "events", filter: { entitlement_id: item.id } })} />
     </>}
   </section>;
 }

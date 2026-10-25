@@ -4,7 +4,7 @@ import { api, parseExactApiSuccess } from "../../shared/api";
 import { FeedbackText } from "../../shared/FeedbackText";
 import { apiFailureFeedback } from "../../shared/messages";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
-import { formatUtcDate } from "../../shared/format";
+import { expiryDescription } from "../entitlements/expiry";
 import { Entitlements } from "../entitlements/Entitlements";
 import type { EntitlementFilter } from "../entitlements/workflow";
 import { hasEntitlementRecordData } from "../../shared/mutationGuards";
@@ -91,13 +91,13 @@ export function CustomerAccess({ customerId }: { customerId: string }): React.Re
   const url = project === null ? `${root}/apps` : `${root}/access?${new URLSearchParams({ project })}`;
   if (managed) return <Entitlements key={managed.id} active navigationIntent={null} onNavigationHandled={() => undefined} scopedGrant={managed} onExit={closeManagedGrant} />;
   return <section>
-    <div className="actions"><h3>Apps &amp; access</h3><button onClick={() => navigate({ tab: "entitlements", filter: { customer_id: customerId, ...(project ? { project } : {}) } })}>View assigned licenses</button></div>
+    <div className="actions"><h3>Apps &amp; access</h3><button className="primary" onClick={() => navigate({ tab: "entitlements", filter: { customer_id: customerId, ...(project ? { project } : {}) }, grantAccess: { customerId, project: project ?? "" } })}>Grant access</button><button onClick={() => navigate({ tab: "entitlements", filter: { customer_id: customerId, ...(project ? { project } : {}) } })}>View assigned licenses</button></div>
     {project !== null && <div className="actions"><button onClick={() => setCustomerAccess(null)}>All apps</button><strong>{project}</strong></div>}
     <PagedRecords key={url} url={url} customerId={customerId} kind={project === null ? "apps" : "grants"} code={project === null ? "customer_apps" : "entitlements_listed"} render={(rows) => <div className="customerAccessRecords">
       {rows.map(row => <article className="recordCard" key={JSON.stringify([row.project, row.feature, row.license_fingerprint])}>
         {project === null ? <><h4>{String(row.project)}</h4><p>{Number(row.grant_count)} grants · {Number(row.in_date_count)} active and within grant dates</p>
-          <p>{row.earliest_expiry === row.latest_expiry && Number(row.no_expiry_count) === 0 ? `Valid until ${formatUtcDate(Number(row.earliest_expiry))}` : "Mixed or non-expiring validity — view grants"}</p>
-          <button onClick={() => setCustomerAccess({ app: String(row.project) })}>View app</button></> : <><h4>{String(row.feature)}</h4><p>{row.status === "disabled" ? "suspended" : String(row.status)} · Valid until {row.valid_until === null ? "No expiry" : formatUtcDate(Number(row.valid_until))}</p>
+          <p>{row.earliest_expiry === row.latest_expiry && Number(row.no_expiry_count) === 0 ? expiryDescription(Number(row.earliest_expiry)) : "Mixed or non-expiring validity — view grants"}</p>
+          <button onClick={() => setCustomerAccess({ app: String(row.project) })}>View app</button></> : <><h4>{String(row.feature)}</h4><p>{row.status === "disabled" ? "suspended" : String(row.status)} · {expiryDescription(row.valid_until === null ? null : Number(row.valid_until))}</p>
           <button onClick={() => openManagedGrant({ project, feature: String(row.feature), id: String(row.id), customer_id: customerId })}>Manage access</button></>}
       </article>)}
     </div>} />

@@ -20,6 +20,7 @@ export function AddUser({ onCancel, onOpen }: { onCancel(): void; onOpen(id: str
   const [mode, setMode] = useState<Mode>("invite");
   const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState("");
   const [created, setCreated] = useState<CreatedUser | null>(null);
+  const [copyStatus, setCopyStatus] = useState("");
   const [error, setError] = useState<OperatorFeedback | null>(null);
   const mounted = useRef(true); const saved = useRef<CreatedUser | null>(null); const submittedMode = useRef<Mode>("invite");
   const { busy, operationLocked, runKeyedMutation } = useOperatorControls();
@@ -54,8 +55,16 @@ export function AddUser({ onCancel, onOpen }: { onCancel(): void; onOpen(id: str
       isCurrent: () => mounted.current,
     });
   }
+  const instructions = created ? `Open the customer portal and choose 'Set or reset password'. Enter ${created.login_email}, then follow the verification link in your email to choose your password.` : "";
+  async function copyInstructions(): Promise<void> {
+    try { await navigator.clipboard.writeText(instructions); setCopyStatus("Setup instructions copied."); }
+    catch { setCopyStatus("Select and copy the setup instructions above."); }
+  }
   if (created) return <section className="editorLayout"><h3>User added</h3><p>{created.name} · {created.login_email}</p>
-    <p>{submittedMode.current === "invite" ? `Ask ${created.login_email} to open the customer portal and choose 'Forgot your password?' to set a password.` : "Share the initial password securely. The user can change it in their portal account."}</p>
+    {submittedMode.current === "invite" ? <><p>No email was sent. Share these setup instructions with the customer:</p>
+      <label>Setup instructions<textarea readOnly rows={3} value={instructions} onFocus={event => event.target.select()} /></label>
+      <button type="button" onClick={()=>void copyInstructions()}>Copy setup instructions</button>
+      {copyStatus && <p role="status">{copyStatus}</p>}</> : <p>Share the initial password securely. The user can change it in their portal account.</p>}
     <p>No licenses have been assigned.</p>
     <button disabled={locked} onClick={() => onOpen(created.id)}>Open user</button></section>;
   return <section className="editorLayout"><h3>Add user</h3><p>Create a customer portal account. No email is sent.</p>
@@ -64,11 +73,11 @@ export function AddUser({ onCancel, onOpen }: { onCancel(): void; onOpen(id: str
         <label>Name<input autoFocus required maxLength={128} autoComplete="off" value={name} onChange={event => setName(event.target.value)} /></label>
         <label>Login email<input type="email" required maxLength={254} autoComplete="off" value={email} onChange={event => setEmail(event.target.value)} /></label>
         <fieldset className="wide modeChoice"><legend>Initial access</legend>
-          <label><input type="radio" name="add-user-mode" checked={mode === "invite"} onChange={() => selectMode("invite")} /> Invite</label>
+          <label><input type="radio" name="add-user-mode" checked={mode === "invite"} onChange={() => selectMode("invite")} /> Customer sets password</label>
           <label><input type="radio" name="add-user-mode" checked={mode === "set-password"} onChange={() => selectMode("set-password")} /> Set an initial password</label>
         </fieldset>
         {mode === "invite"
-          ? <p>The customer sets their own password later, using 'Forgot your password?' in the customer portal.</p>
+          ? <p>Share the setup instructions after creation. The customer chooses 'Set or reset password' in the portal and verifies their login email.</p>
           : <>
             <p>Use this if the customer portal cannot send email.</p>
             <label>Initial password<input type="password" required autoComplete="new-password" aria-describedby="new-user-password-hint" value={password} onChange={event => setPassword(event.target.value)} /></label>

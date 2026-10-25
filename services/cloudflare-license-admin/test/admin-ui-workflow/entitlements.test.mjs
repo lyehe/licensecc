@@ -158,7 +158,7 @@ test("admin UI workflow prepares entitlement edit patch payloads", async () => {
   });
   assert.deepEqual(patch, {
     valid_from: 1709942400,
-    valid_until: 1719964800,
+    valid_until: 1720051200,
     notes: "",
     customer_id: "cus_456",
     license_id: "lic_123",
@@ -326,9 +326,30 @@ test("entitlement date edits preserve stored instants and use UTC midnight for c
   assert.equal(unchanged.valid_from, original.valid_from);
   assert.equal(unchanged.valid_until, original.valid_until);
   const extended = workflow.normalizeEntitlementPatch({ ...edit, valid_until: "2026-09-10" }, original);
-  assert.equal(extended.valid_until, Date.parse("2026-09-10T00:00:00Z") / 1000);
+  assert.equal(extended.valid_until, Date.parse("2026-09-11T00:00:00Z") / 1000);
   assert.equal(workflow.normalizeEntitlementPatch({ ...edit, valid_until: "" }, original).valid_until, null);
   assert.deepEqual(workflow.entitlementFormErrors(edit, original), {});
-  assert.ok(workflow.entitlementFormErrors({ ...edit, valid_until: "2026-09-07" }, original).valid_until);
+  assert.ok(workflow.entitlementFormErrors({ ...edit, valid_until: "2026-09-06" }, original).valid_until);
   assert.ok(workflow.entitlementFormErrors({ ...edit, valid_until: "2026-02-30" }, original).valid_until);
+});
+
+test("inclusive entitlement expiry handles calendar boundaries and preserves custom exact instants", async () => {
+  const expiry = await loadWorkflowModule("features/entitlements/expiry.ts");
+  for (const [day, next] of [["2026-10-25","2026-10-26"],["2024-02-29","2024-03-01"],["2026-12-31","2027-01-01"],["9999-12-31","+010000-01-01"]]) {
+    const timestamp=Date.parse(`${next}T00:00:00Z`)/1000;
+    assert.equal(expiry.expiryDeadline(day), timestamp);
+    assert.equal(expiry.expiryDateInput(timestamp), day);
+    assert.equal(expiry.expiryDescription(timestamp), `Valid through ${day} UTC`);
+  }
+  for(const day of ["2026-02-30","2023-02-29","1969-12-31","10000-01-01","exact:123","2026-3-2"]) assert.throws(()=>expiry.expiryDeadline(day));
+  for(const timestamp of [0,1792938427,Number.MAX_SAFE_INTEGER]) {
+    const input=expiry.expiryDateInput(timestamp);
+    assert.ok(input.startsWith('exact:'));
+    assert.equal(expiry.expiryDeadline(input,timestamp),timestamp);
+    assert.equal(expiry.expiryDeadline('',timestamp),null);
+    assert.ok(expiry.expiryDescription(timestamp).startsWith('Expires '));
+  }
+  assert.equal(expiry.expiryDeadline(''),null);
+  assert.equal(expiry.expiryDescription(null),'No expiry');
+  assert.equal(expiry.exactExpiry(Date.parse('2026-09-08T18:42:03Z')/1000),'2026-09-08T18:42:03Z');
 });

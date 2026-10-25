@@ -5,11 +5,16 @@ import { formatUtcDate } from "../../shared/format";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { ReadNotice } from "../../shared/ReadNotice";
 import { DeviceLimitForm } from "./DeviceLimitForm";
+import { EntitlementExpiry } from "./EntitlementExpiry";
 import { EntitlementRelationships } from "./EntitlementRelationships";
 import { generateLicenseFingerprint, isProtectedProject } from "./protectedCreate";
 import { DEVICE_LIMIT_RULE, entitlementFormErrors, policiesForProject, policyOptionLabel, type EntitlementEditState, type EntitlementFormState } from "./workflow";
 
 interface EditorProps {
+  guided?: boolean;
+  guidance?: React.ReactNode;
+  createLicenseOnSave?: boolean;
+  lookupReady?: boolean;
   form: EntitlementFormState | EntitlementEditState;
   item?: EntitlementRecord;
   extendValidity?: boolean;
@@ -27,11 +32,11 @@ interface EditorProps {
   onCancel: () => void;
 }
 
-export function EntitlementEditor({ form, item, extendValidity = false, busy, locked, lockMessage, policies, policiesReady, policiesError, onRetryPolicies, onCreatePolicy, onChange, onSubmit, onCancel }: EditorProps): React.ReactElement {
+export function EntitlementEditor({ form, item, guided = false, guidance, createLicenseOnSave = false, lookupReady = true, extendValidity = false, busy, locked, lockMessage, policies, policiesReady, policiesError, onRetryPolicies, onCreatePolicy, onChange, onSubmit, onCancel }: EditorProps): React.ReactElement {
   const editorRef = useRef<HTMLElement>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const isCreate = "license_fingerprint" in form;
-  const title = isCreate ? "New entitlement" : "Edit entitlement";
+  const title = isCreate ? guided ? "Grant access" : "New entitlement" : "Edit entitlement";
   const inheritsDates = isCreate && form.policy_id !== "";
   const protectedCreate = isCreate;
   // Only this project's policies can stamp its grant; the chosen one owns the device limit.
@@ -42,7 +47,7 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
   }, [extendValidity, item?.id]);
 
   function submit(event: FormEvent): void {
-    const next = entitlementFormErrors(form, item);
+    const next = entitlementFormErrors(guided && createLicenseOnSave ? {...form,license_id:form.license_id || "pending-license"} : form, item);
     // A device limit the number field could not read (such as "5e") reads as blank, which would
     // quietly create the default limit; it is refused beside the field instead. The field is read
     // now, since clearing such text changes no value and so fires no change event.
@@ -70,31 +75,33 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
   // A chosen policy owns the device limit.
   const policyLimitLabel = `Device limit (from policy ${chosenPolicy?.name ?? (isCreate ? form.policy_id : "")})`;
   return <section ref={editorRef} className="editorLayout" aria-label={title}>
-    <div className="editorHeader"><div><h3 tabIndex={-1}>{title}</h3><p>{isCreate ? "Grant access to a project and feature." : `${item?.project} / ${item?.feature}`}</p></div><button type="button" disabled={busy} onClick={onCancel}>Back to entitlements</button></div>
+    <div className="editorHeader"><div><h3 tabIndex={-1}>{title}</h3><p>{isCreate ? "Grant access to a project and feature." : `${item?.project} / ${item?.feature}`}</p></div><button type="button" disabled={busy} onClick={onCancel}>{guided ? "Back to customer" : "Back to entitlements"}</button></div>
     {locked && <p className="readState">{lockMessage ?? "Resolve the notice at the bottom of the page before changing this draft."}</p>}
     <form aria-label={title} noValidate onSubmit={submit}><fieldset disabled={locked}>
       <legend className="srOnly">Entitlement details</legend>
       {isCreate && <>
         <p className="wide muted">Protection: Protected devices. Requires a customer, license, and an application using protected device enrollment; each enrolled device occupies a slot.</p>
-        <label>Project (required)<input aria-label="Project" name="project" required aria-invalid={!!errors.project} aria-describedby={describedBy("project")} value={form.project} onChange={(event) => change("project", event.target.value)} />{errorFor("project")}</label>
+        {guided ? <>{guidance}{(errors.project || errors.feature) && <p role="alert">{errors.project || errors.feature}</p>}</> : <><label>Project (required)<input aria-label="Project" name="project" required aria-invalid={!!errors.project} aria-describedby={describedBy("project")} value={form.project} onChange={(event) => change("project", event.target.value)} />{errorFor("project")}</label>
         <label>Feature (required)<input aria-label="Feature" name="feature" required aria-invalid={!!errors.feature} aria-describedby={describedBy("feature")} value={form.feature} onChange={(event) => change("feature", event.target.value)} />{errorFor("feature")}</label>
         <label className="wide">License fingerprint (required)<input aria-label="License fingerprint" name="license_fingerprint" required aria-invalid={!!errors.license_fingerprint} aria-describedby={describedBy("license_fingerprint")} value={form.license_fingerprint} onChange={(event) => change("license_fingerprint", event.target.value)} />{errorFor("license_fingerprint")}<span className="muted">{protectedCreate ? "The exact 64-character lowercase hexadecimal fingerprint. A new protected license can use a generated one." : "The full 64-character hexadecimal fingerprint."}</span></label>
-        {protectedCreate && <div className="wide"><button type="button" onClick={() => change("license_fingerprint", generateLicenseFingerprint())}>Generate fingerprint</button></div>}
+        {protectedCreate && <div className="wide"><button type="button" onClick={() => change("license_fingerprint", generateLicenseFingerprint())}>Generate fingerprint</button></div>}</>}
+        {guided && <details className="wide"><summary>Technical details</summary><label>License fingerprint<input aria-label="License fingerprint" readOnly value={form.license_fingerprint} /></label><p>Generated once for this new access grant. Manual record setup is available under License access.</p></details>}
         <div className="wide"><ReadNotice loading={!policiesReady && policiesError === null} error={policiesError} hasData={policies.length > 0} label="active policies" onRetry={onRetryPolicies} /><label>Policy (optional)<select aria-label="Policy (optional)" disabled={!policiesReady} value={form.policy_id} onChange={(event) => change("policy_id", event.target.value)}><option value="">No policy · use fields below</option>{projectPolicies.map((policy) => <option key={policy.id} value={policy.id}>{policyOptionLabel(policy)}</option>)}</select></label>{onCreatePolicy && !locked && !busy && <p><a href="#/policies" onClick={(event) => { event.preventDefault(); onCreatePolicy(); }}>Create policy…</a> <span className="muted">Opens the policy form for {form.project || "this project"}; this draft is kept and gets the new policy.</span></p>}{inheritsDates && <p className="muted">Blank validity dates inherit this policy’s defaults.</p>}</div>
         {inheritsDates
           ? <label>{policyLimitLabel}<input aria-label={policyLimitLabel} name="max_active_devices" readOnly value={chosenPolicy?.max_active_devices ?? ""} /><span className="muted">The policy sets the device limit.</span></label>
           : <label>Device limit<input aria-label="Device limit" name="max_active_devices" type="number" min={1} max={MAX_DEVICE_LIMIT} step={1} placeholder="1" value={form.max_active_devices} aria-invalid={!!errors.max_active_devices} aria-describedby={describedBy("max_active_devices")} onChange={(event) => change("max_active_devices", event.target.value === "" ? "" : Number(event.target.value))} />{errorFor("max_active_devices")}<span className="muted">Blank: a new license (entitlement) gets 1; an existing one keeps its limit.</span></label>}
       </>}
-      {!isCreate && <p className="wide muted">Project, feature, and fingerprint identify this entitlement and cannot be edited. {extendValidity ? "Update Valid until to extend access." : "Save changes updates the existing entitlement."}</p>}
+      {!isCreate && <p className="wide muted">Project, feature, and fingerprint identify this entitlement and cannot be edited. {extendValidity ? "Update Valid through to extend access." : "Save changes updates the existing entitlement."}</p>}
       <label>Valid from<input aria-label="Valid from" name="valid_from" type="date" min="1970-01-01" value={form.valid_from} aria-invalid={!!errors.valid_from} aria-describedby={`entitlement-date-rules${errors.valid_from ? " entitlement-valid_from-error" : ""}`} onChange={(event) => change("valid_from", event.target.value)} /><span className="muted">{inheritsDates ? "Blank: use policy start." : "Blank: Starts immediately."}</span>{errorFor("valid_from")}</label>
-      <label>Valid until<input aria-label="Valid until" name="valid_until" type="date" min="1970-01-01" value={form.valid_until} aria-invalid={!!errors.valid_until} aria-describedby={`entitlement-date-rules${errors.valid_until ? " entitlement-valid_until-error" : ""}`} onChange={(event) => change("valid_until", event.target.value)} /><span className="muted">{inheritsDates ? "Blank: use policy expiry." : "Blank: No expiry."}</span>{errorFor("valid_until")}</label>
-      <p id="entitlement-date-rules" className="wide muted">Dates are UTC. Expiry is at the start of the selected day; choose the following date to include a whole day. Untouched timestamps stay unchanged.</p>
-      {item && <p className="wide muted">Stored start: {item.valid_from === null ? "Starts immediately" : formatUtcDate(item.valid_from)}. Stored expiry: {item.valid_until === null ? "No expiry" : formatUtcDate(item.valid_until)}.</p>}
-      <EntitlementRelationships required={protectedCreate} protectedProject={protectedCreate && isProtectedProject(form.project) ? form.project : ""} customerId={form.customer_id} licenseId={form.license_id} onCustomerChange={(value) => { change("customer_id", value); if (isCreate) change("license_id", ""); }} onLicenseChange={(value) => change("license_id", value)} />
+      <EntitlementExpiry value={form.valid_until} original={item?.valid_until} inherits={inheritsDates} error={errors.valid_until} onChange={value=>change("valid_until",value)} />
+      <p id="entitlement-date-rules" className="wide muted">Dates are UTC. Valid through includes the whole selected day; expiry is at the next UTC midnight. Untouched timestamps stay unchanged.</p>
+      {item && <p className="wide muted">Stored start: {item.valid_from === null ? "Starts immediately" : formatUtcDate(item.valid_from)}.</p>}
+      {!guided && <EntitlementRelationships required={protectedCreate} protectedProject={protectedCreate && isProtectedProject(form.project) ? form.project : ""} customerId={form.customer_id} licenseId={form.license_id} onCustomerChange={(value) => { change("customer_id", value); if (isCreate) change("license_id", ""); }} onLicenseChange={(value) => change("license_id", value)} />}
       {!isCreate && <p className="wide muted">Protection: Protected devices</p>}
       {(errors.customer_id || errors.license_id) && <p className="wide" role="alert">{errors.customer_id || errors.license_id}</p>}
       <label className="wide">Notes<textarea aria-label="Notes" name="notes" maxLength={1000} value={form.notes} aria-invalid={!!errors.notes} aria-describedby={describedBy("notes")} onChange={(event) => change("notes", event.target.value)} />{errorFor("notes")}</label>
-      <div className="editorActions"><button className="primary" disabled={busy} type="submit">{isCreate ? "Create entitlement" : "Save changes"}</button><button disabled={busy} type="button" onClick={onCancel}>Cancel</button></div>
+      {guided && <p className="wide">Review the app, feature, device limit, and dates above. Saving grants access after all required records are confirmed.</p>}
+      <div className="editorActions"><button className="primary" disabled={busy || (guided && !lookupReady)} type="submit">{isCreate ? guided ? "Save access" : "Create entitlement" : "Save changes"}</button><button disabled={busy} type="button" onClick={onCancel}>Cancel</button></div>
     </fieldset></form>
     {!isCreate && item && <DeviceLimitForm item={item} locked={locked} />}
   </section>;

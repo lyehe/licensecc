@@ -30,10 +30,10 @@ its named `WebhookOperator` capability.
 ## Add a customer portal user
 
 Open **Customers → Add user** and enter a name and login email. This requires
-the administrator role. **Invite** is the default: the server stores a
+the administrator role. **Customer sets password** is the default: the server stores a
 random, never-disclosed credential, and the success panel tells the operator
-to ask the customer to open the customer portal and choose "Forgot your
-password?" to set their own password. That works because the portal treats
+to share copyable instructions for opening the customer portal and choosing
+"Set or reset password". No email is sent by account creation. That works because the portal treats
 an admin-created account's empty contact email as eligible for password
 recovery as long as no other customer has already verified that same
 address -- a non-empty contact email that differs from the login is never
@@ -53,7 +53,26 @@ use **Reconcile status** to recover the original creation safely.
 
 ## Create protected application access
 
+From a customer's app, **Manage access** opens the selected grant's details and
+actions directly. Edit or extend validity, change its device limit, or use the
+existing confirmed lifecycle actions without selecting it from a second list.
+Calendar expiry uses **Valid through**: the whole chosen UTC day is included,
+and the form previews the exact next-midnight deadline. Existing custom deadlines
+retain their exact seconds until explicitly changed.
+
 The whole path runs in the console; no SQL is needed.
+
+For ordinary access, open **Customers → customer → Apps & access → Grant access**.
+The customer and current app are prefilled. Browse an app or enter its valid ID,
+choose a feature, and review the optional policy, device limit, and **Valid through** date.
+The fingerprint is generated once and kept under Technical details. One eligible
+license is selected automatically; several purchases require an explicit choice.
+When no license exists, Save access creates it before saving the grant. If only
+the license succeeds, Access not granted explains the remaining step. Reconcile
+unknown outcomes using the retained request, then reuse the same license and draft.
+Cancel never deletes a license that was already created.
+
+For advanced manual record setup, the existing path remains:
 
 1. Create the customer with **Customers → Add user** (above).
 2. Open **License access → New entitlement**; **Protected devices** is the default.

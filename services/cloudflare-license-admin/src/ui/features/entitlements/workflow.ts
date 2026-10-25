@@ -9,6 +9,7 @@ import type {
 import { MAX_DEVICE_LIMIT } from "../../../shared/api";
 import { dateInputToEpoch, epochToDateInput } from "../../shared/dates";
 import { shortHash } from "../../shared/format";
+import { expiryDateInput, expiryDeadline } from "./expiry";
 
 export type EntitlementAction = "disable" | "reenable" | "revoke";
 
@@ -97,7 +98,7 @@ export function normalizeEntitlementForm(form: EntitlementFormState): AdminEntit
     feature: form.feature,
     license_fingerprint: form.license_fingerprint,
     valid_from: dateInputToEpoch(form.valid_from, "valid_from"),
-    valid_until: dateInputToEpoch(form.valid_until, "valid_until"),
+    valid_until: expiryDeadline(form.valid_until),
     notes: parseNotes(form.notes),
     customer_id: requiredOwner(form.customer_id),
     license_id: parseNullableIdentifier(form.license_id, "license_id"),
@@ -133,7 +134,7 @@ export function normalizeCreateFromPolicy(form: EntitlementFormState): Entitleme
     customer_id: requiredOwner(form.customer_id),
   };
   if (form.valid_from !== "") body.valid_from = dateInputToEpoch(form.valid_from, "valid_from");
-  if (form.valid_until !== "") body.valid_until = dateInputToEpoch(form.valid_until, "valid_until");
+  if (form.valid_until !== "") body.valid_until = expiryDeadline(form.valid_until);
   if (form.notes !== "") body.notes = parseNotes(form.notes);
   if (form.license_id !== "") body.license_id = parseNullableIdentifier(form.license_id, "license_id");
   return body;
@@ -142,7 +143,7 @@ export function normalizeCreateFromPolicy(form: EntitlementFormState): Entitleme
 export function editFormFromEntitlement(item: EntitlementRecord): EntitlementEditState {
   return {
     valid_from: epochToDateInput(item.valid_from),
-    valid_until: epochToDateInput(item.valid_until),
+    valid_until: expiryDateInput(item.valid_until),
     notes: item.notes,
     customer_id: item.customer_id,
     license_id: item.license_id ?? "",
@@ -152,7 +153,7 @@ export function editFormFromEntitlement(item: EntitlementRecord): EntitlementEdi
 export function normalizeEntitlementPatch(form: EntitlementEditState, original?: Pick<EntitlementRecord, "valid_from" | "valid_until">): EntitlementPatch {
   return {
     valid_from: original && form.valid_from === epochToDateInput(original.valid_from) ? original.valid_from : dateInputToEpoch(form.valid_from, "valid_from"),
-    valid_until: original && form.valid_until === epochToDateInput(original.valid_until) ? original.valid_until : dateInputToEpoch(form.valid_until, "valid_until"),
+    valid_until: expiryDeadline(form.valid_until, original?.valid_until),
     notes: parseNotes(form.notes),
     // Every grant has an owner: an edit can move it to another customer but never clears it.
     customer_id: requiredOwner(form.customer_id),
@@ -287,12 +288,12 @@ export function entitlementFormErrors(form: EntitlementEditState | EntitlementFo
   }
   for (const field of ["valid_from", "valid_until"] as const) {
     try {
-      const epoch = dateInputToEpoch(form[field], field);
-      if (epoch !== null && epochToDateInput(epoch) !== form[field]) throw new Error("invalid_date");
+      const epoch = field === "valid_until" ? expiryDeadline(form[field], original?.valid_until) : dateInputToEpoch(form[field], field);
+      if (field === "valid_from" && epoch !== null && epochToDateInput(epoch) !== form[field]) throw new Error("invalid_date");
     } catch { errors[field] = "Enter a valid date on or after January 1, 1970."; }
   }
   if (!errors.valid_from && !errors.valid_until) {
-    const patch = { valid_from: original && form.valid_from === epochToDateInput(original.valid_from) ? original.valid_from : dateInputToEpoch(form.valid_from, "valid_from"), valid_until: original && form.valid_until === epochToDateInput(original.valid_until) ? original.valid_until : dateInputToEpoch(form.valid_until, "valid_until") };
+    const patch = { valid_from: original && form.valid_from === epochToDateInput(original.valid_from) ? original.valid_from : dateInputToEpoch(form.valid_from, "valid_from"), valid_until: expiryDeadline(form.valid_until, original?.valid_until) };
     if (patch.valid_from !== null && patch.valid_until !== null && patch.valid_until <= patch.valid_from) errors.valid_until = "Choose an expiry after the start date.";
   }
   for (const field of ["customer_id", "license_id"] as const) {
