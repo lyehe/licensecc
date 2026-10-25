@@ -2,6 +2,19 @@ import { expect } from "@playwright/test";
 
 import { fillProtectedOwner, makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
+async function inspectOfflineConsequence(page, testInfo, target) {
+  const dialog = page.getByRole("dialog"), originalViewport = page.viewportSize();
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect(dialog).toContainText("Existing offline access may continue until its current permission expires");
+    await expect(dialog.getByText(/Restarting the app requires an online check/)).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await dialog.screenshot({ path: testInfo.outputPath(`offline-${target}-${width}.png`) });
+  }
+  await page.setViewportSize(originalViewport);
+}
+
 // A create settles once the Worker returns the saved record.
 test("protected creation settles on the saved record", async ({ page }) => {
   const api = makeAdminApiFixture();
@@ -215,7 +228,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   expect(pageText).not.toContain("Cf-Access-Jwt-Assertion");
 });
 
-test("admin UI runs bulk transitions, global search deep-link, and CSV export", async ({ page }) => {
+test("admin UI runs bulk transitions, global search deep-link, and CSV export", async ({ page }, testInfo) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
 
@@ -241,6 +254,9 @@ test("admin UI runs bulk transitions, global search deep-link, and CSV export", 
   await expect(page.locator(".bulkBar")).toContainText("2 selected");
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Suspend", includeHidden: true }));
   await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true })).toBeDisabled();
+  await inspectOfflineConsequence(page, testInfo, "bulk-suspend");
+  expect(api.requests.batches).toHaveLength(0);
   await page.getByRole("dialog").getByLabel(/Reason/).fill("quarterly audit");
   await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
 
@@ -304,7 +320,7 @@ test("admin UI retains the server-owned four-entitlement batch limit", async ({ 
   expect(api.requests.batches.map((batch) => batch.rows.map((row) => row.id))).toEqual([["ent-1", "ent-2", "ent-3", "ent-4"], ["ent-5"]]);
 });
 
-test("admin UI gates a batch revoke behind an exact typed REVOKE phrase", async ({ page }) => {
+test("admin UI gates a batch revoke behind an exact typed REVOKE phrase", async ({ page }, testInfo) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -327,6 +343,7 @@ test("admin UI gates a batch revoke behind an exact typed REVOKE phrase", async 
   const typed = dialog.getByLabel("Type REVOKE 4 to confirm");
   // The dialog itself moves focus to the typed field when it opens (the field has no autofocus of its own).
   await expect(typed).toBeFocused();
+  await inspectOfflineConsequence(page, testInfo, "bulk-revoke");
   await dialog.getByLabel(/Reason/).fill("mass revoke test");
   await expect(confirm).toBeDisabled();
   await typed.fill("revoke 4");

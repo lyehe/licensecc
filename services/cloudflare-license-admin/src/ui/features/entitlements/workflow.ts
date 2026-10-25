@@ -9,6 +9,7 @@ import type {
 import { MAX_DEVICE_LIMIT } from "../../../shared/api";
 import { dateInputToEpoch, epochToDateInput } from "../../shared/dates";
 import { shortHash } from "../../shared/format";
+import { OFFLINE_ACCESS_CONSEQUENCE } from "../../shared/accessConsequences";
 import { expiryDateInput, expiryDeadline } from "./expiry";
 
 export type EntitlementAction = "disable" | "reenable" | "revoke";
@@ -192,11 +193,19 @@ export function shortDeviceKeyId(deviceKeyId: string): string {
 }
 
 export function revokeEntitlementConfirm(item: { project: string; feature: string; license_fingerprint: string }): string {
-  return `Revoke the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). This is TERMINAL and cannot be undone.`;
+  return `Revoke the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). This is TERMINAL and cannot be undone. ${entitlementLifecycleConsequence("revoke")}`;
 }
 
 export function disableEntitlementConfirm(item: { project: string; feature: string; license_fingerprint: string }): string {
-  return `Suspend the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). Verification and downloads stop until it is resumed.`;
+  return `Suspend the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). ${entitlementLifecycleConsequence("disable")}`;
+}
+
+/** The same consequences apply to single and bulk grant lifecycle actions. */
+export function entitlementLifecycleConsequence(action: "disable" | "revoke"): string {
+  const effect = action === "disable"
+    ? "New app authorization and renewals stop until access is resumed."
+    : "New app authorization and renewals stop for the revoked access.";
+  return `${effect} ${OFFLINE_ACCESS_CONSEQUENCE}`;
 }
 
 /** Common reasons an operator disables a license; presets fill the reason field and leave it editable. */

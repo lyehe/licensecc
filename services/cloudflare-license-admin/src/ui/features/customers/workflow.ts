@@ -1,3 +1,5 @@
+import { OFFLINE_ACCESS_CONSEQUENCE } from "../../shared/accessConsequences";
+
 export interface CustomerListFilter {
   status: string;
   q: string;
@@ -26,5 +28,5 @@ export function canRunCustomerAction(status: string, action: CustomerAction): bo
 
 export function disableCustomerConfirm(customer: { id: string; name: string }): string {
   const who = customer.name !== "" ? `${customer.name} (${customer.id})` : customer.id;
-  return `Suspend customer ${who}. This immediately severs all of their license/token auth and customer-portal access until you resume their account. The customer is not notified.`;
+  return `Suspend customer ${who}. This stops customer-portal access, new app authorization and renewals until you resume their account. ${OFFLINE_ACCESS_CONSEQUENCE} The customer is not notified.`;
 }

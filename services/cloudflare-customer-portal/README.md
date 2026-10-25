@@ -30,6 +30,13 @@ disconnect must be resolved before approval. Disconnecting stops renewal but
 preserves outstanding lease holds: if the slot becomes available after this
 request expires, restart Connect from the app after the displayed release time.
 
+Disconnect confirmations distinguish current offline permission from slot
+release. An already-running app may retain offline access until that permission
+expires. Restarting requires a fresh online check, which the disconnected
+connection cannot pass. The displayed slot-release time includes a safety
+allowance and does not extend offline access. Portal sign-out and losing
+internet leave the device connection and its slot allocation in place.
+
 The status label preserves disabled/revoked state and marks past or future validity windows as Expired or Not started. Enabled describes the listed dates only: the backend still checks device, trial and account eligibility. The browser clock updates these labels without server polling; it does not authorize access.
 
 ## Protected binding retirement API

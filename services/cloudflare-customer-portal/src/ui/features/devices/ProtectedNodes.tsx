@@ -87,8 +87,10 @@ export function ProtectedNodes({customer,busy,runOnce,onSessionExpired,query,pro
     <dialog ref={dialog} className="retirementDialog" aria-labelledby="retirement-title" onCancel={event=>{event.preventDefault();close();}}>
       <h2 id="retirement-title">Disconnect {pending?.label}?</h2>
       <p>{pending?.project} · {pending?.feature}<span className="retirementIdentity">Connection ID: {pending?.binding}</span></p>
-      <p>This device will stop receiving license renewals. It may keep working until its current license expires.</p>
+      <p>This device will stop receiving license renewals. Existing offline access may continue until its current permission expires.</p>
+      <p>Restarting the app requires an online check. After disconnection, this connection's online checks will be refused.</p>
       <p>Slot available: <strong>{formatTimestamp(pending?.hold??0)}</strong>. If this time has passed, the slot is available when disconnection completes. If the connection changes, review its updated release time.</p>
+      <p>The release time includes a safety allowance and does not extend offline access.</p>
       <p>After the slot is available, connect another device from your app. This connection cannot be restored.</p>
       {error && <p role="alert">{error}</p>}
       {reviewed!==undefined && <p role="status">{reviewed===null?"This connection is no longer available to your account.":`Current connection: ${reviewed.state==="active"?"Connected":reviewed.state==="retiring"?"Disconnecting":"Disconnected"}. Slot available ${formatTimestamp(reviewed.hold_until)}.`} Clear the saved request only after reviewing this status. Clearing does not change the connection.</p>}

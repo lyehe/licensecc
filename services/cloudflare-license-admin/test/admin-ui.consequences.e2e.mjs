@@ -76,7 +76,7 @@ test("admin UI renders Workstream F charts, expiring panel, and validity indicat
   expect(pageText).not.toContain("Bearer ");
 });
 
-test("admin UI keeps destructive operator actions consequence-led, reason-gated, and cancellable", async ({ page }) => {
+test("admin UI keeps destructive operator actions consequence-led, reason-gated, and cancellable", async ({ page }, testInfo) => {
   const api = makeAdminApiFixture();
   api.seed.policy();
   api.seed.webhook();
@@ -84,7 +84,7 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   api.seed.entitlement({ feature: "pro", license_fingerprint: "f".repeat(64) });
   await page.route("**/api/admin/**", api.route);
 
-  async function assertConfirmation(button, consequence, dismissWithEscape = false, typedPhrase = null, confirmLabel = "Confirm") {
+  async function assertConfirmation(button, consequence, dismissWithEscape = false, typedPhrase = null, confirmLabel = "Confirm", offlineTarget = null) {
     await clickAction(button);
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
@@ -98,6 +98,18 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
       await dialog.getByLabel(`Type ${typedPhrase} to confirm`).fill(typedPhrase);
     }
     await expect(confirm).toBeEnabled();
+    if (offlineTarget !== null) {
+      const originalViewport = page.viewportSize();
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 1000 });
+        await expect(dialog).toContainText("Existing offline access may continue until its current permission expires");
+        await expect(dialog.getByText(/Restarting the app requires an online check/)).toBeVisible();
+        await expect(confirm).toBeVisible();await expect(confirm).toBeEnabled();
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        await dialog.screenshot({ path: testInfo.outputPath(`offline-${offlineTarget}-${width}.png`) });
+      }
+      await page.setViewportSize(originalViewport);
+    }
     if (dismissWithEscape) {
       await page.keyboard.press("Escape");
     } else {
@@ -110,14 +122,14 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   await page.getByRole("link", { name: "License access", exact: true }).click();
 
   const entitlementRow = page.locator(".tablePane table tbody tr").first();
-  await assertConfirmation(entitlementRow.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first(), "Verification and downloads stop until it is resumed", true);
-  await assertConfirmation(entitlementRow.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL and cannot be undone", false, "REVOKE 1", "Revoke");
+  await assertConfirmation(entitlementRow.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first(), "New app authorization and renewals stop until access is resumed", true, null, "Confirm", "grant-suspend");
+  await assertConfirmation(entitlementRow.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL and cannot be undone", false, "REVOKE 1", "Revoke", "grant-revoke");
   expect(api.requests.transitions).toHaveLength(0);
 
   await page.getByRole("link", { name: "Customers", exact: true }).click();
   await page.locator("#customer-open-cus_acme").click();
   await expect(page.getByRole("heading", { name: "Acme Corp" })).toBeVisible();
-  await assertConfirmation(page.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first(), "customer-portal access");
+  await assertConfirmation(page.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first(), "customer-portal access", false, null, "Confirm", "customer-suspend");
   expect(api.requests.customerTransitions).toHaveLength(0);
 
   if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();

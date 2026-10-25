@@ -171,6 +171,20 @@ The complete deployment requires the backend's baseline schema.
   create that would move a grant with connected devices to another customer as
   `data.reason: "devices_connected"`.
 
+## Offline consequences of access changes
+
+Customer suspension and single or bulk grant suspension/revocation stop new
+app authorization and renewals. Existing offline access may continue until
+its current permission expires. Restarting the app requires an online check;
+suspended or revoked access cannot obtain new permission. Customer suspension
+also stops portal access and does not notify the customer.
+
+Device disconnection stops renewal for that connection. Its slot stays
+reserved until the displayed release time, which includes a safety allowance
+and does not extend offline access. The connection cannot be restored; a new
+connection must be approved through the app. The confirmations explain these
+consequences before the existing reason or typed-confirmation controls.
+
 ## Hosted setup
 
 Use this Worker alongside the

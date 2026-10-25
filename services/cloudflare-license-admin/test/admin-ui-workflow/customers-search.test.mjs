@@ -63,14 +63,14 @@ test("destructive-action confirm copy echoes the exact target", async () => {
 
   const disable = entitlements.disableEntitlementConfirm({ project: "DEFAULT", feature: "pro", license_fingerprint: "b".repeat(64) });
   assert.match(disable, /Suspend the entitlement for DEFAULT \/ pro/);
-  assert.match(disable, /Verification and downloads stop until it is resumed/);
+  assert.match(disable, /New app authorization and renewals stop until access is resumed/);
   assert.match(disable, new RegExp(format.shortHash("b".repeat(64))));
 
   const named = customers.disableCustomerConfirm({ id: "cus_1", name: "Acme" });
   assert.match(named, /Suspend customer Acme \(cus_1\)/);
-  assert.match(named, /severs all of their license\/token auth and customer-portal access/);
+  assert.match(named, /stops customer-portal access, new app authorization and renewals until you resume their account/);
   // Disabling sends no email or notice; the confirm must say so rather than let the operator assume it.
-  assert.match(named, /until you resume their account\. The customer is not notified\.$/);
+  assert.match(named, /The customer is not notified\.$/);
   assert.match(customers.disableCustomerConfirm({ id: "cus_2", name: "" }), /Suspend customer cus_2\./);
 });
 

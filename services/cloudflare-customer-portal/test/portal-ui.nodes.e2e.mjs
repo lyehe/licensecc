@@ -36,9 +36,21 @@ test('nodes: retirement confirmation preserves hold, refreshes status and explai
   await expect(page.getByRole('cell',{name:'Connected',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Disconnect',exact:true}).click();
   const dialog=page.getByRole('dialog');await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText('It may keep working until its current license expires');
+  await expect(dialog).toContainText('Existing offline access may continue until its current permission expires');
+  await expect(dialog).toContainText("this connection's online checks will be refused");
   await expect(dialog).toContainText('This connection cannot be restored');
   await expect(dialog).toContainText('Example app · DEFAULT');await expect(dialog).toContainText(id);
+  const originalViewport=page.viewportSize();
+  for(const width of [1440,390]) {
+    await page.setViewportSize({width,height:1000});
+    await expect(dialog.getByText(/Restarting the app requires an online check/)).toBeVisible();
+    await expect(dialog.getByText(/does not extend offline access/)).toBeVisible();
+    await expect(dialog.getByRole('button',{name:'Disconnect device',exact:true})).toBeVisible();
+    expect(calls).toHaveLength(0);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await dialog.screenshot({path:testInfo.outputPath(`offline-portal-disconnect-${width}.png`)});
+  }
+  await page.setViewportSize(originalViewport);
   await dialog.getByRole('button',{name:'Cancel',exact:true}).click();expect(calls).toHaveLength(0);
   await page.getByRole('button',{name:'Disconnect',exact:true}).click();
   await dialog.getByRole('button',{name:'Disconnect device',exact:true}).click();
