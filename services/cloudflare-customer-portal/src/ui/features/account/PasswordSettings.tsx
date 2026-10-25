@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { api } from "../../shared/api";
+import { accountApi } from "../../shared/api";
 import { passwordMessage, RecoveryHint } from "../auth/passwordMessages";
 import { useProviders } from "../auth/ProviderSignIn";
 
 type Settings = { email: string; has_password: boolean; can_reset: boolean; email_verified: boolean; recovery_available: boolean };
-export function PasswordSettings(): React.ReactElement {
+export function PasswordSettings({ customerId }: { customerId: string }): React.ReactElement {
   const { providers } = useProviders();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -19,18 +19,18 @@ export function PasswordSettings(): React.ReactElement {
   useEffect(() => {
     let cancelled = false;
     setFailed(false);
-    void api<Settings>("/portal/v1/auth/password").then((result) => {
+    void accountApi<Settings>(customerId, "/portal/v1/auth/password").then((result) => {
       if (cancelled) return;
       if (result.ok && result.data) setSettings(result.data); else setFailed(true);
     }).catch(() => { if (!cancelled) setFailed(true); });
     return () => { cancelled = true; };
-  }, [attempt]);
+  }, [attempt, customerId]);
   async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     if (busy) return;
     setBusy(true); setMessage(""); setMessageIsError(false);
     try {
-      const result = await api("/portal/v1/auth/password", { method: "POST", body: JSON.stringify({ password, current_password: current }) });
+      const result = await accountApi(customerId, "/portal/v1/auth/password", { method: "POST", body: JSON.stringify({ password, current_password: current }) });
       setCurrent(""); setPassword("");
       if (result.ok) { setMessage("Password saved. Other browser sessions have been signed out."); setAttempt((value) => value + 1); }
       else { setMessage(passwordMessage(result.code, result.retryAfter)); setMessageIsError(true); }

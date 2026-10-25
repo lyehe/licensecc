@@ -49,6 +49,39 @@ function jsonResponse(status, body, headers = {}) {
   };
 }
 
+test("accountApi carries the displayed customer and current-epoch mismatches recheck the session without replay", async () => {
+  const api = await loadApiModule();
+  const fired = [], calls = [];
+  api.setOnSessionProblem(reason => fired.push(reason));
+  globalThis.fetch = async (path, init) => {
+    calls.push({ path, init });
+    return jsonResponse(409, { ok: false, code: "account_changed", request_id: "switched" });
+  };
+  await api.accountApi("customer / A", "/portal/v1/auth/identities/unlink", { method: "POST", headers: new Headers({ "x-test": "kept" }), body: JSON.stringify({ provider: "google" }) });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].init.headers.get("x-expected-customer-id"), encodeURIComponent("customer / A"));
+  assert.equal(calls[0].init.headers.get("x-test"), "kept");
+  assert.equal(calls[0].init.credentials, "same-origin");
+  assert.deepEqual(fired, ["account_changed"]);
+  let resolve;
+  globalThis.fetch = () => new Promise(done => { resolve = done; });
+  const old = api.accountApi("A", "/portal/v1/auth/identities");
+  api.beginNewSession();
+  resolve(jsonResponse(409, { ok: false, code: "account_changed", request_id: "old-account" }));
+  await old;
+  assert.deepEqual(fired, ["account_changed"], "an old account's response cannot bounce the new session");
+  api.setOnSessionProblem(null);
+});
+
+test("api refuses malformed envelopes and success claims carried by a failed HTTP response", async () => {
+  const api = await loadApiModule();
+  for (const [status, body] of [[503, { ok: true, code: "signed_in", request_id: "r" }], [200, null], [200, []], [200, { ok: "true", code: "signed_in", request_id: "r" }], [200, { ok: true, code: "signed_in" }], [200, { ok: true, code: "", request_id: "r" }]]) {
+    globalThis.fetch = async () => jsonResponse(status, body);
+    const result = await api.api("/portal/v1/auth/password/complete");
+    assert.equal(result.ok, false); assert.equal(result.code, "invalid_response");
+  }
+});
+
 // A session epoch stops a straggler -- a request sent under an OLD, already-
 // superseded session that only answers 401 long after the customer signed in again -- from bouncing
 // that new sign-in back a step.
@@ -56,18 +89,18 @@ function jsonResponse(status, body, headers = {}) {
 test("api() fires onUnauthorized for a plain 401 unauthorized (same epoch throughout)", async () => {
   const api = await loadApiModule();
   const fired = [];
-  api.setOnUnauthorized(() => fired.push(true));
+  api.setOnSessionProblem(() => fired.push(true));
   globalThis.fetch = async () => jsonResponse(401, { ok: false, code: "unauthorized", request_id: "r1" });
   const result = await api.api("/api/portal/entitlements");
   assert.equal(result.code, "unauthorized");
   assert.equal(fired.length, 1, "a same-epoch 401 unauthorized must fire the hook");
-  api.setOnUnauthorized(null);
+  api.setOnSessionProblem(null);
 });
 
 test("api() ignores a straggler 401 whose request started under an OLDER, already-superseded session", async () => {
   const api = await loadApiModule();
   const fired = [];
-  api.setOnUnauthorized(() => fired.push(true));
+  api.setOnSessionProblem(() => fired.push(true));
 
   // A slow request starts -- api() captures the CURRENT epoch internally -- but its response is held
   // back, simulating a request that has been in flight for a while.
@@ -89,33 +122,33 @@ test("api() ignores a straggler 401 whose request started under an OLDER, alread
 test("api() still fires for a 401 sent AFTER the epoch bump (not just before it)", async () => {
   const api = await loadApiModule();
   const fired = [];
-  api.setOnUnauthorized(() => fired.push(true));
+  api.setOnSessionProblem(() => fired.push(true));
   api.beginNewSession();
   globalThis.fetch = async () => jsonResponse(401, { ok: false, code: "unauthorized", request_id: "r3" });
   await api.api("/api/portal/example");
   assert.equal(fired.length, 1, "a request sent in the CURRENT epoch must still fire normally");
 });
 
-test("skipUnauthorizedHook bypasses the epoch check entirely (retrySession's own /me call)", async () => {
+test("skipSessionHook bypasses the epoch check entirely (retrySession's own /me call)", async () => {
   const api = await loadApiModule();
   const fired = [];
-  api.setOnUnauthorized(() => fired.push(true));
+  api.setOnSessionProblem(() => fired.push(true));
   globalThis.fetch = async () => jsonResponse(401, { ok: false, code: "unauthorized", request_id: "r4" });
-  await api.api("/api/portal/me", undefined, { skipUnauthorizedHook: true });
+  await api.api("/api/portal/me", undefined, { skipSessionHook: true });
   assert.equal(fired.length, 0, "the retry's own /me check must never re-enter the handler it is answering");
 });
 
 test("api() never fires onUnauthorized for a credential 401, even in the current epoch", async () => {
   const api = await loadApiModule();
   const fired = [];
-  api.setOnUnauthorized(() => fired.push(true));
+  api.setOnSessionProblem(() => fired.push(true));
   api.beginNewSession();
   // Same (current) epoch, but a credential failure code -- must never fire, epoch match or not.
   globalThis.fetch = async () => jsonResponse(401, { ok: false, code: "invalid_otp", request_id: "r7" });
   const result = await api.api("/portal/v1/auth/verify", { method: "POST" });
   assert.equal(result.code, "invalid_otp");
   assert.equal(fired.length, 0, "a credential failure means a wrong entry, never a signed-out session");
-  api.setOnUnauthorized(null);
+  api.setOnSessionProblem(null);
 });
 
 // The auth 429s now carry a real retry-after header; api() surfaces it on the envelope so the

@@ -1,5 +1,6 @@
 import type { LabeledPathFragment } from "../assemble.js";
 import { ERR_BODY_TOO_LARGE, ERR_CROSS_SITE, errorResponse } from "../components.js";
+import { CUSTOMER_CONTEXT_PARAMETER } from "../customer-context.js";
 
 const redirectResponse = {
   description: "No-store redirect to the provider or fixed portal origin. Callback errors use an allowlisted auth_error; credentials never appear in the final URL.",
@@ -9,8 +10,9 @@ const start = (provider: string): Record<string, unknown> => ({ post: {
   tags: ["auth"], operationId: `authStart${provider}`, summary: `Start ${provider} sign-in or explicit account linking.`,
   description: "Requires exact configured Origin. Authorization code with S256 PKCE, single-use D1 state and a browser-bound cookie. Link mode requires an active session created within the last 10 minutes, at start and again at callback; an older session redirects to /?auth_error=reauth_required&auth_provider=<provider>#/account and records nothing. No email-based automatic linking.",
   security: [{}, { sessionCookie: [] }],
-  parameters: [{ name: "mode", in: "query", required: false, schema: { type: "string", enum: ["link"] } }],
-  responses: { "303": redirectResponse, "400": errorResponse("Unknown mode.", "invalid_request"), "401": errorResponse("Linking requires a session.", "unauthorized"), "403": errorResponse("Origin mismatch.", "cross_site_forbidden"), "503": errorResponse("Session configuration unavailable.", "config_error") },
+  parameters: [{ name: "mode", in: "query", required: false, schema: { type: "string", enum: ["link"] } }, { ...CUSTOMER_CONTEXT_PARAMETER, required: false, description: "Required only for mode=link, unless the native form supplies expected_customer_id. Uses the displayed customer's encodeURIComponent value. An absent precondition redirects with auth_error=account_context_required; a mismatch redirects with auth_error=account_changed. No OAuth state is created for either refusal." }],
+  requestBody: { required: false, content: { "application/x-www-form-urlencoded": { schema: { type: "object", additionalProperties: false, required: ["expected_customer_id"], properties: { expected_customer_id: { type: "string", description: "encodeURIComponent of the displayed customer ID, form-encoded by the browser. Required for native mode=link forms; sign-in mode needs no field." } } } } } },
+  responses: { "303": redirectResponse, "400": errorResponse("Unknown mode.", "invalid_request"), "401": errorResponse("Linking requires a session.", "unauthorized"), "403": errorResponse("Origin mismatch.", "cross_site_forbidden"), "413": ERR_BODY_TOO_LARGE, "503": errorResponse("Session configuration unavailable.", "config_error") },
 } });
 const callback = (provider: string): Record<string, unknown> => ({ get: {
   tags: ["auth"], operationId: `authCallback${provider}`, summary: `Complete ${provider} sign-in.`, security: [],
@@ -43,6 +45,7 @@ export const oauthPaths: LabeledPathFragment = { label: "oauth", entries: [
   ["/portal/v1/auth/github/callback", callback("GitHub")],
   ["/portal/v1/auth/identities", { get: {
     tags: ["auth"], operationId: "authIdentities", summary: "List this customer's linked providers.", security: [{ sessionCookie: [] }],
+    parameters: [CUSTOMER_CONTEXT_PARAMETER],
     responses: {
       "200": jsonData("Linked providers; no provider credentials.", {
         type: "object", properties: { items: { type: "array", items: {
@@ -50,11 +53,14 @@ export const oauthPaths: LabeledPathFragment = { label: "oauth", entries: [
         } } },
       }),
       "401": errorResponse("Session required.", "unauthorized"),
+      "400": errorResponse("Displayed-customer precondition missing.", "invalid_request"),
+      "409": errorResponse("Displayed customer differs from the session. No identities were read.", "account_changed"),
       "503": errorResponse("Session configuration unavailable.", "config_error"),
     },
   } }],
   ["/portal/v1/auth/identities/unlink", { post: {
     tags: ["auth"], operationId: "authUnlinkIdentity", summary: "Disconnect one of this customer's linked providers.", security: [{ sessionCookie: [] }],
+    parameters: [CUSTOMER_CONTEXT_PARAMETER],
     description: "Requires a session and a same-site request. Allowed only while another sign-in method is usable now: a password while password sign-in is enabled (PORTAL_PASSWORD_ENABLED=1), the other provider's identity while that provider is configured, or a non-empty contact email while email codes can be sent, which needs email delivery configured and PORTAL_OTP_PEPPERS set (stricter than the providers envelope's `email`, which reports delivery only). Configuration is judged per request. The rule, a still-live session and the delete are one conditional statement, so concurrent requests cannot remove the last method, and a session revoked by a concurrent unlink cannot finish its own. The same transaction revokes the customer's other OAuth sessions; the current session and sessions from other sign-in methods are kept.",
     requestBody: { required: true, content: { "application/json": { schema: {
       type: "object", required: ["provider"], properties: { provider: { type: "string", enum: ["google", "github"] } },
@@ -65,11 +71,11 @@ export const oauthPaths: LabeledPathFragment = { label: "oauth", entries: [
           allOf: [{ $ref: "#/components/schemas/Envelope" }],
           properties: { code: { const: "identity_unlinked" }, data: { type: "object", required: ["provider"], properties: { provider: { type: "string", enum: ["google", "github"] } } } },
         } } } },
-      "400": errorResponse("Body was not a JSON object, or provider is not google or github.", ["invalid_json", "invalid_request"]),
+      "400": errorResponse("Displayed-customer precondition missing, body was not a JSON object, or provider is not google or github.", ["invalid_json", "invalid_request"]),
       "401": errorResponse("Missing, invalid or expired session, including one a concurrent unlink revoked before this delete ran.", "unauthorized"),
       "403": ERR_CROSS_SITE,
       "404": errorResponse("This customer has no identity for that provider (absent and foreign identities look the same), including one a concurrent unlink removed first.", "not_found"),
-      "409": errorResponse("No other sign-in method is usable now; nothing was changed.", "last_sign_in_method"),
+      "409": errorResponse("Displayed customer differs from the session, or no other sign-in method is usable now; nothing was changed.", ["account_changed", "last_sign_in_method"]),
       "413": ERR_BODY_TOO_LARGE,
       "503": errorResponse("Session or database configuration unavailable.", "config_error"),
     },

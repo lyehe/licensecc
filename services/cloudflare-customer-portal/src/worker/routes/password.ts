@@ -1,4 +1,5 @@
 import { authSession } from "./auth.js";
+import { requireCustomerContext } from "../customer-context.js";
 import { RECENT_SIGN_IN_SEC } from "../../auth/portal_session.mjs";
 import { envelope, readJson, retryAfterHeaders } from "../support.js";
 import { hashPassword, loginEmail, validPassword, verifyPassword } from "@licensecc/cloudflare-runtime/auth/password";
@@ -32,6 +33,8 @@ async function settings(request: Request, env: Env, reqId: string, now: number):
   if (denied) return denied;
   const session = await authSession(request, env, reqId, now);
   if (session instanceof Response) return session;
+  const contextError = requireCustomerContext(request, session.customer_id, reqId);
+  if (contextError) return contextError;
   const db = primary(env);
   // recovery_available reuses the reset endpoint's own eligibility predicate (RESET_ELIGIBLE_SQL),
   // correlated to this customer's own credential, so the settings UI never promises a recovery the

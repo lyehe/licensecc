@@ -10,6 +10,7 @@ import type { EntitlementRecord } from "../../../shared/api";
 import { Entitlements } from "../entitlements/Entitlements";
 import type { EntitlementFilter } from "../entitlements/workflow";
 import { hasEntitlementRecordData } from "../../shared/mutationGuards";
+import type { GrantCustomer } from "../../app/types";
 
 type Row = Record<string, unknown>;
 type Page = { items: Row[]; next_cursor: string | null; customer?: { id: string }; server_time?: number };
@@ -83,7 +84,8 @@ function useAppPresence(root: string, project: string | null, onMissing: (app: s
   }, [root, project]);
 }
 
-export function CustomerAccess({ customerId }: { customerId: string }): React.ReactElement {
+export function CustomerAccess({ customer }: { customer: GrantCustomer }): React.ReactElement {
+  const customerId = customer.id;
   // The app and Manage access are history entries; only the grant stays out of the address.
   const { navigate, customerAccess, managedGrant, setCustomerAccess, openManagedGrant, closeManagedGrant, resolveMissingDrillDown } = useAdminNavigation();
   const project = customerAccess?.app ?? null;
@@ -93,7 +95,7 @@ export function CustomerAccess({ customerId }: { customerId: string }): React.Re
   const url = project === null ? `${root}/apps` : `${root}/access?${new URLSearchParams({ project })}`;
   if (managed) return <Entitlements key={managed.id} active navigationIntent={null} onNavigationHandled={() => undefined} scopedGrant={managed} onExit={closeManagedGrant} />;
   return <section>
-    <div className="actions"><h3>Apps &amp; access</h3><button className="primary" onClick={() => navigate({ tab: "entitlements", filter: { customer_id: customerId, ...(project ? { project } : {}) }, grantAccess: { customerId, project: project ?? "" } })}>Grant access</button><button onClick={() => navigate({ tab: "entitlements", filter: { customer_id: customerId, ...(project ? { project } : {}) } })}>View assigned licenses</button></div>
+    <div className="actions"><h3>Apps &amp; access</h3><button className="primary" onClick={() => navigate({ tab: "entitlements", filter: { customer_id: customerId, ...(project ? { project } : {}) }, grantAccess: { customer: { id: customer.id, name: customer.name, email: customer.email }, project: project ?? "" } })}>Grant access</button><button onClick={() => navigate({ tab: "entitlements", filter: { customer_id: customerId, ...(project ? { project } : {}) } })}>View assigned licenses</button></div>
     {project !== null && <div className="actions"><button onClick={() => setCustomerAccess(null)}>All apps</button><strong>{project}</strong></div>}
     <PagedRecords key={url} url={url} customerId={customerId} kind={project === null ? "apps" : "grants"} code={project === null ? "customer_apps" : "entitlements_listed"} render={(rows) => <div className="customerAccessRecords">
       {rows.map(row => <article className="recordCard" key={JSON.stringify([row.project, row.feature, row.license_fingerprint])}>

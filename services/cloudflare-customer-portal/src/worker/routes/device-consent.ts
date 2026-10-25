@@ -1,6 +1,7 @@
 import { readUnsignedJson, UnsignedJsonError } from "@licensecc/cloudflare-runtime/http/unsigned_json";
 import { portalRateLimit } from "../../auth/portal_ratelimit.mjs";
 import { envelope } from "../support.js";
+import { requireCustomerContext } from "../customer-context.js";
 import type { Env, SessionRow } from "../env.js";
 import { validConsentResponse } from "../../shared/consent.js";
 import { decodeBase64url } from "@licensecc/licensing-domain/lease/device_protocol";
@@ -23,9 +24,8 @@ export async function consentRoute(request: Request, env: Env, session: SessionR
   if (request.headers.get("origin") !== origin || ![null,"same-origin","none"].includes(request.headers.get("sec-fetch-site"))) return respond("cross_site_forbidden",403);
   if (request.url.includes("?") || request.url.includes("#")) return respond("invalid_request",400);
   // This is a displayed-account precondition, never an authority source.
-  const expectedCustomer = request.headers.get("x-expected-customer-id");
-  if (!expectedCustomer) return respond("invalid_request",400);
-  if (expectedCustomer !== encodeURIComponent(session.customer_id)) return respond("account_changed",409);
+  const contextError = requireCustomerContext(request, session.customer_id, reqId);
+  if (contextError) return contextError;
   if (!env.DEVICE_CONSENT) return respond("temporarily_unavailable",503);
   // Fixed global budget runs first so arbitrary identities cannot grow counters after denial.
   for (const [key,limit] of [["device-consent:global",1000],[`device-consent:customer:${session.customer_id}`,20]] as const) {

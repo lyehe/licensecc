@@ -1,14 +1,14 @@
 import { decodeBase64url } from "@licensecc/licensing-domain/lease/device_protocol";
 import { envelope } from "../support.js";
+import { requireCustomerContext } from "../customer-context.js";
 import type { Env, SessionRow } from "../env.js";
 import type { BindingRow } from "../../shared/bindings.js";
 import { matchesDeviceSearch } from "../../shared/deviceSearch.js";
 
 export async function listBindings(request:Request,env:Env,session:SessionRow,reqId:string):Promise<Response> {
   const respond=(code:string,status:number,data?:unknown)=>envelope(reqId,code,data,status,{"cache-control":"no-store"});
-  const expected=request.headers.get("x-expected-customer-id");
-  if(!expected)return respond("invalid_request",400);
-  if(expected!==encodeURIComponent(session.customer_id))return respond("account_changed",409);
+  const contextError=requireCustomerContext(request,session.customer_id,reqId);
+  if(contextError)return contextError;
   const url=new URL(request.url),cursor=url.searchParams.get("cursor")??"",binding=url.searchParams.get("binding_id");
   const keys=[...url.searchParams.keys()],query=(url.searchParams.get("q")??"").trim(),project=url.searchParams.get("project");
   if(keys.some(key=>!["cursor","binding_id","q","project"].includes(key)) || new Set(keys).size!==keys.length

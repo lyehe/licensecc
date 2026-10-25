@@ -235,7 +235,7 @@ test("an entitlement's 'History' item opens Events filtered to exactly that enti
 
   async function disableWithReason(feature, reason) {
     const row = page.locator(".desktopRecords tbody tr").filter({ hasText: feature });
-    await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }));
+    await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }));
     await page.getByRole("dialog").getByLabel(/Reason/).fill(reason);
     await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
     await expect(row.locator(".status.disabled")).toHaveText("suspended");

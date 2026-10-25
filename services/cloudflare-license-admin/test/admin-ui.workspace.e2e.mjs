@@ -208,7 +208,7 @@ test("customer app pages recover failed refreshes and manage only the selected o
   await expect(page.getByRole("button", { name: "Clear filters", exact: true })).toHaveCount(0);
   const grantRow = page.getByRole("region", { name: "Access details", exact: true }).locator("article");
   await grantRow.locator("summary").filter({ hasText: "More actions" }).click();
-  await grantRow.getByRole("button", { name: "Disable", exact: true }).click();
+  await grantRow.getByRole("button", { name: "Suspend", exact: true }).click();
   const confirmation = page.getByRole("dialog");
   await confirmation.getByLabel("Reason (required)").fill("customer requested pause");
   await confirmation.getByRole("button", { name: "Confirm", exact: true }).click();
@@ -454,7 +454,7 @@ test("customer records retain desktop tables, mobile cards, and fluid detail sec
   expect(statusBox.width).toBeLessThan(100);
   expect(statusBox.height).toBeLessThan(40);
   await expect(page.locator(".customerHeader").getByRole("textbox")).toHaveCount(0);
-  await expect(page.locator(".customerHeader").getByRole("button", { name: "Reenable", exact: true })).toBeVisible();
+  await expect(page.locator(".customerHeader").getByRole("button", { name: "Resume", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("1280-customer-header.png") });
 
   await page.setViewportSize({ width: 390, height: 844 });

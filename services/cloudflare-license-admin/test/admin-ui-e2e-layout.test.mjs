@@ -35,7 +35,7 @@ test("admin browser coverage stays partitioned by operator concern", () => {
   }
   // This counts top-level literal titles. Parameterized cases are counted by Playwright;
   // the license-recovery scenario now runs at both desktop and mobile widths.
-  assert.equal(titles.length, 202);
+  assert.equal(titles.length, 203);
   assert.equal(new Set(titles).size, titles.length, "browser scenario titles must be unique");
 
   const fixture = readFileSync(join(directory, "admin-ui.fixture.mjs"), "utf8");

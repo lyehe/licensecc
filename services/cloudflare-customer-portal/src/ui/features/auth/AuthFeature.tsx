@@ -67,7 +67,7 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
       // This IS the session check the global onUnauthorized hook (api.tsx, wired in App.tsx) calls to
       // find out whether a session is really gone. Its own 401 must never re-trigger that hook -- that
       // would be circular -- so it is the one api() call in this file that opts out.
-      const result = await api<PortalMe>(mePath(), undefined, { skipUnauthorizedHook: true });
+      const result = await api<PortalMe>(mePath(), undefined, { skipSessionHook: true });
       if (result.ok && result.data) {
         // A confirmed session, new or reconfirmed. Bumps the epoch so a straggler response from a
         // request sent under an OLDER session can never bounce this one back to sign-in.

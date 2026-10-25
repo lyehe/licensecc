@@ -437,6 +437,42 @@ and ten per 15 minutes per action, with additional IP limits. No password or
 raw token appears in API responses or application logs. Expired action rows are
 removed on subsequent eligible email requests; audit events are unaffected.
 
+### Displayed-account preconditions and rollout
+
+The Account screen binds its reads and changes to the customer returned by
+`GET /api/portal/me`. `GET /portal/v1/auth/identities`,
+`POST /portal/v1/auth/identities/unlink`, and both methods on
+`/portal/v1/auth/password` require `x-expected-customer-id` containing
+`encodeURIComponent` of that displayed customer ID. The cookie remains the
+authentication authority. A missing precondition returns `400 invalid_request`;
+a different session customer returns `409 account_changed` with no account
+data or write. Recheck `/api/portal/me`, clear the previous account's drafts
+and confirmations, and require a new action. Never replay a refused write
+against the newly signed-in customer.
+
+Native OAuth `mode=link` forms supply the same encoded value in a hidden
+`expected_customer_id` field, form-encoded by the browser. JSON clients may
+use the header instead. Missing or malformed form fields redirect to Account
+with `auth_error=account_context_required`; a mismatched customer redirects
+with `auth_error=account_changed`. Neither creates OAuth state. Ordinary
+provider sign-in and the session-check endpoint do not need a precondition.
+The callback retains its existing binding to the exact session that started
+linking.
+
+This is an intentional fail-closed tightening of the existing portal contract,
+matching the protected-device endpoints' existing precondition. Deploy the
+portal Worker and its UI assets together. Older cached Account pages and
+custom callers must reload/update to send the precondition; allowing an
+unbound fallback would preserve the cross-account mutation defect. A rollback
+must keep this server check. Native licensing SDK contracts are unaffected.
+
+The email password-completion screen says **Save password** because its
+opaque token can represent registration or reset. `signed_in` confirms the
+session before opening Apps; if that check fails after a saved password, the
+screen offers **Confirm sign-in**, which retries only the session GET.
+`password_updated` instead confirms the save and directs the customer to sign
+in. It never implies that resetting a password created a session.
+
 Account supports changing a password with the current password, or setting or
 resetting one within ten minutes of a Google, GitHub, or email-code sign-in.
 Successful changes and emailed resets revoke old browser sessions and email

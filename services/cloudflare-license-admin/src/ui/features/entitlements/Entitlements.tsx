@@ -52,8 +52,8 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const [filter, setFilter] = useState<EntitlementFilter>(scopedGrant ?? { project: "", feature: "", status: "" });
   const [form, setForm] = useState<EntitlementFormState>(emptyEntitlementForm);
   const [createOpen, setCreateOpen] = useState(false);
-  const [guided,setGuided]=useState<{customerId:string;project:string}|null>(null);
-  const [granted,setGranted]=useState<{customerId:string;project:string}|null>(null);
+  const [guided,setGuided]=useState<NonNullable<NavigationIntent["grantAccess"]>|null>(null);
+  const [granted,setGranted]=useState<{customerId:string;project:string;feedback:OperatorFeedback}|null>(null);
   const [grantChoice,setGrantChoice]=useState<GrantChoice>({context:"",ready:false,createNew:false});
   const createBaseline=useRef(JSON.stringify(emptyEntitlementForm));
   const [extendValidity, setExtendValidity] = useState(false);
@@ -120,6 +120,9 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
 
   const refresh = useCallback(async (strict = false, isCurrent: () => boolean = () => true): Promise<ExactReadProof | null> => {
     if (!isCurrent()) return null;
+    // A manual/core read already covers this filter generation. Its pending debounce must
+    // not launch a second GET and invalidate the strict confirmation's request ticket.
+    lastRequestedReload.current = rawFilterGeneration;
     const ticket = entitlementsFence.begin();
     setListRead({ context: filterContextKey, error: null });
     const response = await api<{ items: EntitlementRecord[]; next_cursor: string | null }>(entitlementsUrl);
@@ -144,7 +147,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       }
     }
     return null;
-  }, [entitlementsFence, entitlementsUrl, filterContextKey, scopedGrant]);
+  }, [entitlementsFence, entitlementsUrl, filterContextKey, scopedGrant, rawFilterGeneration]);
 
   useEffect(() => {
     return registerCoreRefresh(refresh);
@@ -155,7 +158,6 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   // advances when the debounced filter itself changes.
   useEffect(() => {
     if (!active || lastRequestedReload.current === reloadGeneration) return;
-    lastRequestedReload.current = reloadGeneration;
     void refresh(false, () => isRawFilterGenerationCurrent(reloadGeneration));
   }, [active, reloadGeneration, isRawFilterGenerationCurrent, refresh]);
 
@@ -185,7 +187,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     if (navigationIntent?.tab !== "entitlements") return;
     // Navigation has already passed the dirty-draft and pending-operation guards.
     const context=navigationIntent.grantAccess??null;
-    const initial=context?{...emptyEntitlementForm,project:context.project,feature:"",customer_id:context.customerId,license_fingerprint:generateLicenseFingerprint()}:{...emptyEntitlementForm};
+    const initial=context?{...emptyEntitlementForm,project:context.project,feature:"",customer_id:context.customer.id,license_fingerprint:generateLicenseFingerprint()}:{...emptyEntitlementForm};
     createBaseline.current=JSON.stringify(initial);setGuided(context);setCreateOpen(context!==null);setForm(initial);cancelEdit();
     setFilter({ id: navigationIntent.filter.id, customer_id: navigationIntent.filter.customer_id, license_id: navigationIntent.filter.license_id, project: navigationIntent.filter.project ?? "", feature: navigationIntent.filter.feature ?? "", status: navigationIntent.filter.status ?? "" });
     onNavigationHandled(navigationIntent);
@@ -197,9 +199,9 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   useEffect(()=>{
     if(!granted || busy || operationRetained)return;
     if(navigate({tab:"customers",filter:{},selectCustomerId:granted.customerId,customerSection:"access"})){
-      setCustomerAccess({app:granted.project});setGranted(null);setGuided(null);
+      setCustomerAccess({app:granted.project});setFeedback(granted.feedback);setGranted(null);setGuided(null);
     }
-  },[granted,busy,operationRetained,navigate,setCustomerAccess]);
+  },[granted,busy,operationRetained,navigate,setCustomerAccess,setFeedback]);
 
   useEffect(() => {
     if (scopedGrant || guided || !active || navigationIntent?.tab === "entitlements") return;
@@ -218,10 +220,10 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const {submitCreate,partialLicenseId} = useEntitlementCreate({ form, guided: guided !== null, choice: grantChoice,
     policyAvailable: activePoliciesFence.canLoadMore() && activePolicies.some(policy=>policy.id===form.policy_id),
     isListCurrent: ()=>isFilterGenerationCurrent(filterGeneration), setForm,
-    onApplied: (item)=>{
+    onApplied: (item,feedback)=>{
       setCreateOpen(false);setForm(emptyEntitlementForm);
       setReveal({id:item.id,context:filterContextKey,shown:guided?null:entitlementsRef.current});
-      if(guided)setGranted({customerId:item.customer_id,project:item.project});
+      if(guided)setGranted({customerId:item.customer_id,project:item.project,feedback});
     }, refresh: async()=>await refreshCore(true),
   });
   function beginEdit(item: EntitlementRecord, extend = false): void {
@@ -373,7 +375,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     const count = selectedVisibleRows.length;
     const noun = `${count} selected entitlement${count === 1 ? "" : "s"}`;
     if (action === "revoke") return `Revoke ${noun}. Revocation is TERMINAL and cannot be undone; already-revoked rows are reported as revoked-terminal and skipped.`;
-    return `Disable ${noun}. Disabled entitlements stop verifying until re-enabled.`;
+    return `Suspend ${noun}. Suspended entitlements stop verifying until resumed.`;
   }
 
   const batch = useEntitlementBatch({
@@ -388,14 +390,14 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const listError = listRead.context === filterContextKey ? listRead.error : null;
   const policyError = policyRead.context === activePoliciesContext ? policyRead.error : null;
   const editingItem = visibleEntitlements.find((item) => item.id === editingId);
-  const closeEditor = (): void => { requestLeave(() => { setCreateOpen(false); setForm(emptyEntitlementForm); cancelEdit(); if(guided){ navigate({tab:"customers",filter:{},selectCustomerId:guided.customerId,customerSection:"access"}); if(guided.project)setCustomerAccess({app:guided.project});setGuided(null); } }); };
+  const closeEditor = (): void => { requestLeave(() => { setCreateOpen(false); setForm(emptyEntitlementForm); cancelEdit(); if(guided){ navigate({tab:"customers",filter:{},selectCustomerId:guided.customer.id,customerSection:"access"}); if(guided.project)setCustomerAccess({app:guided.project});setGuided(null); } }); };
   // A scoped (Manage access) list stays on its one customer's grant: nothing in it may change its filter.
   const pinnedFilter = (): void => undefined;
   return <section className="listPage">
     {onExit && <button disabled={busy} onClick={() => requestLeave(onExit)}>Back to app</button>}
     {createOpen || editingId !== null ? <>
       {editingId !== null && <ReadNotice loading={!ready && listError === null} error={listError} hasData={visibleEntitlements.length > 0} label="entitlements" onRetry={() => void refresh()} />}
-      {createOpen || editingItem ? <EntitlementEditor key={createOpen ? "create" : editingId} guided={createOpen && guided!==null} createLicenseOnSave={grantChoice.createNew} lookupReady={grantChoice.ready} guidance={guided && <><GuidedGrantFields form={form} onChange={patch=>setForm(previous=>({...previous,...patch}))} onAutoLicense={autoLicense} onChoice={setGrantChoice} />{partialLicenseId && <p className="wide" role="status">License created. Access not granted. Save access to finish.</p>}</>} form={createOpen ? form : editForm} item={createOpen ? undefined : editingItem} extendValidity={extendValidity} busy={busy} locked={operationLocked || (!createOpen && (!ready || editingItem?.status === "revoked"))} lockMessage={operationLocked ? undefined : editingItem?.status === "revoked" ? "Revocation is permanent. This entitlement can no longer be edited." : "Refresh entitlements successfully before changing or saving this draft."} policies={activePoliciesFence.isSettled() ? activePolicies : []} policiesReady={activePoliciesFence.canLoadMore()} policiesError={policyError} onRetryPolicies={() => void refreshPolicies()} onCreatePolicy={createOpen && onCreatePolicy !== undefined ? () => setPolicyDetour("leaving") : undefined} onChange={(patch) => createOpen ? setForm((previous) => ({ ...previous, ...patch })) : setEditForm((previous) => ({ ...previous, ...patch }))} onSubmit={createOpen ? submitCreate : (event) => submitPatch(event, editingItem!)} onCancel={closeEditor} /> : <div className="emptyState"><p>{ready ? "This entitlement is no longer in the current list. Return to the list to select a current record." : "Waiting for the current entitlement record."}</p><button type="button" disabled={busy} onClick={closeEditor}>Back to entitlements</button></div>}
+      {createOpen || editingItem ? <EntitlementEditor key={createOpen ? "create" : editingId} guided={createOpen && guided!==null} createLicenseOnSave={grantChoice.createNew} lookupReady={grantChoice.ready} guidance={guided && <><GuidedGrantFields customer={guided.customer} form={form} onChange={patch=>setForm(previous=>({...previous,...patch}))} onAutoLicense={autoLicense} onChoice={setGrantChoice} />{partialLicenseId && <p className="wide" role="status">License created. Access not granted. Save access to finish.</p>}</>} form={createOpen ? form : editForm} item={createOpen ? undefined : editingItem} extendValidity={extendValidity} busy={busy} locked={operationLocked || (!createOpen && (!ready || editingItem?.status === "revoked"))} lockMessage={operationLocked ? undefined : editingItem?.status === "revoked" ? "Revocation is permanent. This entitlement can no longer be edited." : "Refresh entitlements successfully before changing or saving this draft."} policies={activePoliciesFence.isSettled() ? activePolicies : []} policiesReady={activePoliciesFence.canLoadMore()} policiesError={policyError} onRetryPolicies={() => void refreshPolicies()} onCreatePolicy={createOpen && onCreatePolicy !== undefined ? () => setPolicyDetour("leaving") : undefined} onChange={(patch) => createOpen ? setForm((previous) => ({ ...previous, ...patch })) : setEditForm((previous) => ({ ...previous, ...patch }))} onSubmit={createOpen ? submitCreate : (event) => submitPatch(event, editingItem!)} onCancel={closeEditor} /> : <div className="emptyState"><p>{ready ? "This entitlement is no longer in the current list. Return to the list to select a current record." : "Waiting for the current entitlement record."}</p><button type="button" disabled={busy} onClick={closeEditor}>Back to entitlements</button></div>}
     </> : <>
       <EntitlementList scoped={scopedGrant !== undefined} items={visibleEntitlements} filter={filter} onFilter={scopedGrant === undefined ? setFilter : pinnedFilter} loading={!ready && listError === null} error={listError} ready={ready} busy={busy} selectedIds={selectedIds} selectedCount={selectedCount} allSelected={allSelected} onSelect={toggleSelected} onSelectAll={toggleSelectAll} onClearSelection={() => setSelectedIds(new Set())} onCreate={() => { requestLeave(() => { cancelEdit(); setGuided(null); const initial={ ...emptyEntitlementForm, project:filter.project || emptyEntitlementForm.project, feature:filter.feature || emptyEntitlementForm.feature, customer_id:filter.customer_id || "" }; createBaseline.current=JSON.stringify(initial);setForm(initial);setCreateOpen(true); }); }} onEdit={beginEdit} onRetry={() => void refresh()} onExport={() => void downloadCsv(entitlementsUrl, "entitlements.csv", runMutation, setFeedback)} onLoadMore={visibleEntitlementsCursor === null ? null : () => void loadMore(entitlementsUrl, visibleEntitlementsCursor, visibleEntitlements, setEntitlements, setEntitlementsCursor, setFeedback, hasEntitlementListData, "entitlements_listed", entitlementsFence, (entitlement) => entitlement.id)} onTransition={transition} batch={batch} bulkConfirmBody={bulkConfirmBody} isCurrent={() => isFilterGenerationCurrent(filterGeneration)} onHistory={(item) => navigate({ tab: "events", filter: { entitlement_id: item.id } })} />
     </>}

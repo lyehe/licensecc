@@ -108,7 +108,7 @@ test("an aborted verify call shows the network message and stays on the verify s
 test("an aborted password login shows the network message and leaves the form usable", async ({ page }) => {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error));
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false, password: true }) }));
   await page.route("**/portal/v1/auth/password/login", (route) => route.abort("failed"));
   await page.goto("/");

@@ -7,11 +7,12 @@ import { useRequestFence } from "../../shared/requestFence";
 import type { EntitlementFormState } from "./workflow";
 import { FeedbackText } from "../../shared/FeedbackText";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
+import type { GrantCustomer } from "../../app/types";
 
 export type GrantChoice = { context: string; ready: boolean; createNew: boolean };
 type License = { id: string; project: string; customer_id: string; label: string | null };
-export function GuidedGrantFields({ form, onChange, onAutoLicense, onChoice }: {
-  form: EntitlementFormState; onChange(patch: Partial<EntitlementFormState>): void;
+export function GuidedGrantFields({ customer, form, onChange, onAutoLicense, onChoice }: {
+  customer: GrantCustomer; form: EntitlementFormState; onChange(patch: Partial<EntitlementFormState>): void;
   onAutoLicense(id: string): void; onChoice(choice: GrantChoice): void;
 }): React.ReactElement {
   const [licenses, setLicenses] = useState<License[]>([]), [features, setFeatures] = useState<CatalogFeature[]>([]);
@@ -44,7 +45,8 @@ export function GuidedGrantFields({ form, onChange, onAutoLicense, onChoice }: {
   },[ready,fence,form.license_id,newLicense,licenses,onAutoLicense]);
   useEffect(()=>{onChoice({context,ready:ready && fence.canLoadMore() && form.project!=="",createNew:newLicense});},[context,ready,fence,newLicense,form.project,onChoice]);
   return <div className="wide">
-    <p>Customer: {form.customer_id}. Choose the app and feature to grant.</p>
+    <div><p>Grant access to <strong>{customer.name || customer.email || customer.id}</strong>.</p>{customer.email && <p>{customer.email}</p>}<p className="muted">Customer ID: <span className="identifier">{customer.id}</span></p></div>
+    <p>Choose the app and feature to grant.</p>
     <label>App (required)<input aria-label="App" name="project" value={form.project} onChange={event=>onChange({project:event.target.value,license_id:"",policy_id:""})} /></label>
     <ProjectPicker onSelect={project=>onChange({project,license_id:"",policy_id:""})} />
     <label>Feature (required)<input aria-label="Feature" name="feature" list="grant-feature-options" value={form.feature} onChange={event=>onChange({feature:event.target.value})} /></label>

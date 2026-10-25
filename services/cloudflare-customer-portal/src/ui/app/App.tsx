@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { localMessage, setOnUnauthorized, StatusLine } from "../shared/api";
+import { localMessage, setOnSessionProblem, StatusLine } from "../shared/api";
 import { useSingleFlight } from "../shared/useSingleFlight";
 import { AuthFeature, usePortalAuth } from "../features/auth/AuthFeature";
 import { PasswordAction, capturePasswordAction } from "../features/auth/PasswordAction";
@@ -64,16 +64,18 @@ function PortalShell(): React.ReactElement {
   // return the customer to sign-in no matter which api() call surfaced it. Registered exactly once
   // here; `retrying` is a re-entrancy guard so several api() calls failing at once (e.g.
   // usePortalData's concurrent reads) collapse into one retrySession() call rather than one each.
-  // retrySession() itself (AuthFeature's loadMe) makes its own /me check with skipUnauthorizedHook,
+  // retrySession() itself (AuthFeature's loadMe) makes its own /me check with skipSessionHook,
   // so that check can never re-enter this handler. Never touches consent/enrollment state -- a saved
   // consent mutation must survive and resume.
   useEffect(() => {
     let retrying = false;
-    const handleUnauthorized = (): void => {
+    const handleUnauthorized = (reason: "session_ended" | "account_changed"): void => {
       if (retrying) return;
       retrying = true;
+      if (reason === "account_changed") clearAllPortalStateRef.current();
       void auth.retrySession()
         .then((stillAuthed) => {
+          if (reason === "account_changed") setMessage(localMessage("account_changed", false));
           if (!stillAuthed) {
             clearAllPortalStateRef.current();
             setMessage(localMessage("session_ended", false));
@@ -83,8 +85,8 @@ function PortalShell(): React.ReactElement {
           retrying = false;
         });
     };
-    setOnUnauthorized(handleUnauthorized);
-    return () => setOnUnauthorized(null);
+    setOnSessionProblem(handleUnauthorized);
+    return () => setOnSessionProblem(null);
   }, [auth.retrySession, setMessage]);
 
   const refreshFocusRef = useRef<HTMLElement | null>(null);
@@ -164,10 +166,11 @@ function PortalShell(): React.ReactElement {
     clearEnrollment();setEnrollment(null);window.history.replaceState(null,"","/#/apps");
   }
   if (passwordAction !== null) return <PasswordAction token={passwordAction} onDone={async () => {
-    window.history.replaceState(null, "", "/#/apps");
     clearPortalData();
-    await auth.retrySession();
+    if (!await auth.retrySession()) return false;
+    window.history.replaceState(null, "", "/#/apps");
     setPasswordAction(null);
+    return true;
   }} />;
   if (typeof enrollment === "string" || (enrollment && auth.phase === "authed")) return <ConsentFeature key={typeof enrollment==="string"?enrollment:`${enrollment.handle}:${enrollment.createdAt}`} entry={enrollment} customerId={auth.customerId??""} email={auth.email} onDone={finishEnrollment} onSignOut={logout} onSessionExpired={auth.retrySession} feedback={<StatusLine message={message} fallback="" />} />;
   if (auth.phase !== "authed") return <AuthFeature auth={auth} busy={busy} message={message} connecting={enrollment!==null} />;
@@ -191,7 +194,7 @@ function PortalShell(): React.ReactElement {
           <StatusLine message={message} fallback="" />
         </div>
         {location.page === "nodes" && <DevicesFeature key={auth.customerId} customer={auth.customerId??""} busy={controlsBusy} runOnce={runOnce} onSessionExpired={auth.retrySession} project={location.project} entitlements={entitlements} accountDataState={readState} />}
-        {location.page === "account" && <AccountFeature customerId={auth.customerId} onSignInAgain={() => void logout("/#/account")} />}
+        {location.page === "account" && <AccountFeature key={auth.customerId} customerId={auth.customerId ?? ""} onSignInAgain={() => void logout("/#/account")} />}
         {location.page === "apps" && (readState !== "ready" ? <section className="emptyState"><h2>{readState === "loading" ? "Loading your account…" : "Account data unavailable"}</h2><p>{readState === "loading" ? "Fetching your licenses and devices." : "We could not refresh your account. Retry to see current access."}</p>{readState === "error" && <button disabled={controlsBusy} onClick={() => void refreshPortalData()}>Retry</button>}</section> : <AppsFeature entitlements={entitlements} project={location.project} email={auth.email} />)}
       </div>
     </main>

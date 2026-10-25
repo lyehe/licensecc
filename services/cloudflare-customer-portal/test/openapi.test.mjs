@@ -139,18 +139,18 @@ test("password settings GET and POST each document only the codes their own hand
   const path = "/portal/v1/auth/password";
   const get = openApiDocument.paths[path].get;
   const post = openApiDocument.paths[path].post;
-  assert.deepEqual(Object.keys(get.responses).sort(), ["200", "401", "403", "404", "503"]);
+  assert.deepEqual(Object.keys(get.responses).sort(), ["200", "400", "401", "403", "404", "409", "503"]);
   assert.deepEqual(documentedErrorCodes(path, 401, "get"), ["unauthorized"]);
   assert.deepEqual(documentedErrorCodes(path, 403, "get"), ["cross_site_forbidden"]);
   assert.deepEqual(documentedErrorCodes(path, 404, "get"), ["not_found"]);
   assert.deepEqual(documentedErrorCodes(path, 503, "get"), ["config_error"]);
 
   assert.deepEqual(Object.keys(post.responses).sort(), ["200", "400", "401", "403", "404", "409", "413", "429", "503"]);
-  assert.deepEqual([...documentedErrorCodes(path, 400, "post")].sort(), ["invalid_json", "invalid_registration"]);
+  assert.deepEqual([...documentedErrorCodes(path, 400, "post")].sort(), ["invalid_json", "invalid_registration", "invalid_request"]);
   assert.deepEqual([...documentedErrorCodes(path, 401, "post")].sort(), ["invalid_credentials", "unauthorized"]);
   assert.deepEqual([...documentedErrorCodes(path, 403, "post")].sort(), ["cross_site_forbidden", "verified_sign_in_required"]);
   assert.deepEqual(documentedErrorCodes(path, 404, "post"), ["not_found"]);
-  assert.deepEqual(documentedErrorCodes(path, 409, "post"), ["password_change_conflict"]);
+  assert.deepEqual(documentedErrorCodes(path, 409, "post"), ["account_changed", "password_change_conflict"]);
   assert.deepEqual(documentedErrorCodes(path, 413, "post"), ["body_too_large"]);
   assert.deepEqual(documentedErrorCodes(path, 429, "post"), ["rate_limited"]);
   assert.deepEqual(documentedErrorCodes(path, 503, "post"), ["config_error"]);
@@ -160,6 +160,22 @@ test("password login documents the suspended-account denial separately from inva
   const path = "/portal/v1/auth/password/login";
   assert.deepEqual(documentedErrorCodes(path, 401), ["invalid_credentials"]);
   assert.deepEqual([...documentedErrorCodes(path, 403)].sort(), ["account_suspended", "cross_site_forbidden"]);
+});
+
+test("all account settings operations require the displayed-customer precondition and document mismatch recovery", () => {
+  for (const [path, method] of [["/portal/v1/auth/identities", "get"], ["/portal/v1/auth/identities/unlink", "post"], ["/portal/v1/auth/password", "get"], ["/portal/v1/auth/password", "post"]]) {
+    const op = openApiDocument.paths[path][method];
+    const header = op.parameters.find(item => item.name === "x-expected-customer-id");
+    assert.equal(header.required, true); assert.equal(header.in, "header");
+    assert.match(header.description, /never used as authority/);
+    assert.ok(documentedErrorCodes(path, 400, method).includes("invalid_request"));
+    assert.ok(documentedErrorCodes(path, 409, method).includes("account_changed"));
+  }
+  for (const provider of ["google", "github"]) {
+    const start = openApiDocument.paths[`/portal/v1/auth/${provider}/start`].post;
+    assert.equal(start.parameters.find(item => item.name === "x-expected-customer-id").required, false);
+    assert.deepEqual(start.requestBody.content["application/x-www-form-urlencoded"].schema.required, ["expected_customer_id"]);
+  }
 });
 
 // The handler runs isCrossSite -> authSession -> readJson -> the provider check -> the existence
@@ -176,7 +192,7 @@ test("provider unlink requires a session and documents every status its handler 
   assert.deepEqual(documentedErrorCodes(path, 401), ["unauthorized"]);
   assert.deepEqual(documentedErrorCodes(path, 403), ["cross_site_forbidden"]);
   assert.deepEqual(documentedErrorCodes(path, 404), ["not_found"]);
-  assert.deepEqual(documentedErrorCodes(path, 409), ["last_sign_in_method"]);
+  assert.deepEqual(documentedErrorCodes(path, 409), ["account_changed", "last_sign_in_method"]);
   assert.deepEqual(documentedErrorCodes(path, 413), ["body_too_large"]);
   assert.deepEqual(documentedErrorCodes(path, 503), ["config_error"]);
 });

@@ -28,7 +28,7 @@ async function guidedFixture(page,{licenses=0,lostLicense=false,refuseGrant=fals
       state.grants.push({key:route.request().headers()['idempotency-key'],body:route.request().postDataJSON()});
       if(refuseGrant && state.grants.length===1)return route.fulfill({status:409,json:{ok:false,code:'protected_creation_conflict',request_id:'grant-refusal',data:{reason:'customer_suspended'}}});
       if(lostGrant || grantRead){
-        savedGrant??=api.seed.entitlement({...route.request().postDataJSON()});
+        savedGrant??=api.seed.entitlement({...route.request().postDataJSON(),revocation_seq:2});
         if(lostGrant && state.grants.length===1)return route.abort();
         return route.fulfill({json:makeEnvelope('entitlement_saved',savedGrant)});
       }
@@ -41,6 +41,11 @@ async function guidedFixture(page,{licenses=0,lostLicense=false,refuseGrant=fals
     if(state.grantRead==='unavailable')return route.fulfill({status:503,json:{ok:false,code:'temporarily_unavailable',request_id:'missing-grant-read'}});
     if(state.grantRead==='empty')return route.fulfill({json:makeEnvelope('entitlement',{items:[],next_cursor:null})});
     if(state.grantRead==='wrong-owner')return route.fulfill({json:makeEnvelope('entitlement',{...savedGrant,customer_id:'another_customer'})});
+    if(state.grantRead==='older')return route.fulfill({json:makeEnvelope('entitlement',{...savedGrant,revocation_seq:1})});
+    if(state.grantRead==='disabled' || state.grantRead==='revoked') {
+      Object.assign(savedGrant,{status:state.grantRead,revocation_seq:3});
+      return route.fulfill({json:makeEnvelope('entitlement',savedGrant)});
+    }
     return route.fallback();
   });
   await page.goto(`/#/customers/${customer.id}?section=access`);
@@ -130,7 +135,7 @@ for(const width of [1440,390])test(`guided access keeps Access not granted after
   expect(state.grants).toHaveLength(1);expect(state.grants[0].body.license_fingerprint).toBe(fingerprint);
 });
 
-for(const width of [1440,390])for(const grantRead of ['empty','wrong-owner','unavailable'])test(`guided access retains GET-only recovery for ${grantRead} exact grant reads at ${width}px`,async({page},testInfo)=>{
+for(const width of [1440,390])for(const grantRead of ['empty','wrong-owner','unavailable','older'])test(`guided access retains GET-only recovery for ${grantRead} exact grant reads at ${width}px`,async({page},testInfo)=>{
   await page.setViewportSize({width,height:1000});
   const {state,form}=await guidedFixture(page,{licenses:1,grantRead});
   const fingerprint=await form.getByLabel('License fingerprint').inputValue();
@@ -143,15 +148,49 @@ for(const width of [1440,390])for(const grantRead of ['empty','wrong-owner','una
   await expect(form.getByLabel('License fingerprint')).toHaveValue(fingerprint);
   await page.screenshot({path:testInfo.outputPath(`exact-read-${grantRead}-${width}.png`),fullPage:true});
   await refresh.click();
+  await expect.poll(()=>state.detailReads).toBe(2);
   await expect(refresh).toBeEnabled();
   await expect(form).toBeVisible();
   expect(state.grants).toHaveLength(1);expect(state.licenses).toHaveLength(0);
   state.grantRead='current';
   await refresh.click();
+  await expect.poll(()=>state.detailReads).toBe(3);
   await expect(page.getByRole('button',{name:'Manage access',exact:true})).toBeVisible();
   await expect(form).toHaveCount(0);
   expect(state.detailReads).toBe(3);
   expect(state.grants).toHaveLength(1);expect(state.licenses).toHaveLength(0);
+});
+
+for(const width of [1440,390])for(const grantRead of ['disabled','revoked'])test(`guided access confirms the saved grant's later ${grantRead} state at ${width}px`,async({page},testInfo)=>{
+  await page.setViewportSize({width,height:1000});
+  const {state,form}=await guidedFixture(page,{licenses:1,grantRead});
+  await form.getByRole('button',{name:'Save access',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Manage access',exact:true})).toBeVisible();
+  const status=grantRead==='disabled'?'suspended':'revoked';
+  await expect(page.getByText(`Access was saved and has changed since. Current status: ${status}.`,{exact:true})).toBeVisible();
+  await expect(page.locator('.activityMessage')).not.toHaveClass(/error/);
+  await expect(page.getByRole('button',{name:'Refresh status',exact:true})).toHaveCount(0);
+  await expect(form).toHaveCount(0);
+  expect(state.grants).toHaveLength(1);expect(state.licenses).toHaveLength(0);expect(state.detailReads).toBe(1);
+  await page.screenshot({path:testInfo.outputPath(`grant-newer-${grantRead}-${width}.png`),fullPage:true});
+});
+
+for(const width of [1440,390])test(`guided access retains human customer context privately through policy and partial recovery at ${width}px`,async({page},testInfo)=>{
+  await page.setViewportSize({width,height:1000});
+  const {customer,state,form}=await guidedFixture(page,{refuseGrant:true});
+  await expect(form).toContainText(customer.name);await expect(form).toContainText(customer.email);
+  await form.getByRole('link',{name:'Create policy…',exact:true}).click();
+  await page.getByRole('button',{name:'Back to entitlement draft',exact:true}).click();
+  await expect(form).toContainText(customer.name);await expect(form).toContainText(customer.email);
+  await form.getByRole('button',{name:'Save access',exact:true}).click();
+  await expect(form.getByText('License created. Access not granted. Save access to finish.',{exact:true})).toBeVisible();
+  await expect(form).toContainText(customer.name);await expect(form).toContainText(customer.email);
+  expect(page.url()).not.toContain(customer.name);expect(page.url()).not.toContain(customer.email);
+  const history=await page.evaluate(()=>JSON.stringify(window.history.state));
+  expect(history).not.toContain(customer.name);expect(history).not.toContain(customer.email);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.screenshot({path:testInfo.outputPath(`grant-customer-context-${width}.png`),fullPage:true});
+  expect(state.licenses).toHaveLength(1);expect(state.grants).toHaveLength(1);
 });
 
 test("guided access retains a created license after the entitlement is refused",async({page})=>{
@@ -198,6 +237,19 @@ test("generated defaults and an automatic license selection leave an untouched g
   const prompts=[];page.on('dialog',dialog=>{prompts.push(dialog.message());void dialog.dismiss();});
   await page.getByRole('button',{name:'Back to customer',exact:true}).click();
   await expect(page.getByRole('button',{name:'Manage access',exact:true})).toBeVisible();expect(prompts).toEqual([]);
+});
+
+test("guided access replaces its customer identity tuple when another customer opens a new draft",async({page})=>{
+  const {api,customer,form}=await guidedFixture(page);
+  const next=api.seed.customer({id:'cust_next',name:'Second customer',email:'second@example.test'});
+  page.on('dialog',dialog=>void dialog.accept());
+  await form.getByRole('button',{name:'Cancel',exact:true}).click();
+  await page.getByRole('button',{name:'Back to customers',exact:true}).click();
+  const row=page.locator('.desktopRecords tbody tr').filter({hasText:next.name});
+  await row.getByRole('button',{name:'Open',exact:true}).click();
+  await page.getByRole('button',{name:'Grant access',exact:true}).click();
+  await expect(form).toContainText(next.name);await expect(form).toContainText(next.email);
+  await expect(form).not.toContainText(customer.name);await expect(form).not.toContainText(customer.email);
 });
 
 test("a late license lookup cannot replace the guided draft's newer app context",async({page})=>{

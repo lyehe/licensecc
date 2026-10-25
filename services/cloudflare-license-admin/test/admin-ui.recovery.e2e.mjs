@@ -171,7 +171,7 @@ test("admin UI keeps a same-key replay conflict indeterminate after a post-commi
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
   await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
-  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
   await dialog.getByRole("button", { name: "Confirm" }).click();
@@ -191,7 +191,7 @@ test("admin UI accepts a legitimate empty customer name in a transition RETURNIN
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Customers", exact: true }).click();
   await page.locator("#customer-open-cus_acme").click();
-  const disable = page.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
+  const disable = page.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first();
   await openActionMenu(disable);
   await expect(disable).toBeEnabled();
   await clickAction(disable);
@@ -303,13 +303,13 @@ test("admin UI reconciles unknown customer transitions from the list using the o
   await page.goto("/#/customers");
 
   for (const scenario of [
-    { id: "cus_acme", action: "Disable", status: "suspended" },
-    { id: "cus_globex", action: "Reenable", status: "active" },
+    { id: "cus_acme", label: "Suspend", action: "disable", status: "suspended" },
+    { id: "cus_globex", label: "Resume", action: "reenable", status: "active" },
   ]) {
     const openCustomer = page.locator(`#customer-open-${scenario.id}`);
     await openCustomer.click();
-    await clickAction(page.locator(".recordDetail").getByRole("button", { name: scenario.action, exact: true, includeHidden: true }));
-    if (scenario.action === "Disable") {
+    await clickAction(page.locator(".recordDetail").getByRole("button", { name: scenario.label, exact: true, includeHidden: true }));
+    if (scenario.action === "disable") {
       const dialog = page.getByRole("dialog");
       await dialog.getByLabel("Reason (required)").fill("review while returning to the customer list");
       await dialog.getByRole("button", { name: "Confirm", exact: true }).click();
@@ -328,7 +328,7 @@ test("admin UI reconciles unknown customer transitions from the list using the o
     await expect(globalSearch).toBeVisible();
     await globalSearch.press("Escape");
     await page.setViewportSize({ width: 1280, height: 900 });
-    const path = `/api/admin/customers/${scenario.id}/${scenario.action.toLowerCase()}`;
+    const path = `/api/admin/customers/${scenario.id}/${scenario.action}`;
     const original = attempts.find((attempt) => attempt.path === path);
     expect(original.key).toBeTruthy();
     expect(attempts.filter((attempt) => attempt.path === path)).toHaveLength(1);

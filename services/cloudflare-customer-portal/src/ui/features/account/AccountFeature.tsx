@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { LABELS, ProviderButtons, ProviderResult, useProviders } from "../auth/ProviderSignIn";
 import { PasswordSettings } from "./PasswordSettings";
-import { api } from "../../shared/api";
+import { accountApi } from "../../shared/api";
 import { useSingleFlight } from "../../shared/useSingleFlight";
 
 type Provider = keyof typeof LABELS;
@@ -9,7 +9,7 @@ type Identity = { provider: Provider; email: string };
 const LAST_SIGN_IN_METHOD = "You can't disconnect your only sign-in method. Set up another way to sign in first.";
 
 export function AccountFeature({ customerId, onSignInAgain }: {
-  customerId: string | null;
+  customerId: string;
   // Signs out, leaving the app on Account so an email-code or password sign-in returns there
   // (offered when a Connect was refused because the session is too old to connect a provider).
   onSignInAgain(): void;
@@ -24,13 +24,13 @@ export function AccountFeature({ customerId, onSignInAgain }: {
   useEffect(() => {
     let cancelled = false;
     setIdentityError(false);
-    void api<{ items: Identity[] }>("/portal/v1/auth/identities").then((result) => {
+    void accountApi<{ items: Identity[] }>(customerId, "/portal/v1/auth/identities").then((result) => {
       if (cancelled) return;
       if (result.ok && result.data) setIdentities(result.data.items);
       else setIdentityError(true);
     }).catch(() => { if (!cancelled) setIdentityError(true); });
     return () => { cancelled = true; };
-  }, [attempt]);
+  }, [attempt, customerId]);
   // Resolves true when the identity is still connected, so its row can take focus back.
   async function disconnect(provider: Provider): Promise<boolean> {
     let connected = true;
@@ -38,7 +38,7 @@ export function AccountFeature({ customerId, onSignInAgain }: {
       const name = LABELS[provider];
       setNotice(null);
       try {
-        const result = await api<{ provider: string }>("/portal/v1/auth/identities/unlink", { method: "POST", body: JSON.stringify({ provider }) });
+        const result = await accountApi<{ provider: string }>(customerId, "/portal/v1/auth/identities/unlink", { method: "POST", body: JSON.stringify({ provider }) });
         if (result.ok) {
           connected = false;
           setIdentities((items) => items && items.filter((item) => item.provider !== provider));
@@ -64,11 +64,11 @@ export function AccountFeature({ customerId, onSignInAgain }: {
       <p role="status" className="accountNotice">{notice}</p>
       {(failed || identityError) ? <p>Unable to load sign-in methods. <button onClick={() => { retry(); setAttempt((value) => value + 1); }}>Retry</button></p> : !providers || !identities ? <p>Loading sign-in methods…</p> : <>
         {identities.map((identity) => <ConnectedIdentity key={identity.provider} identity={identity} busy={busy} onDisconnect={disconnect} />)}
-        <ProviderButtons providers={providers} linked={identities.map((identity) => identity.provider)} link />
+        <ProviderButtons providers={providers} linked={identities.map((identity) => identity.provider)} linkCustomerId={customerId} />
 
       </>}
     </section>}
-    {providers?.password && <PasswordSettings />}
+    {providers?.password && <PasswordSettings customerId={customerId} />}
     <details className="referenceDetails"><summary>Account details</summary><p>Account ID</p><p className="identifier">{customerId ?? "Account details unavailable"}</p></details>
   </div>;
 }

@@ -166,12 +166,12 @@ function setupConsent(page) {
   });
   page.route("**/api/portal/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (!signedIn) return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } });
+    if (!signedIn) return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } });
     if (path.endsWith("/me")) return route.fulfill({ json: consentEnvelope("ok", { customer_id: customer, email: null }) });
     if (path.endsWith("/inspect")) return route.fulfill({ json: consentEnvelope("authorization_inspected", consentInspection(approveAttempts > 0 ? { status: "approved", revision: 1, entitlements: [] } : {})) });
     if (path.endsWith("/approve")) {
       approveAttempts += 1;
-      if (approveAttempts === 1) { signedIn = false; return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }); }
+      if (approveAttempts === 1) { signedIn = false; return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }); }
       return route.fulfill({ json: consentEnvelope("authorization_approved", { callback_url: consentCallback, expires_at: Math.floor(Date.now() / 1000) + 60, revision: 1 }) });
     }
     return route.fulfill({ json: consentEnvelope("ok", { items: [] }) });

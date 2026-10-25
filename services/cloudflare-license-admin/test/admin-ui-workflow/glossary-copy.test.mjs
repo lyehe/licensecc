@@ -59,3 +59,15 @@ test("admin UI source never reintroduces a term the glossary retired", () => {
   }
   assert.deepEqual(offenses, [], offenses.join("\n"));
 });
+
+test("customer and access workflows consistently say Suspend and Resume while retaining wire action names", () => {
+  const scopes = ["features/customers", "features/entitlements"];
+  const offenses = [];
+  // Capitalized display words and prose only: lowercase protocol strings and identifiers stay valid.
+  const retired = /\b(?:Disable|Disabled|Reenable)\b|re-enabled|re-enable\b/;
+  for (const scope of scopes) for (const file of collectSourceFiles(join(UI_SOURCE_ROOT, scope))) {
+    const text = readFileSync(file, "utf8").split("\n").filter(line => !line.trimStart().startsWith("//")).join("\n");
+    if (retired.test(text)) offenses.push(`${file}: use Suspend / Resume for customer and access lifecycle copy`);
+  }
+  assert.deepEqual(offenses, []);
+});

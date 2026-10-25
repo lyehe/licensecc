@@ -189,7 +189,7 @@ export function batchProgressText(state: Pick<BatchRunState, "current" | "chunkC
   return state.chunkCount <= 1 ? "Sending one request" : `Chunk ${state.current} of ${state.chunkCount}`;
 }
 
-const ACTION_LABELS: Record<EntitlementAction, string> = { disable: "Disable", reenable: "Reenable", revoke: "Revoke" };
+const ACTION_LABELS: Record<EntitlementAction, string> = { disable: "Suspend", reenable: "Resume", revoke: "Revoke" };
 
 export function batchRunHeadline(state: BatchRunState): string {
   const label = ACTION_LABELS[state.action];

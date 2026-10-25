@@ -115,6 +115,7 @@ const RESULT_CODE_COPY: Record<string, string> = {
   // but this local code is what fires the return-to-sign-in transition itself, and it can be raised
   // by ANY api() caller, not just the one request whose response happened to carry the code.
   session_ended: "Your session ended. Sign in again.",
+  account_changed: "The signed-in account changed in another tab. Review this account before trying the action again.",
 };
 
 export function describeResultCode(code: string): string | null {

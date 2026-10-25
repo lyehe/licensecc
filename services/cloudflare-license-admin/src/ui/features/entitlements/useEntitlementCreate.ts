@@ -9,12 +9,14 @@ import { useCreateLicense } from "./CreateLicense";
 import { normalizeCreateFromPolicy, normalizeEntitlementForm, type EntitlementFormState } from "./workflow";
 import type { GrantChoice } from "./GuidedGrantFields";
 import type { ExactReadProof } from "../../shared/controls";
+import { confirmsSavedGrant, grantConfirmationMessage } from "./grantConfirmation";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 
 type PartialLicense = { id: string; customer: string; project: string; fingerprint: string };
 export function useEntitlementCreate({form, guided, choice, policyAvailable, isListCurrent, setForm, onApplied, refresh}: {
   form: EntitlementFormState; guided: boolean; choice: GrantChoice; policyAvailable: boolean;
   isListCurrent(): boolean; setForm: Dispatch<SetStateAction<EntitlementFormState>>;
-  onApplied(item: EntitlementRecord): void; refresh(): Promise<ExactReadProof | null>;
+  onApplied(item: EntitlementRecord, feedback: OperatorFeedback): void; refresh(): Promise<ExactReadProof | null>;
 }): { submitCreate(event: FormEvent): Promise<void>; partialLicenseId: string | null } {
   const {runKeyedMutation,setFeedback,setMessage} = useOperatorControls();
   const createLicense=useCreateLicense();
@@ -71,7 +73,9 @@ export function useEntitlementCreate({form, guided, choice, policyAvailable, isL
           // The advanced list keeps its existing filter/navigation behavior after a known write.
           // Guided creation stays on its draft until the exact read below confirms the grant.
           if(!guided && isCurrent()){
-            completed=true;setFeedback(codeFeedback(parsed.code,parsed.requestId));onApplied(parsed.data);
+            completed=true;
+            const feedback=codeFeedback(parsed.code,parsed.requestId);
+            setFeedback(feedback);onApplied(parsed.data,feedback);
           }
         },
         refresh:async()=>{
@@ -81,14 +85,14 @@ export function useEntitlementCreate({form, guided, choice, policyAvailable, isL
           const exact=parseExactApiSuccess<EntitlementRecord>(response,"entitlement",value=>{
             if(!hasEntitlementRecordData(value))return false;
             const row=value as EntitlementRecord;
-            return row.id===target.id && row.project===target.project && row.feature===target.feature
-              && row.license_fingerprint===target.license_fingerprint && row.customer_id===target.customer_id
-              && row.license_id===target.license_id && row.status===target.status;
+            return confirmsSavedGrant(target, row);
           });
           if(!exact || !mounted.current || await refresh()!==EXACT_READ_PROOF || !mounted.current)return null;
           if(!completed && isCurrent()){
             completed=true;
-            setFeedback(codeFeedback(saved.code,saved.requestId));onApplied(exact.data);
+            const changed = grantConfirmationMessage(target, exact.data);
+            const feedback=changed === null ? codeFeedback(saved.code,saved.requestId) : feedbackWith(changed,saved.code,saved.requestId,"info");
+            setFeedback(feedback);onApplied(exact.data,feedback);
           }
           return EXACT_READ_PROOF;
         },

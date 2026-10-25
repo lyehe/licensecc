@@ -3,6 +3,22 @@ import test from "node:test";
 
 import { loadWorkflowModule } from "./helpers.mjs";
 
+test("saved grants confirm newer lifecycle states but never older snapshots or a different owned grant", async () => {
+  const { confirmsSavedGrant, grantConfirmationMessage } = await loadWorkflowModule("features/entitlements/grantConfirmation.ts");
+  const saved = { id: "grant", project: "APP", feature: "PRO", license_fingerprint: "a".repeat(64), customer_id: "A", license_id: "purchase", status: "active", revocation_seq: 2 };
+  assert.equal(confirmsSavedGrant(saved, { ...saved }), true);
+  assert.equal(grantConfirmationMessage(saved, saved), null);
+  for (const status of ["active", "disabled", "revoked"]) {
+    const current = { ...saved, status, revocation_seq: 3 };
+    assert.equal(confirmsSavedGrant(saved, current), true);
+    assert.match(grantConfirmationMessage(saved, current), /Access was saved and has changed since/);
+    assert.match(grantConfirmationMessage(saved, current), new RegExp(`Current status: ${status === "disabled" ? "suspended" : status}`));
+  }
+  for (const patch of [{ id: "other" }, { project: "other" }, { feature: "other" }, { license_fingerprint: "b".repeat(64) }, { customer_id: "B" }, { license_id: "other" }, { revocation_seq: 1 }, { status: "disabled", revocation_seq: 2 }]) {
+    assert.equal(confirmsSavedGrant(saved, { ...saved, ...patch }), false, JSON.stringify(patch));
+  }
+});
+
 // Each creation path sends exactly the fields its Worker route reads, and a policy create sends no
 // status: the Worker refuses any other field.
 test("protected form sends only its grant fields through either creation path and reports incompatible identifiers", async () => {
@@ -264,11 +280,11 @@ test("a finished batch reads as one sentence, with every per-row outcome in word
   assert.equal(workflow.batchResultSentence("disable", [
     { id: "a", ok: true, code: "entitlement_disabled" },
     { id: "b", ok: true, code: "entitlement_disabled" },
-  ]), "Disable finished: 2 done.");
+  ]), "Suspend finished: 2 done.");
   assert.equal(workflow.batchResultSentence("disable", [
     { id: "a", ok: true, code: "entitlement_disabled" },
     { id: "b", ok: false, code: "not_found" },
-  ]), "Disable finished: 1 done, 1 not found.");
+  ]), "Suspend finished: 1 done, 1 not found.");
   const mixed = workflow.batchResultSentence("revoke", [
     { id: "a", ok: false, code: "revoked_entitlement_is_terminal" },
     { id: "b", ok: false, code: "revoked_entitlement_is_terminal" },
@@ -280,7 +296,7 @@ test("a finished batch reads as one sentence, with every per-row outcome in word
   ]);
   assert.equal(mixed, "Revoke finished: 0 done, 2 already revoked, 1 with an invalid ID, 1 failed, 1 changed meanwhile, 2 not changed.");
   assert.doesNotMatch(mixed, /\b[a-z]+_[a-z_]+\b/);
-  assert.equal(workflow.batchResultSentence("reenable", []), "Reenable finished: 0 done.");
+  assert.equal(workflow.batchResultSentence("reenable", []), "Resume finished: 0 done.");
 });
 
 test("the entitlement record guard accepts the protected row shape", async () => {

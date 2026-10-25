@@ -170,12 +170,12 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await expect(patchedRow).toContainText("ent-1");
 
   const entitlementActions = page.locator(".desktopRecords tbody tr").first();
-  await clickAction(entitlementActions.getByRole("button", { name: "Disable", includeHidden: true }));
+  await clickAction(entitlementActions.getByRole("button", { name: "Suspend", includeHidden: true }));
   await page.getByRole("dialog").getByLabel(/Reason/).fill("operator pause");
   await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
   await expect(entitlementActions.locator(".status.disabled")).toHaveText("suspended");
 
-  await clickAction(entitlementActions.getByRole("button", { name: "Reenable", includeHidden: true }));
+  await clickAction(entitlementActions.getByRole("button", { name: "Resume", includeHidden: true }));
   await expect(entitlementActions.locator(".status.active")).toHaveText("active");
 
   // Revoke is irreversible -> it now opens a typed-confirm modal; the action fires only on the renamed button.
@@ -191,8 +191,8 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await revokeConfirm.click();
   await expect(entitlementActions.locator(".status.revoked")).toHaveText("revoked");
   await expect(entitlementActions.getByRole("button", { name: "Edit" })).toBeDisabled();
-  const revokedReenable = entitlementActions.getByRole("button", { name: "Reenable", includeHidden: true });
-  await expect(revokedReenable).toHaveCount(0);
+  const revokedResume = entitlementActions.getByRole("button", { name: "Resume", includeHidden: true });
+  await expect(revokedResume).toHaveCount(0);
 
   if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
   await page.getByRole("link", { name: "Events" }).click();
@@ -236,10 +236,10 @@ test("admin UI runs bulk transitions, global search deep-link, and CSV export", 
   await createEntitlement("ent", "b".repeat(64));
   await expect(page.locator("tbody input[type=checkbox]")).toHaveCount(2);
 
-  // BULK: select all loaded rows -> the bulk bar appears -> Disable -> typed-confirm (reason) -> Confirm.
+  // BULK: select all loaded rows -> the bulk bar appears -> Suspend -> typed-confirm (reason) -> Confirm.
   await page.getByLabel(/^Select all \d+ loaded$/).check();
   await expect(page.locator(".bulkBar")).toContainText("2 selected");
-  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }));
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Suspend", includeHidden: true }));
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.getByRole("dialog").getByLabel(/Reason/).fill("quarterly audit");
   await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
@@ -248,7 +248,7 @@ test("admin UI runs bulk transitions, global search deep-link, and CSV export", 
   expect(api.requests.batches[0]).toMatchObject({ action: "disable", reason: "quarterly audit" });
   expect(api.requests.batches[0].rows).toHaveLength(2);
   // The per-row roll-up renders in the status line, and the rows refreshed to disabled.
-  await expect(page.getByText("Disable finished: 2 done.")).toBeVisible();
+  await expect(page.getByText("Suspend finished: 2 done.")).toBeVisible();
   await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(2);
   // Selection cleared after the batch (the bulk bar is gone).
   await expect(page.locator(".bulkBar")).toHaveCount(0);
@@ -296,7 +296,7 @@ test("admin UI retains the server-owned four-entitlement batch limit", async ({ 
   await expect(page.locator(".bulkBar")).toContainText("5 selected");
   await expect(page.locator(".bulkBar")).toContainText("2 chunks of up to 4");
   await expect(rowChecks.nth(4)).toBeEnabled();
-  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }));
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Suspend", includeHidden: true }));
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("four-row free tier proof");
   await dialog.getByRole("button", { name: "Confirm" }).click();
@@ -374,7 +374,7 @@ test("admin UI disables twenty loaded entitlements with one confirmation, one re
   await page.getByLabel("Select all 20 loaded", { exact: true }).check();
   await expect(page.locator(".bulkBar")).toContainText("20 selected");
   await expect(page.locator(".bulkBar")).toContainText("5 chunks of up to 4");
-  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }));
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Suspend", includeHidden: true }));
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("5 chunks of up to 4");
   await dialog.getByLabel(/Reason/).fill("contract ended");
@@ -400,7 +400,7 @@ test("admin UI disables twenty loaded entitlements with one confirmation, one re
 
   const panel = page.locator(".tablePane .batchRun");
   await expect(panel.getByRole("listitem")).toHaveText(["20 done"]);
-  await expect(panel).toContainText("Disable finished");
+  await expect(panel).toContainText("Suspend finished");
   await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(20);
   await expect(page.locator(".bulkBar")).toHaveCount(0);
 });

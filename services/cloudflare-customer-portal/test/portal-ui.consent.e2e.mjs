@@ -29,14 +29,14 @@ async function capacityRecovery(page, { lost = false, expires = 300, recheckFail
   const state = { retired: false, writes: [], checks: 0 };
   state.auth=await fixture(page, { inspect: route => {
     state.checks++;
-    if (recheckFailure && state.checks === 2) return route.fulfill({status:503,json:{ok:false,code:'temporarily_unavailable'}});
+    if (recheckFailure && state.checks === 2) return route.fulfill({status:503,json:{ok:false,code:'temporarily_unavailable', request_id: "portal-e2e-failure" }});
     return route.fulfill({json:envelope('authorization_inspected',inspection({expires_at:now+expires,
       comparison_code:changeCode && state.checks>1?'3333-4444-5555':'0000-1111-2222',
       entitlements:[{id:'license-pro',feature:'PRO',valid_until:null,device_limit:1,devices_in_use:state.retired?0:1,slot_free_at:null,device_connected:false}]}))});
   }});
   await page.route('**/api/portal/device-bindings**', route => {
     const request = route.request();
-    if(request.headers()['x-expected-customer-id']!==state.auth.customer)return route.fulfill({status:409,json:{ok:false,code:'account_changed'}});
+    if(request.headers()['x-expected-customer-id']!==state.auth.customer)return route.fulfill({status:409,json:{ok:false,code:'account_changed', request_id: "portal-e2e-failure" }});
     if(request.method()==='POST') {
       state.writes.push({key:request.headers()['idempotency-key'],body:request.postDataJSON()}); state.retired=true;
       if(lost && state.writes.length===1)return route.abort();
@@ -156,9 +156,9 @@ async function fixture(page, { signedIn = true, inspect, approve, deny, logout, 
   await page.route("**/api/portal/**", async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     state.requests.push({ path, url: request.url(), referer: request.headers().referer });
-    if (!state.signedIn) return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } });
+    if (!state.signedIn) return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } });
     if (path.endsWith("/me")) return route.fulfill({ json: envelope("ok", { customer_id: state.customer, email: state.email }) });
-    if(path.includes("/device-authorizations/") && request.headers()["x-expected-customer-id"]!==encodeURIComponent(state.customer)) return route.fulfill({status:409,json:{ok:false,code:"account_changed"}});
+    if(path.includes("/device-authorizations/") && request.headers()["x-expected-customer-id"]!==encodeURIComponent(state.customer)) return route.fulfill({status:409,json:{ok:false,code:"account_changed", request_id: "portal-e2e-failure" }});
     if (path.endsWith("/inspect")) return inspect ? inspect(route, state) : route.fulfill({ json: envelope("authorization_inspected", inspection()) });
     if (path.endsWith("/approve")) return approve ? approve(route, state) : route.fulfill({ json: envelope("authorization_approved", { callback_url: callback, expires_at: Math.floor(Date.now()/1000)+60, revision: 1 }) });
     if (path.endsWith("/deny")) return deny ? deny(route, state) : route.fulfill({ json: envelope("authorization_denied", { status: "authorization_denied", revision: 1 }) });
@@ -186,7 +186,7 @@ test("consent: a signed-in account with no eligible license is pointed to the co
 });
 
 test("consent: a request that cannot be submitted names the support contact for repeat failures", async ({ page }) => {
-  await fixture(page, { support: "mailto:help@example.com", inspect: route => route.fulfill({ status: 400, json: { ok: false, code: "invalid_request" } }) });
+  await fixture(page, { support: "mailto:help@example.com", inspect: route => route.fulfill({ status: 400, json: { ok: false, code: "invalid_request" , request_id: "portal-e2e-failure" } }) });
   await page.goto(entry);
   const alert = page.getByRole("alert");
   await expect(alert).toHaveText("This connection request cannot be submitted. Restart from your app. Contact support if it happens again.");
@@ -230,7 +230,7 @@ test("consent: lost approval response and reload preserve the exact mutation and
     approve: route => {
       attempts.push({ body: route.request().postDataJSON(), key: route.request().headers()["idempotency-key"] });
       return attempts.length === 1
-        ? route.fulfill({ status: 503, json: { ok: false, code: "temporarily_unavailable" } })
+        ? route.fulfill({ status: 503, json: { ok: false, code: "temporarily_unavailable" , request_id: "portal-e2e-failure" } })
         : route.fulfill({ json: envelope("authorization_approved", { callback_url: callback, expires_at: Math.floor(Date.now()/1000)+60, revision: 1 }) });
     },
   });
@@ -325,7 +325,7 @@ test("consent: malformed approval stays on portal and throttled retry waits", as
   let attempts = 0;
   await fixture(page, { approve: route => ++attempts === 1
     ? route.fulfill({ json: envelope("authorization_approved", { callback_url: "https://evil.example/", expires_at: 1, revision: 1 }) })
-    : route.fulfill({ status: 429, headers: { "retry-after": "60" }, json: { ok: false, code: "rate_limited" } }),
+    : route.fulfill({ status: 429, headers: { "retry-after": "60" }, json: { ok: false, code: "rate_limited" , request_id: "portal-e2e-failure" } }),
   });
   await page.goto(entry);
   await page.getByRole("combobox", { name: "License", exact: true }).selectOption("license-pro");
@@ -465,7 +465,7 @@ test("consent: an authenticated consumed result remains connected after attempt 
 });
 
 for(const [status,code] of [[400,"invalid_request"],[403,"cross_site_forbidden"]]) test(`consent: ${code} gives terminal restart guidance`,async({page})=>{
-  await fixture(page,{inspect:route=>route.fulfill({status,json:{ok:false,code}})});
+  await fixture(page,{inspect:route=>route.fulfill({status,json:{ok:false,code, request_id: "portal-e2e-failure" }})});
   await page.goto(entry);
   await expect(page.getByRole("alert")).toContainText("Restart from your app");
   await expect(page.getByRole("button",{name:"Retry",exact:true})).toHaveCount(0);
@@ -473,7 +473,7 @@ for(const [status,code] of [[400,"invalid_request"],[403,"cross_site_forbidden"]
 });
 
 test("consent: a failed sign-out remains visible and preserves the request",async({page})=>{
-  await fixture(page,{logout:route=>route.fulfill({status:503,json:{ok:false,code:"temporarily_unavailable"}})});
+  await fixture(page,{logout:route=>route.fulfill({status:503,json:{ok:false,code:"temporarily_unavailable", request_id: "portal-e2e-failure" }})});
   await page.goto(entry);
   await expect(page.getByRole("combobox",{name:"License",exact:true})).toBeVisible();
   await page.getByText("Account details", { exact: true }).click();
@@ -489,7 +489,7 @@ for(const sameAccount of [true,false]) test(`consent: reauthentication ${sameAcc
     inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection(attempts.length?{status:"approved",revision:1,entitlements:[]}:{}))}),
     approve:(route,current)=>{
       attempts.push({body:route.request().postDataJSON(),key:route.request().headers()["idempotency-key"]});
-      if(attempts.length===1){current.signedIn=false;return route.fulfill({status:401,json:{ok:false,code:"unauthorized"}});}
+      if(attempts.length===1){current.signedIn=false;return route.fulfill({status:401,json:{ok:false,code:"unauthorized", request_id: "portal-e2e-failure" }});}
       return route.fulfill({json:envelope("authorization_approved",{callback_url:callback,expires_at:Math.floor(Date.now()/1000)+60,revision:1})});
     },
   });
@@ -649,7 +649,7 @@ test("consent: Previous and Next keep one page and clear successful navigation s
 
 for(const status of [429,503])test(`consent: failed page ${status} preserves the current selection and page`,async({page})=>{
   await fixture(page,{inspect:route=>route.request().postDataJSON().page_cursor
-    ?route.fulfill({status,headers:{"retry-after":"60"},json:{ok:false,code:status===429?"rate_limited":"temporarily_unavailable"}})
+    ?route.fulfill({status,headers:{"retry-after":"60"},json:{ok:false,code:status===429?"rate_limited":"temporarily_unavailable", request_id: "portal-e2e-failure" }})
     :route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:firstLicensePage(),has_more:true,next_page_cursor:pageTwoCursor}))})});
   await page.goto(entry);
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-5");
@@ -734,7 +734,7 @@ test("consent: Approve reads Connecting… while approving",async({page})=>{
 test("consent: a changed comparison code cannot reuse a saved approval",async({page})=>{
   let comparison="0000-1111-2222";
   await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({comparison_code:comparison}))}),
-    approve:route=>route.fulfill({status:503,json:{ok:false,code:"temporarily_unavailable"}})});
+    approve:route=>route.fulfill({status:503,json:{ok:false,code:"temporarily_unavailable", request_id: "portal-e2e-failure" }})});
   await page.goto(entry);
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-pro");
   await approve(page);

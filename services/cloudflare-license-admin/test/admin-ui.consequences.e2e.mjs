@@ -110,14 +110,14 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   await page.getByRole("link", { name: "License access", exact: true }).click();
 
   const entitlementRow = page.locator(".tablePane table tbody tr").first();
-  await assertConfirmation(entitlementRow.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first(), "Verification and downloads stop until it is re-enabled", true);
+  await assertConfirmation(entitlementRow.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first(), "Verification and downloads stop until it is resumed", true);
   await assertConfirmation(entitlementRow.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL and cannot be undone", false, "REVOKE 1", "Revoke");
   expect(api.requests.transitions).toHaveLength(0);
 
   await page.getByRole("link", { name: "Customers", exact: true }).click();
   await page.locator("#customer-open-cus_acme").click();
   await expect(page.getByRole("heading", { name: "Acme Corp" })).toBeVisible();
-  await assertConfirmation(page.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first(), "customer-portal access");
+  await assertConfirmation(page.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first(), "customer-portal access");
   expect(api.requests.customerTransitions).toHaveLength(0);
 
   if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
@@ -152,7 +152,7 @@ test("admin UI entitlement disable reason presets fill the field and leave it ed
   await page.getByRole("link", { name: "License access", exact: true }).click();
 
   const entitlementRow = page.locator(".tablePane table tbody tr").first();
-  await clickAction(entitlementRow.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  await clickAction(entitlementRow.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   const reason = dialog.getByLabel("Reason (required)");
 
@@ -185,7 +185,7 @@ test("admin UI consequence dialogs contain focus, isolate the background, and re
   await page.getByRole("link", { name: "License access", exact: true }).click();
 
   const row = page.locator('[data-focus-row^="entitlement:"]:visible').first();
-  const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
+  const trigger = row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first();
   await revealAction(trigger);
   await trigger.focus();
   await clickAction(trigger);
@@ -272,7 +272,7 @@ test("admin UI consequence dialogs contain focus, isolate the background, and re
   await expect.poll(() => api.behavior.releaseTransition).not.toBeNull();
   api.behavior.releaseTransition();
   await expect(dialog).toHaveCount(0);
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeFocused();
+  await expect(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first()).toBeFocused();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 });
 
@@ -284,7 +284,7 @@ test("admin UI typed failures keep consequence dialogs open and restore focus", 
   await page.goto("/");
   await page.getByRole("link", { name: "License access", exact: true }).click();
 
-  const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
+  const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first();
   await revealAction(trigger);
   await trigger.focus();
   await clickAction(trigger);
@@ -355,7 +355,7 @@ test("admin UI typed failures keep consequence dialogs open and restore focus", 
   await expect.poll(() => api.requests.transitions.length).toBe(beforeReplay + 1);
   expect(api.requests.transitions[3].idempotencyKey).toBe(unknownKey);
   expect(api.requests.transitions[3].body).toEqual(api.requests.transitions[2].body);
-  await expect(page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeEnabled();
+  await expect(page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first()).toBeEnabled();
 });
 
 test("admin UI direct re-enable replays an unknown mutation with the same key", async ({ page }) => {
@@ -367,14 +367,14 @@ test("admin UI direct re-enable replays an unknown mutation with the same key", 
   await page.getByRole("link", { name: "License access", exact: true }).click();
 
   const row = page.locator(".tablePane table tbody tr").first();
-  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
   const disableDialog = page.getByRole("dialog");
   await disableDialog.getByLabel("Reason (required)").fill("operator review");
   await disableDialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeEnabled();
+  await expect(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first()).toBeEnabled();
 
   api.behavior.abortTransition = true;
-  const reenable = row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first();
+  const reenable = row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first();
   await revealAction(reenable);
   await reenable.focus();
   await clickAction(reenable);
@@ -402,15 +402,15 @@ test("admin UI keeps a wrong-action reason_required rejection indeterminate", as
   await page.goto("/");
   await page.getByRole("link", { name: "License access", exact: true }).click();
   const row = page.locator(".tablePane table tbody tr").first();
-  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
   await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeEnabled();
+  await expect(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first()).toBeEnabled();
 
   api.behavior.transitionStatus = 400;
   api.behavior.transitionResponse = { ok: false, code: "reason_required", request_id: "ui-e2e-wrong-action-reason" };
-  await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first());
   const attempts = () => api.requests.transitions.filter((item) => item.action === "reenable");
   await expect.poll(() => attempts().length).toBe(1);
   const key = attempts()[0].idempotencyKey;
@@ -435,14 +435,14 @@ test("admin UI keeps every same-key replay failure indeterminate until exact suc
   await page.getByRole("link", { name: "License access", exact: true }).click();
 
   const row = page.locator(".tablePane table tbody tr").first();
-  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
   const disableDialog = page.getByRole("dialog");
   await disableDialog.getByLabel("Reason (required)").fill("operator review");
   await disableDialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeEnabled();
+  await expect(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first()).toBeEnabled();
 
   api.behavior.abortTransition = true;
-  await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first());
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
   await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   const attempts = () => api.requests.transitions.filter((item) => item.action === "reenable");
@@ -484,7 +484,7 @@ test("admin UI rejects a partial successful mutation envelope as unknown", async
   await page.goto("/");
   await page.getByRole("link", { name: "License access", exact: true }).click();
 
-  const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
+  const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
@@ -516,7 +516,7 @@ test("admin UI rejects a non-2xx response carrying a successful mutation envelop
   await page.goto("/");
   await page.getByRole("link", { name: "License access", exact: true }).click();
 
-  const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
+  const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
@@ -550,7 +550,7 @@ test("admin UI treats a well-formed 5xx rejection envelope as an unknown mutatio
   await page.goto("/");
   await page.getByRole("link", { name: "License access", exact: true }).click();
 
-  const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
+  const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
@@ -581,7 +581,7 @@ test("admin UI rejects duplicate batch result identities as unknown", async ({ p
   await createEntitlement("batch-one", "a".repeat(64));
   await createEntitlement("batch-two", "b".repeat(64));
   await page.getByLabel(/^Select all \d+ loaded$/).check();
-  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Suspend", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
   api.behavior.batchResponse = {
@@ -627,7 +627,7 @@ test("admin UI rejects substituted batch result identities as unknown", async ({
   await createEntitlement("batch-one", "a".repeat(64));
   await createEntitlement("batch-two", "b".repeat(64));
   await page.getByLabel(/^Select all \d+ loaded$/).check();
-  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Suspend", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
   api.behavior.batchResponse = {
@@ -669,7 +669,7 @@ test("admin UI reports a known partial batch outcome when every row identity and
     await expect(page.locator(".tablePane table tbody tr")).toHaveCount(index + 1);
   }
   await page.getByLabel(/^Select all \d+ loaded$/).check();
-  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Suspend", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
   api.behavior.batchResponse = {
@@ -688,7 +688,7 @@ test("admin UI reports a known partial batch outcome when every row identity and
   await expect.poll(() => api.requests.batches.length).toBe(1);
   expect(api.requests.batches[0].rows.map((row) => row.id)).toEqual(["ent-1", "ent-2"]);
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByText("Disable finished: 1 done, 1 not found.")).toBeVisible();
+  await expect(page.getByText("Suspend finished: 1 done, 1 not found.")).toBeVisible();
   // A row that did not change is not a success.
   await expect(page.locator(".activityMessage")).toHaveAttribute("data-tone", "info");
 });
@@ -708,14 +708,14 @@ test("admin UI settles a batch row staled by a concurrent change as done, not un
 
   await page.getByLabel(/^Select all \d+ loaded$/).check();
   await expect(page.locator(".bulkBar")).toContainText("2 selected");
-  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Suspend", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
   await dialog.getByRole("button", { name: "Confirm" }).click();
 
   await expect.poll(() => api.requests.batches.length).toBe(1);
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByText("Disable finished: 1 done, 1 changed meanwhile.")).toBeVisible();
+  await expect(page.getByText("Suspend finished: 1 done, 1 changed meanwhile.")).toBeVisible();
   await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(1);
 });
 
@@ -735,7 +735,7 @@ test("admin UI rejects an unknown per-row batch failure code as ambiguous", asyn
     await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   }
   await page.getByLabel(/^Select all \d+ loaded$/).check();
-  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Suspend", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
   api.behavior.batchResponse = {
@@ -772,7 +772,7 @@ test("admin UI rejects reordered batch proof rows as an unknown outcome", async 
     await expect(page.locator(".tablePane table tbody tr")).toHaveCount(index + 1);
   }
   await page.getByLabel(/^Select all \d+ loaded$/).check();
-  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Suspend", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
   api.behavior.batchResponse = {
@@ -812,7 +812,7 @@ async function routeBatchPosts(page, api, respond) {
   return attempts;
 }
 
-/** Seeds twenty active rows, then selects them all and confirms a bulk Disable with one reason. */
+/** Seeds twenty active rows, then selects them all and confirms a bulk Suspend with one reason. */
 async function openTwentyRowBatch(page, respond) {
   const api = makeAdminApiFixture();
   api.seed.entitlements(20);
@@ -821,7 +821,7 @@ async function openTwentyRowBatch(page, respond) {
   await page.getByRole("link", { name: "License access", exact: true }).click();
   await expect(page.locator("tbody input[type=checkbox]")).toHaveCount(20);
   await page.getByLabel("Select all 20 loaded", { exact: true }).check();
-  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Suspend", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
   await dialog.getByRole("button", { name: "Confirm" }).click();
@@ -936,7 +936,7 @@ test("admin UI never reports success when the status refresh fails after a parti
   await expect.poll(() => attempts.length).toBe(2);
   await expect(dialog).toHaveCount(0);
   const notice = page.locator(".operatorNotice");
-  await expect(notice).toContainText("Disable stopped at chunk 2 of 5");
+  await expect(notice).toContainText("Suspend stopped at chunk 2 of 5");
   // The notice replaces the page message, so it says why the run stopped as well as the failed read.
   await expect(notice).toContainText("This request key was already used for a different change.");
   await expect(notice).toContainText("The status could not be refreshed.");
@@ -950,7 +950,7 @@ test("admin UI never reports success when the status refresh fails after a parti
   expect(attempts).toHaveLength(2);
 });
 
-/** Seeds five suspended rows, then selects them all and starts a bulk Reenable, which has no dialog. */
+/** Seeds five suspended rows, then selects them all and starts a bulk Resume, which has no dialog. */
 async function reenableFiveRows(page, respond) {
   const api = makeAdminApiFixture();
   api.seed.entitlements(Array.from({ length: 5 }, () => ({ status: "disabled" })));
@@ -959,7 +959,7 @@ async function reenableFiveRows(page, respond) {
   await page.getByRole("link", { name: "License access", exact: true }).click();
   await expect(page.locator("tbody input[type=checkbox]")).toHaveCount(5);
   await page.getByLabel("Select all 5 loaded", { exact: true }).check();
-  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Reenable", includeHidden: true }).first());
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Resume", includeHidden: true }).first());
   return { attempts };
 }
 
@@ -973,7 +973,7 @@ test("admin UI reenables five suspended rows without a dialog as two chunks with
   expect(new Set(attempts.map((attempt) => attempt.key)).size).toBe(2);
   const panel = page.locator(".tablePane .batchRun");
   await expect(panel.getByRole("listitem")).toHaveText(["5 done"]);
-  await expect(panel).toContainText("Reenable finished.");
+  await expect(panel).toContainText("Resume finished.");
   await expect(page.locator(".desktopRecords .status.active")).toHaveCount(5);
 });
 
@@ -994,7 +994,7 @@ test("admin UI reconciles an unknown second reenable chunk by replaying its froz
   expect(attempts[2]).toEqual(attempts[1]);
   expect(attempts[1].body.rows.map((row) => row.id)).toEqual(["ent-5"]);
   await expect(panel.getByRole("listitem")).toHaveText(["5 done"]);
-  await expect(panel).toContainText("Reenable finished; chunk 2 is now reconciled.");
+  await expect(panel).toContainText("Resume finished; chunk 2 is now reconciled.");
   await expect(page.locator(".desktopRecords .status.active")).toHaveCount(5);
 });
 
@@ -1008,7 +1008,7 @@ test("admin UI visibly locks other actions while a refused action's notice waits
   api.behavior.transitionStatus = 404;
   api.behavior.transitionResponseOnce = true;
   api.behavior.transitionResponse = { ok: false, code: "not_found", request_id: "ui-e2e-reenable-refused" };
-  await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first());
 
   const notice = page.locator(".operatorNotice");
   await expect(notice).toContainText("That record was not found");
@@ -1034,14 +1034,14 @@ test("admin UI gates ordinary mutations while consequence recovery is pending", 
   const createForm = page.locator(".editorLayout form");
 
   const row = page.locator(".tablePane table tbody tr").first();
-  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
   await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeEnabled();
+  await expect(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first()).toBeEnabled();
 
   api.behavior.refreshFailures = ["response-error"];
-  await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first());
   await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
   api.behavior.deferRefresh = true;
   const refreshButton = page.getByRole("button", { name: "Refresh status" });
@@ -1068,21 +1068,21 @@ test("admin UI gates ordinary mutations through the post-success refresh", async
   const createForm = page.locator(".editorLayout form");
 
   const row = page.locator(".tablePane table tbody tr").first();
-  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
   await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeEnabled();
+  await expect(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first()).toBeEnabled();
 
   api.behavior.deferRefresh = true;
-  await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first());
   await expect.poll(() => api.behavior.releaseRefresh).not.toBeNull();
   const createsBefore = api.requests.creates;
   await expect(createForm).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New entitlement", exact: true })).toBeDisabled();
   expect(api.requests.creates).toBe(createsBefore);
   api.behavior.releaseRefresh();
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeDisabled();
+  await expect(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first()).toBeDisabled();
 });
 
 test("admin UI direct re-enable treats a malformed mutation response as unknown", async ({ page }) => {
@@ -1094,14 +1094,14 @@ test("admin UI direct re-enable treats a malformed mutation response as unknown"
   await page.getByRole("link", { name: "License access", exact: true }).click();
 
   const row = page.locator(".tablePane table tbody tr").first();
-  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
   const disableDialog = page.getByRole("dialog");
   await disableDialog.getByLabel("Reason (required)").fill("operator review");
   await disableDialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeEnabled();
+  await expect(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first()).toBeEnabled();
 
   api.behavior.transitionFailure = "malformed";
-  const reenable = row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first();
+  const reenable = row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first();
   await clickAction(reenable);
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
   await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
@@ -1119,14 +1119,14 @@ test("admin UI direct re-enable keeps parsed refresh recovery visible", async ({
   await page.getByRole("link", { name: "License access", exact: true }).click();
 
   const row = page.locator(".tablePane table tbody tr").first();
-  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
   const disableDialog = page.getByRole("dialog");
   await disableDialog.getByLabel("Reason (required)").fill("operator review");
   await disableDialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeEnabled();
+  await expect(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first()).toBeEnabled();
 
   api.behavior.refreshFailures = ["response-error", "response-error"];
-  await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first());
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
   await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   const refreshButton = page.getByRole("button", { name: "Refresh status" });
@@ -1134,7 +1134,7 @@ test("admin UI direct re-enable keeps parsed refresh recovery visible", async ({
   await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await refreshButton.click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true })).toHaveCount(0);
   await expect(row.locator(".status")).toBeFocused();
 });
 
@@ -1149,14 +1149,14 @@ test("admin UI settles a same-key reconciliation across a stale filter context w
   const filter = page.locator('input[aria-label="Filter by project"]');
   await filter.fill("stale-unknown");
   const row = page.locator(".tablePane table tbody tr").first();
-  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
   await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeEnabled();
+  await expect(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first()).toBeEnabled();
 
   api.behavior.abortTransition = true;
-  await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first());
   await expect(page.getByRole("button", { name: "Reconcile status" })).toBeVisible();
   const unknownAttempt = api.requests.transitions.at(-1);
   api.behavior.deferTransition = true;
@@ -1178,7 +1178,7 @@ test("admin UI settles a same-key reconciliation across a stale filter context w
 
   await filter.fill("stale-unknown");
   await expect(page.locator(".tablePane table tbody tr").first()).toBeVisible();
-  await expect(page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Reenable", exact: true, includeHidden: true })).toHaveCount(0);
+  await expect(page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Resume", exact: true, includeHidden: true })).toHaveCount(0);
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 });
 
@@ -1193,14 +1193,14 @@ test("admin UI settles an ABA filter switch after an exact same-key replay", asy
   const filter = page.locator('input[aria-label="Filter by project"]');
   await filter.fill("aba-replay");
   const row = page.locator(".tablePane table tbody tr").first();
-  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
   await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeEnabled();
+  await expect(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first()).toBeEnabled();
 
   api.behavior.abortTransition = true;
-  await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first());
   await expect(page.getByRole("button", { name: "Reconcile status" })).toBeVisible();
   const firstReplayCandidate = api.requests.transitions.at(-1);
 
@@ -1238,17 +1238,17 @@ test("admin UI keeps unresolved recovery exclusive without stealing focus after 
   await page.getByRole("link", { name: "License access", exact: true }).click();
 
   const row = page.locator(".tablePane table tbody tr").first();
-  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
   const disableDialog = page.getByRole("dialog");
   await disableDialog.getByLabel("Reason (required)").fill("operator review");
   await disableDialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeEnabled();
+  await expect(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first()).toBeEnabled();
 
   api.behavior.refreshFailures = ["response-error"];
-  await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first());
   await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   const transitionCount = api.requests.transitions.filter((item) => item.action === "reenable").length;
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeDisabled();
+  await expect(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first()).toBeDisabled();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   expect(api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(transitionCount);
@@ -1279,13 +1279,13 @@ test("'More actions' closes after choosing an action, including one that opens a
   const row = page.locator(".desktopRecords tbody tr").first();
   const menu = row.locator("details.contextActions");
 
-  // A non-dialog action (Reenable runs at once, without a modal) closes the menu on its own.
-  await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
+  // A non-dialog action (Resume runs at once, without a modal) closes the menu on its own.
+  await clickAction(row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first());
   await expect(row.locator(".status")).toHaveText("active");
   expect(await menu.evaluate((node) => node.hasAttribute("open"))).toBe(false);
 
   // A dialog-opening action closes the menu too; focus goes to the dialog, not back to the menu.
-  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   expect(await menu.evaluate((node) => node.hasAttribute("open"))).toBe(false);

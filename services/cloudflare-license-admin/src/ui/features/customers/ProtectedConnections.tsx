@@ -151,7 +151,7 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
       <h2 id="connection-dialog-title">{saved?'Resolve disconnect request':`Disconnect ${pending?.label}?`}</h2>
       {pending && <><p><strong>{pending.label}</strong> · {pending.project} / {pending.feature}</p><p>Customer: {customer}</p><p>Connection ID: {pending.binding}</p>
         <p>Renewal stops immediately. Existing signed offline access can continue until its deadline. The slot remains reserved until at least {formatUtcDate(pending.hold)}.</p>
-        <p>This connection cannot be re-enabled. To transfer, disconnect it, wait for the slot to become available, then connect the new machine from its app.</p></>}
+        <p>This connection cannot be restored. To transfer, disconnect it, wait for the slot to become available, then connect the new machine from its app.</p></>}
       {saved && <p>The original request is saved in this browser tab. Closing this dialog does not cancel it.</p>}
       {confirmed && <p role="status">Disconnection has been confirmed. The saved request still needs local cleanup.</p>}
       {pending && page && (!sameOperator || !mayRetire) && <p role="alert">Your operator or customer access has changed. Review the connection before clearing this saved request.</p>}

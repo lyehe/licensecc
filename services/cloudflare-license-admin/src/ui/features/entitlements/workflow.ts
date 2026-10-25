@@ -196,7 +196,7 @@ export function revokeEntitlementConfirm(item: { project: string; feature: strin
 }
 
 export function disableEntitlementConfirm(item: { project: string; feature: string; license_fingerprint: string }): string {
-  return `Disable the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). Verification and downloads stop until it is re-enabled.`;
+  return `Suspend the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). Verification and downloads stop until it is resumed.`;
 }
 
 /** Common reasons an operator disables a license; presets fill the reason field and leave it editable. */
@@ -250,7 +250,7 @@ export function summarizeBatchResults(results: ReadonlyArray<BatchRowResult>): s
   return parts.join(", ");
 }
 
-const ACTION_NAMES: Readonly<Record<EntitlementAction, string>> = { disable: "Disable", reenable: "Reenable", revoke: "Revoke" };
+const ACTION_NAMES: Readonly<Record<EntitlementAction, string>> = { disable: "Suspend", reenable: "Resume", revoke: "Revoke" };
 
 /** Why a row of a finished batch was not changed, in words; any other code reads as "not changed". */
 function batchOutcomeWords(code: string): string {
