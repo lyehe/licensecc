@@ -30,6 +30,7 @@ export function useEntitlementCreate({form, guided, choice, policyAvailable, isL
     if(submitting.current)return;
     if(form.policy_id && !policyAvailable){setFeedback(codeFeedback("policy_not_available"));return;}
     if(guided && (!choice.ready || choice.context!==`${form.customer_id}\0${form.project}` || (!choice.createNew && !form.license_id))){setMessage("Choose a current license or create a new one before saving.");return;}
+    // The guided draft is locked during operations; license creation may still assign its ID.
     const snapshot=(draft:EntitlementFormState):string=>JSON.stringify(guided?{...draft,license_id:""}:draft);
     const captured=snapshot(form), isReadCurrent=():boolean=>mounted.current && isListCurrent();
     const isCurrent=():boolean=>isReadCurrent() && snapshot(latest.current)===captured;

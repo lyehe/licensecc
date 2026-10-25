@@ -77,6 +77,42 @@ for(const licenses of [1,2])test(`guided access selects one license and requires
   expect(state.grants[0].body.license_id).toBe(`lic_existing_${licenses-1}`);
 });
 
+for(const width of [1440,390])test(`guided access locks purchase selection through saving and confirmation at ${width}px`,async({page},testInfo)=>{
+  await page.setViewportSize({width,height:1000});
+  const {api,state,form}=await guidedFixture(page,{licenses:2});
+  const select=form.getByLabel('License',{exact:true});
+  await select.selectOption('lic_existing_0');
+  const fingerprint=await form.getByLabel('License fingerprint').inputValue();
+  let releasePost,releaseRead,postStarted,readStarted;
+  const postGate=new Promise(resolve=>{releasePost=resolve;}),readGate=new Promise(resolve=>{releaseRead=resolve;});
+  const postReady=new Promise(resolve=>{postStarted=resolve;}),readReady=new Promise(resolve=>{readStarted=resolve;});
+  await page.route('**/api/admin/entitlements',async route=>{
+    if(route.request().method()!=='POST')return route.fallback();
+    const body=route.request().postDataJSON();
+    state.grants.push({body,key:route.request().headers()['idempotency-key']});
+    const saved=api.seed.entitlement(body);postStarted();await postGate;
+    return route.fulfill({json:makeEnvelope('entitlement_saved',saved)});
+  });
+  await page.route('**/api/admin/entitlements/*',async route=>{
+    if(route.request().method()!=='GET')return route.fallback();
+    readStarted();await readGate;return route.fallback();
+  });
+  try{
+    await form.getByRole('button',{name:'Save access',exact:true}).click();await postReady;
+    await expect(select).toBeDisabled();await expect(select).toHaveValue('lic_existing_0');
+    await expect(form.getByLabel('App',{exact:true})).toBeDisabled();
+    await page.screenshot({path:testInfo.outputPath(`purchase-saving-${width}.png`),fullPage:true});
+    releasePost();await readReady;
+    await expect(select).toBeDisabled();await expect(select).toHaveValue('lic_existing_0');
+    await expect(form.getByLabel('App',{exact:true})).toBeDisabled();
+    await page.screenshot({path:testInfo.outputPath(`purchase-confirming-${width}.png`),fullPage:true});
+    releaseRead();
+    await expect(page.getByRole('button',{name:'Manage access',exact:true})).toBeVisible();
+    expect(state.grants).toHaveLength(1);expect(state.licenses).toHaveLength(0);
+    expect(state.grants[0].body).toMatchObject({license_id:'lic_existing_0',license_fingerprint:fingerprint});
+  }finally{releasePost();releaseRead();}
+});
+
 for(const width of [1440,390])test(`guided access keeps Access not granted after license-only reconciliation at ${width}px`,async({page},testInfo)=>{
   await page.setViewportSize({width,height:1000});
   const {state,form}=await guidedFixture(page,{lostLicense:true});
@@ -84,6 +120,7 @@ for(const width of [1440,390])test(`guided access keeps Access not granted after
   await form.getByRole('button',{name:'Save access',exact:true}).click();
   await page.getByRole('button',{name:'Reconcile status',exact:true}).click();
   await expect(form.getByLabel('License',{exact:true})).toHaveValue('lic_guided');
+  await expect(form.getByLabel('License',{exact:true})).toBeEnabled();
   await expect(form.getByRole('status')).toContainText('Access not granted. Save access to finish.');
   expect(state.grants).toHaveLength(0);
   await page.screenshot({path:testInfo.outputPath(`partial-license-${width}.png`),fullPage:true});
@@ -102,6 +139,7 @@ for(const width of [1440,390])for(const grantRead of ['empty','wrong-owner','una
   await expect(refresh).toBeVisible();
   await expect(form).toBeVisible();
   await expect(form.getByRole('button',{name:'Save access',exact:true})).toBeDisabled();
+  await expect(form.getByLabel('License',{exact:true})).toBeDisabled();
   await expect(form.getByLabel('License fingerprint')).toHaveValue(fingerprint);
   await page.screenshot({path:testInfo.outputPath(`exact-read-${grantRead}-${width}.png`),fullPage:true});
   await refresh.click();
@@ -120,6 +158,7 @@ test("guided access retains a created license after the entitlement is refused",
   const {state,form}=await guidedFixture(page,{refuseGrant:true});
   await form.getByRole('button',{name:'Save access',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('Access not granted.');
+  await expect(form.getByLabel('License',{exact:true})).toBeEnabled();
   await form.getByRole('button',{name:'Save access',exact:true}).click();
   await expect(page.getByRole('button',{name:'Manage access',exact:true})).toBeVisible();
   expect(state.licenses).toHaveLength(1);expect(state.grants).toHaveLength(2);
@@ -129,6 +168,7 @@ test("guided access retains a created license after the entitlement is refused",
 test("guided access reconciles an uncertain grant without generating another license or fingerprint",async({page})=>{
   const {state,form}=await guidedFixture(page,{lostGrant:true});
   await form.getByRole('button',{name:'Save access',exact:true}).click();
+  await expect(form.getByLabel('License',{exact:true})).toBeDisabled();
   await page.getByRole('button',{name:'Reconcile status',exact:true}).click();
   await expect(page.getByRole('button',{name:'Manage access',exact:true})).toBeVisible();
   expect(state.licenses).toHaveLength(1);expect(state.grants).toHaveLength(2);expect(state.grants[1]).toEqual(state.grants[0]);

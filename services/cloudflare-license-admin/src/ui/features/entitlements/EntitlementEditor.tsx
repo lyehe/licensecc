@@ -78,7 +78,7 @@ export function EntitlementEditor({ form, item, guided = false, guidance, create
   return <section ref={editorRef} className="editorLayout" aria-label={title}>
     <div className="editorHeader"><div><h3 tabIndex={-1}>{title}</h3><p>{isCreate ? "Grant access to a project and feature." : `${item?.project} / ${item?.feature}`}</p></div><button type="button" disabled={busy} onClick={onCancel}>{guided ? "Back to customer" : "Back to entitlements"}</button></div>
     {locked && <p className="readState">{lockMessage ?? "Resolve the notice at the bottom of the page before changing this draft."}</p>}
-    <form aria-label={title} noValidate onSubmit={submit}><fieldset disabled={locked}>
+    <form aria-label={title} noValidate onSubmit={submit}><fieldset disabled={locked || (guided && busy)}>
       <legend className="srOnly">Entitlement details</legend>
       {isCreate && <>
         <p className="wide muted">Protection: Protected devices. Requires a customer, license, and an application using protected device enrollment; each enrolled device occupies a slot.</p>

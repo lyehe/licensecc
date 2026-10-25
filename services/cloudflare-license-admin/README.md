@@ -70,6 +70,7 @@ The customer and current app are prefilled. Browse an app or enter its valid ID,
 choose a feature, and review the optional policy, device limit, and **Valid through** date.
 The fingerprint is generated once and kept under Technical details. One eligible
 license is selected automatically; several purchases require an explicit choice.
+License selection stays locked until saving and confirmation finish.
 When no license exists, Save access creates it before saving the grant. If only
 the license succeeds, Access not granted explains the remaining step. Reconcile
 unknown outcomes using the retained request, then reuse the same license and draft.
