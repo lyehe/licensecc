@@ -353,3 +353,29 @@ test("inclusive entitlement expiry handles calendar boundaries and preserves cus
   assert.equal(expiry.expiryDescription(null),'No expiry');
   assert.equal(expiry.exactExpiry(Date.parse('2026-09-08T18:42:03Z')/1000),'2026-09-08T18:42:03Z');
 });
+
+test("trial validity distinguishes a pending clock, derived expiry, and an earlier grant deadline",async()=>{
+  const validity=await loadWorkflowModule('features/entitlements/validity.ts');
+  const trial={is_trial:1,valid_until:null,trial_expiration_basis:'from_first_activation',trial_duration_sec:86400,trial_started_at:null};
+  assert.equal(validity.entitlementExpiryDescription(trial),'Trial: 1 day from first activation.');
+  assert.equal(validity.entitlementDeadline(trial),null);
+  const started={...trial,trial_started_at:Date.parse('2026-10-25T12:34:56Z')/1000};
+  assert.equal(validity.entitlementDeadline(started),Date.parse('2026-10-26T12:34:56Z')/1000);
+  assert.match(validity.entitlementExpiryDescription(started),/^Trial expires 2026-10-26T12:34:56Z \(derived from first activation\)/);
+  const capped={...started,valid_until:Date.parse('2026-10-26T00:00:00Z')/1000};
+  assert.equal(validity.entitlementDeadline(capped),capped.valid_until);
+  assert.match(validity.entitlementExpiryDescription(capped),/Trial expires 2026-10-26T00:00:00Z \(limited by grant expiry\)/);
+  assert.match(validity.entitlementExpiryDescription(capped),/Grant: Valid through 2026-10-25 UTC/);
+  assert.equal(validity.entitlementExpiryDescription({...trial,trial_duration_sec:3600,trial_expiration_basis:'from_first_use'}),'Trial: 1 hour from first use.');
+  assert.equal(validity.entitlementExpiryDescription({...trial,trial_expiration_basis:'from_issue',valid_until:capped.valid_until}),'Trial from issue. Valid through 2026-10-25 UTC.');
+  assert.equal(validity.entitlementExpiryDescription({...trial,is_trial:0}),'No expiry');
+});
+
+test("invalid trial clocks never claim perpetual access or round a precise stored deadline",async()=>{
+  const validity=await loadWorkflowModule('features/entitlements/validity.ts');
+  const trial={is_trial:1,valid_until:null,trial_expiration_basis:'from_first_activation',trial_duration_sec:0,trial_started_at:null};
+  assert.equal(validity.entitlementExpiryDescription(trial),'Trial expiry unavailable.');
+  assert.equal(validity.entitlementExpiryDescription({...trial,trial_duration_sec:86400,trial_started_at:Number.MAX_SAFE_INTEGER}),'Trial expiry unavailable.');
+  const custom=Date.parse('2026-10-26T12:34:57Z')/1000;
+  assert.match(validity.entitlementExpiryDescription({...trial,valid_until:custom}),/Grant: Expires 2026-10-26T12:34:57Z/);
+});

@@ -6,6 +6,7 @@ import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { ReadNotice } from "../../shared/ReadNotice";
 import { DeviceLimitForm } from "./DeviceLimitForm";
 import { EntitlementExpiry } from "./EntitlementExpiry";
+import { entitlementExpiryDescription } from "./validity";
 import { EntitlementRelationships } from "./EntitlementRelationships";
 import { generateLicenseFingerprint, isProtectedProject } from "./protectedCreate";
 import { DEVICE_LIMIT_RULE, entitlementFormErrors, policiesForProject, policyOptionLabel, type EntitlementEditState, type EntitlementFormState } from "./workflow";
@@ -93,7 +94,8 @@ export function EntitlementEditor({ form, item, guided = false, guidance, create
       </>}
       {!isCreate && <p className="wide muted">Project, feature, and fingerprint identify this entitlement and cannot be edited. {extendValidity ? "Update Valid through to extend access." : "Save changes updates the existing entitlement."}</p>}
       <label>Valid from<input aria-label="Valid from" name="valid_from" type="date" min="1970-01-01" value={form.valid_from} aria-invalid={!!errors.valid_from} aria-describedby={`entitlement-date-rules${errors.valid_from ? " entitlement-valid_from-error" : ""}`} onChange={(event) => change("valid_from", event.target.value)} /><span className="muted">{inheritsDates ? "Blank: use policy start." : "Blank: Starts immediately."}</span>{errorFor("valid_from")}</label>
-      <EntitlementExpiry value={form.valid_until} original={item?.valid_until} inherits={inheritsDates} error={errors.valid_until} onChange={value=>change("valid_until",value)} />
+      {item?.is_trial===1 && <p className="wide muted">{entitlementExpiryDescription(item)}</p>}
+      <EntitlementExpiry value={form.valid_until} original={item?.valid_until} inherits={inheritsDates} trial={item?.is_trial===1 || chosenPolicy?.type==="trial"} error={errors.valid_until} onChange={value=>change("valid_until",value)} />
       <p id="entitlement-date-rules" className="wide muted">Dates are UTC. Valid through includes the whole selected day; expiry is at the next UTC midnight. Untouched timestamps stay unchanged.</p>
       {item && <p className="wide muted">Stored start: {item.valid_from === null ? "Starts immediately" : formatUtcDate(item.valid_from)}.</p>}
       {!guided && <EntitlementRelationships required={protectedCreate} protectedProject={protectedCreate && isProtectedProject(form.project) ? form.project : ""} customerId={form.customer_id} licenseId={form.license_id} onCustomerChange={(value) => { change("customer_id", value); if (isCreate) change("license_id", ""); }} onLicenseChange={(value) => change("license_id", value)} />}

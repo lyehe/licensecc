@@ -47,9 +47,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   onDraftPolicyUsed?: () => void;
 }): React.ReactElement | null {
   const [entitlements, setEntitlements] = useState<EntitlementRecord[]>([]);
-  // The list on screen now, for callbacks that settle after the render that created them.
-  const entitlementsRef = useRef(entitlements);
-  entitlementsRef.current = entitlements;
+  const entitlementsRef=useRef(entitlements);entitlementsRef.current=entitlements;
   const [entitlementsCursor, setEntitlementsCursor] = useState<string | null>(null);
   const [filter, setFilter] = useState<EntitlementFilter>(scopedGrant ?? { project: "", feature: "", status: "" });
   const [form, setForm] = useState<EntitlementFormState>(emptyEntitlementForm);
@@ -64,7 +62,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const [policyRead, setPolicyRead] = useState<{ context: string; error: OperatorFeedback | null }>({ context: "", error: null });
   // A created entitlement opens as its focused row once the list shows it, but only in the list view
   // it was created from: a later filter the operator chose is never replaced by it.
-  const [reveal, setReveal] = useState<{ id: string; context: string; shown: EntitlementRecord[] } | null>(null);
+  const [reveal, setReveal] = useState<{ id: string; context: string; shown: EntitlementRecord[] | null } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState(emptyEntitlementEditForm);
   const [activePolicies, setActivePolicies] = useState<Policy[]>([]);
@@ -170,8 +168,8 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   useEffect(() => { if (active) void refreshPolicies(); }, [active, refreshPolicies]);
 
   useEffect(() => {
-    // It waits for a list read newer than the one on screen when the create settled.
-    if (reveal === null || (reveal.context === filterContextKey && (!ready || entitlements === reveal.shown))) return;
+    // Guided creation is already refreshed; advanced creation waits for its newer list read.
+    if (reveal === null || (reveal.context === filterContextKey && (!ready || entitlements===reveal.shown))) return;
     setReveal(null);
     if (reveal.context !== filterContextKey) return;
     if (!entitlements.some((item) => item.id === reveal.id)) {
@@ -217,12 +215,12 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       return next.size === previous.size ? previous : next;
     });
   }, [entitlements]);
-  const submitCreate = useEntitlementCreate({ form, guided: guided !== null, choice: grantChoice,
+  const {submitCreate,partialLicenseId} = useEntitlementCreate({ form, guided: guided !== null, choice: grantChoice,
     policyAvailable: activePoliciesFence.canLoadMore() && activePolicies.some(policy=>policy.id===form.policy_id),
     isListCurrent: ()=>isFilterGenerationCurrent(filterGeneration), setForm,
     onApplied: (item)=>{
       setCreateOpen(false);setForm(emptyEntitlementForm);
-      setReveal({id:item.id,context:filterContextKey,shown:entitlementsRef.current});
+      setReveal({id:item.id,context:filterContextKey,shown:guided?null:entitlementsRef.current});
       if(guided)setGranted({customerId:item.customer_id,project:item.project});
     }, refresh: async()=>await refreshCore(true),
   });
@@ -397,7 +395,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     {onExit && <button disabled={busy} onClick={() => requestLeave(onExit)}>Back to app</button>}
     {createOpen || editingId !== null ? <>
       {editingId !== null && <ReadNotice loading={!ready && listError === null} error={listError} hasData={visibleEntitlements.length > 0} label="entitlements" onRetry={() => void refresh()} />}
-      {createOpen || editingItem ? <EntitlementEditor key={createOpen ? "create" : editingId} guided={createOpen && guided!==null} createLicenseOnSave={grantChoice.createNew} lookupReady={grantChoice.ready} guidance={guided && <GuidedGrantFields form={form} onChange={patch=>setForm(previous=>({...previous,...patch}))} onAutoLicense={autoLicense} onChoice={setGrantChoice} />} form={createOpen ? form : editForm} item={createOpen ? undefined : editingItem} extendValidity={extendValidity} busy={busy} locked={operationLocked || (!createOpen && (!ready || editingItem?.status === "revoked"))} lockMessage={operationLocked ? undefined : editingItem?.status === "revoked" ? "Revocation is permanent. This entitlement can no longer be edited." : "Refresh entitlements successfully before changing or saving this draft."} policies={activePoliciesFence.isSettled() ? activePolicies : []} policiesReady={activePoliciesFence.canLoadMore()} policiesError={policyError} onRetryPolicies={() => void refreshPolicies()} onCreatePolicy={createOpen && onCreatePolicy !== undefined ? () => setPolicyDetour("leaving") : undefined} onChange={(patch) => createOpen ? setForm((previous) => ({ ...previous, ...patch })) : setEditForm((previous) => ({ ...previous, ...patch }))} onSubmit={createOpen ? submitCreate : (event) => submitPatch(event, editingItem!)} onCancel={closeEditor} /> : <div className="emptyState"><p>{ready ? "This entitlement is no longer in the current list. Return to the list to select a current record." : "Waiting for the current entitlement record."}</p><button type="button" disabled={busy} onClick={closeEditor}>Back to entitlements</button></div>}
+      {createOpen || editingItem ? <EntitlementEditor key={createOpen ? "create" : editingId} guided={createOpen && guided!==null} createLicenseOnSave={grantChoice.createNew} lookupReady={grantChoice.ready} guidance={guided && <><GuidedGrantFields form={form} onChange={patch=>setForm(previous=>({...previous,...patch}))} onAutoLicense={autoLicense} onChoice={setGrantChoice} />{partialLicenseId && <p className="wide" role="status">License created. Access not granted. Save access to finish.</p>}</>} form={createOpen ? form : editForm} item={createOpen ? undefined : editingItem} extendValidity={extendValidity} busy={busy} locked={operationLocked || (!createOpen && (!ready || editingItem?.status === "revoked"))} lockMessage={operationLocked ? undefined : editingItem?.status === "revoked" ? "Revocation is permanent. This entitlement can no longer be edited." : "Refresh entitlements successfully before changing or saving this draft."} policies={activePoliciesFence.isSettled() ? activePolicies : []} policiesReady={activePoliciesFence.canLoadMore()} policiesError={policyError} onRetryPolicies={() => void refreshPolicies()} onCreatePolicy={createOpen && onCreatePolicy !== undefined ? () => setPolicyDetour("leaving") : undefined} onChange={(patch) => createOpen ? setForm((previous) => ({ ...previous, ...patch })) : setEditForm((previous) => ({ ...previous, ...patch }))} onSubmit={createOpen ? submitCreate : (event) => submitPatch(event, editingItem!)} onCancel={closeEditor} /> : <div className="emptyState"><p>{ready ? "This entitlement is no longer in the current list. Return to the list to select a current record." : "Waiting for the current entitlement record."}</p><button type="button" disabled={busy} onClick={closeEditor}>Back to entitlements</button></div>}
     </> : <>
       <EntitlementList scoped={scopedGrant !== undefined} items={visibleEntitlements} filter={filter} onFilter={scopedGrant === undefined ? setFilter : pinnedFilter} loading={!ready && listError === null} error={listError} ready={ready} busy={busy} selectedIds={selectedIds} selectedCount={selectedCount} allSelected={allSelected} onSelect={toggleSelected} onSelectAll={toggleSelectAll} onClearSelection={() => setSelectedIds(new Set())} onCreate={() => { requestLeave(() => { cancelEdit(); setGuided(null); const initial={ ...emptyEntitlementForm, project:filter.project || emptyEntitlementForm.project, feature:filter.feature || emptyEntitlementForm.feature, customer_id:filter.customer_id || "" }; createBaseline.current=JSON.stringify(initial);setForm(initial);setCreateOpen(true); }); }} onEdit={beginEdit} onRetry={() => void refresh()} onExport={() => void downloadCsv(entitlementsUrl, "entitlements.csv", runMutation, setFeedback)} onLoadMore={visibleEntitlementsCursor === null ? null : () => void loadMore(entitlementsUrl, visibleEntitlementsCursor, visibleEntitlements, setEntitlements, setEntitlementsCursor, setFeedback, hasEntitlementListData, "entitlements_listed", entitlementsFence, (entitlement) => entitlement.id)} onTransition={transition} batch={batch} bulkConfirmBody={bulkConfirmBody} isCurrent={() => isFilterGenerationCurrent(filterGeneration)} onHistory={(item) => navigate({ tab: "events", filter: { entitlement_id: item.id } })} />
     </>}

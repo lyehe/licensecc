@@ -20,6 +20,42 @@ async function expectDocumentFitsViewport(page) {
   expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
 }
 
+for(const width of [1440,390])test(`trial validity explains derived deadlines in customer access, details, and the global list at ${width}px`,async({page},testInfo)=>{
+  await page.setViewportSize({width,height:1000});
+  const api=makeAdminApiFixture(),customer=api.seed.customer({id:'cust_trial_audit'});
+  const started=Math.floor(Date.now()/1000)-3600;
+  const end=new Date((started+86400)*1000).toISOString().replace('.000Z','Z');
+  const trial={customer_id:customer.id,project:'APP',license_id:'lic_trial',is_trial:1,license_mode:'trial',trial_expiration_basis:'from_first_activation',trial_duration_sec:86400,valid_until:null};
+  api.seed.entitlement({...trial,feature:'PENDING_TRIAL'});
+  api.seed.entitlement({...trial,feature:'STARTED_TRIAL',trial_started_at:started,trial_device_key_id:'sha256:'+'a'.repeat(64)});
+  api.seed.entitlement({customer_id:customer.id,project:'APP',feature:'PERPETUAL'});
+  await page.route('**/api/admin/**',api.route);
+  await page.goto(`/#/customers/${customer.id}?section=access&app=APP`);
+  const cards=page.locator('.customerAccessRecords article');
+  const pending=cards.filter({hasText:'PENDING_TRIAL'}),active=cards.filter({hasText:'STARTED_TRIAL'});
+  await expect(pending).toContainText('Trial: 1 day from first activation.');
+  await expect(pending).not.toContainText('No expiry');
+  await expect(active).toContainText(`Trial expires ${end}`);
+  await expect(cards.filter({hasText:'PERPETUAL'})).toContainText('No expiry');
+  await active.getByRole('button',{name:'Manage access',exact:true}).click();
+  const details=page.getByRole('region',{name:'Access details',exact:true});
+  await expect(details).toContainText(`Trial expires ${end}`);
+  await expect(details).toContainText('derived from first activation');
+  await expect(details).toContainText('Expires soon');
+  await expect(details).not.toContainText('No expiry');
+  await page.screenshot({path:testInfo.outputPath(`trial-details-${width}.png`),fullPage:true});
+  await details.getByRole('button',{name:'Edit',exact:true}).click();
+  const editor=page.getByRole('form',{name:'Edit entitlement',exact:true});
+  await expect(editor).toContainText(`Trial expires ${end}`);
+  await expect(editor).toContainText('No fixed grant expiry; trial limits still apply.');
+  await page.getByRole('button',{name:'Back to entitlements',exact:true}).click();
+  await page.goto('/#/entitlements');
+  const records=page.locator('[data-focus-row]').filter({hasText:'STARTED_TRIAL'});
+  await expect(records).toContainText(`Trial expires ${end}`);
+  await expect(records).not.toContainText('No expiry');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
 test("a feature that fails to render shows a local fallback and leaves the console usable", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);

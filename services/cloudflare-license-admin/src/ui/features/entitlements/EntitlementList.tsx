@@ -8,7 +8,7 @@ import type { EntitlementBatch } from "./useEntitlementBatch";
 import { focusTargetInRow, type ConfirmActionOutcome, useOperatorControls } from "../../shared/controls";
 import { hasActiveFilter } from "../../shared/filters";
 import { formatUtcDate } from "../../shared/format";
-import { expiryDescription } from "./expiry";
+import { entitlementDeadline, entitlementExpiryDescription } from "./validity";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { useMediaQuery } from "../../shared/useMediaQuery";
 import { focusWorkspaceTarget } from "../../shared/workspaceFocus";
@@ -43,8 +43,9 @@ interface ListProps {
 
 export function EntitlementValidity({ item }: { item: EntitlementRecord }): React.ReactElement {
   const now = Math.floor(Date.now() / 1000);
-  const validity = item.valid_until !== null && item.valid_until <= now ? "Expired" : item.valid_from !== null && item.valid_from > now ? "Not started" : item.valid_until !== null && item.valid_until <= now + 30 * 86400 ? "Expires soon" : null;
-  return <><span className={`status ${item.status}`}>{item.status === "disabled" ? "suspended" : item.status}</span>{validity ? <span className={`healthBadge health-${validity === "Expired" ? "expired" : validity === "Expires soon" ? "expiring" : "pending"}`}>{validity}</span> : null}<div className="muted">{expiryDescription(item.valid_until)}</div></>;
+  const deadline=entitlementDeadline(item);
+  const validity = deadline !== null && deadline <= now ? "Expired" : item.valid_from !== null && item.valid_from > now ? "Not started" : deadline !== null && deadline <= now + 30 * 86400 ? "Expires soon" : null;
+  return <><span className={`status ${item.status}`}>{item.status === "disabled" ? "suspended" : item.status}</span>{validity ? <span className={`healthBadge health-${validity === "Expired" ? "expired" : validity === "Expires soon" ? "expiring" : "pending"}`}>{validity}</span> : null}<div className="muted">{entitlementExpiryDescription(item)}</div></>;
 }
 
 function EntitlementDetails({ item }: { item: EntitlementRecord }): React.ReactElement {

@@ -59,6 +59,9 @@ existing confirmed lifecycle actions without selecting it from a second list.
 Calendar expiry uses **Valid through**: the whole chosen UTC day is included,
 and the form previews the exact next-midnight deadline. Existing custom deadlines
 retain their exact seconds until explicitly changed.
+Trial grants also show their frozen duration and start basis. Once started, their
+derived expiry is shown alongside any earlier grant deadline; a blank grant date
+does not remove trial limits.
 
 The whole path runs in the console; no SQL is needed.
 
@@ -71,6 +74,9 @@ When no license exists, Save access creates it before saving the grant. If only
 the license succeeds, Access not granted explains the remaining step. Reconcile
 unknown outcomes using the retained request, then reuse the same license and draft.
 Cancel never deletes a license that was already created.
+Creation finishes only after an exact read confirms the saved grant. If that read
+fails or identifies another record, **Refresh status** retries only the read while
+the draft remains protected. It never resends a known successful creation.
 
 For advanced manual record setup, the existing path remains:
 
