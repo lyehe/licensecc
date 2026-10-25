@@ -477,14 +477,15 @@ The email password-completion screen says **Save password** because its
 opaque token can represent registration or reset. `signed_in` confirms the
 session before opening Apps; if that check fails after a saved password, the
 screen offers **Confirm sign-in**, which retries only the session GET.
-`password_updated` instead confirms the save and directs the customer to sign
-in. It never implies that resetting a password created a session.
+`password_updated` instead confirms the save without a session and directs the
+customer to sign in. Registration and reset can return either outcome,
+depending on whether a session could be issued.
 
 Account supports changing a password with the current password, or setting or
 resetting one within ten minutes of a Google, GitHub, or email-code sign-in.
 Successful changes and emailed resets revoke old browser sessions and email
-codes, invalidate old reset links, and issue a fresh session. Concurrent link
-redemption permits one write.
+codes and invalidate old reset links. Concurrent link redemption permits one
+write.
 
 The registration API accepts `{ "email": "..." }` and returns 202; clients
 must follow the email link and POST `{ "token": "...", "password": "..." }` to

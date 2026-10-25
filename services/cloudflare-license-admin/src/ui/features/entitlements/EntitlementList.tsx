@@ -36,7 +36,7 @@ interface ListProps {
   onLoadMore: (() => void) | null;
   onTransition: (item: EntitlementRecord, action: EntitlementAction, key: string) => Promise<ConfirmActionOutcome>;
   batch: EntitlementBatch;
-  bulkConfirmBody: (action: EntitlementAction) => string;
+  bulkConfirmBody: (action: "disable" | "revoke") => string;
   isCurrent: () => boolean;
   onHistory: (item: EntitlementRecord) => void;
 }

@@ -200,6 +200,12 @@ export function disableEntitlementConfirm(item: { project: string; feature: stri
   return `Suspend the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). ${entitlementLifecycleConsequence("disable")}`;
 }
 
+export function bulkEntitlementConfirm(action: "disable" | "revoke", count: number): string {
+  const noun = `${count} selected entitlement${count === 1 ? "" : "s"}`;
+  if (action === "revoke") return `Revoke ${noun}. Revocation is TERMINAL and cannot be undone. ${entitlementLifecycleConsequence("revoke")} Access that is already revoked is skipped.`;
+  return `Suspend ${noun}. ${entitlementLifecycleConsequence("disable")}`;
+}
+
 /** The same consequences apply to single and bulk grant lifecycle actions. */
 export function entitlementLifecycleConsequence(action: "disable" | "revoke"): string {
   const effect = action === "disable"

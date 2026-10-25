@@ -33,7 +33,7 @@ import {
   normalizeEntitlementPatch,
   patchPath,
   transitionPath,
-  entitlementLifecycleConsequence,
+  bulkEntitlementConfirm,
 } from "./workflow";
 
 export function Entitlements({ active, navigationIntent, onNavigationHandled, scopedGrant, onExit, onCreatePolicy, draftPolicy = null, onDraftPolicyUsed }: {
@@ -372,11 +372,8 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     setSelectedIds(allSelected ? new Set() : new Set(visibleEntitlements.map((item) => item.id)));
   }
 
-  function bulkConfirmBody(action: EntitlementAction): string {
-    const count = selectedVisibleRows.length;
-    const noun = `${count} selected entitlement${count === 1 ? "" : "s"}`;
-    if (action === "revoke") return `Revoke ${noun}. Revocation is TERMINAL and cannot be undone. ${entitlementLifecycleConsequence("revoke")} Access that is already revoked is skipped.`;
-    return `Suspend ${noun}. ${entitlementLifecycleConsequence("disable")}`;
+  function bulkConfirmBody(action: "disable" | "revoke"): string {
+    return bulkEntitlementConfirm(action, selectedVisibleRows.length);
   }
 
   const batch = useEntitlementBatch({
