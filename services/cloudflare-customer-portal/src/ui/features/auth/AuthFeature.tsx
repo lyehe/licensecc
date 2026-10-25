@@ -24,7 +24,7 @@ export type AuthPhase = "loading" | "request" | "verify" | "authed" | "error";
 const PASSWORD_HEADINGS: Record<PasswordMode, string> = {
   login: "Sign in",
   register: "Create account",
-  reset: "Reset password",
+  reset: "Set or reset password",
 };
 
 interface AuthOptions {

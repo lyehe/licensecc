@@ -1,6 +1,8 @@
 import { decodeBase64url } from "@licensecc/licensing-domain/lease/device_protocol";
 import { envelope } from "../support.js";
 import type { Env, SessionRow } from "../env.js";
+import type { BindingRow } from "../../shared/bindings.js";
+import { matchesDeviceSearch } from "../../shared/deviceSearch.js";
 
 export async function listBindings(request:Request,env:Env,session:SessionRow,reqId:string):Promise<Response> {
   const respond=(code:string,status:number,data?:unknown)=>envelope(reqId,code,data,status,{"cache-control":"no-store"});
@@ -8,7 +10,10 @@ export async function listBindings(request:Request,env:Env,session:SessionRow,re
   if(!expected)return respond("invalid_request",400);
   if(expected!==encodeURIComponent(session.customer_id))return respond("account_changed",409);
   const url=new URL(request.url),cursor=url.searchParams.get("cursor")??"",binding=url.searchParams.get("binding_id");
-  if([...url.searchParams.keys()].some(key=>!["cursor","binding_id"].includes(key)) || [...url.searchParams.keys()].length>1)return respond("invalid_request",400);
+  const keys=[...url.searchParams.keys()],query=(url.searchParams.get("q")??"").trim(),project=url.searchParams.get("project");
+  if(keys.some(key=>!["cursor","binding_id","q","project"].includes(key)) || new Set(keys).size!==keys.length
+      || (binding!==null && keys.length!==1) || [...query].length>128
+      || (project!==null && !/^[A-Za-z0-9_.:-]{1,127}(?![\s\S])/.test(project)))return respond("invalid_request",400);
   try {if(url.searchParams.has("cursor") && decodeBase64url(cursor,16).length!==16)return respond("invalid_request",400);}
   catch{return respond("invalid_request",400);}
   try {if(binding!==null && decodeBase64url(binding,16).length!==16)return respond("invalid_request",400);}
@@ -22,9 +27,10 @@ export async function listBindings(request:Request,env:Env,session:SessionRow,re
       JOIN entitlements e ON e.project=b.project AND e.feature=b.feature AND e.license_fingerprint=b.license_fingerprint
       JOIN customers c ON c.id=d.customer_id AND c.id=e.customer_id
       WHERE c.id=? AND c.status='active' AND b.id>?
-      ${binding===null?"":"AND b.id=?"} ORDER BY b.id LIMIT 101`).bind(session.customer_id,cursor,...(binding===null?[]:[binding])).all<Record<string,unknown>>();
-    const more=rows.results.length>100,items=rows.results.slice(0,100);
-    return respond("device_bindings",200,{customer_id:session.customer_id,items,has_more:more,next_cursor:more?items.at(-1)!.binding_id:null});
+      ${binding===null?"":"AND b.id=?"} ${project===null?"":"AND b.project=?"} ORDER BY b.id LIMIT 101`).bind(session.customer_id,cursor,...(binding===null?[]:[binding]),...(project===null?[]:[project])).all<BindingRow>();
+    const more=rows.results.length>100,candidates=rows.results.slice(0,100);
+    const items=query?candidates.filter(row=>matchesDeviceSearch([row.label||"Unnamed device",row.binding_id],row.project,query,project)):candidates;
+    return respond("device_bindings",200,{customer_id:session.customer_id,items,has_more:more,next_cursor:more?candidates.at(-1)!.binding_id:null});
   } catch{return respond("temporarily_unavailable",503);}
 }
 

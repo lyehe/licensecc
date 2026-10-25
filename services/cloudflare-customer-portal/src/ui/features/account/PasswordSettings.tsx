@@ -42,7 +42,7 @@ export function PasswordSettings(): React.ReactElement {
       <p>{settings.email || "No verified email available"}</p>
       {settings.has_password && !settings.email_verified && (
         settings.recovery_available && providers?.email !== false
-          ? <p>Use 'Forgot your password?' once to verify this email.</p>
+          ? <p>Use 'Set or reset password' once to verify this email.</p>
           : <p>Email not verified. Password recovery by email is unavailable.</p>
       )}
       {!settings.has_password && !settings.can_reset ? <p><RecoveryHint tail="to set a password." /></p> : <details className="passwordEditor"><summary>{settings.has_password ? "Change password" : "Set password"}</summary><form className="passwordSettings" onSubmit={(event) => void submit(event)}>

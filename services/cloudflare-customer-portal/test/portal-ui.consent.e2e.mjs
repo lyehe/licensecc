@@ -22,6 +22,110 @@ async function approve(page){
   await page.getByRole("button",{name:"Approve",exact:true}).click();
 }
 
+async function capacityRecovery(page, { lost = false, expires = 300, recheckFailure = false, changeCode = false, paged = false } = {}) {
+  const now = Math.floor(Date.now()/1000);
+  const ids=paged?Array.from({length:102},(_,i)=>{const bytes=Buffer.alloc(16);bytes.writeUInt32BE(i+1,12);return bytes.toString('base64url');}).sort():[Buffer.alloc(16,3).toString('base64url')];
+  const id=ids.at(-1);
+  const state = { retired: false, writes: [], checks: 0 };
+  state.auth=await fixture(page, { inspect: route => {
+    state.checks++;
+    if (recheckFailure && state.checks === 2) return route.fulfill({status:503,json:{ok:false,code:'temporarily_unavailable'}});
+    return route.fulfill({json:envelope('authorization_inspected',inspection({expires_at:now+expires,
+      comparison_code:changeCode && state.checks>1?'3333-4444-5555':'0000-1111-2222',
+      entitlements:[{id:'license-pro',feature:'PRO',valid_until:null,device_limit:1,devices_in_use:state.retired?0:1,slot_free_at:null,device_connected:false}]}))});
+  }});
+  await page.route('**/api/portal/device-bindings**', route => {
+    const request = route.request();
+    if(request.headers()['x-expected-customer-id']!==state.auth.customer)return route.fulfill({status:409,json:{ok:false,code:'account_changed'}});
+    if(request.method()==='POST') {
+      state.writes.push({key:request.headers()['idempotency-key'],body:request.postDataJSON()}); state.retired=true;
+      if(lost && state.writes.length===1)return route.abort();
+      return route.fulfill({json:envelope('binding_retired',{binding_id:id,state:'retiring',effective_release_at:now,revision:1,generation:2})});
+    }
+    const params=new URL(request.url()).searchParams,cursor=params.get('cursor')??'',q=(params.get('q')??'').toLowerCase();
+    const candidates=ids.filter(value=>value>cursor),scanned=candidates.slice(0,100),more=candidates.length>100;
+    const items=scanned.map(value=>({binding_id:value,project:'COLMAP',feature:'PRO',revision:state.retired && value===id?1:0,hold_until:now,state:state.retired && value===id?'released':'active',label:value===id?'Old workstation':`Other ${value}`,last_proof_at:now,created_at:now-100,server_time:now})).filter(row=>row.label.toLowerCase().includes(q));
+    return route.fulfill({json:envelope('device_bindings',{customer_id:'customer-a',items,has_more:more,next_cursor:more?scanned.at(-1):null})});
+  });
+  return state;
+}
+
+for(const width of [390,1440])test(`consent: capacity recovery stays in the attempt and returns to approval at ${width}px`,async({page},testInfo)=>{
+  await page.setViewportSize({width,height:1000});
+  const state=await capacityRecovery(page,{paged:true});
+  await captureAppHandoffs(page,'http://127.0.0.1:44888/**');
+  await page.goto(entry);
+  await page.getByRole('checkbox',{name:'This code matches my app'}).check();
+  const manage=page.getByRole('button',{name:'Manage devices',exact:true});
+  await manage.focus();await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading',{name:'Devices for COLMAP',exact:true})).toBeFocused();
+  await expect(page.getByText('Connections for this app may use different licenses.',{exact:false})).toBeVisible();
+  await page.getByRole('searchbox',{name:'Find a device'}).fill('Old workstation');
+  await expect(page.getByRole('button',{name:'Disconnect',exact:true})).toHaveCount(1);
+  await page.screenshot({path:testInfo.outputPath(`capacity-recovery-${width}.png`),fullPage:true});
+  await page.getByRole('button',{name:'Disconnect',exact:true}).focus();await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog')).toContainText('Old workstation');
+  await page.getByRole('button',{name:'Disconnect device',exact:true}).focus();await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await page.getByRole('button',{name:'Return and check again'}).focus();await page.keyboard.press('Enter');
+  await expect(page.getByRole('checkbox',{name:'This code matches my app'})).toBeChecked();
+  await expect(page.getByRole('button',{name:'Approve',exact:true})).toBeEnabled();
+  await expect(page.getByRole('button',{name:'Approve',exact:true})).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('link',{name:'Open app'})).toBeVisible();
+  expect(state.writes).toHaveLength(1);expect(state.checks).toBe(2);
+  expect(page.url()).not.toContain(handle);
+  expect(await page.locator('body').innerHTML()).not.toContain(handle);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+});
+
+test('consent: saved disconnect remains recoverable after the attempt expires',async({page})=>{
+  await page.clock.install();
+  const state=await capacityRecovery(page,{lost:true,expires:60});
+  await page.goto(entry);await page.getByRole('button',{name:'Manage devices',exact:true}).click();
+  await page.getByRole('button',{name:'Disconnect',exact:true}).click();
+  await page.getByRole('button',{name:'Disconnect device',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('result is not confirmed');
+  await page.clock.fastForward(61000);
+  await expect(page.getByText('This connection request has ended.',{exact:false})).toBeVisible();
+  await page.getByRole('button',{name:'Retry disconnect',exact:true}).click();
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  expect(state.writes).toHaveLength(2);expect(state.writes[1]).toEqual(state.writes[0]);
+  await page.getByRole('button',{name:'Return to connection',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Connection request expired'})).toBeVisible();
+  expect(await page.evaluate(()=>sessionStorage.getItem('licensecc.retirement.v1:customer-a'))).toBeNull();
+});
+
+test('consent: a failed recovery re-inspection cannot enable approval from stale capacity',async({page})=>{
+  await capacityRecovery(page,{recheckFailure:true});
+  await page.goto(entry);await page.getByRole('checkbox',{name:'This code matches my app'}).check();
+  await page.getByRole('button',{name:'Manage devices',exact:true}).click();
+  await page.getByRole('button',{name:'Return and check again'}).click();
+  await expect(page.getByRole('alert')).toContainText("couldn't load this request");
+  await expect(page.getByRole('button',{name:'Approve',exact:true})).toBeDisabled();
+});
+
+test('consent: recovery rejects a changed comparison code',async({page})=>{
+  await capacityRecovery(page,{changeCode:true});
+  await page.goto(entry);await page.getByRole('checkbox',{name:'This code matches my app'}).check();
+  await page.getByRole('button',{name:'Manage devices',exact:true}).click();
+  await page.getByRole('button',{name:'Return and check again'}).click();
+  await expect(page.getByRole('heading',{name:'Unable to connect',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Approve',exact:true})).toHaveCount(0);
+});
+
+test('consent: an account change during device management blocks disconnect and approval',async({page})=>{
+  const state=await capacityRecovery(page);
+  await page.goto(entry);await page.getByRole('button',{name:'Manage devices',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Disconnect',exact:true})).toBeEnabled();
+  state.auth.customer='customer-b';
+  await page.getByRole('button',{name:'Refresh devices'}).click();
+  await expect(page.getByRole('button',{name:'Disconnect',exact:true})).toBeDisabled();
+  await page.getByRole('button',{name:'Return and check again'}).click();
+  await expect(page.getByRole('heading',{name:'Unable to connect'})).toBeVisible();
+  expect(state.writes).toEqual([]);await expect(page.getByRole('button',{name:'Approve',exact:true})).toHaveCount(0);
+});
+
 // Both consent capacity messages must meet the same contrast rule the
 // primary-button hover check does, computed the same way -- from the element's own computed color
 // against its card's actual background, not by inspection.

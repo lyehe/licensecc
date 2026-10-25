@@ -12,7 +12,7 @@ export function validRetirement(data:unknown,body:Record<string,unknown>):data i
     && data.binding_id===body.binding_id && data.state==="retiring" && data.revision===(body.expected_revision as number)+1
     && uint(data.generation) && data.generation>=2 && uint(data.effective_release_at);
 }
-export function validBindingPage(data:unknown,customer:string,cursor:string):data is BindingPage {
+export function validBindingPage(data:unknown,customer:string,cursor:string,query=""):data is BindingPage {
   if(!exact(data,["customer_id","items","has_more","next_cursor"]) || data.customer_id!==customer || !Array.isArray(data.items)
       || data.items.length>100 || typeof data.has_more!=="boolean" || data.has_more!==(data.next_cursor!==null))return false;
   let previous=cursor;
@@ -24,5 +24,7 @@ export function validBindingPage(data:unknown,customer:string,cursor:string):dat
       || !["active","retiring","released"].includes(row.state as string))return false;
     previous=row.binding_id;
   }
-  return !data.has_more || (data.items.length===100 && data.next_cursor===previous);
+  return !data.has_more || (query.trim()!==""
+    ? canonicalId(data.next_cursor,16) && data.next_cursor>cursor && data.next_cursor>=previous
+    : data.items.length===100 && data.next_cursor===previous);
 }

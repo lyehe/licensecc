@@ -5,6 +5,8 @@ import { useSingleFlight } from "../../shared/useSingleFlight";
 import { formatTimestamp } from "../../portalWorkflow";
 import { clearEnrollment, saveEnrollment, type EnrollmentEntry, type PendingEnrollment, type PendingMutation } from "./pending";
 import { LicenseChoice } from "./LicenseChoice";
+import { ConsentDevices } from "./ConsentDevices";
+import { restoreRetirement } from "../devices/pendingRetirement";
 
 export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessionExpired,feedback}: {
   entry: Exclude<EnrollmentEntry,null>; customerId:string; email:string|null; onDone():void; onSignOut():Promise<void>; onSessionExpired():Promise<boolean>; feedback?:React.ReactNode;
@@ -15,6 +17,9 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
   const [pageCursor,setPageCursor]=useState<string|undefined>();
   const [previousCursors,setPreviousCursors]=useState<Array<string|undefined>>([]);
   const [comparisonConfirmed,setComparisonConfirmed]=useState(false);
+  const [inspected,setInspected]=useState(false);
+  const [managing,setManaging]=useState(false),[recoveryOpened,setRecoveryOpened]=useState(false);
+  const [retirementPending,setRetirementPending]=useState(()=>restoreRetirement(customerId)!==null);
   const [phase,setPhase]=useState<"loading"|"ready"|"approved"|"cancelled"|"connected"|"expired"|"blocked">(entry==="invalid"?"expired":entry==="storage_unavailable"?"blocked":"loading");
   const [message,setMessage]=useState<React.ReactNode>(entry==="storage_unavailable"?"Browser session storage is unavailable. Enable it, then restart from your app.":"");
   const [callback,setCallback]=useState<string|null>(null);
@@ -30,7 +35,7 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
   const [inFlight,setInFlight]=useState<"approve"|"deny"|"check"|null>(null);
 
   function expire():void {
-    clearEnrollment();record.current=null;setCallback(null);setDeadline(null);setPhase("expired");setMessage("");
+    clearEnrollment();record.current=null;setCallback(null);setDeadline(null);setPhase("expired");setMessage("");setInspected(false);setComparisonConfirmed(false);
   }
 
   function failure(code:string,retryAfter?:number):void {
@@ -46,6 +51,7 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
   }
 
   async function inspect(cursor?:string,history:Array<string|undefined>=[]):Promise<void> {
+    setInspected(false);
     const current=record.current;if(!current)return;
     if(current.customerId && current.customerId!==customerId){clearEnrollment();setPhase("blocked");setMessage("Your account changed. Start a new connection from your app.");return;}
     current.customerId=customerId;
@@ -55,20 +61,20 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
     if(!result.ok){setPhase("ready");failure(result.code,result.retryAfter);return;}
     if(result.data.next_page_cursor!==null && (result.data.next_page_cursor===cursor || history.includes(result.data.next_page_cursor))){setPhase("ready");setMessage("We couldn't load the next page safely. Go back and refresh the list.");return;}
     if((details && details.comparison_code!==result.data.comparison_code) || (current.mutation?.operation==="approve" && current.mutation.comparisonCode!==result.data.comparison_code)){
-      clearEnrollment();setPhase("blocked");setMessage("This connection request changed. Restart from your app.");return;
+      clearEnrollment();setComparisonConfirmed(false);setPhase("blocked");setMessage("This connection request changed. Restart from your app.");return;
     }
     setDetails(result.data);setMessage("");setPageCursor(cursor);setPreviousCursors(history);
     if(result.data.status==="consumed" || result.data.status==="denied") {
       clearEnrollment();setDeadline(null);setPhase(result.data.status==="consumed"?"connected":"cancelled");return;
     }
     if(Date.now()>=result.data.expires_at*1000){expire();return;}
-    setDeadline(result.data.expires_at*1000);
+    setDeadline(previous=>previous===null?result.data.expires_at*1000:Math.min(previous,result.data.expires_at*1000));
     if(result.data.status==="approved" && current.mutation?.operation!=="approve") {
       setPhase("blocked");setMessage("This request was already approved. Return to your app to finish connecting.");return;
     }
     if(!current.mutation)setSelected(selected && result.data.entitlements.some(item=>item.id===selected)?selected
       :cursor===undefined && history.length===0 && result.data.next_page_cursor===null && result.data.entitlements.length===1?result.data.entitlements[0]!.id:"");
-    setPhase("ready");
+    setInspected(true);setPhase("ready");
   }
 
   async function checkAgain():Promise<void> {
@@ -86,7 +92,12 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
     if(record.current)void runOnce(inspect);
     return()=>{mounted.current=false;};
   },[]);
-  useEffect(()=>{heading.current?.focus();},[phase]);
+  useEffect(()=>{if(!managing)heading.current?.focus();},[phase,managing]);
+  useEffect(()=>{
+    if(record.current?.customerId && record.current.customerId!==customerId){
+      clearEnrollment();setInspected(false);setComparisonConfirmed(false);setPhase("blocked");setMessage("Your account changed. Start a new connection from your app.");
+    }
+  },[customerId]);
   useEffect(()=>{
     if(deadline===null && !retryAt)return;
     const tick=():void=>{
@@ -103,7 +114,8 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
     await runOnce(()=>track(record.current?.mutation?.operation??operation,async()=>{
       const current=record.current;if(!current || !details)return;
       if(deadline!==null && Date.now()>=deadline){expire();return;}
-      if(!current.mutation && operation==="approve" && (!comparisonConfirmed || !selected))return;
+      if(retirementPending || managing)return;
+      if(!current.mutation && operation==="approve" && (!inspected || !comparisonConfirmed || !selected))return;
       const mutation:PendingMutation=current.mutation??{operation,key:crypto.randomUUID(),revision:details.revision,...(operation==="approve"?{entitlementId:selected,comparisonCode:details.comparison_code}:{})};
       current.mutation=mutation;
       if(!saveEnrollment(current)){setPhase("blocked");setMessage("Unable to save this request safely. Restart from your app.");return;}
@@ -138,11 +150,12 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
     setRecheckArmed(false);
   },[recheckArmed,full,busy]);
 
-  const title=phase==="expired"?"Connection request expired":phase==="cancelled"?"Connection cancelled":phase==="connected"?"Device connected":phase==="approved"?"Returning to your app…":phase==="blocked"?"Unable to connect":"Connect this device";
+  const title=managing?"Manage devices":phase==="expired"?"Connection request expired":phase==="cancelled"?"Connection cancelled":phase==="connected"?"Device connected":phase==="approved"?"Returning to your app…":phase==="blocked"?"Unable to connect":"Connect this device";
   return <main className="authPane consentPane"><div className="authBrand brand"><span aria-hidden="true">L</span>Licensecc</div>
     <section className="authCard consentCard" aria-busy={busy}>
       <h1 ref={heading} tabIndex={-1}>{title}</h1>
       {feedback}
+      <div hidden={managing}>
       {phase==="loading"?<p role="status">Checking this connection request…</p>:<>
         {details && !terminal && <div className="consentIdentity"><strong>{details.app.name}</strong><span>{details.device.label||"Unnamed device"}</span></div>}
         {phase==="ready" && details && !mutation && <>
@@ -158,6 +171,7 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
             {chosenEntitlement.slot_free_at!==null && chosenEntitlement.slot_free_at>=details.expires_at && <p>This request expires before then. Start connecting again from your app after that time.</p>}
             <button disabled={busy||waiting} onClick={()=>void checkAgain()}>{inFlight==="check"?"Checking…":"Check again"}</button>
           </div>}
+          {(full || retirementPending) && <button disabled={busy||waiting} onClick={()=>{setRecoveryOpened(true);setManaging(true);}}>Manage devices</button>}
           {(previousCursors.length>0 || details.has_more) && <nav className="consentPages" aria-label="License pages">
             <button disabled={busy||waiting||previousCursors.length===0} onClick={()=>void runOnce(()=>inspect(previousCursors.at(-1),previousCursors.slice(0,-1)))}>Previous</button>
             <span role="status">Page {previousCursors.length+1}</span><button disabled={busy||waiting||!details.next_page_cursor} onClick={()=>void runOnce(()=>inspect(details.next_page_cursor??undefined,[...previousCursors,pageCursor]))}>Next</button>
@@ -170,13 +184,15 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
         {phase==="cancelled" && <p>This request cannot activate a device.</p>}
         {phase==="connected" && <p>You can close this page and continue in your app.</p>}
         {phase==="approved" && callback && <><p>Return to your app to finish. If nothing happens, try again below.</p><a className="button" href={callback}>Open app</a></>}
-        {terminal?<button onClick={onDone}>Go to portal</button>:phase==="ready"?<div className="actions consentActions">
+        {terminal?<button disabled={busy} onClick={onDone}>Go to portal</button>:phase==="ready"?<div className="actions consentActions">
           {!details?<button disabled={busy||waiting} onClick={()=>void runOnce(inspect)}>Retry</button>:mutation?<button className="primary" disabled={busy||waiting} onClick={()=>void act(mutation.operation)}>{inFlight==="approve"?"Connecting…":inFlight==="deny"?"Cancelling…":busy?"Checking…":mutation.operation==="approve"?"Retry approval":"Retry cancellation"}</button>:<>
-            <button disabled={busy||waiting} onClick={()=>void act("deny")}>{inFlight==="deny"?"Cancelling…":"Cancel"}</button><button ref={approveButton} className="primary" disabled={busy||waiting||!selected||!comparisonConfirmed||full} onClick={()=>void act("approve")}>{inFlight==="approve"?"Connecting…":"Approve"}</button>
+            <button disabled={busy||waiting||retirementPending} onClick={()=>void act("deny")}>{inFlight==="deny"?"Cancelling…":"Cancel"}</button><button ref={approveButton} className="primary" disabled={busy||waiting||retirementPending||!inspected||!selected||!comparisonConfirmed||full} onClick={()=>void act("approve")}>{inFlight==="approve"?"Connecting…":"Approve"}</button>
           </>}
         </div>:null}
       </>}
+      </div>
+      {recoveryOpened && details && <ConsentDevices customer={customerId} project={details.app.project} active={managing} busy={busy} pending={retirementPending} expired={terminal} runOnce={runOnce} onPendingChange={setRetirementPending} onSessionExpired={onSessionExpired} onReturn={()=>{setManaging(false);if(!terminal)void checkAgain();}} />}
     </section>
-    {customerId && <div className="consentAccount">{email!==null && <p className="consentEmail">Connecting to {email}</p>}<details><summary>Account details</summary><p>{customerId}</p></details><button className="consentSignOut" disabled={busy} onClick={()=>void runOnce(onSignOut)}>Sign out</button><p>To use another account, sign out and restart Connect in your app.</p></div>}
+    {customerId && <div className="consentAccount">{email!==null && <p className="consentEmail">Connecting to {email}</p>}<details><summary>Account details</summary><p>{customerId}</p></details><button className="consentSignOut" disabled={busy||retirementPending} onClick={()=>void runOnce(onSignOut)}>Sign out</button><p>To use another account, sign out and restart Connect in your app.</p></div>}
   </main>;
 }

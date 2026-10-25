@@ -14,7 +14,21 @@ and connected-device retirement.
 
 ## License access in the portal
 
+An administrator can create an account whose customer chooses a password later.
+Choose **Set or reset password** on the sign-in screen and enter the login email;
+the verification link lets both first-time and returning customers choose a password.
+The configured portal URL with "/?password_action=reset" opens this form directly.
+Account creation does not send an invitation: the operator shares setup instructions.
+Email-disabled deployments use an initial password supplied securely by the operator.
+
 Every grant is protected: app details direct customers to Connect in their application. The portal never offers a device-key field or a `.lic` download; offline `.lic` files are issued by the operator with `lccgen`.
+
+If a license is full, choose **Manage devices** on the connection screen to review
+connections for that app and confirm a disconnect. **Return and check again**
+re-inspects the same connection request without restarting its deadline. A saved
+disconnect must be resolved before approval. Disconnecting stops renewal but
+preserves outstanding lease holds: if the slot becomes available after this
+request expires, restart Connect from the app after the displayed release time.
 
 The status label preserves disabled/revoked state and marks past or future validity windows as Expired or Not started. Enabled describes the listed dates only: the backend still checks device, trial and account eligibility. The browser clock updates these labels without server polling; it does not authorize access.
 
@@ -45,10 +59,27 @@ conflicts inspect the exact binding before a separate explicit clear action.
 header. It returns at most 100 owned bindings in binding-ID order, with
 `next_cursor`/`has_more`; supply `cursor` for the next page. This is live keyset
 pagination, not a snapshot. Alternatively supply `binding_id` to inspect exactly
-one owned connection (zero or one result); the two query fields are mutually
-exclusive. Every read rechecks ownership and uses primary D1 session semantics
+one owned connection (zero or one result); this exact lookup cannot be combined
+with other query fields. Every read rechecks ownership and uses primary D1 session semantics
 when available. Database time determines logical release at the hold boundary.
 No private keys, raw proofs or license fingerprints are included.
+
+Optional **q** searches device labels (including the Unnamed device fallback),
+connection IDs, and app IDs by a literal case-insensitive substring using JavaScript
+lowercase semantics. It is trimmed and limited to 128 Unicode code points; percent,
+underscore, quotes, and backslashes have no special meaning. Empty q behaves as omitted.
+Optional **project** is an exact app ID applied before pagination. Both work with cursor;
+keep them unchanged when continuing, and restart when the query or app changes.
+Unknown or duplicate parameters are rejected, and binding_id excludes all other parameters.
+
+Search reads inspect at most 100 owned candidate connections per request. A page
+can have no matches and still have **has_more**: its **next_cursor** advances past
+the scanned candidates. The Devices and connection-recovery screens automatically
+continue sparse search pages, with at most five requests per interaction. If more
+remain, **Search incomplete** and **Continue search** make the remaining work explicit.
+No matching devices is final only when pagination ends. Existing unfiltered clients
+retain the original response shape, order, and page-size behavior. Roll out the
+extended Worker before the new UI; revert the UI first when rolling back.
 
 ## Device consent API
 

@@ -12,6 +12,37 @@ function makeEnvelope(code, data) {
 }
 makeEnvelope.nextRequestId = 0;
 
+test("an admin-created account can set its first password through the direct setup entry", async ({ page }) => {
+  let signedIn=false;
+  await page.route('**/api/portal/**',route=>signedIn?route.fulfill({json:makeEnvelope('ok',route.request().url().endsWith('/me')?{customer_id:'cust_onboarded'}:{items:[]})}):route.fulfill({status:401,json:{ok:false,code:'unauthorized'}}));
+  await page.route('**/portal/v1/auth/providers',route=>route.fulfill({json:makeEnvelope('auth_providers',{password:true,email:true,google:false,github:false})}));
+  await page.route('**/portal/v1/auth/password/reset',route=>{
+    expect(route.request().postDataJSON()).toEqual({email:'onboarded@example.test'});
+    return route.fulfill({status:202,json:makeEnvelope('verification_requested')});
+  });
+  await page.route('**/portal/v1/auth/password/complete',route=>{
+    expect(route.request().postDataJSON()).toEqual({token:'s'.repeat(43),password:'My new testing passphrase 123!'});
+    return route.fulfill({json:makeEnvelope('password_updated')});
+  });
+  await page.route('**/portal/v1/auth/password/login',route=>{signedIn=true;return route.fulfill({json:makeEnvelope('signed_in',{customer_id:'cust_onboarded'})});});
+  await page.goto('/?password_action=reset');
+  await expect(page.getByRole('heading',{name:'Set or reset password',exact:true})).toBeVisible();
+  expect(page.url()).not.toContain('password_action');
+  await page.getByLabel('Email',{exact:true}).fill('onboarded@example.test');
+  await page.getByRole('button',{name:'Send password link'}).click();
+  await expect(page.getByRole('alert')).toContainText('If this address is eligible');
+  await page.goto('/password-action#token='+'s'.repeat(43));
+  await page.getByLabel('New password',{exact:true}).fill('My new testing passphrase 123!');
+  await page.getByLabel('Confirm password',{exact:true}).fill('My new testing passphrase 123!');
+  await page.getByRole('button',{name:'Save password and sign in'}).click();
+  await expect(page.getByText('Password saved. Sign in with your new password.')).toBeVisible();
+  await page.getByRole('link',{name:'Back to sign in'}).click();
+  await page.getByLabel('Email',{exact:true}).fill('onboarded@example.test');
+  await page.getByLabel('Password',{exact:true}).fill('My new testing passphrase 123!');
+  await page.getByRole('button',{name:'Sign in',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Apps',exact:true})).toBeVisible();
+});
+
 test("registration verifies email before choosing a password and opens an empty account", async ({ page }) => {
   let authed = false;
   const submissions = [];
@@ -73,15 +104,15 @@ test("password login errors clear the secret and explain recovery", async ({ pag
   // Reuses the existing error colour token rather than a new literal.
   await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(219, 146, 146)");
   await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
-  await page.getByText("Forgot your password?", { exact: true }).click();
+  await page.getByText("Set or reset password", { exact: true }).click();
   // Reworded to drop "verified" -- an admin-invited account with an
   // unverified login email also recovers, and verifies, through this same reset.
-  await expect(page.getByText(/We'll email a reset link to your login address/)).toBeVisible();
+  await expect(page.getByText(/First time here or forgot your password/)).toBeVisible();
   await page.route("**/portal/v1/auth/password/reset", route => {
     expect(route.request().postDataJSON()).toEqual({ email: "new@example.com" });
     return route.fulfill({ status: 202, json: makeEnvelope("verification_requested") });
   });
-  await page.getByRole("button", { name: "Send reset link" }).click();
+  await page.getByRole("button", { name: "Send password link" }).click();
   await expect(page.getByRole("alert")).toContainText("Check your email");
   // A confirmation, not an error -- unaffected by the error-colour fix above.
   await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(155, 196, 155)");
@@ -145,8 +176,8 @@ test("Request a new link returns to sign-in with the reset form already open", a
   const requestNewLink = page.getByRole("link", { name: "Request a new link" });
   await expect(requestNewLink).toBeVisible();
   await requestNewLink.click();
-  await expect(page.getByRole("heading", { name: "Reset password", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Send reset link" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Set or reset password", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send password link" })).toBeVisible();
   expect(page.url()).not.toContain(token);
 });
 
@@ -156,7 +187,7 @@ test("password sign-in hides email-only actions when email delivery is off", asy
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create an account", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Forgot your password?" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Set or reset password" })).toHaveCount(0);
   // Password-only mode (password configured, no email delivery: no reset email can ever be sent) --
   // the forgot-password entry becomes a support-contact sentence instead of silently disappearing.
   // No `support` field in this fixture, so it names the administrator fallback.
@@ -237,7 +268,7 @@ test("password settings point an eligible unverified email at Forgot your passwo
   await page.route("**/portal/v1/auth/identities", (route) => route.fulfill({ json: makeEnvelope("identities", { items: [] }) }));
   await page.route("**/portal/v1/auth/password", (route) => route.fulfill({ json: makeEnvelope("password_settings", { has_password: true, can_reset: false, email_verified: false, recovery_available: true, email: "invited@example.com" }) }));
   await page.goto("/#/account");
-  await expect(page.getByText("Use 'Forgot your password?' once to verify this email.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Use 'Set or reset password' once to verify this email.", { exact: true })).toBeVisible();
   await expect(page.getByText("Email not verified. Password recovery by email is unavailable.", { exact: true })).toHaveCount(0);
 });
 
@@ -248,7 +279,7 @@ test("password settings fall back to the unavailable notice when no address is e
   await page.route("**/portal/v1/auth/password", (route) => route.fulfill({ json: makeEnvelope("password_settings", { has_password: true, can_reset: false, email_verified: false, recovery_available: false, email: "claimed@example.com" }) }));
   await page.goto("/#/account");
   await expect(page.getByText("Email not verified. Password recovery by email is unavailable.", { exact: true })).toBeVisible();
-  await expect(page.getByText("Use 'Forgot your password?' once to verify this email.", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Use 'Set or reset password' once to verify this email.", { exact: true })).toHaveCount(0);
 });
 
 test("password settings hide the recovery promise when the portal has no email delivery configured", async ({ page }) => {
@@ -258,7 +289,7 @@ test("password settings hide the recovery promise when the portal has no email d
   await page.route("**/portal/v1/auth/password", (route) => route.fulfill({ json: makeEnvelope("password_settings", { has_password: true, can_reset: false, email_verified: false, recovery_available: true, email: "invited@example.com" }) }));
   await page.goto("/#/account");
   await expect(page.getByText("Email not verified. Password recovery by email is unavailable.", { exact: true })).toBeVisible();
-  await expect(page.getByText("Use 'Forgot your password?' once to verify this email.", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Use 'Set or reset password' once to verify this email.", { exact: true })).toHaveCount(0);
 });
 
 // No existing PasswordSettings fixture ever set has_password:false, so
@@ -750,7 +781,9 @@ function makePortalApiFixture() {
     // ---- Connected devices (protected bindings) ----
     if (method === "GET" && path === "/api/portal/device-bindings") {
       if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "portal-e2e-401" });
-      return fulfill(200, makeEnvelope("device_bindings", { customer_id: "cus_self", items: bindings.map((item) => ({ ...item })), has_more: false, next_cursor: null }));
+      const query=(url.searchParams.get("q")??"").trim().toLowerCase(),project=url.searchParams.get("project");
+      const items=bindings.filter(item=>(project===null || item.project===project) && [item.label||"Unnamed device",item.binding_id,item.project].some(value=>value.toLowerCase().includes(query)));
+      return fulfill(200, makeEnvelope("device_bindings", { customer_id: "cus_self", items: items.map((item) => ({ ...item })), has_more: false, next_cursor: null }));
     }
     if (method === "POST" && path === "/api/portal/device-bindings/retire") {
       const body = await jsonBody(request);
@@ -1077,8 +1110,8 @@ test("sign-in headings follow the chosen method after registration and reset", a
   await page.getByRole("button", { name: "Use a password instead" }).click();
   await expect(page.getByRole("heading", { name: "Create account", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Back to sign in", exact: true }).click();
-  await page.getByRole("button", { name: "Forgot your password?" }).click();
-  await expect(page.getByRole("heading", { name: "Reset password", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Set or reset password" }).click();
+  await expect(page.getByRole("heading", { name: "Set or reset password", exact: true })).toBeVisible();
   if (!await page.locator(".otherSignIn").evaluate(element => element.open)) await page.getByText("Other sign-in options", { exact: true }).click();
   await page.getByRole("button", { name: "Use an email code instead" }).click();
   await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
