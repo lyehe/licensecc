@@ -2,9 +2,9 @@ import { expect, test } from "@playwright/test";
 import { captureAppHandoffs } from "./e2e-app-handoff.mjs";
 
 // A mid-session 401 (the server's `unauthorized` code, never a credential failure like
-// `invalid_otp`) must return the customer to sign-in on every api() path -- a background data read
-// or a consent mutation -- via one global onUnauthorized hook (api.tsx) that App wires to
-// auth.retrySession(). These tests pin: a consent mutation surviving the same kind of 401, a wrong
+// `invalid_otp`) must return the customer to sign-in. Ordinary api() requests use App's session
+// hook; protected-device requests retain their saved mutation and invoke recovery explicitly.
+// Both paths use auth.retrySession(). These tests pin: a consent mutation surviving that 401, a wrong
 // OTP code NOT tripping the hook, exactly one /me retry for a single expired-session event, and that
 // a customer switch after a session-ending 401 never shows the previous customer's data.
 const VALID_CODE = "80315426";

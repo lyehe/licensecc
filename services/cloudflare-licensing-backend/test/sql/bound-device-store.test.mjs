@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { boundRandomId, boundSecretHash, createBoundChallenge } from "../../src/device/bound_enrollment.mjs";
+import { boundRandomId, boundSecretHash } from "../../src/device/bound_crypto.mjs";
+import { createBoundChallenge } from "../../src/device/bound_enrollment.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";

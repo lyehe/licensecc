@@ -6,7 +6,7 @@ import {
   enqueueWebhooks,
   WEBHOOK_CLAIM_TTL_SECONDS,
   WEBHOOK_ERROR_BODY_MAX_BYTES,
-} from "../src/webhooks/webhook.mjs";
+} from "../../src/webhooks/webhook.mjs";
 
 const SECRET_B64 = Buffer.alloc(32, 7).toString("base64");
 const SIGNING_ENV = {

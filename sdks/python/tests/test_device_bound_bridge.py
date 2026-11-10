@@ -210,6 +210,33 @@ def test_concurrent_call_returns_busy_and_close_waits():
     assert api.closed == [123]
 
 
+@pytest.mark.parametrize("field,value", [("size", 0), ("version", 2), ("comparison_code", b"bad-code")])
+def test_invalid_native_enrollment_view_releases_call_admission(field, value):
+    api = FakeApi()
+    prepare = api.device_bound_prepare
+
+    def invalid_prepare(handle, view):
+        code = prepare(handle, view)
+        setattr(pointed(view, abi.View), field, value)
+        return code
+
+    api.device_bound_prepare = invalid_prepare
+    client, _ = library(api).open_resume(config())
+    with client:
+        with pytest.raises(RuntimeError, match="Invalid native enrollment view"):
+            client.prepare()
+        assert client.cancel() is Result.CANCELLED
+
+
+def test_failed_prepare_returns_no_enrollment_view():
+    api = FakeApi()
+    api.device_bound_prepare = lambda handle, view: Result.RETRY
+    client, _ = library(api).open_resume(config())
+    with client:
+        assert client.prepare() == (Result.RETRY, None)
+        assert client.launch() is Result.OK
+
+
 def test_finalizer_owns_state_not_client_and_is_disabled_at_exit():
     api = FakeApi()
     client, _ = library(api).open_resume(config())

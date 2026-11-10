@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { sealBoundApproval, openBoundApproval } from "../src/device/bound_approval_crypto.mjs";
-import { boundRandomId } from "../src/device/bound_enrollment.mjs";
+import { boundRandomId } from "../src/device/bound_crypto.mjs";
 
 test("approval ciphertext hides callback material and binds attempt plus approved revision", async () => {
   const ring=JSON.stringify({active:"a1",keys:{a1:boundRandomId(32)}}),hash="a".repeat(64);

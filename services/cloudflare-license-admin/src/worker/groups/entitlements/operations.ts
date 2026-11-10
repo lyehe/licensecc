@@ -14,8 +14,8 @@ import {
 } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type { Actor, GuardedMutationContext, MutationContext } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import { stampFromPolicy, type Policy } from "@licensecc/licensing-domain/entitlements/policy";
-import { buildPolicyStampStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
-import { readIdempotentResponse, writeIdempotentResponse } from "@licensecc/cloudflare-runtime/d1/idempotency_store";
+import { buildPolicyStampStatement } from "./policy_store.mjs";
+import { readIdempotentResponse, writeIdempotentResponse } from "../../persistence/idempotency_store.mjs";
 import {
   ENTITLEMENT_BATCH_MAX_IDS,
   ENTITLEMENT_BATCH_TOO_LARGE_CODE,

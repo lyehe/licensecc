@@ -6,7 +6,7 @@ import { envelope } from "../../responses.js";
 import { deviceLimit, ENTITLEMENT_CREATE_FIELDS, ENTITLEMENT_POLICY_CREATE_FIELDS, namesOnly, validateEntitlementInput } from "./validation.js";
 import { protectedCapacityReason, protectedCreateAssertion, protectedCreateReason, protectedOwnerReason } from "./protected-checks.js";
 import { createEntitlement, findEntitlement, syncEntitlement, type EntitlementKey, type GuardedMutationContext, type MutationContext, type MutationResult, type IdempotencyCommit, type D1PreparedStatementLike } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
-import { buildDeviceLimitStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
+import { buildDeviceLimitStatement } from "./policy_store.mjs";
 
 /** Protected project IDs; license creation applies the same rule so its records can back a grant. */
 export const PROTECTED_PROJECT = /^[A-Za-z0-9_.:-]{1,127}(?![\s\S])/;

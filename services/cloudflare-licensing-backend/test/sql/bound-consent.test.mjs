@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import { inspectBoundAuthorization, approveBoundAuthorization, denyBoundAuthorization } from "../../src/device/bound_consent.mjs";
-import { boundRandomId, boundSecretHash } from "../../src/device/bound_enrollment.mjs";
+import { boundRandomId, boundSecretHash } from "../../src/device/bound_crypto.mjs";
 import { openBoundApproval } from "../../src/device/bound_approval_crypto.mjs";
 import { ERASE_EXPIRED_BOUND_APPROVALS_SQL, purgeExpiredBoundApprovals } from "../../src/device/bound_cleanup.mjs";
 import { CONSENT_PAGE_SQL } from "../../src/device/bound_consent_page.mjs";

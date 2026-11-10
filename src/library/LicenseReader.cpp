@@ -33,6 +33,10 @@
 #include "LicenseReader.hpp"
 #include "base/string_utils.h"
 #include "locate/LocatorFactory.hpp"
+#include "os/os.h"
+
+#define SI_SUPPORT_IOSTREAMS
+#include "ini/SimpleIni.h"
 
 namespace license {
 using namespace std;

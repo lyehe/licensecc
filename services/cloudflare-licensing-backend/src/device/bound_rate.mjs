@@ -1,5 +1,5 @@
 import { BoundRequestError } from "./bound_request.mjs";
-import { boundSecretHash } from "./bound_enrollment.mjs";
+import { boundSecretHash } from "./bound_crypto.mjs";
 import { sourceIdentity } from "@licensecc/cloudflare-runtime/http/source_identity";
 
 const window = `(unixepoch()/60)*60`;

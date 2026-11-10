@@ -1,3 +1,5 @@
+import type { BackupTriggerParams } from "./workflow.js";
+import type { AssertNoIncompatibleGeneratedBindings, IncompatibleGeneratedBindings, WidenWranglerStringBindings, WithRuntimeNarrowing } from "@licensecc/cloudflare-runtime/bindings";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { NonRetryableError } from "cloudflare:workflows";
 import {
@@ -14,7 +16,6 @@ import {
 } from "./core.js";
 import {
   type BackupHttpEnv,
-  type BackupTriggerParams,
   handleBackupRequest,
 } from "./http.js";
 import { type ScheduledControllerLike, startScheduledBackupWorkflow } from "./scheduled.js";
@@ -22,21 +23,6 @@ import { type ScheduledControllerLike, startScheduledBackupWorkflow } from "./sc
 interface ExecutionContextLike {
   waitUntil(promise: Promise<unknown>): void;
 }
-
-// The generated declaration records the deployable's resource bindings. Its
-// example-config literals are widened so backup validation keeps accepting
-// real runtime values rather than only placeholder values.
-type WidenWranglerStringBindings<Bindings extends object> = {
-  [Binding in keyof Bindings]: Bindings[Binding] extends string ? string : Bindings[Binding];
-};
-
-type WithRuntimeNarrowing<Generated extends object, Runtime extends object> = Omit<Generated, keyof Runtime> & Runtime;
-
-type IncompatibleGeneratedBindings<Generated extends object, Runtime extends object> = {
-  [Binding in keyof Generated & keyof Runtime]: Generated[Binding] extends Runtime[Binding] ? never : Binding;
-}[keyof Generated & keyof Runtime];
-
-type AssertNoIncompatibleGeneratedBindings<Bindings extends never> = Bindings;
 
 // Explicit keys make checked Wrangler binding drift a type error. Keep the
 // service-local structural interfaces below for HTTP/Workflow test adapters.

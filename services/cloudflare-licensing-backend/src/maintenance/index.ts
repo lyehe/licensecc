@@ -1,5 +1,5 @@
 import { runBoundDeviceCleanup } from "./device_cleanup.js";
-import { enqueueAndDeliverWebhooks } from "@licensecc/cloudflare-runtime/webhooks/webhook";
+import { enqueueAndDeliverWebhooks } from "../webhooks/webhook.mjs";
 import { appendAuditDigest } from "@licensecc/cloudflare-runtime/d1/audit_digest";
 import type { Env, ExecutionContextLike } from "../env.js";
 import { logEvent } from "../observability/index.js";

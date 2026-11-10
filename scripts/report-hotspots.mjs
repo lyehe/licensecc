@@ -1,18 +1,12 @@
-import { readFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { candidateFiles } from "./ci/git-files.mjs";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const SOURCE_EXTENSION = /\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|js|mjs|ts|tsx)$/u;
 const PRODUCTION_SOURCE = /^(?:src|packages\/[^/]+\/src|services\/[^/]+\/src)\//u;
 const THIRD_PARTY_SOURCE = /^src\/library\/ini\//u;
-
-function trackedFiles(root) {
-  const result = spawnSync("git", ["ls-files", "-z"], { cwd: root, encoding: "buffer" });
-  if (result.status !== 0) throw new Error("unable to list tracked hotspot inputs");
-  return result.stdout.toString("utf8").split("\0").filter(Boolean);
-}
 
 function countLines(path) {
   const source = readFileSync(path, "utf8");
@@ -21,8 +15,9 @@ function countLines(path) {
 }
 
 export function collectProductionHotspots({ root = repositoryRoot } = {}) {
-  return trackedFiles(root)
+  return candidateFiles(root)
     .filter((path) => PRODUCTION_SOURCE.test(path) && SOURCE_EXTENSION.test(path) && !THIRD_PARTY_SOURCE.test(path))
+    .filter((path) => statSync(resolve(root, path), { throwIfNoEntry: false })?.isFile())
     .map((path) => ({ path, lines: countLines(resolve(root, path)) }))
     .sort((left, right) => right.lines - left.lines || (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
 }

@@ -1,28 +1,16 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { constantTimeEqual } from "../src/auth/primitives.mjs";
 import { loadSecretMap, lookupSecret } from "../src/auth/secret_map.mjs";
 import { HTML_NONCE_PLACEHOLDER, safeErrorType, safeString, secureHtml } from "../src/http/kit.mjs";
 
-const RUNTIME_SUBPATHS = [
-  "@licensecc/cloudflare-runtime/d1/audit_digest",
-  "@licensecc/cloudflare-runtime/auth/primitives",
-  "@licensecc/cloudflare-runtime/auth/secret_map",
-  "@licensecc/cloudflare-runtime/d1/plan_projection",
-  "@licensecc/cloudflare-runtime/d1/contract",
-  "@licensecc/cloudflare-runtime/d1/entitlement_mutation",
-  "@licensecc/cloudflare-runtime/d1/idempotency_store",
-  "@licensecc/cloudflare-runtime/device/bound_capacity",
-  "@licensecc/cloudflare-runtime/device/bound_trial",
-  "@licensecc/cloudflare-runtime/entitlements/policy_store",
-  "@licensecc/cloudflare-runtime/http/kit",
-  "@licensecc/cloudflare-runtime/webhooks/webhook",
-  "@licensecc/cloudflare-runtime/webhooks/event_types",
-];
-
-test("every explicit runtime export resolves without a service import", async () => {
-  const modules = await Promise.all(RUNTIME_SUBPATHS.map((subpath) => import(subpath)));
-  assert.equal(modules.length, RUNTIME_SUBPATHS.length);
+test("every runtime export resolves", async () => {
+  const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const subpaths = Object.entries(manifest.exports)
+    .filter(([, entry]) => typeof entry.default === "string")
+    .map(([subpath]) => `@licensecc/cloudflare-runtime${subpath.slice(1)}`);
+  await Promise.all(subpaths.map((subpath) => import(subpath)));
 });
 
 test("the runtime exports no seat-reclaim or legacy device helper", async () => {

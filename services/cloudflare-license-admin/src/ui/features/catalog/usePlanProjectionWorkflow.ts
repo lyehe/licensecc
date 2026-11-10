@@ -55,7 +55,6 @@ export interface PlanProjectionWorkflow {
   form: PlanProjectionFormState;
   previewBinding: PlanProjectionPreviewBinding | null;
   preview: PlanProjectionPreviewResponse | PlanProjectionApplyResult | null;
-  /** The projection form's inline errors and status line. */
   feedback: FormFeedback;
   invalidate: () => void;
   updateForm: (updater: (current: PlanProjectionFormState) => PlanProjectionFormState) => void;

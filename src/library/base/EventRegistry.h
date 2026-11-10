@@ -10,9 +10,9 @@
 
 #include <licensecc/datatypes.h>
 
+#include <iosfwd>
 #include <vector>
 #include <map>
-#include <set>
 #include <string>
 
 namespace license {
@@ -23,22 +23,14 @@ namespace license {
  */
 class EventRegistry {
 private:
-	friend EventRegistry &operator<<(EventRegistry &, AuditEvent &);
-	friend EventRegistry &operator<<(EventRegistry &, EventRegistry &);
 	friend std::ostream &operator<<(std::ostream &out, const EventRegistry &er);
 
 	std::vector<AuditEvent> logs;
-	/**
-	 * For every license keep track of the events who progressed most
-	 * in the validation process
-	 */
 	std::map<std::string, size_t> mostAdvancedLogIdx_by_LicenseId;
 	int current_validation_step;
 
 public:
 	EventRegistry();
-	// operator <<
-	void append(const EventRegistry &eventRegistry);
 	/**
 	 * Turn the event warning for the license with the most advanced status
 	 * into an error.

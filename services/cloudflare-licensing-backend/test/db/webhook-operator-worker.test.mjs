@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 
 import { loadSecretMap } from "@licensecc/cloudflare-runtime/auth/secret_map";
-import { verifyWebhookSignature } from "@licensecc/cloudflare-runtime/webhooks/webhook";
+import { verifyWebhookSignature } from "../../src/webhooks/webhook.mjs";
 
 const require = createRequire(import.meta.url), wranglerRequire = createRequire(require.resolve("wrangler/package.json"));
 const { Miniflare, convertV4MiniflareOptions } = wranglerRequire("miniflare");

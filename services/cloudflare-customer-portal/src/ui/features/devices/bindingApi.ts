@@ -1,20 +1,18 @@
 import { validBindingPage,validRetirement,type BindingPage,type Retirement } from "../../../shared/bindings";
 import { matchesDeviceSearch } from "../../../shared/deviceSearch";
-type Result<T>={ok:true;data:T}|{ok:false;code:string;retryAfter?:number};
+import { protectedDeviceRequest, type ProtectedDeviceResult } from "../../shared/protectedDeviceRequest";
 const errors:Record<string,number>={invalid_request:400,unauthorized:401,cross_site_forbidden:403,access_denied:403,binding_unavailable:404,
   account_changed:409,revision_conflict:409,idempotency_conflict:409,rate_limited:429,config_error:503,temporarily_unavailable:503};
-async function request<T>(path:string,customer:string,validate:(data:unknown)=>data is T,body?:Record<string,unknown>,key?:string):Promise<Result<T>> {
-  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);
-  try {
-    const response=await fetch(path,{method:body?"POST":"GET",credentials:"same-origin",cache:"no-store",redirect:"error",signal:controller.signal,
-      headers:{"x-expected-customer-id":encodeURIComponent(customer),...(body?{"content-type":"application/json","idempotency-key":key!}:{})},...(body?{body:JSON.stringify(body)}:{})});
-    const result=await response.json();
-    if(response.status===200 && result?.ok===true && result.code===(body?"binding_retired":"device_bindings") && validate(result.data))return {ok:true,data:result.data};
-    if(result?.ok===false && typeof result.code==="string" && Object.hasOwn(errors,result.code) && errors[result.code]===response.status)
-      return {ok:false,code:result.code,...(response.status===429?{retryAfter:Math.min(300,Math.max(60,Number(response.headers.get("retry-after"))||60))}:{})};
-  }catch{/* A lost response cannot prove that the retirement failed. */}
-  finally{clearTimeout(timeout);}
-  return {ok:false,code:"temporarily_unavailable"};
+function request<T>(path:string,customer:string,validate:(data:unknown)=>data is T,body?:Record<string,unknown>,key?:string):Promise<ProtectedDeviceResult<T>> {
+  return protectedDeviceRequest({
+    path,
+    customerId: customer,
+    method: body ? "POST" : "GET",
+    ...(body ? { body, idempotencyKey: key } : {}),
+    successCode: body ? "binding_retired" : "device_bindings",
+    failureStatuses: errors,
+    validate,
+  });
 }
 export const readBindings=(customer:string,cursor="",query="",project:string|null=null)=>{
   const params=new URLSearchParams();if(cursor)params.set("cursor",cursor);if(query.trim())params.set("q",query.trim());if(project!==null)params.set("project",project);

@@ -15,6 +15,7 @@ import threading
 import weakref
 from dataclasses import dataclass, fields
 from enum import IntEnum
+from typing import Callable
 
 from . import _device_bound_abi as abi
 
@@ -296,61 +297,72 @@ class DeviceBoundClient:
     def __exit__(self, *_: object) -> None:
         self.close()
 
-    def _call(self, operation: str, *, wait_ms: int = 0):
+    def _call_outcome(self, function: Callable[..., int]) -> Outcome:
         state = self._state
         if not state.lock.acquire(blocking=False):
-            return Outcome(Result.BUSY) if operation in _OUTCOME_CALLS else (Result.BUSY, None) if operation == "prepare" else Result.BUSY
+            return Outcome(Result.BUSY)
         try:
             if not state.handle.value:
                 raise RuntimeError("Device-bound client is closed")
-            function = getattr(state.api, "device_bound_" + operation)
-            if operation in _OUTCOME_CALLS:
-                raw = abi.Outcome()
-                state.api.init_device_bound_outcome(ct.byref(raw))
-                return _outcome(function(state.handle, ct.byref(raw)), raw)
-            if operation == "prepare":
-                view = abi.View()
-                state.api.init_device_bound_view(ct.byref(view))
-                code = Result(function(state.handle, ct.byref(view)))
-                if code is not Result.OK:
-                    return code, None
-                display = view.comparison_code.decode("ascii", errors="strict")
-                if view.size != ct.sizeof(abi.View) or view.version != 1 or not re.fullmatch(r"[0-9A-F]{4}(?:-[0-9A-F]{4}){2}", display):
-                    raise RuntimeError("Invalid native enrollment view")
-                return code, EnrollmentView(display, view.expires_at)
-            return Result(function(state.handle, wait_ms) if operation == "poll" else function(state.handle))
+            raw = abi.Outcome()
+            state.api.init_device_bound_outcome(ct.byref(raw))
+            return _outcome(function(state.handle, ct.byref(raw)), raw)
+        finally:
+            state.lock.release()
+
+    def _call_result(self, function: Callable[..., int], *arguments: int) -> Result:
+        state = self._state
+        if not state.lock.acquire(blocking=False):
+            return Result.BUSY
+        try:
+            if not state.handle.value:
+                raise RuntimeError("Device-bound client is closed")
+            return Result(function(state.handle, *arguments))
         finally:
             state.lock.release()
 
     def prepare(self) -> tuple[Result, EnrollmentView | None]:
-        return self._call("prepare")
+        state = self._state
+        if not state.lock.acquire(blocking=False):
+            return Result.BUSY, None
+        try:
+            if not state.handle.value:
+                raise RuntimeError("Device-bound client is closed")
+            view = abi.View()
+            state.api.init_device_bound_view(ct.byref(view))
+            code = Result(state.api.device_bound_prepare(state.handle, ct.byref(view)))
+            if code is not Result.OK:
+                return code, None
+            display = view.comparison_code.decode("ascii", errors="strict")
+            if view.size != ct.sizeof(abi.View) or view.version != 1 or not re.fullmatch(r"[0-9A-F]{4}(?:-[0-9A-F]{4}){2}", display):
+                raise RuntimeError("Invalid native enrollment view")
+            return code, EnrollmentView(display, view.expires_at)
+        finally:
+            state.lock.release()
 
     def launch(self) -> Result:
         """Launch only after displaying and flushing prepare's comparison code."""
-        return self._call("launch")
+        return self._call_result(self._state.api.device_bound_launch)
 
     def poll(self, wait_ms: int = 0) -> Result:
         if type(wait_ms) is not int or not 0 <= wait_ms <= 1000:
             raise ValueError("wait_ms must be an integer in 0..1000")
-        return self._call("poll", wait_ms=wait_ms)
+        return self._call_result(self._state.api.device_bound_poll, wait_ms)
 
     def activate(self) -> Outcome:
-        return self._call("activate")
+        return self._call_outcome(self._state.api.device_bound_activate)
 
     def renew(self) -> Outcome:
-        return self._call("renew")
+        return self._call_outcome(self._state.api.device_bound_renew)
 
     def authorize(self) -> Outcome:
-        return self._call("authorize")
+        return self._call_outcome(self._state.api.device_bound_authorize)
 
     def save_checkpoint(self) -> Outcome:
-        return self._call("save_checkpoint")
+        return self._call_outcome(self._state.api.device_bound_save_checkpoint)
 
     def abandon_pending(self) -> Outcome:
-        return self._call("abandon_pending")
+        return self._call_outcome(self._state.api.device_bound_abandon_pending)
 
     def cancel(self) -> Result:
-        return self._call("cancel")
-
-
-_OUTCOME_CALLS = frozenset({"activate", "renew", "authorize", "save_checkpoint", "abandon_pending"})
+        return self._call_result(self._state.api.device_bound_cancel)

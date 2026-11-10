@@ -156,12 +156,3 @@ export async function exportCatalogPlan(env: Env, planId: string, requestIdValue
     ],
   });
 }
-
-// ── Slice 4: operator console ────────────────────────────────────────────────
-// Read surface over the already-isolated tables (customers / licenses / orders)
-// + the customer kill-switch. All reads are reader+admin; the only
-// write (customer disable/reenable) is gated by requireAdmin so reader RBAC blocks it.
-// Design: docs/superpowers/plans/2026-06-24-slice4-operator-console-blueprint.md.
-
-// Turn a user search term into a LIKE pattern, escaping the wildcards so input matches
-// literally (paired with `LIKE ? ESCAPE '\'`). Returns null for over-long/unsafe input.

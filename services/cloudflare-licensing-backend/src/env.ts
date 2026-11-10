@@ -1,3 +1,4 @@
+import type { AssertNoIncompatibleGeneratedBindings, IncompatibleGeneratedBindings, WidenWranglerStringBindings, WithRuntimeNarrowing } from "@licensecc/cloudflare-runtime/bindings";
 import type { DbDatabaseLike, DbPreparedStatementLike } from "@licensecc/cloudflare-runtime/d1/contract";
 
 export type D1PreparedStatementLike = DbPreparedStatementLike;
@@ -11,21 +12,6 @@ export interface ExecutionContextLike {
 export interface RateLimitBindingLike {
   limit(input: { key: string }): Promise<{ success: boolean }>;
 }
-
-// `wrangler types` intentionally emits literal values from the checked example
-// config. Keep those strings broad at the service boundary: deployed mode
-// values may differ, while resource bindings retain their generated types.
-type WidenWranglerStringBindings<Bindings extends object> = {
-  [Binding in keyof Bindings]: Bindings[Binding] extends string ? string : Bindings[Binding];
-};
-
-type WithRuntimeNarrowing<Generated extends object, Runtime extends object> = Omit<Generated, keyof Runtime> & Runtime;
-
-type IncompatibleGeneratedBindings<Generated extends object, Runtime extends object> = {
-  [Binding in keyof Generated & keyof Runtime]: Generated[Binding] extends Runtime[Binding] ? never : Binding;
-}[keyof Generated & keyof Runtime];
-
-type AssertNoIncompatibleGeneratedBindings<Bindings extends never> = Bindings;
 
 // Naming every checked binding here makes a Wrangler rename/removal fail the
 // Worker typecheck instead of silently falling back to this service contract.

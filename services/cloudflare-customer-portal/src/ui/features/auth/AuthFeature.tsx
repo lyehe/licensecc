@@ -12,7 +12,8 @@ import {
   normalizeEmail,
   OTP_EXPIRY_COPY,
 } from "../../portalWorkflow";
-import { api, beginNewSession, localMessage, resultMessage, StatusLine } from "../../shared/api";
+import { api, beginNewSession, localMessage, resultMessage } from "../../shared/api";
+import { StatusLine } from "../../shared/StatusLine";
 import { SupportContact } from "../../shared/SupportContact";
 import type { PortalMe, StatusMessage } from "../../types";
 
@@ -64,7 +65,7 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
   const loadMe = useCallback(async (): Promise<boolean> => {
     setPhase("loading");
     try {
-      // This IS the session check the global onUnauthorized hook (api.tsx, wired in App.tsx) calls to
+      // This IS the session check the global onUnauthorized hook (api.ts, wired in App.tsx) calls to
       // find out whether a session is really gone. Its own 401 must never re-trigger that hook -- that
       // would be circular -- so it is the one api() call in this file that opts out.
       const result = await api<PortalMe>(mePath(), undefined, { skipSessionHook: true });

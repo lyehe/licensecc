@@ -2,33 +2,18 @@
 // to the operator's configured support contact (PORTAL_SUPPORT_CONTACT, published by the providers
 // envelope) and otherwise falls back to "Contact your administrator".
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, readdirSync } from "node:fs";
 import { extname, join, relative, sep } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
-import ts from "@typescript/typescript6";
+import { loadUiModules } from "../../../test/helpers/ui-modules.mjs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 const UI_SOURCE_ROOT = fileURLToPath(new URL("../src/ui", import.meta.url));
-const COMPONENT_SOURCE = new URL("../src/ui/shared/SupportContact.tsx", import.meta.url);
-
-// Transpile the component on its own and import it. The temporary copy cannot resolve bare package
-// names, so its React imports are pinned to the modules this test (and react-dom/server) resolve:
-// one React instance, or neither hooks nor context would cross the boundary.
 async function loadSupportContact() {
-  const transpiled = ts.transpileModule(readFileSync(COMPONENT_SOURCE, "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText.replace(/from "(react(?:\/jsx-runtime)?)"/g, (_, specifier) => `from "${import.meta.resolve(specifier)}"`);
-  const dir = mkdtempSync(join(tmpdir(), "licensecc-portal-support-"));
-  const file = join(dir, "SupportContact.mjs");
-  writeFileSync(file, transpiled, "utf8");
-  try {
-    return await import(pathToFileURL(file).href);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  const [module] = await loadUiModules(fileURLToPath(new URL("../", import.meta.url)), ["ui/shared/SupportContact.tsx"]);
+  return module;
 }
 
 function collectSourceFiles(dir) {

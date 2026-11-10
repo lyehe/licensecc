@@ -6,7 +6,7 @@ The ``lcccfg1`` config-attestation token uses this plumbing:
     dots (a third dot is malformed), canonical standard base64 on both parts.
   * ``parse_fields_in_order`` — the canonical payload is a newline-terminated
     list of ``key=value`` lines in a FIXED order; any missing/unexpected key,
-    trailing field, or (optionally) a value containing ``=``/CR/LF is rejected.
+    or trailing field is rejected.
   * ``verify_payload_signature`` — RSASSA-PKCS1-v1_5 + SHA-256 over the raw
     payload bytes, against the trusted key SELECTED BY the payload's ``key-id``
     (unknown key-id -> reject; key below the bit floor -> reject).
@@ -45,7 +45,6 @@ def split_envelope(token: str, expected_prefix: str) -> tuple[_Envelope | None, 
     second_dot = token.find(".", first_dot + 1)
     if second_dot == -1:
         return None, VerificationResult.reject(RejectionCode.ENVELOPE_MALFORMED, "envelope malformed")
-    # A third dot => more than 3 parts => malformed.
     if token.find(".", second_dot + 1) != -1:
         return None, VerificationResult.reject(RejectionCode.ENVELOPE_MALFORMED, "envelope malformed")
 
@@ -115,15 +114,14 @@ class FieldSpec:
 
 
 def parse_fields_in_order(
-    payload_text: str, fields: Iterable[FieldSpec], validate_values: bool
+    payload_text: str, fields: Iterable[FieldSpec]
 ) -> tuple[dict[str, str] | None, VerificationResult | None]:
     """Parse the canonical payload into a dict, enforcing exact field order.
 
     Returns (values, None) on success or (None, rejection). Mirrors the C++
     ``parse_fields_in_order``: each expected key must appear, in order, as a
     full ``key=value`` line terminated by ``\\n``; with no unknown trailing
-    fields. When ``validate_values`` is set, a value containing ``=``/CR/LF is
-    rejected.
+    fields.
     """
     values: dict[str, str] = {}
     pos = 0
@@ -140,10 +138,6 @@ def parse_fields_in_order(
                 RejectionCode.FIELD_UNEXPECTED, f"expected field {field.key}"
             )
         value = line[len(prefix) :]
-        if validate_values and _value_has_line_breaks_or_equals(value):
-            return None, VerificationResult.reject(
-                RejectionCode.INVALID_FIELD_VALUE, f"invalid value for {field.key}"
-            )
         values[field.key] = value
         pos = nl + 1
     if pos != len(payload_text):
@@ -151,10 +145,6 @@ def parse_fields_in_order(
             RejectionCode.TRAILING_FIELDS, "has unknown trailing fields"
         )
     return values, None
-
-
-def _value_has_line_breaks_or_equals(value: str) -> bool:
-    return "\n" in value or "\r" in value or "=" in value
 
 
 def parse_uint64(value: str) -> int | None:

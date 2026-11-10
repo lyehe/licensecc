@@ -23,7 +23,6 @@ import { CATALOG_FEATURE_FORM, CATALOG_IMPORT_FORM, CATALOG_PLAN_FEATURE_FORM, C
 
 type FormSubmit = (event: FormEvent<HTMLFormElement>) => void;
 
-/** Inline errors for one catalog form: input props, the error beside it, and clearing on edit. */
 function inline(form: string, feedback: FormFeedback) {
   return {
     field: (name: string, label?: string) => fieldProps(form, feedback.errors, name, label),

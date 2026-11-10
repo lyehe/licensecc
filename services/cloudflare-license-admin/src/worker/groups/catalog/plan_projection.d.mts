@@ -1,4 +1,4 @@
-import type { IdempotencyCommit, MutationContext, MutationEnv } from "./entitlement_mutation";
+import type { IdempotencyCommit, MutationContext, MutationEnv } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type {
   PlanProjectionApplyInput,
   PlanProjectionApplyResult,

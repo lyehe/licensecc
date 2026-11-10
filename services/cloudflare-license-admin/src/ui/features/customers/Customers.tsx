@@ -1,3 +1,4 @@
+import { runConsequenceMutation } from "../../shared/consequenceMutation";
 import { CustomerAccess } from "./CustomerAccess";
 import { ProtectedConnections } from "./ProtectedConnections";
 import { AddUser } from "./AddUser";
@@ -6,7 +7,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useAdminNavigation } from "../../app/navigation";
 import type { CustomerSection, NavigationIntent } from "../../app/types";
 import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
-import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
+import { ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { TechnicalDetails } from "../../shared/FeedbackText";
 import { formatEpoch, shortHash } from "../../shared/format";
 import { apiFailureFeedback, codeFeedback, refusalOutcome } from "../../shared/messages";
@@ -206,59 +207,19 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
     const expectedCode = `customer_${action}d`;
     const body = JSON.stringify(action === "disable" ? { reason: currentReason() } : {});
     const dataGuard = (value: unknown): value is CustomerListItem => hasCustomerTransitionData(value, id, targetStatus);
-    const refreshStatus = async (): Promise<ExactReadProof | null> => {
-      captureRecoveryContext();
-      return await currentCustomerRefreshRef.current();
-    };
-    const postSuccessRefresh = confirmSuccessWithRefreshFailure(refreshStatus, isCurrent).manualRefresh;
-    const replay = async (): Promise<ConfirmActionResolution> => {
-      captureRecoveryContext();
-      const retry = await runMutation(async () => {
-        try {
-          return await api<unknown>(customerTransitionPath(id, action), {
-            method: "POST",
-            headers: { "idempotency-key": idempotencyKey },
-            body,
-          });
-        } catch {
-          return null;
-        }
-      }, "recovery");
-      if (retry === undefined || retry === null) return "indeterminate";
-      const parsed = parseMutationResponse(retry, expectedCode, dataGuard, mutationFailurePolicies.customerTransition[action], "replay");
-      if (parsed.kind !== "success") return parsed.kind === "failure" ? "unapplied" : "indeterminate";
-      try {
-        return (await refreshStatus()) === EXACT_READ_PROOF ? "applied" : "refresh_failed";
-      } catch {
-        return "refresh_failed";
-      }
-    };
-    const reconciliation = { label: "Reconcile status", run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh };
-    const mutation = await runMutation(async () => {
-      try {
-        return await api<unknown>(customerTransitionPath(id, action), {
-          method: "POST",
-          headers: { "idempotency-key": idempotencyKey },
-          body,
-        });
-      } catch {
-        return null;
-      }
-    }, "consequence");
-    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
-    if (mutation === null) return confirmMutationUnknown(reconciliation);
-    const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.customerTransition[action], "initial");
-    if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
-    setFeedback(codeFeedback(parsed.code, parsed.requestId));
-    setReason("");
-    try {
-      return (await refreshStatus()) === EXACT_READ_PROOF
-        ? { ok: true }
-        : confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    } catch {
-      return confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    }
+    return await runConsequenceMutation({
+      request: { method: "POST", path: customerTransitionPath(id, action), body, idempotencyKey },
+      runMutation,
+      parse: (result, phase) => parseMutationResponse(result, expectedCode, dataGuard, mutationFailurePolicies.customerTransition[action], phase),
+      onApplied: (parsed) => {
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
+        setReason("");
+        captureRecoveryContext();
+      },
+      refresh: async () => await currentCustomerRefreshRef.current(),
+      captureRecoveryContext,
+      isCurrent,
+    });
   }
 
   const customers = customersFence.isSettled() ? customersSnapshot : [];

@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { localMessage, setOnSessionProblem, StatusLine } from "../shared/api";
+import { localMessage, setOnSessionProblem } from "../shared/api";
+import { StatusLine } from "../shared/StatusLine";
 import { useSingleFlight } from "../shared/useSingleFlight";
 import { AuthFeature, usePortalAuth } from "../features/auth/AuthFeature";
 import { PasswordAction, capturePasswordAction } from "../features/auth/PasswordAction";

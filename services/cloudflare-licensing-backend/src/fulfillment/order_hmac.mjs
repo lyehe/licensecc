@@ -1,3 +1,4 @@
+import { orderMaxSkewSeconds } from "./order_timing.mjs";
 // Pure HMAC verification for Slice 1 order-ingest (POST /v1/orders). Worker-safe:
 // no node:/Buffer; only Web Crypto (crypto.subtle) + standard globals (atob,
 // TextEncoder). Runs raw under `node --test`.
@@ -23,8 +24,6 @@
 import { bytesFromBase64, loadSecretMap, lookupSecret } from "@licensecc/cloudflare-runtime/auth/secret_map";
 
 const SIGNED_PREFIX = "POST\n/v1/orders\n";
-const DEFAULT_MAX_SKEW_SECONDS = 300;
-const MAX_SKEW_CAP_SECONDS = 3600;
 
 const textEncoder = new TextEncoder();
 
@@ -81,22 +80,10 @@ function canonicalIntTimestamp(headerValue) {
   if (!Number.isInteger(n) || n < 0 || n > Number.MAX_SAFE_INTEGER) {
     return null;
   }
-  // Reject any non-canonical spelling (leading/trailing space, decimals, signs).
   if (String(n) !== headerValue) {
     return null;
   }
   return { value: n, canonical: headerValue };
-}
-
-function clampMaxSkew(rawValue) {
-  if (rawValue === undefined || rawValue === null || rawValue === "") {
-    return DEFAULT_MAX_SKEW_SECONDS;
-  }
-  const parsed = Number(rawValue);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    return DEFAULT_MAX_SKEW_SECONDS;
-  }
-  return Math.min(parsed, MAX_SKEW_CAP_SECONDS);
 }
 
 /**
@@ -120,7 +107,6 @@ function clampMaxSkew(rawValue) {
 export async function verifyOrderHmac(request, env, bodyBytes) {
   const now = Math.floor(Date.now() / 1000);
 
-  // Fail closed if the key map or audience is not configured/usable.
   const secretMap = loadSecretMap(env?.ORDER_HMAC_SECRETS);
   if (secretMap === null) {
     return { ok: false, code: "config_error", keyId: null };
@@ -144,7 +130,7 @@ export async function verifyOrderHmac(request, env, bodyBytes) {
   if (ts === null) {
     return { ok: false, code: "stale_timestamp", keyId };
   }
-  const maxSkew = clampMaxSkew(env?.ORDER_MAX_SKEW_SECONDS);
+  const maxSkew = orderMaxSkewSeconds(env?.ORDER_MAX_SKEW_SECONDS);
   if (Math.abs(now - ts.value) > maxSkew) {
     return { ok: false, code: "stale_timestamp", keyId };
   }

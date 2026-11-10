@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import worker from "../../dist/app.js";
-import { boundRandomId, boundSecretHash } from "../../src/device/bound_enrollment.mjs";
+import { boundRandomId, boundSecretHash } from "../../src/device/bound_crypto.mjs";
 import { expireBoundRecovery, purgeExpiredBoundLeases } from "../../src/device/bound_cleanup.mjs";
 import { DEFAULT_GLOBAL_RATE_LIMIT, limitBoundRequest, limitBoundVerified, parseGlobalRateLimit } from "../../src/device/bound_rate.mjs";
 import { retireBoundBinding } from "../../src/device/bound_retire.mjs";

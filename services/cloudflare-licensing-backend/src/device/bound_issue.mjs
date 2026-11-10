@@ -2,8 +2,7 @@ import { encodeBase64url, deviceOperationBody, deviceOperationDigestInput } from
 import { boundOccupiedSql } from "@licensecc/cloudflare-runtime/device/bound_capacity";
 import { deviceLeaseWindow } from "@licensecc/licensing-domain/lease/device_policy";
 import { BoundRequestError, validateBoundRequest } from "./bound_request.mjs";
-import { boundRandomId, boundSecretHash } from "./bound_enrollment.mjs";
-import { sha256Hex, verifyBoundDeviceProof, signBoundDeviceLease } from "./bound_crypto.mjs";
+import { boundRandomId, boundSecretHash, sha256Hex, verifyBoundDeviceProof, signBoundDeviceLease } from "./bound_crypto.mjs";
 import { commitBoundDeviceLease } from "./bound_store.mjs";
 import { recoverBoundDeviceLease } from "./bound_recovery.mjs";
 import { limitBoundVerified } from "./bound_rate.mjs";

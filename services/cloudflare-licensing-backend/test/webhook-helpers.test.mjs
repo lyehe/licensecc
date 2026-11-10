@@ -13,7 +13,7 @@ import {
   signWebhookBody,
   verifyWebhookSignature,
   WEBHOOK_REPLAY_WINDOW_SECONDS,
-} from "@licensecc/cloudflare-runtime/webhooks/webhook";
+} from "../src/webhooks/webhook.mjs";
 
 // A 32-byte base64 secret (24 raw bytes is < 32 and would be rejected; use 32 bytes).
 const SECRET_B64 = Buffer.alloc(32, 7).toString("base64");
@@ -119,7 +119,6 @@ test("signWebhookBody header round-trips through verifyWebhookSignature", async 
   const ok = await verifyWebhookSignature(body, header, SECRETS, now);
   assert.equal(ok, true, "fresh signature over the exact body verifies");
 
-  // Within the window still verifies.
   assert.equal(await verifyWebhookSignature(body, header, SECRETS, now + 200), true);
 });
 
@@ -149,11 +148,9 @@ test("verifyWebhookSignature rejects unknown key id, malformed header, and non-c
   const body = "{}";
   const header = await signWebhookBody(SECRETS, "k1", body, now);
 
-  // Unknown keyid.
   const otherMap = loadSecretMap(JSON.stringify({ k2: Buffer.alloc(32, 9).toString("base64") }));
   assert.equal(await verifyWebhookSignature(body, header, otherMap, now), false, "unknown keyid fails");
 
-  // Malformed header.
   assert.equal(await verifyWebhookSignature(body, "garbage", SECRETS, now), false);
   assert.equal(await verifyWebhookSignature(body, "", SECRETS, now), false);
 
@@ -161,6 +158,5 @@ test("verifyWebhookSignature rejects unknown key id, malformed header, and non-c
   const nonCanon = header.replace("t=1700000000", "t=1700000000.0");
   assert.equal(await verifyWebhookSignature(body, nonCanon, SECRETS, now), false);
 
-  // Null secret map (fail-closed) -> false.
   assert.equal(await verifyWebhookSignature(body, header, null, now), false);
 });

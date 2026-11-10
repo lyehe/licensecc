@@ -1,11 +1,12 @@
+import { runConsequenceMutation } from "../../shared/consequenceMutation";
 import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { EntitlementRecord, Policy } from "../../../shared/api";
 import type { DraftPolicy, NavigationIntent } from "../../app/types";
 import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
-import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, focusTargetInRow, useContextGeneration, useOperatorControls } from "../../shared/controls";
+import { ConfirmRefreshFailure, EXACT_READ_PROOF, type ConfirmActionOutcome, type ExactReadProof, focusTargetInRow, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { useCoreRefresh } from "../../shared/coreRefresh";
-import { apiFailureFeedback, codeFeedback, failureFeedback, feedbackWith, refusalOutcome, validationCode } from "../../shared/messages";
+import { apiFailureFeedback, codeFeedback, failureFeedback, feedbackWith, validationCode } from "../../shared/messages";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { hasEntitlementListData, hasEntitlementRecordData, hasEntitlementTransitionData, hasPolicyListData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
 import { downloadCsv, loadAllExactPages, loadMore } from "../../shared/pagination";
@@ -299,55 +300,18 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     const expectedCode = `entitlement_${action}d`;
     const body = JSON.stringify({ ...(action === "disable" || action === "revoke" ? { reason: currentReason() } : {}), expected_customer_id: item.customer_id, expected_revocation_seq: item.revocation_seq });
     const dataGuard = (value: unknown): value is EntitlementRecord => hasEntitlementTransitionData(value, item.id, targetStatus);
-    const refreshStatus = async (): Promise<ExactReadProof | null> => {
-      captureRecoveryContext();
-      return await refreshCore(true);
-    };
-    const postSuccessRefresh = confirmSuccessWithRefreshFailure(refreshStatus, isCurrent).manualRefresh;
-    const replay = async (): Promise<ConfirmActionResolution> => {
-      captureRecoveryContext();
-      const retry = await runMutation(async () => {
-        try {
-          return await api<unknown>(transitionPath(item, action), { method: "POST", headers: { "idempotency-key": idempotencyKey }, body });
-        } catch {
-          return null;
-        }
-      }, "recovery");
-      if (retry === undefined || retry === null) return "indeterminate";
-      const parsed = parseMutationResponse(retry, expectedCode, dataGuard, mutationFailurePolicies.entitlementTransition[action], "replay");
-      if (parsed.kind !== "success") return parsed.kind === "failure" ? "unapplied" : "indeterminate";
-      try {
-        return (await refreshStatus()) === EXACT_READ_PROOF ? "applied" : "refresh_failed";
-      } catch {
-        return "refresh_failed";
-      }
-    };
-    const reconciliation = { label: "Reconcile status", run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh };
-    const mutation = await runMutation(async () => {
-      try {
-        return await api<unknown>(transitionPath(item, action), {
-          method: "POST",
-          headers: { "idempotency-key": idempotencyKey },
-          body,
-        });
-      } catch {
-        return null;
-      }
-    }, "consequence");
-    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
-    if (mutation === null) return confirmMutationUnknown(reconciliation);
-    const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.entitlementTransition[action], "initial");
-    if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
-    setFeedback(codeFeedback(parsed.code, parsed.requestId));
-    setReason("");
-    try {
-      return (await refreshCore(true)) === EXACT_READ_PROOF
-        ? { ok: true }
-        : confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    } catch {
-      return confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    }
+    return await runConsequenceMutation({
+      request: { method: "POST", path: transitionPath(item, action), body, idempotencyKey },
+      runMutation,
+      parse: (result, phase) => parseMutationResponse(result, expectedCode, dataGuard, mutationFailurePolicies.entitlementTransition[action], phase),
+      onApplied: (parsed) => {
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
+        setReason("");
+      },
+      refresh: async () => await refreshCore(true),
+      captureRecoveryContext,
+      isCurrent,
+    });
   }
 
   function toggleSelected(id: string): void {

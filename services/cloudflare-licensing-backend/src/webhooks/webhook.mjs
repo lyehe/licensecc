@@ -10,8 +10,7 @@
 // Worker-safe: no node:/Buffer; only Web Crypto (crypto.subtle), TextEncoder, atob, AbortController.
 // Runs raw under `node --test` (and `--experimental-sqlite`). The pure helpers (buildWebhookPayload,
 // signWebhookBody, verifyWebhookSignature, nextBackoff, eventTypeMatches) do NO I/O so they are
-// hermetically unit-testable; verifyWebhookSignature is also exported via the package exports map so
-// the admin worker + receivers can import the SAME verifier.
+// hermetically unit-testable; delivery and signed test events use the same signer.
 //
 // SIGNING: a Worker-env WEBHOOK_SIGNING_SECRETS — a JSON map {keyId: base64secret} mirroring
 // ORDER_HMAC_SECRETS (each secret >= 32 bytes), loaded via the shared fail-closed loadSecretMap.
@@ -25,13 +24,13 @@
 // They MUST also retain the source/id deduplication key because a crash after remote success and
 // before the D1 outcome write intentionally retries the same delivery after its lease expires.
 
-import { loadSecretMap, lookupSecret } from "../auth/secret_map.mjs";
-import { safeErrorType } from "../http/kit.mjs";
+import { loadSecretMap, lookupSecret } from "@licensecc/cloudflare-runtime/auth/secret_map";
+import { safeErrorType } from "@licensecc/cloudflare-runtime/http/kit";
 import {
   WEBHOOK_CLAIM_TTL_SECONDS, cancelOutOfScopeWebhookDelivery, claimPendingWebhookDelivery, nextBackoff,
   persistWebhookDeliveryOutcome, readWebhookClock, refuseUnsafeWebhookDelivery,
 } from "./webhook_delivery_store.mjs";
-import { deliveryWithinEndpointScope, endpointScopeMatches, safeWebhookUrl } from "./webhook_endpoint.mjs";
+import { deliveryWithinEndpointScope, endpointScopeMatches, safeWebhookUrl } from "@licensecc/cloudflare-runtime/webhooks/webhook_endpoint";
 
 export { WEBHOOK_CLAIM_TTL_SECONDS, nextBackoff };
 

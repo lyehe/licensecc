@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import test from "node:test";
+import { candidateFiles } from "./ci/git-files.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
@@ -24,10 +25,7 @@ function lineCount(relativePath) {
 }
 
 function candidateSourceStats(relativeRoot) {
-  // Include non-ignored, untracked source so a local pre-commit run measures the
-  // same candidate tree that CI will see after the files are committed.
-  const files = git(["ls-files", "--cached", "--others", "--exclude-standard", "--", relativeRoot])
-    .split(/\r?\n/u)
+  const files = candidateFiles(repositoryRoot, [relativeRoot])
     .filter((path) => /\.(?:js|mjs|ts|tsx)$/u.test(path));
   return {
     files: files.length,
@@ -44,21 +42,9 @@ function trackedChildDirectories(relativeRoot) {
     .sort();
 }
 
-function candidateFiles(relativeRoots) {
-  const output = git([
-    "ls-files",
-    "--cached",
-    "--others",
-    "--exclude-standard",
-    "--",
-    ...relativeRoots,
-  ]);
-  return output.length === 0 ? [] : output.split(/\r?\n/u).filter(Boolean).sort();
-}
-
 function maintainedGuidancePaths() {
   const rootGuidance = new Set(["AGENTS.md", "CONTRIBUTING.md", "README.md"]);
-  return candidateFiles([
+  return candidateFiles(repositoryRoot, [
     "AGENTS.md",
     "CONTRIBUTING.md",
     "README.md",
@@ -72,7 +58,7 @@ function maintainedGuidancePaths() {
     "sdks",
     "services",
     "test",
-  ]).filter((path) => {
+  ]).sort().filter((path) => {
     if (rootGuidance.has(path) || path === ".agents/skills/using-licensecc/SKILL.md") {
       return true;
     }

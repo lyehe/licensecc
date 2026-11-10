@@ -101,7 +101,7 @@ std::string build_envelope(const char* prefix, const std::string& payload, const
 }
 
 bool parse_fields_in_order(const std::string& payload, const FieldSpec* fields, const size_t field_count,
-						   const char* error_noun, const bool validate_values, std::string& error) {
+						   const char* error_noun, std::string& error) {
 	const std::string noun(error_noun);
 	size_t pos = 0;
 	for (size_t i = 0; i < field_count; ++i) {
@@ -118,10 +118,6 @@ bool parse_fields_in_order(const std::string& payload, const FieldSpec* fields, 
 			return false;
 		}
 		*field.value = line.substr(prefix.size());
-		if (validate_values && value_has_line_breaks_or_equals(*field.value)) {
-			error = noun + " invalid value for " + field.key;
-			return false;
-		}
 		pos = next + 1;
 	}
 	if (pos != payload.size()) {

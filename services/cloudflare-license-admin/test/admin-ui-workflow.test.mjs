@@ -12,5 +12,6 @@ import "./admin-ui-workflow/lists-reports.test.mjs";
 import "./admin-ui-workflow/navigation.test.mjs";
 import "./admin-ui-workflow/glossary-copy.test.mjs";
 import "./admin-ui-workflow/operator-controls.test.mjs";
+import "./admin-ui-workflow/consequence-mutation.test.mjs";
 import "./admin-ui-workflow/messages.test.mjs";
 import "./admin-ui-workflow/workspace-focus.test.mjs";

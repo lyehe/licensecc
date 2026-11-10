@@ -147,7 +147,8 @@ test("missing pinned Wrangler fails through the real subprocess without package 
   const root = mkdtempSync(join(tmpdir(), "licensecc missing wrangler "));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, "scripts"));
-  for (const filename of ["run-protected-wrangler.mjs", "rollback-workers.mjs"]) {
+  for (const filename of ["run-protected-wrangler.mjs", "release/deployment-evidence.mjs", "release/worker-targets.mjs"]) {
+    mkdirSync(dirname(join(root, "scripts", filename)), { recursive: true });
     copyFileSync(join(repositoryRoot, "scripts", filename), join(root, "scripts", filename));
   }
   const isolated = await import(pathToFileURL(join(root, "scripts/run-protected-wrangler.mjs")).href);

@@ -5,7 +5,7 @@ import admin from "../../../cloudflare-license-admin/dist-worker/worker/index.js
 import backend from "../../dist/app.js";
 import { baseFixture } from "../../../cloudflare-customer-portal/test/portal-worker-fixtures.mjs";
 import { inspectBoundAuthorization, approveBoundAuthorization } from "../../src/device/bound_consent.mjs";
-import { boundRandomId } from "../../src/device/bound_enrollment.mjs";
+import { boundRandomId } from "../../src/device/bound_crypto.mjs";
 import { importBoundDeviceKey, normalizeDeviceSignature, sha256Hex } from "../../src/device/bound_crypto.mjs";
 import { encodeBase64url, deviceOperationBody, deviceProofSigningInput, decodeDeviceLeaseEnvelope, deviceLeaseSigningInput } from "@licensecc/licensing-domain/lease/device_protocol";
 

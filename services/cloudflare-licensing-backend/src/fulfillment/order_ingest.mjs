@@ -1,3 +1,4 @@
+import { orderMaxSkewSeconds } from "./order_timing.mjs";
 // Slice 1 order-ingest HTTP core (POST /v1/orders) — the exactly-once accept/apply
 // flow. Worker-safe: no node:/Buffer, only Web Crypto (crypto.subtle) + standard
 // globals; bundles identically under wrangler/esbuild and runs raw under
@@ -58,7 +59,6 @@ import {
 // 16 KiB raw-body ceiling (blueprint MAX_ORDER_BODY_BYTES). Enforced over the exact
 // stream bytes before any decoding; never re-stringify a parsed object.
 export const MAX_ORDER_BODY_BYTES = 16384;
-// --- small helpers (self-contained; Worker-safe) -----------------------------
 function jsonResponse(body, status) {
   return new Response(JSON.stringify(body), {
     status,
@@ -179,7 +179,6 @@ function stableStringify(value) {
   return `{${parts.join(",")}}`;
 }
 
-// --- ORDER_SIGNER_SCOPE gate ---------------------------------------------------
 // Bind each order-HMAC key-id to an allowed project/customer so ONE shared signing key can never
 // create/revoke ANY customer's entitlements. Always enforced: ORDER_SIGNER_SCOPES is a JSON map
 // { "<keyId>": { "project"?: "<p>", "customer_id"?: "<c>" } }; a keyId absent from the map is
@@ -232,8 +231,6 @@ function signerScopeViolation(scopes, keyId, order) {
   return null;
 }
 
-// --- nonce spend (Step 0, runs LAST, fail-closed) ----------------------------
-
 /**
  * Spend one authenticated signed-attempt nonce. The `(key_id,request_nonce_id)` table stores a
  * bounded `signed_timestamp:raw_body_digest` attempt identity in its `request_nonce_id` column. An
@@ -263,22 +260,6 @@ async function spendOrderNonce(env, keyId, requestNonceId, signedTimestamp, now,
   }
 }
 
-function clampMaxSkew(rawValue) {
-  if (rawValue === undefined || rawValue === null || rawValue === "") {
-    return 300;
-  }
-  const parsed = Number(rawValue);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    return 300;
-  }
-  return Math.min(parsed, 3600);
-}
-
-// --- response builders -------------------------------------------------------
-
-// =============================================================================
-// Step 4 entitlement statement builders (floor-guarded; reuse the shared SQL).
-// =============================================================================
 //
 // These mirror the admin mutators' bodies EXACTLY for the mutated columns, and add
 // the monotonic floor:
@@ -432,8 +413,6 @@ function buildCapacityStatement(env, key, capacity, owner, floor, now) {
   );
 }
 
-// --- audit-event + processed-mark statements (in the SAME batch) -------------
-
 const ORDER_CTX_SOURCE = "sync";
 const ORDER_ACTOR_TYPE = "sync";
 
@@ -490,10 +469,6 @@ function buildProcessedMarkStatement(env, eventId, resultJson, now) {
   ).bind(resultJson, now, eventId);
 }
 
-// =============================================================================
-// Step 3 — atomic ACCEPT (one env.DB.batch).
-// =============================================================================
-
 /**
  * Build the ACCEPT batch: 3a guarded cursor advance on orders(order_epoch,last_seq)
  * + 3b guarded event claim (insert order_events 'accepted' only if 3a won). Returns
@@ -533,10 +508,6 @@ export function buildAcceptBatch(env, order, keyId, digest, rawPayload, now, fin
 
   return reservation === null ? [cursorAdvance, eventClaim] : [reservation, cursorAdvance, eventClaim];
 }
-
-// =============================================================================
-// Step 4 — APPLY (floor-guarded mutation + in-batch processed-mark).
-// =============================================================================
 
 function firstBatchRow(result) {
   if (typeof result !== "object" || result === null || !("results" in result)) {
@@ -580,7 +551,6 @@ export async function applyOrderEvent(env, order, fingerprint, fingerprintOrigin
     return terminalizeMissingEntitlementOrderEvent(env, order, key, fingerprintOrigin, now);
   }
 
-  // Build the mutation statement (floor-guarded) for the descriptor kind.
   let writeStatement;
   let eventType;
   if (descriptor.kind === "create") {
@@ -646,7 +616,6 @@ export async function applyOrderEvent(env, order, fingerprint, fingerprintOrigin
   // no-op'd (superseded — a newer event already applied).
   if (result.applied) {
     const body = { ...appliedBody, entitlement: result.data };
-    // Finalize the cached result_json with the entitlement snapshot.
     await env.DB.prepare("UPDATE order_events SET result_json = ? WHERE event_id = ? AND status = 'processed'")
       .bind(JSON.stringify(body), order.event_id)
       .run();
@@ -700,8 +669,6 @@ async function writeEntitlementWithAuditFloor(
   return { applied: true, marked, data: withId(mutated) };
 }
 
-// --- field assembly for create / patch ---------------------------------------
-
 /** Assemble the INSERT/upsert fields for subscription.active. */
 function createFields(order, prev, descriptor, now) {
   const validUntil = descriptor.valid_until === undefined ? null : descriptor.valid_until;
@@ -746,9 +713,7 @@ function patchFields(order, prev, descriptor) {
   };
 }
 
-// =============================================================================
 // handleOrderIngest — the full Step 0-5 flow.
-// =============================================================================
 
 export async function handleOrderIngest(request, env) {
   // Step 0a/b — read the raw body ONCE (never .text()/.json()); the byte ceiling
@@ -813,7 +778,7 @@ export async function handleOrderIngest(request, env) {
   // timestamp is part of the verified HMAC framing; the digest is over the exact raw
   // signed body bytes. The separate normalized payload digest above remains the logical-event
   // idempotency identity, so harmless JSON reserialization cannot create an event-id conflict.
-  const maxSkew = clampMaxSkew(env?.ORDER_MAX_SKEW_SECONDS);
+  const maxSkew = orderMaxSkewSeconds(env?.ORDER_MAX_SKEW_SECONDS);
   const rawBodyDigest = await sha256BytesHex(rawBody.bytes);
   const requestNonceId = `${hmac.timestamp}:${rawBodyDigest}`;
   const nonceState = await spendOrderNonce(env, hmac.keyId, requestNonceId, Number(hmac.timestamp), now, maxSkew);

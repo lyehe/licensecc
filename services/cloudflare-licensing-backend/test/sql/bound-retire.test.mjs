@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { retireBoundBinding, retireBoundBindingAsOperator, BOUND_RETIRE_SQL } from '../../src/device/bound_retire.mjs';
 import { expireBoundRecovery } from '../../src/device/bound_cleanup.mjs';
-import { boundRandomId,boundSecretHash } from '../../src/device/bound_enrollment.mjs';
+import { boundRandomId, boundSecretHash } from "../../src/device/bound_crypto.mjs";
 
 function fixture(t) {
   const sql=new DatabaseSync(':memory:'); t.after(()=>sql.close()); let now=1000,before=()=>{};

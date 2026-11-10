@@ -20,9 +20,6 @@ namespace Licensecc.Client
 
         private const int FutureSkewSeconds = 300;
 
-        /// <summary>
-        /// One canonical payload field: a key and the destination slot the parsed value is written into.
-        /// </summary>
         public sealed class FieldSpec
         {
             public FieldSpec(string key, Action<string> assign)
@@ -239,11 +236,10 @@ namespace Licensecc.Client
         /// <summary>
         /// Parse the canonical payload: every field must appear in <paramref name="fields"/> order, each
         /// line is <c>key=value</c>, the payload must end with a single trailing newline and contain no
-        /// extra fields. When <paramref name="validateValues"/> is true, a value may not contain '=' or
-        /// CR/LF (matching <c>parse_fields_in_order(..., validate_values=true)</c>).
+        /// extra fields.
         /// </summary>
         public static bool TryParseCanonicalPayload(string payloadText, FieldSpec[] fields,
-            bool validateValues, out string error)
+            out string error)
         {
             error = string.Empty;
 
@@ -273,12 +269,6 @@ namespace Licensecc.Client
                 }
 
                 string value = line.Substring(prefix.Length);
-                if (validateValues && (value.IndexOf('=') >= 0 || value.IndexOf('\n') >= 0 || value.IndexOf('\r') >= 0))
-                {
-                    error = "invalid value for " + field.Key;
-                    return false;
-                }
-
                 field.Assign(value);
                 pos = next + 1;
             }
@@ -323,8 +313,6 @@ namespace Licensecc.Client
             return true;
         }
 
-        /// <summary>Find a <c>key=value</c> field by scanning newline-delimited lines, before the full
-        /// ordered parse (used only to pull alg/key-id for signature verification).</summary>
         private static bool ExtractPreverifyField(string payload, string key, out string value)
         {
             value = string.Empty;
@@ -367,7 +355,6 @@ namespace Licensecc.Client
         /// <summary>Ordinal string equality (no culture surprises in security comparisons).</summary>
         public static bool StringEquals(string a, string b) => string.Equals(a, b, StringComparison.Ordinal);
 
-        /// <summary>UTF-8 encode (payloads are UTF-8 of the canonical key=value lines).</summary>
         public static byte[] Utf8(string text) => Encoding.UTF8.GetBytes(text);
     }
 }

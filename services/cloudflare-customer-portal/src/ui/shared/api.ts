@@ -1,7 +1,4 @@
-import React from "react";
-
 import type { ApiEnvelope } from "../../shared/api";
-import { describeResultCode, describeUnknownResult, rateLimitMessage } from "../portalWorkflow";
 import type { StatusMessage } from "../types";
 
 // A mid-session 401: the server's `unauthorized` code means the session cookie is gone or
@@ -99,36 +96,6 @@ export function localMessage(code: string, ok: boolean): StatusMessage {
   return { code, request_id: "", ok };
 }
 
-// The "Technical details" line -- the raw code, plus the request id in
-// parentheses when one is present -- used by StatusLine below. Lives here rather than in
-// portalWorkflow.ts: it needs no React, but api.tsx (not the pure RESULT_CODE_COPY module) is
-// where StatusLine-adjacent helpers already live.
 export function formatMessageDetail(message: Pick<StatusMessage, "code" | "request_id">): string {
   return message.request_id === "" ? message.code : `${message.code} (${message.request_id})`;
-}
-
-// Human-readable status text for the SPA: describeResultCode's copy when the code is mapped, else the
-// generic reference fallback -- never the raw snake_case code as the visible sentence. The
-// code and request id remain available, tucked under a collapsed "Technical details" disclosure so
-// support can read them off without the raw code cluttering the message every customer sees.
-export function StatusLine({ message, fallback }: { message: StatusMessage | null; fallback: string }): React.ReactElement {
-  if (message === null) {
-    return <p role="status" className="statusline">{fallback}</p>;
-  }
-  // rate_limited gets the one dynamic sentence ONLY when a real retry-after header reached this
-  // specific call (the auth 429s in the header rollout); every other rate_limited (e.g. self-service's
-  // own 429, which never carries the header) keeps the existing generic RESULT_CODE_COPY text.
-  const human = message.code === "rate_limited" && typeof message.retryAfter === "number"
-    ? rateLimitMessage(message.retryAfter)
-    : describeResultCode(message.code) ?? describeUnknownResult(message.request_id);
-  const detail = formatMessageDetail(message);
-  return (
-    <div role="status" className={message.ok ? "statusline" : "statusline error"}>
-      <p>{human}</p>
-      <details>
-        <summary>Technical details</summary>
-        <small>{detail}</small>
-      </details>
-    </div>
-  );
 }

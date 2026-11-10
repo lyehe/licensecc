@@ -1,6 +1,6 @@
 import { encodeBase64url, decodeBase64url } from "@licensecc/licensing-domain/lease/device_protocol";
 import { BoundRequestError, validateBoundClient } from "./bound_request.mjs";
-import { boundRandomId, boundSecretHash, boundEnrollmentComparison } from "./bound_enrollment.mjs";
+import { boundRandomId, boundSecretHash, boundEnrollmentComparison } from "./bound_crypto.mjs";
 import { sealBoundApproval, openBoundApproval } from "./bound_approval_crypto.mjs";
 import { CONSENT_PAGE_SQL, consentPageCursor, readConsentPageCursor } from "./bound_consent_page.mjs";
 import { boundTrialSql, boundTrialState } from "@licensecc/cloudflare-runtime/device/bound_trial";

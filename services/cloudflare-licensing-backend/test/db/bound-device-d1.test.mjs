@@ -8,7 +8,8 @@ import { recoverBoundDeviceLease } from "../../src/device/bound_recovery.mjs";
 import { purgeExpiredBoundApprovals, purgeExpiredBoundEphemera, expireBoundRecovery, purgeExpiredBoundLeases } from "../../src/device/bound_cleanup.mjs";
 import { denyBoundAuthorization } from "../../src/device/bound_consent.mjs";
 import { retireBoundBinding } from "../../src/device/bound_retire.mjs";
-import { boundRandomId, boundSecretHash, createBoundAuthorization, createBoundChallenge } from "../../src/device/bound_enrollment.mjs";
+import { boundRandomId, boundSecretHash } from "../../src/device/bound_crypto.mjs";
+import { createBoundAuthorization, createBoundChallenge } from "../../src/device/bound_enrollment.mjs";
 import { encodeBase64url } from "@licensecc/licensing-domain/lease/device_protocol";
 
 // Exercise the D1 binding from the repository's pinned Wrangler runtime, not

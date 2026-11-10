@@ -1,3 +1,4 @@
+import { SNAPSHOT_COUNTED_TABLES, SNAPSHOT_INVENTORY_ALGORITHM } from "../src/snapshot-contract.mjs";
 import { spawnSync } from "node:child_process";
 import {
   closeSync,
@@ -21,7 +22,6 @@ const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const MAX_MANIFEST_STRING_LENGTH = 2048;
 const SQL_HASH_CHUNK_BYTES = 64 * 1024;
 const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "6c825b216d163d90c7e50ae56e2c1b246699ed9ffd83f5a243582aac7d411118";
-const SNAPSHOT_INVENTORY_ALGORITHM = "d1-export-sql-insert-count-v1";
 const DEFAULT_BACKEND_MIGRATIONS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../../cloudflare-licensing-backend/migrations",
@@ -31,31 +31,7 @@ const DEFAULT_BACKEND_MIGRATIONS_DIR = resolve(
 // counts are compared when --source-database is supplied. Presence is always
 // checked; count comparison is optional because a live source can advance
 // after the exported snapshot.
-const REQUIRED_TABLES = [
-  "device_bound_devices",
-  "device_bound_bindings",
-  "device_bound_events",
-  "device_bound_operations",
-  "entitlements",
-  "entitlement_events",
-  "mutation_idempotency",
-  "customers",
-  "licenses",
-  "orders",
-  "order_events",
-  "customer_events",
-  "entitlement_policies",
-  "policy_events",
-  "webhook_endpoints",
-  "audit_digests",
-  "catalog_features",
-  "catalog_plans",
-  "catalog_plan_features",
-  "license_plan_assignments",
-  "catalog_events",
-  "webhook_events",
-  "license_plan_assignment_events",
-];
+const REQUIRED_TABLES = SNAPSHOT_COUNTED_TABLES;
 
 // High-churn, swept, delivery, meter, cursor, and preview/projection state is
 // presence-checked but deliberately not count-compared with a live source.

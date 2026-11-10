@@ -3,23 +3,16 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { parseDeploymentList } from "./rollback-workers.mjs";
+import { DEPLOYMENT_ID_PATTERN as safeIdentity, VERSION_ID_PATTERN as versionIdentity, parseDeploymentList } from "./release/deployment-evidence.mjs";
+import { WORKER_CONFIGS as configs } from "./release/worker-targets.mjs";
 
 const execFile = promisify(execFileCallback);
 const pinnedWranglerEntrypoint = fileURLToPath(new URL("../node_modules/wrangler/bin/wrangler.js", import.meta.url));
 const maxOutputBytes = 1024 * 1024;
 const maxInputBytes = 64 * 1024;
-const configs = Object.freeze({
-  backend: "services/cloudflare-licensing-backend/wrangler.toml",
-  admin: "services/cloudflare-license-admin/wrangler.jsonc",
-  portal: "services/cloudflare-customer-portal/wrangler.jsonc",
-  backup: "services/cloudflare-d1-backup/wrangler.jsonc",
-});
 
 // Parses the sanitized deployment evidence recorded for one Worker before a deploy (the
 // pre-deployment input on stdin). It accepts only the exact sanitized shape for one known Worker.
-const safeIdentity = /^[A-Za-z0-9_-]{1,128}$/u;
-const versionIdentity = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/u;
 
 export function parseSanitizedDeployment(input, expectedWorker) {
   if (!Object.hasOwn(configs, expectedWorker)) throw new Error("expected Worker identity is invalid");

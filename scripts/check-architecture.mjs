@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path, { dirname, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { spawnSync } from "node:child_process";
+import { candidateFiles, trackedFiles } from "./ci/git-files.mjs";
 
 const SOURCE_EXTENSIONS = Object.freeze([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
 const SOURCE_FILE_PATTERN = /^(?:services|packages)\/[^/]+\/src\/.+\.(?:[cm]?[jt]sx?|jsx)$/i;
@@ -638,7 +638,6 @@ export function evaluateArchitecture({ sourceFiles = [], manifests = [], tracked
     .map((entry) => ({ path: normalizeRepoPath(entry.path), source: entry.source }))
     .sort((left, right) => left.path.localeCompare(right.path));
   const allResolvablePaths = new Set([
-    ...trackedPaths.map(normalizeRepoPath),
     ...candidatePaths.map(normalizeRepoPath),
     ...productionFiles.map((entry) => entry.path),
   ]);
@@ -719,16 +718,6 @@ function formatDiagnostic(error) {
   return `[${error.code}] ${location}${edge}: ${error.message}`;
 }
 
-const TRACKED_GIT_PATH_ARGS = Object.freeze(["ls-files", "--cached", "-z"]);
-const CANDIDATE_GIT_PATH_ARGS = Object.freeze(["ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
-
-function pathsFromGit(repoRoot, args) {
-  const result = spawnSync("git", args, { cwd: repoRoot, encoding: "buffer", shell: false });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`git ${args.join(" ")} exited ${result.status}: ${result.stderr?.toString("utf8") ?? ""}`);
-  return result.stdout.toString("utf8").split("\0").filter(Boolean).map(normalizeRepoPath);
-}
-
 function readJson(filePath) {
   try {
     return JSON.parse(readFileSync(filePath, "utf8"));
@@ -738,10 +727,10 @@ function readJson(filePath) {
 }
 
 export function repositoryInput(repoRoot) {
-  const trackedPaths = pathsFromGit(repoRoot, TRACKED_GIT_PATH_ARGS);
+  const trackedPaths = trackedFiles(repoRoot).map(normalizeRepoPath);
   // Audit non-ignored, untracked source too so a local pre-commit run evaluates
   // the same candidate tree that CI will see after those files are committed.
-  const candidatePaths = pathsFromGit(repoRoot, CANDIDATE_GIT_PATH_ARGS);
+  const candidatePaths = candidateFiles(repoRoot).map(normalizeRepoPath);
   const sourceFiles = candidatePaths
     .filter(isProductionSource)
     .map((pathName) => ({ path: pathName, source: readFileSync(resolve(repoRoot, ...pathName.split("/")), "utf8") }));

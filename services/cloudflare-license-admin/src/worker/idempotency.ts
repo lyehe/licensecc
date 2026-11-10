@@ -9,7 +9,7 @@ import { safeString } from "@licensecc/cloudflare-runtime/http/kit";
 import {
   readIdempotentResponse,
   writeIdempotentResponse,
-} from "@licensecc/cloudflare-runtime/d1/idempotency_store";
+} from "./persistence/idempotency_store.mjs";
 
 interface IdempotencyEnv {
   DB: D1DatabaseLike;

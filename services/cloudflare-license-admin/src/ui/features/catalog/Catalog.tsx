@@ -1,7 +1,8 @@
+import { runConsequenceMutation } from "../../shared/consequenceMutation";
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useAdminNavigation } from "../../app/navigation";
 import { useFormFeedback } from "../../shared/fieldErrors";
-import { apiFailureFeedback, codeFeedback, refusalOutcome, validationCode } from "../../shared/messages";
+import { apiFailureFeedback, codeFeedback, validationCode } from "../../shared/messages";
 
 import type {
   CatalogFeature,
@@ -10,7 +11,7 @@ import type {
   Policy,
 } from "../../../shared/api";
 import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
-import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
+import { ConfirmRefreshFailure, EXACT_READ_PROOF, type ConfirmActionOutcome, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { useCoreRefresh } from "../../shared/coreRefresh";
 import { loadAllExactPages, loadMore } from "../../shared/pagination";
 import { hasCatalogFeatureData, hasCatalogFeatureListData, hasCatalogFeatureTransitionData, hasCatalogPlanData, hasCatalogPlanFeatureData, hasCatalogPlanFeatureListData, hasCatalogPlanFeatureTransitionData, hasCatalogPlanListData, hasCatalogPlanTransitionData, hasPolicyListData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
@@ -286,7 +287,6 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     setCatalogFeatureForm(emptyCatalogFeatureForm);
     workspace.markClean("featureEditor", JSON.stringify(emptyCatalogFeatureForm));
   }
-  /** A created feature opens in its editor, showing what was saved. */
   function openFeatureRecord(feature: CatalogFeature): void {
     const form = catalogFeatureFormFromRecord(feature);
     setEditingCatalogFeatureId(feature.id); setCatalogFeatureForm(form); workspace.markClean("featureEditor", JSON.stringify(form));
@@ -369,53 +369,20 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     const expectedCode = `catalog_feature_${action}d`;
     const body = JSON.stringify(action === "disable" ? { reason: currentReason() } : {});
     const dataGuard = (value: unknown): value is CatalogFeature => hasCatalogFeatureTransitionData(value, feature.id, targetStatus);
-    const refreshStatus = async (): Promise<ExactReadProof | null> => {
-      captureRecoveryContext();
-      return await currentCatalogFeaturesRefreshRef.current();
-    };
-    const postSuccessRefresh = confirmSuccessWithRefreshFailure(refreshStatus, isCurrent).manualRefresh;
-    const replay = async (): Promise<ConfirmActionResolution> => {
-      captureRecoveryContext();
-      const retry = await runMutation(async () => {
-        try {
-          return await api<unknown>(catalogFeatureTransitionPath(feature.id, action), { method: "POST", headers: { "idempotency-key": idempotencyKey }, body });
-        } catch {
-          return null;
-        }
-      }, "recovery");
-      if (retry === undefined || retry === null) return "indeterminate";
-      const parsed = parseMutationResponse(retry, expectedCode, dataGuard, mutationFailurePolicies.catalogFeatureTransition[action], "replay");
-      if (parsed.kind !== "success") return parsed.kind === "failure" ? "unapplied" : "indeterminate";
-      try {
-        return (await refreshStatus()) === EXACT_READ_PROOF ? "applied" : "refresh_failed";
-      } catch {
-        return "refresh_failed";
-      }
-    };
-    const reconciliation = { label: "Reconcile status", run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh };
-    const mutation = await runMutation(async () => {
-      try {
-        return await api<unknown>(catalogFeatureTransitionPath(feature.id, action), { method: "POST", headers: { "idempotency-key": idempotencyKey }, body });
-      } catch {
-        return null;
-      }
-    }, "consequence");
-    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
-    if (mutation === null) return confirmMutationUnknown(reconciliation);
-    const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.catalogFeatureTransition[action], "initial");
-    if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
-    setFeedback(codeFeedback(parsed.code, parsed.requestId));
-    invalidatePlanProjectionPreview();
-    invalidateCatalogImportPreview();
-    if (action === "disable") setReason("");
-    try {
-      return (await currentCatalogFeaturesRefreshRef.current()) === EXACT_READ_PROOF
-        ? { ok: true }
-        : confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    } catch {
-      return confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    }
+    return await runConsequenceMutation({
+      request: { method: "POST", path: catalogFeatureTransitionPath(feature.id, action), body, idempotencyKey },
+      runMutation,
+      parse: (result, phase) => parseMutationResponse(result, expectedCode, dataGuard, mutationFailurePolicies.catalogFeatureTransition[action], phase),
+      onApplied: (parsed) => {
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
+        invalidatePlanProjectionPreview();
+        invalidateCatalogImportPreview();
+        if (action === "disable") setReason("");
+      },
+      refresh: async () => await currentCatalogFeaturesRefreshRef.current(),
+      captureRecoveryContext,
+      isCurrent,
+    });
   }
 
   async function submitCatalogPlanCreate(event: FormEvent): Promise<void> {
@@ -487,53 +454,20 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     const expectedCode = `catalog_plan_${action}d`;
     const body = JSON.stringify(action === "disable" ? { reason: currentReason() } : {});
     const dataGuard = (value: unknown): value is CatalogPlan => hasCatalogPlanTransitionData(value, plan.id, targetStatus);
-    const refreshStatus = async (): Promise<ExactReadProof | null> => {
-      captureRecoveryContext();
-      return await currentCatalogPlansRefreshRef.current();
-    };
-    const postSuccessRefresh = confirmSuccessWithRefreshFailure(refreshStatus, isCurrent).manualRefresh;
-    const replay = async (): Promise<ConfirmActionResolution> => {
-      captureRecoveryContext();
-      const retry = await runMutation(async () => {
-        try {
-          return await api<unknown>(catalogPlanTransitionPath(plan.id, action), { method: "POST", headers: { "idempotency-key": idempotencyKey }, body });
-        } catch {
-          return null;
-        }
-      }, "recovery");
-      if (retry === undefined || retry === null) return "indeterminate";
-      const parsed = parseMutationResponse(retry, expectedCode, dataGuard, mutationFailurePolicies.catalogPlanTransition[action], "replay");
-      if (parsed.kind !== "success") return parsed.kind === "failure" ? "unapplied" : "indeterminate";
-      try {
-        return (await refreshStatus()) === EXACT_READ_PROOF ? "applied" : "refresh_failed";
-      } catch {
-        return "refresh_failed";
-      }
-    };
-    const reconciliation = { label: "Reconcile status", run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh };
-    const mutation = await runMutation(async () => {
-      try {
-        return await api<unknown>(catalogPlanTransitionPath(plan.id, action), { method: "POST", headers: { "idempotency-key": idempotencyKey }, body });
-      } catch {
-        return null;
-      }
-    }, "consequence");
-    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
-    if (mutation === null) return confirmMutationUnknown(reconciliation);
-    const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.catalogPlanTransition[action], "initial");
-    if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
-    setFeedback(codeFeedback(parsed.code, parsed.requestId));
-    invalidatePlanProjectionPreview();
-    invalidateCatalogImportPreview();
-    if (action === "disable") setReason("");
-    try {
-      return (await currentCatalogPlansRefreshRef.current()) === EXACT_READ_PROOF
-        ? { ok: true }
-        : confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    } catch {
-      return confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    }
+    return await runConsequenceMutation({
+      request: { method: "POST", path: catalogPlanTransitionPath(plan.id, action), body, idempotencyKey },
+      runMutation,
+      parse: (result, phase) => parseMutationResponse(result, expectedCode, dataGuard, mutationFailurePolicies.catalogPlanTransition[action], phase),
+      onApplied: (parsed) => {
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
+        invalidatePlanProjectionPreview();
+        invalidateCatalogImportPreview();
+        if (action === "disable") setReason("");
+      },
+      refresh: async () => await currentCatalogPlansRefreshRef.current(),
+      captureRecoveryContext,
+      isCurrent,
+    });
   }
 
   async function catalogPlanFeatureTransition(row: CatalogPlanFeature, action: "disable" | "reenable", idempotencyKey: string = crypto.randomUUID()): Promise<ConfirmActionOutcome> {
@@ -549,53 +483,20 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     const expectedCode = `catalog_plan_feature_${action}d`;
     const body = JSON.stringify(action === "disable" ? { reason: currentReason() } : {});
     const dataGuard = (value: unknown): value is CatalogPlanFeature => hasCatalogPlanFeatureTransitionData(value, row.plan_id, row.feature_key, targetStatus);
-    const refreshStatus = async (): Promise<ExactReadProof | null> => {
-      captureRecoveryContext();
-      return await currentCatalogPlanFeaturesRefreshRef.current();
-    };
-    const postSuccessRefresh = confirmSuccessWithRefreshFailure(refreshStatus, isCurrent).manualRefresh;
-    const replay = async (): Promise<ConfirmActionResolution> => {
-      captureRecoveryContext();
-      const retry = await runMutation(async () => {
-        try {
-          return await api<unknown>(catalogPlanFeatureTransitionPath(row.plan_id, row.feature_key, action), { method: "POST", headers: { "idempotency-key": idempotencyKey }, body });
-        } catch {
-          return null;
-        }
-      }, "recovery");
-      if (retry === undefined || retry === null) return "indeterminate";
-      const parsed = parseMutationResponse(retry, expectedCode, dataGuard, mutationFailurePolicies.catalogPlanFeatureTransition[action], "replay");
-      if (parsed.kind !== "success") return parsed.kind === "failure" ? "unapplied" : "indeterminate";
-      try {
-        return (await refreshStatus()) === EXACT_READ_PROOF ? "applied" : "refresh_failed";
-      } catch {
-        return "refresh_failed";
-      }
-    };
-    const reconciliation = { label: "Reconcile status", run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh };
-    const mutation = await runMutation(async () => {
-      try {
-        return await api<unknown>(catalogPlanFeatureTransitionPath(row.plan_id, row.feature_key, action), { method: "POST", headers: { "idempotency-key": idempotencyKey }, body });
-      } catch {
-        return null;
-      }
-    }, "consequence");
-    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
-    if (mutation === null) return confirmMutationUnknown(reconciliation);
-    const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.catalogPlanFeatureTransition[action], "initial");
-    if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
-    setFeedback(codeFeedback(parsed.code, parsed.requestId));
-    invalidatePlanProjectionPreview();
-    invalidateCatalogImportPreview();
-    if (action === "disable") setReason("");
-    try {
-      return (await currentCatalogPlanFeaturesRefreshRef.current()) === EXACT_READ_PROOF
-        ? { ok: true }
-        : confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    } catch {
-      return confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    }
+    return await runConsequenceMutation({
+      request: { method: "POST", path: catalogPlanFeatureTransitionPath(row.plan_id, row.feature_key, action), body, idempotencyKey },
+      runMutation,
+      parse: (result, phase) => parseMutationResponse(result, expectedCode, dataGuard, mutationFailurePolicies.catalogPlanFeatureTransition[action], phase),
+      onApplied: (parsed) => {
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
+        invalidatePlanProjectionPreview();
+        invalidateCatalogImportPreview();
+        if (action === "disable") setReason("");
+      },
+      refresh: async () => await currentCatalogPlanFeaturesRefreshRef.current(),
+      captureRecoveryContext,
+      isCurrent,
+    });
   }
 
   async function submitCatalogPlanFeatureCreate(event: FormEvent): Promise<void> {
@@ -640,7 +541,6 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
           const form = { ...emptyCatalogPlanFeatureForm, project: catalogPlanFeatureForm.project };
           setCatalogPlanFeatureForm(form);
           workspace.markClean("planFeatureEditor", JSON.stringify(form));
-          // The saved row opens in its plan's detail.
           workspace.finish("planFeatureEditor");
         }
       },

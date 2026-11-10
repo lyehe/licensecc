@@ -3,18 +3,13 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { parseDeploymentList } from "./rollback-workers.mjs";
+import { parseDeploymentList } from "./release/deployment-evidence.mjs";
+import { WORKER_CONFIGS as configs } from "./release/worker-targets.mjs";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const pinnedWranglerEntrypoint = resolve(repositoryRoot, "node_modules/wrangler/bin/wrangler.js");
 const maxOutputBytes = 2 * 1024 * 1024;
-const configs = Object.freeze({
-  backend: "services/cloudflare-licensing-backend/wrangler.toml",
-  admin: "services/cloudflare-license-admin/wrangler.jsonc",
-  portal: "services/cloudflare-customer-portal/wrangler.jsonc",
-  backup: "services/cloudflare-d1-backup/wrangler.jsonc",
-});
 const operations = new Set(["dry-run", "deploy", "migrate", "deployments"]);
 
 export function parseProtectedWranglerArguments(argv) {

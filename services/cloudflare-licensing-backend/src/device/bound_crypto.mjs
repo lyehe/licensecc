@@ -1,7 +1,14 @@
-import { decodeBase64url, encodeBase64url, encodeDeviceLeasePayload, deviceLeaseSigningInput, encodeDeviceLeaseEnvelope, decodeDeviceLeaseEnvelope, deviceProofSigningInput } from "@licensecc/licensing-domain/lease/device_protocol";
+import { decodeBase64url, encodeBase64url, deviceEnrollmentComparisonInput, formatDeviceEnrollmentComparison, encodeDeviceLeasePayload, deviceLeaseSigningInput, encodeDeviceLeaseEnvelope, decodeDeviceLeaseEnvelope, deviceProofSigningInput } from "@licensecc/licensing-domain/lease/device_protocol";
 
 const curveOrder = BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
 const scalar = bytes => BigInt(`0x${Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("")}`);
+
+const encoder = new TextEncoder();
+export const boundSecretHash = value => sha256Hex(encoder.encode(value));
+export const boundRandomId = (size = 16) => encodeBase64url(crypto.getRandomValues(new Uint8Array(size)));
+export async function boundEnrollmentComparison(input) {
+  return formatDeviceEnrollmentComparison(new Uint8Array(await crypto.subtle.digest("SHA-256",deviceEnrollmentComparisonInput(input))));
+}
 
 export async function sha256Hex(bytes) {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));

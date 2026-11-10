@@ -7,15 +7,13 @@
 
 #ifndef LICENSEREADER_H_
 #define LICENSEREADER_H_
+#include <map>
 #include <string>
-#include <ctime>
+#include <vector>
 
-#define SI_SUPPORT_IOSTREAMS
 #include <licensecc/datatypes.h>
 
 #include "base/EventRegistry.h"
-#include "os/os.h"
-#include "ini/SimpleIni.h"
 
 namespace license {
 
@@ -30,24 +28,6 @@ public:
 	FullLicenseInfo(const std::string& source, const std::string& product, const std::string& license_signature);
 };
 
-/**
- * This class it is responsible to read the licenses from the disk
- * (in future from network) examining all the possible LicenseLocation
- * positions.
- *
- * Each section of the ini file represents a product.
- * <pre>
- * [product]
- *  sw_version_from = (optional int)
- *  sw_version_to = (optional int)
- *  from_date = YYYY-MM-DD (optional)
- *  to_date  = YYYY-MM-DD (optional)
- *  client_signature = XXXXXXXX (optional std::string 16)
- *  license_signature = XXXXXXXXXX (mandatory, 1024)
- *  application_data = xxxxxxxxx (optional std::string 16)
- *	lic_ver = LCC_LICENSE_FORMAT_VERSION (mandatory int, see base.h)
- *  </pre>
- */
 class LicenseReader {
 private:
 	const LicenseLocation* licenseLocation;

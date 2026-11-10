@@ -4,5 +4,9 @@
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["src/**/*.ts", ".wrangler/worker-configuration.d.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.mjs",
+    ".wrangler/worker-configuration.d.ts"
+  ]
 }

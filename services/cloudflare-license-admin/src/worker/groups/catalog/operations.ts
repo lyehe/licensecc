@@ -2,7 +2,7 @@ import { INVALID_IDEMPOTENCY_KEY, idempotentReplay, mutationResponse, readIdempo
 import { envelope } from "../../responses.js";
 import { batchReturnedRow } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type { Actor, D1DatabaseLike, MutationContext } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
-import { applyPlanProjection, previewPlanProjection } from "@licensecc/cloudflare-runtime/d1/plan_projection";
+import { applyPlanProjection, previewPlanProjection } from "./plan_projection.mjs";
 import type { Env } from "../../env.js";
 import { requireAdmin } from "../../auth.js";
 import { parseJsonBody } from "../../request.js";

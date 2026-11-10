@@ -1,6 +1,6 @@
 import type { EntitlementKey } from "@licensecc/licensing-domain/entitlements/contracts";
 import type { PolicyCapacity, PolicyTrialState } from "@licensecc/licensing-domain/entitlements/policy";
-import type { D1DatabaseLike, D1PreparedStatementLike } from "../d1/entitlement_mutation";
+import type { D1DatabaseLike, D1PreparedStatementLike } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 
 /** Stamps provenance, the device limit and the trial state. */
 export function buildPolicyStampStatement(

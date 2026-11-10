@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./portal/support_contact": {
+      "types": "./src/portal/support_contact.d.ts",
+      "default": "./src/portal/support_contact.mjs"
+    },
     "./audit/audit_digest": {
       "types": "./src/audit/audit_digest.d.ts",
       "default": "./src/audit/audit_digest.mjs"

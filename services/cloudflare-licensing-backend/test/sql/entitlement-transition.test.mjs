@@ -21,7 +21,7 @@ import {
   syncEntitlement,
   transitionEntitlement,
 } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
-import { buildPolicyStampStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
+import { buildPolicyStampStatement } from "../../../cloudflare-license-admin/src/worker/groups/entitlements/policy_store.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "migrations");

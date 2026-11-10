@@ -61,7 +61,6 @@ export interface CatalogImportWorkflow {
   text: string;
   previewBinding: CatalogImportPreviewBinding | null;
   preview: CatalogImportPreviewResponse | CatalogImportApplyResult | null;
-  /** The import form's inline error and status line. */
   feedback: FormFeedback;
   invalidate: (clearResult?: boolean) => void;
   updateText: (value: string) => void;

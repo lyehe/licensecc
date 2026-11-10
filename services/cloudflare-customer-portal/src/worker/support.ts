@@ -4,6 +4,7 @@ import type { ApiEnvelope } from "../shared/api";
 import type { Env } from "./env.js";
 import { bearerToken, constantTimeEqual, readTextBody } from "@licensecc/cloudflare-runtime/http/kit";
 import { sourceIdentity } from "@licensecc/cloudflare-runtime/http/source_identity";
+import { parseSupportContact } from "@licensecc/licensing-domain/portal/support_contact";
 
 export { bearerToken, constantTimeEqual };
 
@@ -110,24 +111,12 @@ export function publicOrigin(env: Env): string {
   return (env.PORTAL_PUBLIC_ORIGIN ?? "").replace(/\/$/, "");
 }
 
-// One address only: no query, no list separator (",", ";" or a percent-encoded one), no controls.
-// eslint-disable-next-line no-control-regex -- control characters are rejected deliberately
-const SUPPORT_MAILTO = /^mailto:[^\s@?,;%\u0000-\u001f\u007f]+@[^\s@?,;%\u0000-\u001f\u007f]+$/i;
-
 // The operator's customer-facing support contact, published by the providers envelope and placed
 // in an href by the UI. Only a credential-free https: URL or a single mailto: address qualifies;
 // anything else (javascript:, http:, data:, a relative path, empty) counts as unset. This is its
 // own check because canonicalHttpsOrigin() deliberately rejects both mailto: and URL paths.
 export function supportContact(env: Pick<Env, "PORTAL_SUPPORT_CONTACT">): string | null {
-  const value = (env.PORTAL_SUPPORT_CONTACT ?? "").trim();
-  if (SUPPORT_MAILTO.test(value)) return value;
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return null;
-  }
-  return url.protocol === "https:" && url.username === "" && url.password === "" ? url.href : null;
+  return parseSupportContact((env.PORTAL_SUPPORT_CONTACT ?? "").trim());
 }
 
 // Bodyless 303 redirect: no-store, no-referrer, with zero or more Set-Cookie values appended in

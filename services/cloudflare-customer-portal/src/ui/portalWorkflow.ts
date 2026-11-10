@@ -1,11 +1,5 @@
-// Pure, dependency-free path-builders + formatters + input validators for the customer-portal SPA.
-// MUST stay free of any import that the workflow unit test cannot `ts.transpileModule` + `import()`
-// (no React, no DOM, no node:). The UI imports these; the test exercises them directly.
-//
 // Invariant 3 reminder: NONE of these helpers emit an Authorization header or a bearer/token — they
 // only build SAME-ORIGIN relative paths. The session is the HttpOnly cookie, carried automatically.
-
-// ---- Auth path builders (same-origin, relative) ------------------------------------------------
 
 export function authRequestPath(): string {
   return "/portal/v1/auth/request";
@@ -19,8 +13,6 @@ export function logoutPath(): string {
   return "/portal/v1/auth/logout";
 }
 
-// ---- Read path builders ------------------------------------------------------------------------
-
 export function mePath(): string {
   return "/api/portal/me";
 }
@@ -28,8 +20,6 @@ export function mePath(): string {
 export function entitlementsPath(): string {
   return "/api/portal/entitlements";
 }
-
-// ---- Formatters / display helpers --------------------------------------------------------------
 
 export const LOGIN_CODE_SENT_COPY = "If this email is registered, we sent an 8-digit code. Enter it below.";
 
@@ -63,7 +53,6 @@ export const NO_ENTITLEMENTS_EMPTY_COPY = "No licenses yet — they appear here 
 // `passwordMessage()` (passwordMessages.tsx) and `ProviderSignIn`'s ERRORS map their own, separate code
 // domains (password flows and the `?auth_error=` redirect) and never read this map.
 const RESULT_CODE_COPY: Record<string, string> = {
-  // ---- Session / identity (routes/auth.ts) -------------------------------------------------------
   unauthorized: "Your session ended. Sign in again.",
   config_error: "The service is temporarily unavailable. Try again shortly.",
   cross_site_forbidden: "That request couldn't be verified. Reload the page and try again.",
@@ -88,7 +77,6 @@ const RESULT_CODE_COPY: Record<string, string> = {
   rate_limited: "Too many attempts — wait a moment and try again.",
   otp_requested: "Check your email for a sign-in code.",
 
-  // ---- Request/body validation (support.ts) ------------------------------------------------------
   body_too_large: "That request was too large. Try again with less data.",
   invalid_json: "That request wasn't valid. Reload the page and try again.",
 
@@ -98,7 +86,6 @@ const RESULT_CODE_COPY: Record<string, string> = {
   // which additionally names the request id for support -- something a static string here cannot do.
   temporarily_unavailable: "This is temporarily unavailable. Try again shortly.",
 
-  // ---- Local UI-only codes (src/ui, passed via localMessage()) -------------------------------------
   invalid_email: "Enter a valid email address.",
   invalid_code: "Enter the 8-digit code exactly as sent.",
   invalid_response: "The service returned an unexpected response. Try again.",
@@ -110,7 +97,7 @@ const RESULT_CODE_COPY: Record<string, string> = {
   // rejection above) -- always specific about staying signed in rather than forwarding whatever code
   // came back, since a code like "unauthorized" would misleadingly suggest the session already ended.
   logout_failed: "Sign-out didn't complete. You're still signed in — try again.",
-  // Shown by App's global onUnauthorized hook (api.tsx) once retrySession() confirms a mid-session
+// Shown by App's global onUnauthorized hook (api.ts) once retrySession() confirms a mid-session
   // 401 is real. The server's own `unauthorized` code already maps to this identical sentence above,
   // but this local code is what fires the return-to-sign-in transition itself, and it can be raised
   // by ANY api() caller, not just the one request whose response happened to carry the code.
@@ -166,17 +153,14 @@ export const NO_START_DATE_COPY = "No start date";
 
 export const NO_END_DATE_COPY = "No end date";
 
-// A license's start date, or "No start date" when it has none a calendar can show.
 export function formatStartDate(value: number | null | undefined): string {
   return isCalendarEpoch(value) ? formatEpoch(value) : NO_START_DATE_COPY;
 }
 
-// A license's (or its trial's) end date, or "No end date" when it has none a calendar can show.
 export function formatEndDate(value: number | null | undefined): string {
   return isCalendarEpoch(value) ? formatEpoch(value) : NO_END_DATE_COPY;
 }
 
-// epoch seconds -> full local timestamp for event rows; invalid -> "-".
 export function formatTimestamp(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value) || value <= 0) {
     return "-";
@@ -184,14 +168,10 @@ export function formatTimestamp(value: number | null | undefined): string {
   return new Date(value * 1000).toLocaleString();
 }
 
-// Render a validity window "<from> to <until>", naming a missing start or end.
 export function formatWindow(validFrom: number | null | undefined, validUntil: number | null | undefined): string {
   return `${formatStartDate(validFrom)} to ${formatEndDate(validUntil)}`;
 }
 
-// ---- Input validators --------------------------------------------------------------------------
-
-// Normalize an email for the auth request: trim + lowercase. Returns "" for non-strings.
 export function normalizeEmail(value: string): string {
   if (typeof value !== "string") {
     return "";
@@ -223,8 +203,6 @@ export function normalizeCode(value: string): string {
 export function isValidCode(value: string): boolean {
   return /^[0-9]{8}$/.test(normalizeCode(value));
 }
-
-// ---- License lifecycle (display only) -----------------------------------------------------------
 
 // A license's lifecycle as the customer reads it. Display only: dates do not establish device or
 // trial authorization, which the server decides on every activation. The wire status "disabled"

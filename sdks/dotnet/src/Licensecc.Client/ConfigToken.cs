@@ -56,8 +56,7 @@ namespace Licensecc.Client
     }
 
     /// <summary>
-    /// Offline verifier for the <c>lcccfg1.</c> config-attestation token. Same envelope/signature core
-    /// as the online assertion, with the config-attestation purpose, the config-hash binding, and the
+    /// Offline verifier for the <c>lcccfg1.</c> config-attestation token, with the config-hash binding and the
     /// "must carry a finite expiry" rule. Mirrors <c>src/library/config_attestation/ConfigAttestation.cpp</c>.
     /// </summary>
     public static class ConfigTokenVerifier
@@ -127,8 +126,7 @@ namespace Licensecc.Client
                 new SignedTokenCore.FieldSpec("expires-at", v => expiresAt = v),
             };
 
-            // config token uses validate_values=false (the C++ parser passes false here).
-            if (!SignedTokenCore.TryParseCanonicalPayload(payloadText, fields, false, out error))
+            if (!SignedTokenCore.TryParseCanonicalPayload(payloadText, fields, out error))
             {
                 return false;
             }

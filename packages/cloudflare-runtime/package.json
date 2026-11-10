@@ -22,10 +22,6 @@
     "./auth/secret_map": {
       "default": "./src/auth/secret_map.mjs"
     },
-    "./d1/plan_projection": {
-      "types": "./src/d1/plan_projection.d.ts",
-      "default": "./src/d1/plan_projection.mjs"
-    },
     "./d1/contract": {
       "types": "./src/d1/contract.d.ts",
       "default": "./src/d1/contract.mjs"
@@ -41,10 +37,6 @@
       "types": "./src/d1/entitlement_json.d.ts",
       "default": "./src/d1/entitlement_json.mjs"
     },
-    "./d1/idempotency_store": {
-      "types": "./src/d1/idempotency_store.d.ts",
-      "default": "./src/d1/idempotency_store.mjs"
-    },
     "./device/bound_capacity": {
       "types": "./src/device/bound_capacity.d.ts",
       "default": "./src/device/bound_capacity.mjs"
@@ -53,16 +45,9 @@
       "types": "./src/device/bound_trial.d.ts",
       "default": "./src/device/bound_trial.mjs"
     },
-    "./entitlements/policy_store": {
-      "types": "./src/entitlements/policy_store.d.ts",
-      "default": "./src/entitlements/policy_store.mjs"
-    },
     "./http/kit": {
       "types": "./src/http/kit.d.ts",
       "default": "./src/http/kit.mjs"
-    },
-    "./webhooks/webhook": {
-      "default": "./src/webhooks/webhook.mjs"
     },
     "./webhooks/event_types": {
       "types": "./src/webhooks/event_types.d.ts",
@@ -75,6 +60,9 @@
     "./auth/password": {
       "types": "./src/auth/password.d.ts",
       "default": "./src/auth/password.mjs"
+    },
+    "./bindings": {
+      "types": "./src/bindings.d.ts"
     }
   },
   "dependencies": {

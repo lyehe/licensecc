@@ -1,3 +1,4 @@
+import { runConsequenceMutation } from "../../shared/consequenceMutation";
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminNavigation, useNavigationGuard } from "../../app/navigation";
@@ -6,10 +7,10 @@ import { StatusActions } from "../../shared/ActionMenu";
 import { ReadNotice } from "../../shared/ReadNotice";
 import type { Policy } from "../../../shared/api";
 import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
-import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
+import { ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { FormStatus } from "../../shared/FeedbackText";
 import { FieldDetails, FieldError, fieldProps, useFormFeedback } from "../../shared/fieldErrors";
-import { apiFailureFeedback, codeFeedback, refusalOutcome, validationCode } from "../../shared/messages";
+import { apiFailureFeedback, codeFeedback, validationCode } from "../../shared/messages";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { loadMore } from "../../shared/pagination";
 import { hasPolicyData, hasPolicyListData, hasPolicyTransitionData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
@@ -223,59 +224,18 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
     const expectedCode = `policy_${action}d`;
     const body = JSON.stringify(action === "disable" ? { reason: currentReason() } : {});
     const dataGuard = (value: unknown): value is Policy => hasPolicyTransitionData(value, policy.id, targetStatus);
-    const refreshStatus = async (): Promise<ExactReadProof | null> => {
-      captureRecoveryContext();
-      return await currentPoliciesRefreshRef.current();
-    };
-    const postSuccessRefresh = confirmSuccessWithRefreshFailure(refreshStatus, isCurrent).manualRefresh;
-    const replay = async (): Promise<ConfirmActionResolution> => {
-      captureRecoveryContext();
-      const retry = await runMutation(async () => {
-        try {
-          return await api<unknown>(policyTransitionPath(policy.id, action), {
-            method: "POST",
-            headers: { "idempotency-key": idempotencyKey },
-            body,
-          });
-        } catch {
-          return null;
-        }
-      }, "recovery");
-      if (retry === undefined || retry === null) return "indeterminate";
-      const parsed = parseMutationResponse(retry, expectedCode, dataGuard, mutationFailurePolicies.policyTransition[action], "replay");
-      if (parsed.kind !== "success") return parsed.kind === "failure" ? "unapplied" : "indeterminate";
-      try {
-        return (await refreshStatus()) === EXACT_READ_PROOF ? "applied" : "refresh_failed";
-      } catch {
-        return "refresh_failed";
-      }
-    };
-    const reconciliation = { label: "Reconcile status", run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh };
-    const mutation = await runMutation(async () => {
-      try {
-        return await api<unknown>(policyTransitionPath(policy.id, action), {
-          method: "POST",
-          headers: { "idempotency-key": idempotencyKey },
-          body,
-        });
-      } catch {
-        return null;
-      }
-    }, "consequence");
-    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
-    if (mutation === null) return confirmMutationUnknown(reconciliation);
-    const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.policyTransition[action], "initial");
-    if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
-    setFeedback(codeFeedback(parsed.code, parsed.requestId));
-    setReason("");
-    try {
-      return (await currentPoliciesRefreshRef.current()) === EXACT_READ_PROOF
-        ? { ok: true }
-        : confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    } catch {
-      return confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    }
+    return await runConsequenceMutation({
+      request: { method: "POST", path: policyTransitionPath(policy.id, action), body, idempotencyKey },
+      runMutation,
+      parse: (result, phase) => parseMutationResponse(result, expectedCode, dataGuard, mutationFailurePolicies.policyTransition[action], phase),
+      onApplied: (parsed) => {
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
+        setReason("");
+      },
+      refresh: async () => await currentPoliciesRefreshRef.current(),
+      captureRecoveryContext,
+      isCurrent,
+    });
   }
 
   // The previous rows stay on screen through a reload; the region below is marked aria-busy instead.

@@ -107,7 +107,7 @@ final class SignedToken {
         }
     }
 
-    static Map<String, String> parseFields(String payload, List<String> fields, boolean validateValues) throws Failure {
+    static Map<String, String> parseFields(String payload, List<String> fields) throws Failure {
         if (payload.isEmpty() || payload.charAt(payload.length() - 1) != '\n' || payload.indexOf('\r') >= 0) {
             throw fail(RejectionCode.PAYLOAD_NOT_CANONICAL, "payload is not canonical");
         }
@@ -124,9 +124,6 @@ final class SignedToken {
                 throw fail(RejectionCode.FIELD_UNEXPECTED, "expected field " + field);
             }
             String value = line.substring(prefix.length());
-            if (validateValues && (value.indexOf('=') >= 0 || value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0)) {
-                throw fail(RejectionCode.INVALID_FIELD_VALUE, "invalid value for " + field);
-            }
             values.put(field, value);
             offset = newline + 1;
         }

@@ -4,7 +4,7 @@
 // A policy is a reusable template. `stampFromPolicy` is a PURE function: policy + operator overrides +
 // now -> the EXISTING EntitlementInput shape (which createEntitlement writes byte-identically) PLUS the
 // capacity + frozen-trial state. The D1 publication statement lives in
-// @licensecc/cloudflare-runtime/entitlements/policy_store so this package stays portable.
+// the admin Worker's entitlement policy-store adapter so this package stays portable.
 //
 // Policies are STAMP-TIME templates (frozen): the entitlement copies the defaults at create time and is
 // thereafter its own source of truth; entitlements.policy_id is advisory provenance (no FK, no live-link).
