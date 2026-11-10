@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:worker": "npm run generate:wrangler-types && tsc -p tsconfig.worker.json",
+    "build:worker": "npm run generate:wrangler-types && tsc -p tsconfig.adapters.json && tsc -p tsconfig.worker.json",
     "build:ui": "vite build",
     "build": "npm run build:worker && npm run build:ui",
     "test:ui": "npm run build:ui && node --test test/admin-ui-workflow.test.mjs test/admin-ui-e2e-layout.test.mjs",
@@ -16,7 +16,7 @@
     "scan:secrets": "node scripts/lint.mjs",
     "lint": "eslint \"src/**/*.{js,mjs,ts,tsx}\" --max-warnings 0",
     "generate:wrangler-types": "node ../../scripts/generate-wrangler-types.mjs .wrangler/worker-configuration.d.ts wrangler.example.jsonc",
-    "typecheck": "npm run generate:wrangler-types && tsc -p tsconfig.worker.typecheck.json --noEmit && tsc -p tsconfig.json --noEmit",
+    "typecheck": "npm run generate:wrangler-types && tsc -p tsconfig.adapters.json --noEmit && tsc -p tsconfig.worker.typecheck.json --noEmit && tsc -p tsconfig.json --noEmit",
     "dry-run": "npm run build && npx wrangler deploy --dry-run --config wrangler.example.jsonc",
     "migrate:local": "npx wrangler d1 migrations apply DB --local --config ../cloudflare-licensing-backend/wrangler.example.toml",
     "sync:entitlement": "node scripts/sync-entitlement.mjs",

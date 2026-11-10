@@ -61,7 +61,7 @@ test("a retained unknown outcome keeps its notice, lock and Reconcile control ac
   await page.getByRole("button", { name: "Export CSV", exact: true }).click();
   await expect(page.locator(".activityMessage")).toContainText("Exported entitlements.csv.");
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
-  await rowAction(row, "Disable");
+  await rowAction(row, "Suspend");
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
   await dialog.getByRole("button", { name: "Confirm" }).click();

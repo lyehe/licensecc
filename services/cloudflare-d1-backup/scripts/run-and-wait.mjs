@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { SNAPSHOT_INVENTORY_ALGORITHM } from "../src/snapshot-contract.mjs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -345,7 +346,7 @@ function snapshotInventoryOutput(value) {
   const inventory = asRecord(value);
   const tableCounts = asRecord(inventory?.table_counts);
   if (
-    inventory?.algorithm !== "d1-export-sql-insert-count-v1" ||
+    inventory?.algorithm !== SNAPSHOT_INVENTORY_ALGORITHM ||
     tableCounts === null
   ) {
     fail("backup_snapshot_inventory_invalid");
@@ -362,7 +363,7 @@ function snapshotInventoryOutput(value) {
     fail("backup_snapshot_inventory_invalid");
   }
   return {
-    algorithm: "d1-export-sql-insert-count-v1",
+    algorithm: SNAPSHOT_INVENTORY_ALGORITHM,
     counted_table_count: entries.length,
   };
 }

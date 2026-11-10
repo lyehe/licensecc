@@ -36,9 +36,21 @@ test('nodes: retirement confirmation preserves hold, refreshes status and explai
   await expect(page.getByRole('cell',{name:'Connected',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Disconnect',exact:true}).click();
   const dialog=page.getByRole('dialog');await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText('It may keep working until its current license expires');
+  await expect(dialog).toContainText('Existing offline access may continue until its current permission expires');
+  await expect(dialog).toContainText("this connection's online checks will be refused");
   await expect(dialog).toContainText('This connection cannot be restored');
   await expect(dialog).toContainText('Example app · DEFAULT');await expect(dialog).toContainText(id);
+  const originalViewport=page.viewportSize();
+  for(const width of [1440,390]) {
+    await page.setViewportSize({width,height:1000});
+    await expect(dialog.getByText(/Restarting the app requires an online check/)).toBeVisible();
+    await expect(dialog.getByText(/does not extend offline access/)).toBeVisible();
+    await expect(dialog.getByRole('button',{name:'Disconnect device',exact:true})).toBeVisible();
+    expect(calls).toHaveLength(0);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await dialog.screenshot({path:testInfo.outputPath(`offline-portal-disconnect-${width}.png`)});
+  }
+  await page.setViewportSize(originalViewport);
   await dialog.getByRole('button',{name:'Cancel',exact:true}).click();expect(calls).toHaveLength(0);
   await page.getByRole('button',{name:'Disconnect',exact:true}).click();
   await dialog.getByRole('button',{name:'Disconnect device',exact:true}).click();
@@ -81,7 +93,7 @@ test('nodes: stale revision requires explicit review and refresh before a new in
 });
 
 test('nodes: failed refresh preserves rows and disables retirement',async({page})=>{
-  await setup(page,{read:(route,reads)=>reads>1?route.fulfill({status:503,json:{ok:false,code:'temporarily_unavailable'}}):route.fulfill({json:envelope('device_bindings',{customer_id:'A',items:[row],has_more:false,next_cursor:null})})});
+  await setup(page,{read:(route,reads)=>reads>1?route.fulfill({status:503,json:{ok:false,code:'temporarily_unavailable', request_id: "portal-e2e-failure" }}):route.fulfill({json:envelope('device_bindings',{customer_id:'A',items:[row],has_more:false,next_cursor:null})})});
   await page.goto('/#/nodes');await expect(page.getByRole('button',{name:'Disconnect',exact:true})).toBeEnabled();await page.getByRole('button',{name:'Refresh devices',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('out of date');await expect(page.getByRole('cell',{name:/Work laptop/})).toBeVisible();await expect(page.getByRole('button',{name:'Disconnect',exact:true})).toBeDisabled();
 });
@@ -99,14 +111,14 @@ test('nodes: mobile layout, dialog focus and escape remain usable',async({page},
 
 test('nodes: protected recovery remains available when the entitlements read fails',async({page})=>{
   await setup(page);
-  await page.route('**/api/portal/entitlements',route=>route.fulfill({status:503,json:{ok:false,code:'temporarily_unavailable'}}));
+  await page.route('**/api/portal/entitlements',route=>route.fulfill({status:503,json:{ok:false,code:'temporarily_unavailable', request_id: "portal-e2e-failure" }}));
   await page.goto('/#/nodes');await expect(page.getByRole('heading',{name:'Connected devices'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Disconnect',exact:true})).toBeEnabled();
   await page.getByRole('button',{name:'Disconnect',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible();
 });
 
 test('nodes: account change on a read offers sign-in recovery',async({page})=>{
-  await setup(page,{read:route=>route.fulfill({status:409,json:{ok:false,code:'account_changed'}})});
+  await setup(page,{read:route=>route.fulfill({status:409,json:{ok:false,code:'account_changed', request_id: "portal-e2e-failure" }})});
   await page.goto('/#/nodes');await expect(page.getByRole('button',{name:'Check sign-in',exact:true})).toBeVisible();
   await expect(page.getByText(/Your signed-in account changed/)).toBeVisible();
 });
@@ -116,7 +128,7 @@ test('nodes: reviewing a saved target beyond page one inspects that exact bindin
   const firstPage=Array.from({length:100},(_,index)=>({...row,binding_id:Buffer.alloc(16,index).toString('base64url')})).sort((a,b)=>a.binding_id<b.binding_id?-1:1);
   let inspected=false;
   await page.addInitScript(value=>sessionStorage.setItem('licensecc.retirement.v1:A',JSON.stringify(value)),{customer:'A',binding:target,revision:0,key,label:'Remote machine',project:row.project,feature:row.feature,hold:row.hold_until});
-  await setup(page,{retire:route=>route.fulfill({status:409,json:{ok:false,code:'revision_conflict'}}),read:route=>{
+  await setup(page,{retire:route=>route.fulfill({status:409,json:{ok:false,code:'revision_conflict', request_id: "portal-e2e-failure" }}),read:route=>{
     const query=new URL(route.request().url()).searchParams;
     if(query.get('binding_id')===target){inspected=true;return route.fulfill({json:envelope('device_bindings',{customer_id:'A',items:[{...row,binding_id:target,state:'released',revision:2}],has_more:false,next_cursor:null})});}
     return route.fulfill({json:envelope('device_bindings',{customer_id:'A',items:firstPage,has_more:true,next_cursor:firstPage.at(-1).binding_id})});
@@ -149,7 +161,7 @@ for(const kind of ['wrong account','duplicate rows','out of order'])test(`nodes:
 
 test('nodes: exact review is single flight and a late response after navigation preserves pending intent',async({page})=>{
   let held,reads=0;
-  await setup(page,{retire:route=>route.fulfill({status:403,json:{ok:false,code:'cross_site_forbidden'}}),read:route=>{
+  await setup(page,{retire:route=>route.fulfill({status:403,json:{ok:false,code:'cross_site_forbidden', request_id: "portal-e2e-failure" }}),read:route=>{
     if(new URL(route.request().url()).searchParams.has('binding_id')){reads++;held=route;return;}
     return route.fulfill({json:envelope('device_bindings',{customer_id:'A',items:[row],has_more:false,next_cursor:null})});
   }});

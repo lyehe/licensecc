@@ -1,3 +1,4 @@
+import type { AssertNoIncompatibleGeneratedBindings, IncompatibleGeneratedBindings, WidenWranglerStringBindings, WithRuntimeNarrowing } from "@licensecc/cloudflare-runtime/bindings";
 // Cloudflare Worker binding and request-context types for the customer portal.
 
 export interface D1Result<T = Record<string, unknown>> {
@@ -20,20 +21,6 @@ export interface D1DatabaseLike {
 export interface ExecutionContextLike {
   waitUntil(promise: Promise<unknown>): void;
 }
-
-// Example-config strings remain broad at runtime, but every resource binding
-// continues to come from Wrangler's generated environment declaration.
-type WidenWranglerStringBindings<Bindings extends object> = {
-  [Binding in keyof Bindings]: Bindings[Binding] extends string ? string : Bindings[Binding];
-};
-
-type WithRuntimeNarrowing<Generated extends object, Runtime extends object> = Omit<Generated, keyof Runtime> & Runtime;
-
-type IncompatibleGeneratedBindings<Generated extends object, Runtime extends object> = {
-  [Binding in keyof Generated & keyof Runtime]: Generated[Binding] extends Runtime[Binding] ? never : Binding;
-}[keyof Generated & keyof Runtime];
-
-type AssertNoIncompatibleGeneratedBindings<Bindings extends never> = Bindings;
 
 // Keep a direct generated dependency on each checked portal binding. This is
 // deliberately not inferred from local names so config drift fails closed.

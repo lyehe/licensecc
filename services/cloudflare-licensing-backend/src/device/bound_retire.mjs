@@ -1,6 +1,6 @@
 import { decodeBase64url } from "@licensecc/licensing-domain/lease/device_protocol";
 import { BoundRequestError } from "./bound_request.mjs";
-import { boundSecretHash } from "./bound_enrollment.mjs";
+import { boundSecretHash } from "./bound_crypto.mjs";
 
 /** @returns {never} */
 const deny = (code, status) => { throw new BoundRequestError(code, status); };

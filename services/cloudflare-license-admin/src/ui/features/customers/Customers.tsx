@@ -1,3 +1,4 @@
+import { runConsequenceMutation } from "../../shared/consequenceMutation";
 import { CustomerAccess } from "./CustomerAccess";
 import { ProtectedConnections } from "./ProtectedConnections";
 import { AddUser } from "./AddUser";
@@ -6,7 +7,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useAdminNavigation } from "../../app/navigation";
 import type { CustomerSection, NavigationIntent } from "../../app/types";
 import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
-import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
+import { ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { TechnicalDetails } from "../../shared/FeedbackText";
 import { formatEpoch, shortHash } from "../../shared/format";
 import { apiFailureFeedback, codeFeedback, refusalOutcome } from "../../shared/messages";
@@ -206,59 +207,19 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
     const expectedCode = `customer_${action}d`;
     const body = JSON.stringify(action === "disable" ? { reason: currentReason() } : {});
     const dataGuard = (value: unknown): value is CustomerListItem => hasCustomerTransitionData(value, id, targetStatus);
-    const refreshStatus = async (): Promise<ExactReadProof | null> => {
-      captureRecoveryContext();
-      return await currentCustomerRefreshRef.current();
-    };
-    const postSuccessRefresh = confirmSuccessWithRefreshFailure(refreshStatus, isCurrent).manualRefresh;
-    const replay = async (): Promise<ConfirmActionResolution> => {
-      captureRecoveryContext();
-      const retry = await runMutation(async () => {
-        try {
-          return await api<unknown>(customerTransitionPath(id, action), {
-            method: "POST",
-            headers: { "idempotency-key": idempotencyKey },
-            body,
-          });
-        } catch {
-          return null;
-        }
-      }, "recovery");
-      if (retry === undefined || retry === null) return "indeterminate";
-      const parsed = parseMutationResponse(retry, expectedCode, dataGuard, mutationFailurePolicies.customerTransition[action], "replay");
-      if (parsed.kind !== "success") return parsed.kind === "failure" ? "unapplied" : "indeterminate";
-      try {
-        return (await refreshStatus()) === EXACT_READ_PROOF ? "applied" : "refresh_failed";
-      } catch {
-        return "refresh_failed";
-      }
-    };
-    const reconciliation = { label: "Reconcile status", run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh };
-    const mutation = await runMutation(async () => {
-      try {
-        return await api<unknown>(customerTransitionPath(id, action), {
-          method: "POST",
-          headers: { "idempotency-key": idempotencyKey },
-          body,
-        });
-      } catch {
-        return null;
-      }
-    }, "consequence");
-    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
-    if (mutation === null) return confirmMutationUnknown(reconciliation);
-    const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.customerTransition[action], "initial");
-    if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
-    setFeedback(codeFeedback(parsed.code, parsed.requestId));
-    setReason("");
-    try {
-      return (await refreshStatus()) === EXACT_READ_PROOF
-        ? { ok: true }
-        : confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    } catch {
-      return confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    }
+    return await runConsequenceMutation({
+      request: { method: "POST", path: customerTransitionPath(id, action), body, idempotencyKey },
+      runMutation,
+      parse: (result, phase) => parseMutationResponse(result, expectedCode, dataGuard, mutationFailurePolicies.customerTransition[action], phase),
+      onApplied: (parsed) => {
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
+        setReason("");
+        captureRecoveryContext();
+      },
+      refresh: async () => await currentCustomerRefreshRef.current(),
+      captureRecoveryContext,
+      isCurrent,
+    });
   }
 
   const customers = customersFence.isSettled() ? customersSnapshot : [];
@@ -290,8 +251,8 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
               <p>{customerDetail.customer.email || customerDetail.customer.id}</p>
             </div>
             <div className="actions customerActions" data-status={customerDetail.customer.status}>
-                <button className="danger" disabled={busy || !customerDetailFence.canLoadMore() || !canRunCustomerAction(customerDetail.customer.status, "disable")} onClick={() => requestConfirm({ title: "Disable customer", body: disableCustomerConfirm(customerDetail.customer), requiresReason: true, run: ({ idempotencyKey }: ConfirmActionContext) => customerTransition("disable", idempotencyKey), successFocusTarget: focusTargetInRow(`customer:${customerDetail.customer.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isCustomerGenerationCurrent(customerGeneration) })}>Disable</button>
-                <button data-focus-action="reenable" disabled={busy || !customerDetailFence.canLoadMore() || !canRunCustomerAction(customerDetail.customer.status, "reenable")} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }: ConfirmActionContext) => customerTransition("reenable", idempotencyKey), successFocusTarget: focusTargetInRow(`customer:${customerDetail.customer.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isCustomerGenerationCurrent(customerGeneration) })}>Reenable</button>
+                <button className="danger" disabled={busy || !customerDetailFence.canLoadMore() || !canRunCustomerAction(customerDetail.customer.status, "disable")} onClick={() => requestConfirm({ title: "Suspend customer", body: disableCustomerConfirm(customerDetail.customer), requiresReason: true, run: ({ idempotencyKey }: ConfirmActionContext) => customerTransition("disable", idempotencyKey), successFocusTarget: focusTargetInRow(`customer:${customerDetail.customer.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isCustomerGenerationCurrent(customerGeneration) })}>Suspend</button>
+                <button data-focus-action="reenable" disabled={busy || !customerDetailFence.canLoadMore() || !canRunCustomerAction(customerDetail.customer.status, "reenable")} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }: ConfirmActionContext) => customerTransition("reenable", idempotencyKey), successFocusTarget: focusTargetInRow(`customer:${customerDetail.customer.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isCustomerGenerationCurrent(customerGeneration) })}>Resume</button>
             </div>
           </>}
         </header>
@@ -306,7 +267,7 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
             {customerDetail.customer.login_email && <p>Login email: {customerDetail.customer.login_email}</p>}
             <details><summary>Technical details</summary><dl className="recordMeta"><div><dt>Customer ID</dt><dd><code>{customerDetail.customer.id}</code></dd></div><div><dt>External reference</dt><dd>{customerDetail.customer.external_ref || "—"}</dd></div><div><dt>Created</dt><dd>{formatEpoch(customerDetail.customer.created_at)}</dd></div><div><dt>Updated</dt><dd>{formatEpoch(customerDetail.customer.updated_at)}</dd></div></dl><pre>{safeMetadata(customerDetail.customer.metadata_json)}</pre></details>
           </section>}
-          {(customerSection === "access" || customerSection === "overview") && <CustomerAccess key={customerDetail.customer.id} customerId={customerDetail.customer.id} />}
+          {(customerSection === "access" || customerSection === "overview") && <CustomerAccess key={customerDetail.customer.id} customer={customerDetail.customer} />}
           {customerSection === "licenses" && <DetailTable caption="Customer licenses" empty="No licenses are shown for this customer." limit="100" headers={["License", "Project", "Label", "Created", "Open"]}>
             {customerDetail.licenses.map((license) => <tr key={license.id}><td><code>{license.id}</code></td><td>{license.project}</td><td>{license.label || "—"}</td><td>{formatEpoch(license.created_at)}</td><td><button type="button" onClick={() => navigate({ tab: "licenses", filter: { project: license.project, customer_id: customerDetail.customer.id, q: license.id } })}>View licenses</button></td></tr>)}
           </DetailTable>}

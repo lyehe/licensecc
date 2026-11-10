@@ -2,9 +2,9 @@ import { expect, test } from "@playwright/test";
 import { captureAppHandoffs } from "./e2e-app-handoff.mjs";
 
 // A mid-session 401 (the server's `unauthorized` code, never a credential failure like
-// `invalid_otp`) must return the customer to sign-in on every api() path -- a background data read
-// or a consent mutation -- via one global onUnauthorized hook (api.tsx) that App wires to
-// auth.retrySession(). These tests pin: a consent mutation surviving the same kind of 401, a wrong
+// `invalid_otp`) must return the customer to sign-in. Ordinary api() requests use App's session
+// hook; protected-device requests retain their saved mutation and invoke recovery explicitly.
+// Both paths use auth.retrySession(). These tests pin: a consent mutation surviving that 401, a wrong
 // OTP code NOT tripping the hook, exactly one /me retry for a single expired-session event, and that
 // a customer switch after a session-ending 401 never shows the previous customer's data.
 const VALID_CODE = "80315426";
@@ -166,12 +166,12 @@ function setupConsent(page) {
   });
   page.route("**/api/portal/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (!signedIn) return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } });
+    if (!signedIn) return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } });
     if (path.endsWith("/me")) return route.fulfill({ json: consentEnvelope("ok", { customer_id: customer, email: null }) });
     if (path.endsWith("/inspect")) return route.fulfill({ json: consentEnvelope("authorization_inspected", consentInspection(approveAttempts > 0 ? { status: "approved", revision: 1, entitlements: [] } : {})) });
     if (path.endsWith("/approve")) {
       approveAttempts += 1;
-      if (approveAttempts === 1) { signedIn = false; return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }); }
+      if (approveAttempts === 1) { signedIn = false; return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }); }
       return route.fulfill({ json: consentEnvelope("authorization_approved", { callback_url: consentCallback, expires_at: Math.floor(Date.now() / 1000) + 60, revision: 1 }) });
     }
     return route.fulfill({ json: consentEnvelope("ok", { items: [] }) });

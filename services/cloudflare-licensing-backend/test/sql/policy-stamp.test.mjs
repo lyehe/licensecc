@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 
 import { createEntitlement } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import { stampFromPolicy } from "@licensecc/licensing-domain/entitlements/policy";
-import { buildPolicyStampStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
+import { buildPolicyStampStatement } from "../../../cloudflare-license-admin/src/worker/groups/entitlements/policy_store.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "migrations");

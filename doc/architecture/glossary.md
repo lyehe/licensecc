@@ -78,6 +78,23 @@ allows (`max_active_devices`/`device_limit`). Both apps call this the
 already does, in the consent page and in `device_limit_reached` copy). The
 device limit is a grant's only capacity.
 
+**Lifecycle actions.** Customer and license access actions use **Suspend**
+and **Resume**, matching the displayed **suspended** and **active** states.
+The permanent entitlement action remains **Revoke**. Apply these verbs to
+single and bulk actions, confirmation titles, consequence text, and progress
+messages. Keep wire actions `disable` / `reenable`, status `disabled`, and
+internal identifiers unchanged. Configuration controls for webhooks, catalog
+entries, and policies may still use Enable / Disable.
+
+**Offline consequences.** Customer, grant and device lifecycle confirmations
+say that existing offline access may continue until its current permission
+expires, and that restarting the app requires an online check. **Slot
+available** names capacity release, which includes a safety allowance; it
+does not extend offline access or identify the current permission's expiry.
+Portal sign-out and losing internet do not disconnect a device or free its
+slot. The timing and authority rules remain in
+[ADR 0006](decisions/0006-device-bound-licensing.md).
+
 ## Applying this glossary
 
 - Prefer the table's exact words in new copy. If a concept in the table

@@ -568,7 +568,7 @@ test("admin UI treats accepted mutation plus aborted refresh as success with man
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
-  const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
+  const trigger = row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first();
   await openActionMenu(trigger);
   await trigger.focus();
   await clickAction(trigger);
@@ -584,7 +584,7 @@ test("admin UI treats accepted mutation plus aborted refresh as success with man
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
-  const reenable = row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first();
+  const reenable = row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first();
   await openActionMenu(reenable);
   await expect(reenable).toBeEnabled();
 });
@@ -598,7 +598,7 @@ test("admin UI treats malformed post-success refresh as success with manual reco
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
-  const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
+  const trigger = row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
@@ -612,7 +612,7 @@ test("admin UI treats malformed post-success refresh as success with manual reco
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
-  const reenable = row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first();
+  const reenable = row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first();
   await openActionMenu(reenable);
   await expect(reenable).toBeEnabled();
 });
@@ -627,7 +627,7 @@ for (const refreshFailure of ["truncated", "wrong-enum"]) {
     await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
 
     const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
-    await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+    await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Reason (required)").fill("operator review");
     api.behavior.refreshFailure = refreshFailure;
@@ -638,7 +638,7 @@ for (const refreshFailure of ["truncated", "wrong-enum"]) {
     const refreshButton = page.getByRole("button", { name: "Refresh status" });
     await refreshButton.click();
     await expect(page.locator(".operatorNotice")).toHaveCount(0);
-    const reenable = row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first();
+    const reenable = row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first();
     await openActionMenu(reenable);
     await expect(reenable).toBeEnabled();
   });
@@ -652,7 +652,7 @@ test("admin UI rejects a nested-null customer detail refresh before clearing a s
   await page.locator("#customer-open-cus_acme").click();
   await expect(page.getByRole("heading", { name: "Acme Corp" })).toBeVisible();
 
-  const disable = page.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
+  const disable = page.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first();
   await clickAction(disable);
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
@@ -663,7 +663,7 @@ test("admin UI rejects a nested-null customer detail refresh before clearing a s
   await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
-  const reenable = page.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first();
+  const reenable = page.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first();
   await openActionMenu(reenable);
   await expect(reenable).toBeEnabled();
 });
@@ -677,7 +677,7 @@ test("admin UI rejects a non-2xx refresh carrying an ok response", async ({ page
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
-  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  await clickAction(row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
   api.behavior.refreshFailure = "http-success";
@@ -699,7 +699,7 @@ test("admin UI keeps the success warning after a parsed refresh error and clears
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
-  const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
+  const trigger = row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
@@ -719,7 +719,7 @@ test("admin UI keeps the success warning after a parsed refresh error and clears
 
   await refreshButton.click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
-  const reenable = row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first();
+  const reenable = row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first();
   await openActionMenu(reenable);
   await expect(reenable).toBeEnabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
@@ -734,7 +734,7 @@ test("admin UI treats missing refresh data as success with manual recovery", asy
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
-  const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
+  const trigger = row.getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
@@ -747,7 +747,7 @@ test("admin UI treats missing refresh data as success with manual recovery", asy
   await expect(row.locator(".status")).toBeFocused();
   await refreshButton.click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
-  const reenable = row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first();
+  const reenable = row.getByRole("button", { name: "Resume", exact: true, includeHidden: true }).first();
   await openActionMenu(reenable);
   await expect(reenable).toBeEnabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
@@ -762,7 +762,7 @@ test("admin UI falls back to a stable section when a successful row disappears",
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
 
-  const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
+  const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Suspend", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");

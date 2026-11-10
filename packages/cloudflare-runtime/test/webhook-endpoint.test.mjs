@@ -7,7 +7,6 @@ import {
   safeWebhookUrl,
   WEBHOOK_TEST_STATUS_CLASSES,
 } from "../src/webhooks/webhook_endpoint.mjs";
-import { WEBHOOK_DELIVER_TIMEOUT_MS, webhookSigningConfig } from "../src/webhooks/webhook.mjs";
 
 test("safeWebhookUrl accepts an absolute https URL and returns its normalized href", () => {
   assert.equal(safeWebhookUrl("https://hooks.example.com/lcc"), "https://hooks.example.com/lcc");
@@ -63,17 +62,6 @@ test("a test send can only ever report one of five status classes", () => {
   assert.ok(Object.isFrozen(WEBHOOK_TEST_STATUS_CLASSES));
 });
 
-test("webhookSigningConfig is the one fail-closed signing selector real and test deliveries share", () => {
-  const secret = Buffer.alloc(32, 7).toString("base64");
-  const configured = webhookSigningConfig({ WEBHOOK_SIGNING_SECRETS: JSON.stringify({ k1: secret }), WEBHOOK_SIGNING_KEY_ID: "k1" });
-  assert.equal(configured.keyId, "k1");
-  assert.ok(configured.secretsMap !== null && typeof configured.secretsMap === "object");
-  assert.equal(webhookSigningConfig({}).error, "webhook.signing_unconfigured");
-  assert.equal(webhookSigningConfig(undefined).error, "webhook.signing_unconfigured");
-  assert.equal(webhookSigningConfig({ WEBHOOK_SIGNING_SECRETS: JSON.stringify({ k1: secret }) }).error, "webhook.signing_key_missing");
-  assert.equal(webhookSigningConfig({ WEBHOOK_SIGNING_SECRETS: JSON.stringify({ k1: secret }), WEBHOOK_SIGNING_KEY_ID: "k2" }).error, "webhook.signing_key_missing");
-  assert.equal(WEBHOOK_DELIVER_TIMEOUT_MS, 5000);
-});
 
 test("a queued delivery is within scope only when its payload names the endpoint's current project or customer", () => {
   const entitlement = (project) => JSON.stringify({ id: 1, type: "create", source: "entitlement", occurred_at: 1, data: { project } });

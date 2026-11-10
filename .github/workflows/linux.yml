@@ -25,7 +25,7 @@ jobs:
          run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ci-linux-arm64
 
    build-linux:
-      runs-on: ubuntu-latest
+      runs-on: ubuntu-24.04
       strategy:
         fail-fast: false
         matrix:

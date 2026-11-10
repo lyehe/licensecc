@@ -24,16 +24,6 @@ const map<LCC_EVENT_TYPE, int> PROGRESS_BY_EVENT_TYPE = {
 
 EventRegistry::EventRegistry() { current_validation_step = -1; }
 
-EventRegistry &operator<<(EventRegistry &eventRegistry, AuditEvent &securityEvent) {
-	eventRegistry.logs.push_back(securityEvent);
-	return eventRegistry;
-}
-
-EventRegistry &operator<<(EventRegistry &eventRegistry1, EventRegistry &otherRegistry) {
-	eventRegistry1.append(otherRegistry);
-	return eventRegistry1;
-}
-
 ostream &operator<<(std::ostream &out, const EventRegistry &er) {
 	out << string("EventReg[step:") << er.current_validation_step << ",events:{";
 	for (auto &it : er.logs) {
@@ -49,16 +39,11 @@ string EventRegistry::to_string() const {
 	return ss.str();
 }
 
-void EventRegistry::append(const EventRegistry &eventRegistry) {
-	logs.insert(logs.end(), eventRegistry.logs.begin(), eventRegistry.logs.end());
-}
-
 const AuditEvent *EventRegistry::getLastFailure() const {
 	const AuditEvent *result = nullptr;
 	if (logs.size() == 0) {
 		return result;
 	}
-	// try to find a failure between the licenses who progressed the most
 	if (mostAdvancedLogIdx_by_LicenseId.size() > 0) {
 		for (const auto &mostAdvLogIter : mostAdvancedLogIdx_by_LicenseId) {
 			const AuditEvent &currentLog = logs[mostAdvLogIter.second];
@@ -118,7 +103,6 @@ void EventRegistry::addEventWithSeverity(LCC_SEVERITY severity, LCC_EVENT_TYPE e
 		mstrlcpy(audit.param2, info, sizeof audit.param2);
 	}
 	logs.push_back(audit);
-	// udpate the status of the log
 	if (successEvent) {
 		int step = eventIterator->second;
 		if (step > current_validation_step) {
@@ -174,8 +158,6 @@ void EventRegistry::exportLastEvents(AuditEvent *auditEvents, int nlogs) {
 	if (auditEvents == nullptr || nlogs <= 0) {
 		return;
 	}
-	// zero the whole destination first so unused slots are well-defined for
-	// consumers iterating the array (e.g. print_error).
 	memset(auditEvents, 0, sizeof(AuditEvent) * static_cast<size_t>(nlogs));
 	const int sizeToCopy = min(nlogs, (int)logs.size());
 	std::copy(logs.end() - sizeToCopy, logs.end(), auditEvents);

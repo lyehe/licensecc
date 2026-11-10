@@ -47,7 +47,7 @@ public final class ConfigAttestation {
         try {
             SignedToken.Envelope envelope = SignedToken.split(token, PREFIX);
             SignedToken.verifySignature(envelope, trustedKeys, 3072, retiredKeyIds);
-            Map<String, String> values = SignedToken.parseFields(envelope.payloadText(), FIELDS, false);
+            Map<String, String> values = SignedToken.parseFields(envelope.payloadText(), FIELDS);
             Claims claims = new Claims(values.get("purpose"), values.get("version"), values.get("alg"),
                     values.get("key-id"), values.get("project"), values.get("feature"),
                     values.get("license-fingerprint"), values.get("device-hash"), values.get("config-id"),

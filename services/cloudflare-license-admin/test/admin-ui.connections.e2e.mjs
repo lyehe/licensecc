@@ -28,10 +28,21 @@ test("admin connections retire with explicit hold, exact request and audit histo
   const trigger=region(page).getByRole('button',{name:'Disconnect',exact:true});
   await expect(trigger).toHaveClass(/danger/);
   await trigger.click();
-  const dialog=page.getByRole('dialog');await expect(dialog).toContainText('Existing signed offline access');await expect(dialog).toContainText('cus_acme');
+  const dialog=page.getByRole('dialog');await expect(dialog).toContainText('Existing offline access');await expect(dialog).toContainText('cus_acme');
   const commit=dialog.getByRole('button',{name:'Disconnect',exact:true});
   await expect(commit).toHaveClass(/danger/);
   await expect(commit).toBeDisabled();
+  const originalViewport=page.viewportSize();
+  for(const width of [1440,390]) {
+    await page.setViewportSize({width,height:1000});
+    await expect(dialog.getByText(/Restarting the app requires an online check/)).toBeVisible();
+    await expect(dialog.getByText(/does not extend offline access/)).toBeVisible();
+    await expect(commit).toBeVisible();await expect(commit).toBeDisabled();
+    expect(f.posts).toHaveLength(0);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await dialog.screenshot({path:testInfo.outputPath(`offline-admin-disconnect-${width}.png`)});
+  }
+  await page.setViewportSize(originalViewport);
   await dialog.getByLabel('Type DISCONNECT to confirm').fill('DISCONNECT');
   await expect(commit).toBeEnabled();
   await commit.evaluate(button=>{button.click();button.click();});

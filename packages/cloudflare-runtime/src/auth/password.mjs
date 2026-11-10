@@ -1,5 +1,5 @@
 import { scrypt } from "@noble/hashes/scrypt.js";
-import { constantTimeEqual } from "../http/kit.mjs";
+import { constantTimeEqual } from "./primitives.mjs";
 // OWASP's scrypt N=2^15/r=8/p=3 profile: ~32 MiB, bounded 64 MiB allocation.
 const PREFIX = "scrypt-32768-8-3";
 const SALT_BYTES = 16;

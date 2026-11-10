@@ -6,7 +6,7 @@ import adminWorker from "../../../cloudflare-license-admin/dist-worker/worker/in
 import { createLocalSqliteDb } from "../../local-host/db-sqlite.mjs";
 import backend from "../../dist/app.js";
 import { inspectBoundAuthorization, approveBoundAuthorization } from "../../src/device/bound_consent.mjs";
-import { boundRandomId } from "../../src/device/bound_enrollment.mjs";
+import { boundRandomId } from "../../src/device/bound_crypto.mjs";
 import { importBoundDeviceKey, normalizeDeviceSignature, sha256Hex } from "../../src/device/bound_crypto.mjs";
 import { encodeBase64url, deviceOperationBody, deviceProofSigningInput, decodeDeviceLeaseEnvelope, deviceLeaseSigningInput } from "@licensecc/licensing-domain/lease/device_protocol";
 

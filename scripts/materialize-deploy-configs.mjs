@@ -5,43 +5,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { experimental_readRawConfig as readRawWranglerConfig } from "wrangler";
+import { WORKER_TARGETS as targets } from "./release/worker-targets.mjs";
+import { parseSupportContact } from "@licensecc/licensing-domain/portal/support_contact";
 
 // The protected device registry and lease-key PEM shapes are backend-owned; validate them with the
 // backend's own parsers.
 import { boundDeviceConfig, pemBytes } from "../services/cloudflare-licensing-backend/src/device/bound_config.mjs";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-
-const targets = Object.freeze([
-  Object.freeze({
-    id: "backend",
-    env: "LICENSECC_BACKEND_WRANGLER_CONFIG_B64",
-    path: "services/cloudflare-licensing-backend/wrangler.toml",
-    format: "toml",
-    main: "src/index.ts",
-  }),
-  Object.freeze({
-    id: "admin",
-    env: "LICENSECC_ADMIN_WRANGLER_CONFIG_B64",
-    path: "services/cloudflare-license-admin/wrangler.jsonc",
-    format: "jsonc",
-    main: "src/worker/index.ts",
-  }),
-  Object.freeze({
-    id: "portal",
-    env: "LICENSECC_PORTAL_WRANGLER_CONFIG_B64",
-    path: "services/cloudflare-customer-portal/wrangler.jsonc",
-    format: "jsonc",
-    main: "src/worker/index.ts",
-  }),
-  Object.freeze({
-    id: "backup",
-    env: "LICENSECC_BACKUP_WRANGLER_CONFIG_B64",
-    path: "services/cloudflare-d1-backup/wrangler.jsonc",
-    format: "jsonc",
-    main: "src/index.ts",
-  }),
-]);
 
 const expectedOriginEnvironment = Object.freeze({
   backend: "LICENSECC_EXPECTED_BACKEND_ORIGIN",
@@ -103,22 +74,6 @@ const resourceId = /^(?:[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[8
 const accountId = /^[a-f0-9]{32}$/u;
 const accessAudience = /^[A-Za-z0-9._-]{16,128}$/u;
 const emailAddress = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
-// Mirrors the portal Worker's own supportContact() shape (src/worker/support.ts): one address only,
-// no query, no list separator, no controls.
-// eslint-disable-next-line no-control-regex -- control characters are rejected deliberately
-const supportMailto = /^mailto:[^\s@?,;%\u0000-\u001f\u007f]+@[^\s@?,;%\u0000-\u001f\u007f]+$/iu;
-
-function supportContactShape(value) {
-  if (supportMailto.test(value)) return true;
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  return url.protocol === "https:" && url.username === "" && url.password === "";
-}
-
 function fail(target, detail) {
   throw new Error(`${target.env} ${detail}`);
 }
@@ -456,7 +411,7 @@ function validatePortal(config, target, profile, profileName) {
   const backendOrigin = canonicalHttpsOrigin(vars.BACKEND_ORIGIN, target, "vars.BACKEND_ORIGIN");
   if (vars.PORTAL_EMAIL_API_BASE !== undefined) canonicalHttpsOrigin(vars.PORTAL_EMAIL_API_BASE, target, "vars.PORTAL_EMAIL_API_BASE");
   if (vars.PORTAL_EMAIL_FROM !== undefined && vars.PORTAL_EMAIL_FROM !== "" && !emailAddress.test(vars.PORTAL_EMAIL_FROM)) fail(target, "must set vars.PORTAL_EMAIL_FROM to a valid address when enabled");
-  if (vars.PORTAL_SUPPORT_CONTACT !== undefined && vars.PORTAL_SUPPORT_CONTACT !== "" && !supportContactShape(vars.PORTAL_SUPPORT_CONTACT)) {
+  if (vars.PORTAL_SUPPORT_CONTACT !== undefined && vars.PORTAL_SUPPORT_CONTACT !== "" && parseSupportContact(vars.PORTAL_SUPPORT_CONTACT) === null) {
     fail(target, "must set vars.PORTAL_SUPPORT_CONTACT to a credential-free https: URL or a single mailto: address when set");
   }
   validateAssets(config, target);

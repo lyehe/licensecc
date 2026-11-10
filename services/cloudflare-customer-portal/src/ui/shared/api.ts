@@ -1,19 +1,16 @@
-import React from "react";
-
 import type { ApiEnvelope } from "../../shared/api";
-import { describeResultCode, describeUnknownResult, rateLimitMessage } from "../portalWorkflow";
 import type { StatusMessage } from "../types";
 
 // A mid-session 401: the server's `unauthorized` code means the session cookie is gone or
 // invalid -- distinct from a credential failure that also answers 401 (`invalid_otp`,
 // `invalid_credentials`, ...), which means "you typed the wrong thing", never "you were signed out".
-// App registers exactly one handler here, once (setOnUnauthorized), so every api() call below routes a
-// real session death through the same recovery path.
-type UnauthorizedHandler = () => void;
-let onUnauthorizedHandler: UnauthorizedHandler | null = null;
+// App registers exactly one handler here, once (setOnSessionProblem), so every api() call below routes a
+// real session death or a 409 account_changed through the same /me recovery path.
+type SessionProblemHandler = (reason: "session_ended" | "account_changed") => void;
+let onSessionProblemHandler: SessionProblemHandler | null = null;
 
-export function setOnUnauthorized(handler: UnauthorizedHandler | null): void {
-  onUnauthorizedHandler = handler;
+export function setOnSessionProblem(handler: SessionProblemHandler | null): void {
+  onSessionProblemHandler = handler;
 }
 
 // A straggler -- a request sent under an OLD, now-superseded session that only
@@ -22,15 +19,17 @@ export function setOnUnauthorized(handler: UnauthorizedHandler | null): void {
 // cannot tell "a fresh 401 from the current session" apart from "a very late 401 from a dead one". A
 // session epoch does: beginNewSession() bumps it once per confirmed sign-in (called from
 // AuthFeature.tsx's loadMe, success branch only), api() captures the epoch when EACH request starts,
-// and reportUnauthorized() ignores a 401 whose request started in an epoch that is no longer current.
+// and reportSessionProblem() ignores failures from a superseded epoch, including account mismatches.
 let sessionEpoch = 0;
 
 export function beginNewSession(): void {
   sessionEpoch += 1;
 }
 
-function reportUnauthorized(status: number, code: string, requestEpoch: number): void {
-  if (status === 401 && code === "unauthorized" && requestEpoch === sessionEpoch) onUnauthorizedHandler?.();
+function reportSessionProblem(status: number, code: string, requestEpoch: number): void {
+  if (requestEpoch !== sessionEpoch) return;
+  if (status === 401 && code === "unauthorized") onSessionProblemHandler?.("session_ended");
+  if (status === 409 && code === "account_changed") onSessionProblemHandler?.("account_changed");
 }
 
 // The HttpOnly session cookie is the only browser credential. Keeping every JSON request here makes
@@ -38,18 +37,17 @@ function reportUnauthorized(status: number, code: string, requestEpoch: number):
 export async function api<T>(
   path: string,
   init?: RequestInit,
-  options?: { skipUnauthorizedHook?: boolean },
+  options?: { skipSessionHook?: boolean },
 ): Promise<ApiEnvelope<T>> {
   const requestEpoch = sessionEpoch; // captured before the request goes out
   let response: Response;
   try {
+    const headers = new Headers(init?.headers);
+    if (!headers.has("content-type")) headers.set("content-type", "application/json");
     response = await fetch(path, {
       ...init,
       credentials: "same-origin",
-      headers: {
-        "content-type": "application/json",
-        ...(init?.headers ?? {}),
-      },
+      headers,
     });
   } catch {
     // fetch() itself rejects when the request never reached the network at all (offline, DNS
@@ -61,18 +59,33 @@ export async function api<T>(
   }
   let envelope: ApiEnvelope<T>;
   try {
-    envelope = (await response.json()) as ApiEnvelope<T>;
+    const body: unknown = await response.json();
+    if (typeof body !== "object" || body === null || Array.isArray(body)
+        || !("ok" in body) || typeof body.ok !== "boolean" || body.ok !== response.ok
+        || !("code" in body) || typeof body.code !== "string" || !body.code
+        || !("request_id" in body) || typeof body.request_id !== "string") {
+      return { ok: false, code: "invalid_response", request_id: "" };
+    }
+    envelope = body as ApiEnvelope<T>;
   } catch {
     return { ok: false, code: "invalid_response", request_id: "" };
   }
   // retrySession()'s own /me check (AuthFeature.tsx's loadMe) must never re-trigger the hook it is
-  // itself answering -- that would be circular -- so it alone passes skipUnauthorizedHook.
-  if (!options?.skipUnauthorizedHook) reportUnauthorized(response.status, envelope.code, requestEpoch);
+  // itself answering -- that would be circular -- so it alone passes skipSessionHook.
+  if (!options?.skipSessionHook) reportSessionProblem(response.status, envelope.code, requestEpoch);
   // The auth 429s carry a real `retry-after` header; it never rides the JSON body, so it
   // is read here, once, and attached for every caller instead of each one re-parsing headers.
   const retryAfterHeader = response.headers.get("retry-after");
   const retryAfter = retryAfterHeader === null ? Number.NaN : Number(retryAfterHeader);
   return Number.isFinite(retryAfter) ? { ...envelope, retryAfter } : envelope;
+}
+
+// Bind account reads and actions to the identity the mounted screen actually displayed.
+// A mismatch rechecks /me through the epoch-fenced session handler; no mutation is replayed.
+export function accountApi<T>(customerId: string, path: string, init?: RequestInit): Promise<ApiEnvelope<T>> {
+  const headers = new Headers(init?.headers);
+  headers.set("x-expected-customer-id", encodeURIComponent(customerId));
+  return api<T>(path, { ...init, headers });
 }
 
 export function resultMessage(result: ApiEnvelope<unknown>): StatusMessage {
@@ -83,36 +96,6 @@ export function localMessage(code: string, ok: boolean): StatusMessage {
   return { code, request_id: "", ok };
 }
 
-// The "Technical details" line -- the raw code, plus the request id in
-// parentheses when one is present -- used by StatusLine below. Lives here rather than in
-// portalWorkflow.ts: it needs no React, but api.tsx (not the pure RESULT_CODE_COPY module) is
-// where StatusLine-adjacent helpers already live.
 export function formatMessageDetail(message: Pick<StatusMessage, "code" | "request_id">): string {
   return message.request_id === "" ? message.code : `${message.code} (${message.request_id})`;
-}
-
-// Human-readable status text for the SPA: describeResultCode's copy when the code is mapped, else the
-// generic reference fallback -- never the raw snake_case code as the visible sentence. The
-// code and request id remain available, tucked under a collapsed "Technical details" disclosure so
-// support can read them off without the raw code cluttering the message every customer sees.
-export function StatusLine({ message, fallback }: { message: StatusMessage | null; fallback: string }): React.ReactElement {
-  if (message === null) {
-    return <p role="status" className="statusline">{fallback}</p>;
-  }
-  // rate_limited gets the one dynamic sentence ONLY when a real retry-after header reached this
-  // specific call (the auth 429s in the header rollout); every other rate_limited (e.g. self-service's
-  // own 429, which never carries the header) keeps the existing generic RESULT_CODE_COPY text.
-  const human = message.code === "rate_limited" && typeof message.retryAfter === "number"
-    ? rateLimitMessage(message.retryAfter)
-    : describeResultCode(message.code) ?? describeUnknownResult(message.request_id);
-  const detail = formatMessageDetail(message);
-  return (
-    <div role="status" className={message.ok ? "statusline" : "statusline error"}>
-      <p>{human}</p>
-      <details>
-        <summary>Technical details</summary>
-        <small>{detail}</small>
-      </details>
-    </div>
-  );
 }

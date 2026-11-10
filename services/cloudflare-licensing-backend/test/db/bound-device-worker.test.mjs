@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { measureBoundCleanupBacklog, purgeExpiredBoundEphemera } from "../../src/device/bound_cleanup.mjs";
 import { encodeBase64url, deviceOperationBody, deviceProofSigningInput, decodeDeviceLeaseEnvelope, deviceEnrollmentComparisonInput, formatDeviceEnrollmentComparison } from "@licensecc/licensing-domain/lease/device_protocol";
-import { boundRandomId, boundSecretHash } from "../../src/device/bound_enrollment.mjs";
+import { boundRandomId, boundSecretHash } from "../../src/device/bound_crypto.mjs";
 import { sha256Hex, normalizeDeviceSignature, importBoundDeviceKey } from "../../src/device/bound_crypto.mjs";
 
 import { mintSession } from "../../../cloudflare-customer-portal/src/auth/portal_session.mjs";

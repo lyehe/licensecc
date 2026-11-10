@@ -1226,7 +1226,7 @@
       },
       "/api/portal/device-bindings": {
         "get": {
-          "description": "Returns at most 100 bindings in ascending binding ID order. Opaque keyset pagination rechecks current ownership on every page; it is not a snapshot. Restart pagination to see inserts before the cursor. Retiring bindings at or beyond their hold deadline are logically released without waiting for cleanup. Active bindings remain occupied after lease expiry. Last proof time is authenticated contact, not live presence. All responses are no-store.",
+          "description": "Returns at most 100 bindings in ascending binding ID order. Pagination rechecks ownership on every page; it is not a snapshot. Optional project restricts candidates before pagination. With a nonempty q, scans at most 100 owned candidates and returns literal case-insensitive substring matches over label (or Unnamed device), connection ID and app using JavaScript lowercase semantics. Search pages may have zero matches and has_more true; next_cursor advances over scanned candidates, not just matches. Keep q and project unchanged while continuing; restart when either changes. Empty q retains ordinary list pagination. Restart pagination to see inserts before the cursor. Retiring bindings at or beyond their hold deadline are logically released without cleanup; active bindings remain occupied after lease expiry. All responses are no-store. Unknown and duplicate query parameters are rejected.",
           "operationId": "portalDeviceBindingsList",
           "parameters": [
             {
@@ -1250,13 +1250,32 @@
               }
             },
             {
-              "description": "Inspect exactly this owned binding, returning zero or one item. Mutually exclusive with cursor.",
+              "description": "Inspect exactly this owned binding, returning zero or one item. Mutually exclusive with cursor, q and project, including an empty q.",
               "in": "query",
               "name": "binding_id",
               "required": false,
               "schema": {
                 "description": "Canonical unpadded base64url encoding of 16 bytes.",
                 "pattern": "^[A-Za-z0-9_-]{22}$",
+                "type": "string"
+              }
+            },
+            {
+              "description": "Literal substring, trimmed before enforcing the maximum of 128 Unicode code points. No wildcard or query syntax; JavaScript case-insensitive matching. Omit or use whitespace for the ordinary list.",
+              "in": "query",
+              "name": "q",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Exact app identifier; applied before candidate pagination. May be combined with q and cursor.",
+              "in": "query",
+              "name": "project",
+              "required": false,
+              "schema": {
+                "pattern": "^[A-Za-z0-9_.:-]{1,127}$",
                 "type": "string"
               }
             }
@@ -2362,8 +2381,38 @@
                 ],
                 "type": "string"
               }
+            },
+            {
+              "description": "Required only for mode=link, unless the native form supplies expected_customer_id. Uses the displayed customer's encodeURIComponent value. An absent precondition redirects with auth_error=account_context_required; a mismatch redirects with auth_error=account_changed. No OAuth state is created for either refusal.",
+              "in": "header",
+              "name": "x-expected-customer-id",
+              "required": false,
+              "schema": {
+                "minLength": 1,
+                "type": "string"
+              }
             }
           ],
+          "requestBody": {
+            "content": {
+              "application/x-www-form-urlencoded": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "expected_customer_id": {
+                      "description": "encodeURIComponent of the displayed customer ID, form-encoded by the browser. Required for native mode=link forms; sign-in mode needs no field.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "expected_customer_id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": false
+          },
           "responses": {
             "303": {
               "description": "No-store redirect to the provider or fixed portal origin. Callback errors use an allowlisted auth_error; credentials never appear in the final URL.",
@@ -2438,6 +2487,25 @@
                 }
               },
               "description": "Origin mismatch."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeded 8192 bytes."
             },
             "503": {
               "content": {
@@ -2561,8 +2629,38 @@
                 ],
                 "type": "string"
               }
+            },
+            {
+              "description": "Required only for mode=link, unless the native form supplies expected_customer_id. Uses the displayed customer's encodeURIComponent value. An absent precondition redirects with auth_error=account_context_required; a mismatch redirects with auth_error=account_changed. No OAuth state is created for either refusal.",
+              "in": "header",
+              "name": "x-expected-customer-id",
+              "required": false,
+              "schema": {
+                "minLength": 1,
+                "type": "string"
+              }
             }
           ],
+          "requestBody": {
+            "content": {
+              "application/x-www-form-urlencoded": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "expected_customer_id": {
+                      "description": "encodeURIComponent of the displayed customer ID, form-encoded by the browser. Required for native mode=link forms; sign-in mode needs no field.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "expected_customer_id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": false
+          },
           "responses": {
             "303": {
               "description": "No-store redirect to the provider or fixed portal origin. Callback errors use an allowlisted auth_error; credentials never appear in the final URL.",
@@ -2638,6 +2736,25 @@
               },
               "description": "Origin mismatch."
             },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeded 8192 bytes."
+            },
             "503": {
               "content": {
                 "application/json": {
@@ -2673,6 +2790,18 @@
       "/portal/v1/auth/identities": {
         "get": {
           "operationId": "authIdentities",
+          "parameters": [
+            {
+              "description": "encodeURIComponent of the customer ID displayed by the caller. Required before account reads or changes. Compared with the authenticated session, never used as authority. A mismatch returns account_changed (409) without reading or changing the other account; refresh /api/portal/me and ask for a new action.",
+              "in": "header",
+              "name": "x-expected-customer-id",
+              "required": true,
+              "schema": {
+                "minLength": 1,
+                "type": "string"
+              }
+            }
+          ],
           "responses": {
             "200": {
               "content": {
@@ -2712,6 +2841,25 @@
               },
               "description": "Linked providers; no provider credentials."
             },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_request"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Displayed-customer precondition missing."
+            },
             "401": {
               "content": {
                 "application/json": {
@@ -2730,6 +2878,25 @@
                 }
               },
               "description": "Session required."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "account_changed"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Displayed customer differs from the session. No identities were read."
             },
             "503": {
               "content": {
@@ -2766,6 +2933,18 @@
         "post": {
           "description": "Requires a session and a same-site request. Allowed only while another sign-in method is usable now: a password while password sign-in is enabled (PORTAL_PASSWORD_ENABLED=1), the other provider's identity while that provider is configured, or a non-empty contact email while email codes can be sent, which needs email delivery configured and PORTAL_OTP_PEPPERS set (stricter than the providers envelope's `email`, which reports delivery only). Configuration is judged per request. The rule, a still-live session and the delete are one conditional statement, so concurrent requests cannot remove the last method, and a session revoked by a concurrent unlink cannot finish its own. The same transaction revokes the customer's other OAuth sessions; the current session and sessions from other sign-in methods are kept.",
           "operationId": "authUnlinkIdentity",
+          "parameters": [
+            {
+              "description": "encodeURIComponent of the customer ID displayed by the caller. Required before account reads or changes. Compared with the authenticated session, never used as authority. A mismatch returns account_changed (409) without reading or changing the other account; refresh /api/portal/me and ask for a new action.",
+              "in": "header",
+              "name": "x-expected-customer-id",
+              "required": true,
+              "schema": {
+                "minLength": 1,
+                "type": "string"
+              }
+            }
+          ],
           "requestBody": {
             "content": {
               "application/json": {
@@ -2851,7 +3030,7 @@
                   }
                 }
               },
-              "description": "Body was not a JSON object, or provider is not google or github."
+              "description": "Displayed-customer precondition missing, body was not a JSON object, or provider is not google or github."
             },
             "401": {
               "content": {
@@ -2921,13 +3100,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "last_sign_in_method"
+                        "enum": [
+                          "account_changed",
+                          "last_sign_in_method"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "No other sign-in method is usable now; nothing was changed."
+              "description": "Displayed customer differs from the session, or no other sign-in method is usable now; nothing was changed."
             },
             "413": {
               "content": {
@@ -3380,6 +3562,18 @@
       "/portal/v1/auth/password": {
         "get": {
           "operationId": "authPasswordSettings",
+          "parameters": [
+            {
+              "description": "encodeURIComponent of the customer ID displayed by the caller. Required before account reads or changes. Compared with the authenticated session, never used as authority. A mismatch returns account_changed (409) without reading or changing the other account; refresh /api/portal/me and ask for a new action.",
+              "in": "header",
+              "name": "x-expected-customer-id",
+              "required": true,
+              "schema": {
+                "minLength": 1,
+                "type": "string"
+              }
+            }
+          ],
           "responses": {
             "200": {
               "content": {
@@ -3412,6 +3606,25 @@
                 }
               },
               "description": "Email login identifier, has_password, can_reset, email_verified, and recovery_available flags; no hash. recovery_available reports only this account's own eligibility for the emailed reset (the same check that endpoint applies to decide whether to send one); it says nothing about whether email delivery is configured -- see the `email` field from GET /portal/v1/auth/providers for that."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_request"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Displayed-customer precondition missing."
             },
             "401": {
               "content": {
@@ -3470,6 +3683,25 @@
               },
               "description": "Password sign-in disabled."
             },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "account_changed"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Displayed customer differs from the session. No settings were read or changed."
+            },
             "503": {
               "content": {
                 "application/json": {
@@ -3503,6 +3735,18 @@
         "post": {
           "description": "Requires current password or an OTP/OAuth session created within ten minutes. First set requires a recent OTP/OAuth session and customer contact email. Atomic compare-and-swap revokes all old sessions and outstanding OTPs, then issues a new password-authenticated session.",
           "operationId": "authSetPassword",
+          "parameters": [
+            {
+              "description": "encodeURIComponent of the customer ID displayed by the caller. Required before account reads or changes. Compared with the authenticated session, never used as authority. A mismatch returns account_changed (409) without reading or changing the other account; refresh /api/portal/me and ask for a new action.",
+              "in": "header",
+              "name": "x-expected-customer-id",
+              "required": true,
+              "schema": {
+                "minLength": 1,
+                "type": "string"
+              }
+            }
+          ],
           "requestBody": {
             "content": {
               "application/json": {
@@ -3547,6 +3791,7 @@
                     "properties": {
                       "code": {
                         "enum": [
+                          "invalid_request",
                           "invalid_json",
                           "invalid_registration"
                         ]
@@ -3555,7 +3800,7 @@
                   }
                 }
               },
-              "description": "Invalid JSON, email or password length."
+              "description": "Displayed-customer precondition missing, invalid JSON, email or password length."
             },
             "401": {
               "content": {
@@ -3631,13 +3876,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "password_change_conflict"
+                        "enum": [
+                          "account_changed",
+                          "password_change_conflict"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Settings changed concurrently."
+              "description": "Displayed customer differs from the session, or settings changed concurrently."
             },
             "413": {
               "content": {

@@ -1,5 +1,5 @@
 // Hand-written types for the D1 mutation_idempotency store.
-import type { D1DatabaseLike } from "./entitlement_mutation";
+import type { D1DatabaseLike } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 
 /** Returns the cached response_json string for (scope, key), or null when there
  *  is no cached row or the key is null. */

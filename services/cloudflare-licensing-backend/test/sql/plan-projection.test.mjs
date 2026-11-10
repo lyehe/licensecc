@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { applyPlanProjection, previewPlanProjection } from "@licensecc/cloudflare-runtime/d1/plan_projection";
+import { applyPlanProjection, previewPlanProjection } from "../../../cloudflare-license-admin/src/worker/groups/catalog/plan_projection.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "migrations");

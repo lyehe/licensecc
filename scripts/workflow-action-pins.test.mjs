@@ -488,10 +488,21 @@ test("repository organization contracts are exact-once local PR gates", () => {
   assert.equal(packageJson.scripts.doctor, "node scripts/ci/repository-doctor.mjs");
   assert.equal(packageJson.scripts["check:scripts"], "node scripts/ci/check-script-catalog.mjs");
   assert.equal(packageJson.scripts["check:hotspots"], "node scripts/report-hotspots.mjs --check");
-  assert.equal(
-    packageJson.scripts["test:repository"],
-    "node --test scripts/ci/check-script-catalog.test.mjs scripts/ci/ownership-contract.test.mjs scripts/ci/repository-doctor.test.mjs scripts/ci/run-offline-docs-quickstart.test.mjs scripts/ui-token-parity.test.mjs",
-  );
+  const repositoryTestCommand = packageJson.scripts["test:repository"].trim().split(/\s+/u);
+  assert.deepEqual(repositoryTestCommand.slice(0, 2), ["node", "--test"]);
+  const repositoryTests = repositoryTestCommand.slice(2);
+  assert.equal(new Set(repositoryTests).size, repositoryTests.length, "repository tests must run once each");
+  assert.ok(repositoryTests.every(path => /^scripts\/[A-Za-z0-9_./-]+\.test\.mjs$/u.test(path) && !path.includes("..")), "repository tests must be direct script test inputs");
+  for (const required of [
+    "scripts/ci/check-script-catalog.test.mjs",
+    "scripts/ci/ownership-contract.test.mjs",
+    "scripts/ci/repository-doctor.test.mjs",
+    "scripts/ci/run-offline-docs-quickstart.test.mjs",
+    "scripts/ui-token-parity.test.mjs",
+    "scripts/check-typecheck-coverage.test.mjs",
+  ]) {
+    assert.ok(repositoryTests.includes(required), `test:repository must include ${required}`);
+  }
   for (const command of ["npm run test:repository", "npm run check:scripts", "npm run check:hotspots"]) {
     assert.equal(
       packageJson.scripts["check:pr"].split(" && ").filter((candidate) => candidate === command).length,

@@ -1,7 +1,58 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
-import { checkHotspotBaseline, collectHotspots, evaluateHotspotBaseline } from "./report-hotspots.mjs";
+import { checkHotspotBaseline, collectHotspots, collectProductionHotspots, evaluateHotspotBaseline } from "./report-hotspots.mjs";
+
+function fixtureRepository(t) {
+  const root = mkdtempSync(join(tmpdir(), "licensecc-hotspots-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  execFileSync("git", ["init", "--quiet", root]);
+  execFileSync("git", ["-C", root, "config", "core.autocrlf", "false"]);
+  return root;
+}
+
+function sourceFile(root, path, lines) {
+  const absolute = join(root, path);
+  mkdirSync(dirname(absolute), { recursive: true });
+  writeFileSync(absolute, "const value = 1;\n".repeat(lines));
+  return absolute;
+}
+
+test("hotspot reporting follows an unstaged source move rather than reading its deleted cached path", t => {
+  const root = fixtureRepository(t);
+  const original = sourceFile(root, "packages/example/src/old.ts", 4);
+  execFileSync("git", ["-C", root, "add", "packages/example/src/old.ts"]);
+  unlinkSync(original);
+  sourceFile(root, "services/example/src/local.ts", 4);
+
+  assert.deepEqual(collectProductionHotspots({ root }), [{ path: "services/example/src/local.ts", lines: 4 }]);
+});
+
+test("new untracked production hotspots fail the ratchet while ignored source and build output stay excluded", t => {
+  const root = fixtureRepository(t);
+  writeFileSync(join(root, ".gitignore"), "build/\nservices/example/src/generated.ts\n");
+  sourceFile(root, "src/library/existing.cpp", 1);
+  sourceFile(root, "services/example/src/new.ts", 5);
+  sourceFile(root, "services/example/src/generated.ts", 20);
+  sourceFile(root, "build/output.cpp", 20);
+  const hotspots = collectProductionHotspots({ root });
+
+  assert.deepEqual(hotspots, [
+    { path: "services/example/src/new.ts", lines: 5 },
+    { path: "src/library/existing.cpp", lines: 1 },
+  ]);
+  assert.deepEqual(evaluateHotspotBaseline({
+    schema_version: 1,
+    threshold_lines: 5,
+    files: { "src/library/existing.cpp": 1 },
+  }, hotspots).map(({ code, path }) => ({ code, path })), [
+    { code: "HOTSPOT_UNRATCHETED", path: "services/example/src/new.ts" },
+  ]);
+});
 
 test("hotspot reporting is deterministic and production-source scoped", () => {
   const first = collectHotspots({ limit: 25 });

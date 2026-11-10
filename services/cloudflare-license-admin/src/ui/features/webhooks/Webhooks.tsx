@@ -1,3 +1,4 @@
+import { runConsequenceMutation } from "../../shared/consequenceMutation";
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminNavigation, useNavigationGuard } from "../../app/navigation";
@@ -5,11 +6,11 @@ import { StatusActions } from "../../shared/ActionMenu";
 import { ReadNotice } from "../../shared/ReadNotice";
 import type { WebhookDelivery, WebhookEndpoint } from "../../../shared/api";
 import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
-import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
+import { ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { FormStatus } from "../../shared/FeedbackText";
 import { FieldDetails, FieldError, fieldErrorId, fieldProps, useFormFeedback } from "../../shared/fieldErrors";
 import { formatEpoch, shortHash } from "../../shared/format";
-import { apiFailureFeedback, codeFeedback, describeCode, failureFeedback, refusalOutcome, validationCode } from "../../shared/messages";
+import { apiFailureFeedback, codeFeedback, describeCode, failureFeedback, validationCode } from "../../shared/messages";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { isRetryableAppendFailure, loadMore, pageAppendError, withCursor } from "../../shared/pagination";
 import { hasWebhookData, hasWebhookDeliveryData, hasWebhookDeliveryListData, hasWebhookListData, hasWebhookTransitionData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
@@ -301,59 +302,18 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
     const expectedCode = `webhook_${action}d`;
     const body = JSON.stringify(action === "disable" ? { reason: currentReason() } : {});
     const dataGuard = (value: unknown): value is WebhookEndpoint => hasWebhookTransitionData(value, endpoint.id, targetStatus);
-    const refreshStatus = async (): Promise<ExactReadProof | null> => {
-      captureRecoveryContext();
-      return await currentWebhooksRefreshRef.current();
-    };
-    const postSuccessRefresh = confirmSuccessWithRefreshFailure(refreshStatus, isCurrent).manualRefresh;
-    const replay = async (): Promise<ConfirmActionResolution> => {
-      captureRecoveryContext();
-      const retry = await runMutation(async () => {
-        try {
-          return await api<unknown>(webhookTransitionPath(endpoint.id, action), {
-            method: "POST",
-            headers: { "idempotency-key": idempotencyKey },
-            body,
-          });
-        } catch {
-          return null;
-        }
-      }, "recovery");
-      if (retry === undefined || retry === null) return "indeterminate";
-      const parsed = parseMutationResponse(retry, expectedCode, dataGuard, mutationFailurePolicies.webhookTransition[action], "replay");
-      if (parsed.kind !== "success") return parsed.kind === "failure" ? "unapplied" : "indeterminate";
-      try {
-        return (await refreshStatus()) === EXACT_READ_PROOF ? "applied" : "refresh_failed";
-      } catch {
-        return "refresh_failed";
-      }
-    };
-    const reconciliation = { label: "Reconcile status", run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh };
-    const mutation = await runMutation(async () => {
-      try {
-        return await api<unknown>(webhookTransitionPath(endpoint.id, action), {
-          method: "POST",
-          headers: { "idempotency-key": idempotencyKey },
-          body,
-        });
-      } catch {
-        return null;
-      }
-    }, "consequence");
-    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
-    if (mutation === null) return confirmMutationUnknown(reconciliation);
-    const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.webhookTransition[action], "initial");
-    if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
-    setFeedback(codeFeedback(parsed.code, parsed.requestId));
-    setReason("");
-    try {
-      return (await currentWebhooksRefreshRef.current()) === EXACT_READ_PROOF
-        ? { ok: true }
-        : confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    } catch {
-      return confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    }
+    return await runConsequenceMutation({
+      request: { method: "POST", path: webhookTransitionPath(endpoint.id, action), body, idempotencyKey },
+      runMutation,
+      parse: (result, phase) => parseMutationResponse(result, expectedCode, dataGuard, mutationFailurePolicies.webhookTransition[action], phase),
+      onApplied: (parsed) => {
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
+        setReason("");
+      },
+      refresh: async () => await currentWebhooksRefreshRef.current(),
+      captureRecoveryContext,
+      isCurrent,
+    });
   }
 
   // A diagnostic, not a state change: the backend signs and sends one test event and reports only

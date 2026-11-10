@@ -4,8 +4,8 @@
 // refused because its stored URL no longer passes safeWebhookUrl, or one canceled because its event
 // is outside the endpoint's current scope.
 
-import { safeErrorType } from "../http/kit.mjs";
-import { WEBHOOK_ENDPOINT_CHANGED, WEBHOOK_INVALID_URL } from "./webhook_endpoint.mjs";
+import { safeErrorType } from "@licensecc/cloudflare-runtime/http/kit";
+import { WEBHOOK_ENDPOINT_CHANGED, WEBHOOK_INVALID_URL } from "@licensecc/cloudflare-runtime/webhooks/webhook_endpoint";
 
 export const WEBHOOK_CLAIM_TTL_SECONDS = 60;
 const BACKOFF_SCHEDULE_SECONDS = [30, 120, 600, 3600, 21600];

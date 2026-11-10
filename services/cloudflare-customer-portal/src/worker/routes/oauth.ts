@@ -7,6 +7,8 @@ import { clientIp, envelope, isCrossSite, readJson, redirect, supportContact } f
 import { digest, exchangeIdentity, providerConfig, randomToken, type Provider } from "../oauth/providers.js";
 import { identityCustomer, recentSignIn } from "../oauth/accounts.js";
 import type { Env, TopRoute } from "../env.js";
+import { customerContextError, requireCustomerContext } from "../customer-context.js";
+import { readTextBody } from "@licensecc/cloudflare-runtime/http/kit";
 
 const COOKIE = "__Host-lccp_oauth";
 const TTL = 600;
@@ -48,6 +50,23 @@ async function start(request: Request, env: Env, reqId: string, now: number, pro
   if (mode === "link") {
     const session = await authSession(request, env, reqId, now);
     if (session instanceof Response) return session;
+    // Native browser forms carry the same encoded precondition as JSON clients' header.
+    // Read a bounded body and reject duplicate/extra fields rather than choosing one silently.
+    let expected = request.headers.get("x-expected-customer-id");
+    if (expected === null) {
+      if (request.headers.get("content-type")?.split(";")[0]?.trim() !== "application/x-www-form-urlencoded") {
+        return redirect(`${origin}/?auth_error=account_context_required#/account`);
+      }
+      const body = await readTextBody(request, 8192);
+      if (!body.ok) return envelope(reqId, "body_too_large", undefined, 413, NO_STORE);
+      const fields = new URLSearchParams(body.text);
+      if ([...fields.keys()].length !== 1 || !fields.has("expected_customer_id")) {
+        return redirect(`${origin}/?auth_error=account_context_required#/account`);
+      }
+      expected = fields.get("expected_customer_id");
+    }
+    const contextError = customerContextError(expected, session.customer_id);
+    if (contextError) return redirect(`${origin}/?auth_error=${contextError === "account_changed" ? "account_changed" : "account_context_required"}#/account`);
     if (!await recentSignIn(env, session.id, now)) return redirect(reauthLocation(origin, provider));
     linkSessionId = session.id;
   }
@@ -113,6 +132,8 @@ async function unlink(request: Request, env: Env, reqId: string, now: number): P
   if (isCrossSite(request, env)) return envelope(reqId, "cross_site_forbidden", undefined, 403, NO_STORE);
   const session = await authSession(request, env, reqId, now);
   if (session instanceof Response) return session;
+  const contextError = requireCustomerContext(request, session.customer_id, reqId);
+  if (contextError) return contextError;
   const body = await readJson(request, reqId);
   if (body instanceof Response) return body;
   const provider = (["google", "github"] as const).find((name) => name === body.provider);
@@ -167,6 +188,8 @@ export const OAUTH_DISPATCH: Record<string, TopRoute> = {
   "GET /portal/v1/auth/identities": async (request, env, _ctx, reqId, now) => {
     const session = await authSession(request, env, reqId, now);
     if (session instanceof Response) return session;
+    const contextError = requireCustomerContext(request, session.customer_id, reqId);
+    if (contextError) return contextError;
     const db = env.DB.withSession?.("first-primary") ?? env.DB;
     const rows = await db.prepare("SELECT provider, email, created_at FROM portal_identities WHERE customer_id = ? ORDER BY provider").bind(session.customer_id).all();
     return envelope(reqId, "identities", { items: rows.results }, 200, NO_STORE);

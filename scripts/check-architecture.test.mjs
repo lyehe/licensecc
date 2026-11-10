@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -115,6 +115,26 @@ test("repository input audits cached and non-ignored untracked candidates while 
     assert.equal(includedInput.candidatePaths.includes("services/alpha/src/local.ts"), true);
     const included = evaluateArchitecture({ ...includedInput, config: config() });
     assert.equal(included.exitCode, 0, included.diagnostics.join("\n"));
+
+    unlinkSync(join(root, "services", "alpha", "src", "main.ts"));
+    writeFileSync(join(root, "services", "alpha", "src", "renamed.ts"), 'import "./local.js";\n', "utf8");
+    const movedInput = repositoryInput(root);
+    assert.equal(movedInput.trackedPaths.includes("services/alpha/src/main.ts"), true);
+    assert.equal(movedInput.candidatePaths.includes("services/alpha/src/main.ts"), false);
+    assert.equal(movedInput.candidatePaths.includes("services/alpha/src/renamed.ts"), true);
+    const moved = evaluateArchitecture({ ...movedInput, config: config() });
+    assert.equal(moved.exitCode, 0, moved.diagnostics.join("\n"));
+
+    writeFileSync(join(root, "services", "alpha", "src", "removed.ts"), "export const removed = true;\n", "utf8");
+    execFileSync("git", ["-c", "core.autocrlf=false", "add", "services/alpha/src/removed.ts"], { cwd: root, windowsHide: true });
+    writeFileSync(join(root, "services", "alpha", "src", "renamed.ts"), 'import "./removed.js";\n', "utf8");
+    unlinkSync(join(root, "services", "alpha", "src", "removed.ts"));
+    const deletedTargetInput = repositoryInput(root);
+    assert.equal(deletedTargetInput.trackedPaths.includes("services/alpha/src/removed.ts"), true);
+    assert.equal(deletedTargetInput.candidatePaths.includes("services/alpha/src/removed.ts"), false);
+    const deletedTarget = evaluateArchitecture({ ...deletedTargetInput, config: config() });
+    assert.deepEqual(errorCodes(deletedTarget), ["ARCH_UNRESOLVED_RELATIVE"]);
+    writeFileSync(join(root, "services", "alpha", "src", "renamed.ts"), 'import "./local.js";\n', "utf8");
 
     writeFileSync(join(root, ".gitignore"), "services/alpha/src/local.ts\n", "utf8");
     const ignoredInput = repositoryInput(root);

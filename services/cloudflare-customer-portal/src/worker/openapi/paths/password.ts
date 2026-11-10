@@ -1,5 +1,6 @@
 import type { LabeledPathFragment } from "../assemble.js";
 import { errorResponse, RETRY_AFTER_HEADER } from "../components.js";
+import { CUSTOMER_CONTEXT_PARAMETER } from "../customer-context.js";
 
 const body = (register: boolean) => ({ required: true, content: { "application/json": { schema: {
   type: "object", required: register ? ["email", "password"] : ["password"],
@@ -23,6 +24,8 @@ const common = {
   "503": errorResponse("Session/database configuration unavailable.", "config_error"),
 };
 const settingsSharedResponses = {
+  "400": errorResponse("Displayed-customer precondition missing.", "invalid_request"),
+  "409": errorResponse("Displayed customer differs from the session. No settings were read or changed.", "account_changed"),
   "403": common["403"],
   "404": common["404"],
   "503": common["503"],
@@ -35,10 +38,10 @@ const settingsGetResponses = {
 const settingsPostResponses = {
   ...settingsSharedResponses,
   "200": signedInResponse,
-  "400": errorResponse("Invalid JSON, email or password length.", ["invalid_json", "invalid_registration"]),
+  "400": errorResponse("Displayed-customer precondition missing, invalid JSON, email or password length.", ["invalid_request", "invalid_json", "invalid_registration"]),
   "401": errorResponse("Invalid credentials or session.", ["invalid_credentials", "unauthorized"]),
   "403": errorResponse("Origin mismatch or fresh verified sign-in required.", ["cross_site_forbidden", "verified_sign_in_required"]),
-  "409": errorResponse("Settings changed concurrently.", "password_change_conflict"),
+  "409": errorResponse("Displayed customer differs from the session, or settings changed concurrently.", ["account_changed", "password_change_conflict"]),
   "413": common["413"],
   "429": RATE_LIMITED_NO_HEADER,
 };
@@ -64,8 +67,8 @@ export const passwordPaths: LabeledPathFragment = { label: "password", entries: 
     description: "Requires exact Origin. Wrong password and unknown login return the same denial. The password is verified before the account status is read, so only the correct password on a suspended (disabled) customer returns account_suspended, without a session. Per-IP 30/900s and per-email 10/900s. Session creation atomically checks the verified password hash is still current.",
   } }],
   ["/portal/v1/auth/password", {
-    get: { tags: ["auth"], operationId: "authPasswordSettings", summary: "Read this customer's password settings.", security: [{ sessionCookie: [] }], responses: settingsGetResponses },
-    post: { tags: ["auth"], operationId: "authSetPassword", summary: "Set or change this customer's password.", security: [{ sessionCookie: [] }], requestBody: body(false), responses: settingsPostResponses,
+    get: { tags: ["auth"], operationId: "authPasswordSettings", summary: "Read this customer's password settings.", security: [{ sessionCookie: [] }], parameters: [CUSTOMER_CONTEXT_PARAMETER], responses: settingsGetResponses },
+    post: { tags: ["auth"], operationId: "authSetPassword", summary: "Set or change this customer's password.", security: [{ sessionCookie: [] }], parameters: [CUSTOMER_CONTEXT_PARAMETER], requestBody: body(false), responses: settingsPostResponses,
       description: "Requires current password or an OTP/OAuth session created within ten minutes. First set requires a recent OTP/OAuth session and customer contact email. Atomic compare-and-swap revokes all old sessions and outstanding OTPs, then issues a new password-authenticated session.",
     },
   }],

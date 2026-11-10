@@ -1,13 +1,5 @@
-import { encodeBase64url, deviceEnrollmentComparisonInput, formatDeviceEnrollmentComparison } from "@licensecc/licensing-domain/lease/device_protocol";
-import { importBoundDeviceKey, sha256Hex } from "./bound_crypto.mjs";
+import { boundEnrollmentComparison, boundRandomId, boundSecretHash, importBoundDeviceKey } from "./bound_crypto.mjs";
 import { BoundRequestError, validateBoundClient, validateBoundRequest } from "./bound_request.mjs";
-
-const encoder = new TextEncoder();
-export const boundSecretHash = value => sha256Hex(encoder.encode(value));
-export const boundRandomId = (size = 16) => encodeBase64url(crypto.getRandomValues(new Uint8Array(size)));
-export async function boundEnrollmentComparison(input) {
-  return formatDeviceEnrollmentComparison(new Uint8Array(await crypto.subtle.digest("SHA-256",deviceEnrollmentComparisonInput(input))));
-}
 
 // Called only after the route's mandatory rate limit. Registry and portal URL
 // come from validated deployment configuration, never Host or request headers.

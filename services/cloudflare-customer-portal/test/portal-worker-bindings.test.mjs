@@ -45,3 +45,21 @@ test('binding read infrastructure errors are no-store and do not expose SQL',asy
   f.db.exec('DROP TABLE device_bound_bindings');
   const result=await request(f.env,cookie);assert.equal(result.status,503);assert.equal(result.body.code,'temporarily_unavailable');assert.equal(result.res.headers.get('cache-control'),'no-store');
 });
+
+test('binding search traverses sparse pages, matches Unicode literally and never widens ownership',async t=>{
+  const f=baseFixture();t.after(()=>f.db.close());
+  const ids=Array.from({length:102},(_,i)=>seed(f,i+1)).sort();seed(f,150,'B');
+  const target=ids.at(-1),label="Étage 100%_ \\ 'scanner'";
+  f.db.prepare('UPDATE device_bound_devices SET label=? WHERE id=?').run(label,target);
+  const cookie=await cookieFor(f.env,'A'),term=encodeURIComponent('éTAGE 100%_ \\');
+  const first=(await request(f.env,cookie,'?q='+term+'&project=APP')).body.data;
+  assert.deepEqual(first.items,[]);assert.equal(first.has_more,true);assert.equal(first.next_cursor,ids[99]);
+  const second=(await request(f.env,cookie,'?q='+term+'&project=APP&cursor='+first.next_cursor)).body.data;
+  assert.equal(second.has_more,false);assert.deepEqual(second.items.map(row=>row.binding_id),[target]);
+  assert.equal((await request(f.env,cookie,'?q=scanner&project=OTHER')).body.data.items.length,0);
+  assert.equal((await request(f.env,cookie,'?q=My%20laptop')).body.data.items.length,100);
+  assert.equal((await request(f.env,cookie,'?q=%20%20')).body.data.items.length,100);
+  assert.equal((await request(f.env,cookie,'?project=APP')).body.data.items.length,100);
+  for(const query of ['?q=x&q=y','?project=APP&project=APP','?project=APP%0A','?project=','?q='+encodeURIComponent('é'.repeat(129)),'?binding_id='+target+'&q=','?binding_id='+target+'&project=APP','?q=x&unknown=y'])assert.equal((await request(f.env,cookie,query)).status,400,query);
+  assert.equal((await request(f.env,cookie,'?q='+encodeURIComponent('é'.repeat(128)))).status,200);
+});

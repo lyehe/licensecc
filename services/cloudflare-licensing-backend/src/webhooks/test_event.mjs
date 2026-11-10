@@ -8,7 +8,7 @@
 // Worker's validation. Nothing from the receiver's response (headers, body, error text) is
 // returned, so a test send cannot be used to read another service's responses.
 
-import { signWebhookBody, webhookSigningConfig, WEBHOOK_DELIVER_TIMEOUT_MS } from "@licensecc/cloudflare-runtime/webhooks/webhook";
+import { signWebhookBody, webhookSigningConfig, WEBHOOK_DELIVER_TIMEOUT_MS } from "./webhook.mjs";
 import { safeWebhookUrl } from "@licensecc/cloudflare-runtime/webhooks/webhook_endpoint";
 
 export const WEBHOOK_TEST_RATE_NAMESPACE = "webhook-test";

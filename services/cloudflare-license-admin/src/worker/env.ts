@@ -1,18 +1,5 @@
+import type { AssertNoIncompatibleGeneratedBindings, IncompatibleGeneratedBindings, WidenWranglerStringBindings, WithRuntimeNarrowing } from "@licensecc/cloudflare-runtime/bindings";
 import type { D1DatabaseLike } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
-
-// Example-config strings are intentionally widened for runtime configuration,
-// while resource bindings stay generated from Wrangler's authoritative config.
-type WidenWranglerStringBindings<Bindings extends object> = {
-  [Binding in keyof Bindings]: Bindings[Binding] extends string ? string : Bindings[Binding];
-};
-
-type WithRuntimeNarrowing<Generated extends object, Runtime extends object> = Omit<Generated, keyof Runtime> & Runtime;
-
-type IncompatibleGeneratedBindings<Generated extends object, Runtime extends object> = {
-  [Binding in keyof Generated & keyof Runtime]: Generated[Binding] extends Runtime[Binding] ? never : Binding;
-}[keyof Generated & keyof Runtime];
-
-type AssertNoIncompatibleGeneratedBindings<Bindings extends never> = Bindings;
 
 // Every checked config binding is named explicitly so a rename/removal is a
 // type error rather than an unnoticed divergence from Worker composition.

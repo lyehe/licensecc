@@ -146,11 +146,11 @@ test("a send the operation gate refuses stops the run as not sent: never failed,
   assert.equal(state.stopped.requestId, undefined);
   assert.deepEqual(runner.batchRunCounts(state), { done: 0, unknown: 0, failed: 0, notAttempted: 8 });
   assert.deepEqual(runner.batchCountItems(state), ["0 done", "8 not attempted"]);
-  assert.equal(runner.batchRunHeadline(state), "Disable stopped at chunk 1 of 2: it was not sent.");
-  assert.equal(runner.batchStopMessage(state), "Disable stopped at chunk 1 of 2: it was not sent.");
+  assert.equal(runner.batchRunHeadline(state), "Suspend stopped at chunk 1 of 2: it was not sent.");
+  assert.equal(runner.batchStopMessage(state), "Suspend stopped at chunk 1 of 2: it was not sent.");
   assert.doesNotMatch(runner.batchStopMessage(state), /refused|mutation_busy|not_sent|\(/);
   const single = await runner.runBatchChunks("disable", runner.planBatchChunks("disable", rowsFor(["a"]), "r", "k"), async () => undefined, () => {});
-  assert.equal(runner.batchStopMessage(single), "Disable was not sent.");
+  assert.equal(runner.batchStopMessage(single), "Suspend was not sent.");
 });
 
 test("an all-success run reports every row done, in order, with each chunk's request id", async () => {
@@ -212,7 +212,7 @@ test("an unknown last chunk leaves 16 done, 4 unknown and nothing not attempted;
   const replay = runner.classifyBatchChunk(batchDone(state.stopped.chunk.ids), "disable", state.stopped.chunk.ids, "replay");
   const settled = runner.settleReconciledChunk(state, replay);
   assert.deepEqual(runner.batchCountItems(settled), ["20 done"]);
-  assert.equal(runner.batchRunHeadline(settled), "Disable finished; chunk 5 is now reconciled.");
+  assert.equal(runner.batchRunHeadline(settled), "Suspend finished; chunk 5 is now reconciled.");
 });
 
 test("an unknown first chunk leaves nothing done and sends nothing more", async () => {
@@ -243,10 +243,10 @@ test("a single-request run keeps the single-request copy; a multi-chunk run name
 
   const refusedSingle = await runner.runBatchChunks("disable", plan(three), async () => refusal(409, "idempotency_request_conflict", "ui-unit-single"), () => {});
   assert.equal(runner.batchStopMessage(refusedSingle), "This request key was already used for a different change. Reload the page and try again.");
-  assert.equal(runner.batchRunHeadline(refusedSingle), "Disable was refused.");
+  assert.equal(runner.batchRunHeadline(refusedSingle), "Suspend was refused.");
 
   const refusedMulti = await runner.runBatchChunks("disable", plan(twenty), async (chunk) => chunk.index === 2 ? refusal(409, "idempotency_request_conflict", "ui-unit-multi") : batchDone(chunk.ids), () => {});
-  assert.equal(runner.batchStopMessage(refusedMulti), "Disable stopped at chunk 2 of 5: the request was refused. This request key was already used for a different change. Reload the page and try again.");
+  assert.equal(runner.batchStopMessage(refusedMulti), "Suspend stopped at chunk 2 of 5: the request was refused. This request key was already used for a different change. Reload the page and try again.");
 
   const { state: unknownMulti } = await runWithUnknownAt(runner, twenty, 3);
   assert.equal(runner.batchReconcileLabel(unknownMulti), "Reconcile chunk 3");
@@ -265,6 +265,6 @@ test("reconcile guidance says where the control is, and a refresh failure after 
   const refused = await runner.runBatchChunks("disable", runner.planBatchChunks("disable", rowsFor(twenty), "audit", "k"), async (chunk) => chunk.index === 2 ? refusal(409, "idempotency_request_conflict") : batchDone(chunk.ids), () => {});
   const message = runner.batchRefreshFailureMessage(refused);
   // The notice replaces the stop banner, so it must keep why the run stopped as well as the failed read.
-  assert.equal(message, "Disable stopped at chunk 2 of 5: the request was refused. This request key was already used for a different change. Reload the page and try again. The status could not be refreshed.");
+  assert.equal(message, "Suspend stopped at chunk 2 of 5: the request was refused. This request key was already used for a different change. Reload the page and try again. The status could not be refreshed.");
   assert.doesNotMatch(message, /succeeded/i);
 });

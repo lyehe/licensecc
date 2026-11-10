@@ -74,7 +74,7 @@ bool parse_canonical_payload(const std::string& payload, ConfigAttestationClaims
 		{"expires-at", &expires_at},
 	};
 	if (!license::signed_token::parse_fields_in_order(payload, fields, sizeof(fields) / sizeof(fields[0]),
-													  "config token", false, error)) {
+													  "config token", error)) {
 		return false;
 	}
 	if (!license::signed_token::parse_uint64(config_seq, claims.config_seq) ||

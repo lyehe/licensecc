@@ -1,6 +1,7 @@
+import { d1JsonFunctionArgumentCounts, assertD1JsonFunctionArity } from "../helpers/json-sql.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -8,19 +9,17 @@ import { fileURLToPath } from "node:url";
 
 import {
   D1_SQLITE_MAX_FUNCTION_ARGS,
-  assertD1JsonFunctionArity,
-  d1JsonFunctionArgumentCounts,
   entitlementCurrentJsonSql,
-} from "../src/d1/entitlement_json.mjs";
+} from "@licensecc/cloudflare-runtime/d1/entitlement_json";
 import {
   entitlementId,
   eventFromCurrentStatement,
   idempotencyFromCurrentStatement,
-} from "../src/d1/entitlement_mutation.mjs";
-import { applyPlanProjection } from "../src/d1/plan_projection.mjs";
+} from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
+import { applyPlanProjection } from "../../src/worker/groups/catalog/plan_projection.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(here, "..", "..", "..");
+const repoRoot = resolve(here, "..", "..", "..", "..");
 const backendRoot = join(repoRoot, "services", "cloudflare-licensing-backend");
 
 class CapturedStatement {
@@ -327,12 +326,7 @@ function runPythonFunctionLimitProbe(payload) {
 
 function runWranglerLocalD1Probe(payload) {
   const temp = mkdtempSync(join(tmpdir(), "licensecc-d1-json-"));
-  // npm's documented hoisted workspace layout puts Wrangler at the repository
-  // root; retain the workspace-local fallback for isolated package installs.
-  const workspaceWrangler = join(backendRoot, "node_modules", "wrangler", "bin", "wrangler.js");
-  const wrangler = existsSync(workspaceWrangler)
-    ? workspaceWrangler
-    : join(repoRoot, "node_modules", "wrangler", "bin", "wrangler.js");
+  const wrangler = join(repoRoot, "node_modules", "wrangler", "bin", "wrangler.js");
   const config = join(backendRoot, "wrangler.example.toml");
   const schema = join(backendRoot, "schema.sql");
   const probeSql = join(temp, "exact-generated-json.sql");

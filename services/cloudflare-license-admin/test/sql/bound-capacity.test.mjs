@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { boundOccupiedSql } from "@licensecc/cloudflare-runtime/device/bound_capacity";
-import { buildDeviceLimitStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
+import { buildDeviceLimitStatement } from "../../src/worker/groups/entitlements/policy_store.mjs";
 
 // ADR 0006 occupancy: a binding holds one of its grant's device slots while it is active, and while
 // it is retiring until its hold ends. The backend's lease issue and the admin console count with

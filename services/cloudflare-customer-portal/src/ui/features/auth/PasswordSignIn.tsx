@@ -9,12 +9,12 @@ const MODE_COPY: Record<Exclude<PasswordMode, "login">, string> = {
   register: "Verify your email, then choose a password. Your administrator can assign licenses after registration.",
   // Reworded (dropped "verified"): an admin-created account with an unverified login email also
   // recovers, and verifies that address, through this same reset -- see PasswordSettings.tsx.
-  reset: "We'll email a reset link to your login address. You can also recover through a connected Google or GitHub account.",
+  reset: "First time here or forgot your password? Enter your login email to request a verification link and choose a password. You can also recover through a connected Google or GitHub account.",
 };
 const SUBMIT_LABEL: Record<PasswordMode, string> = {
   login: "Sign in",
   register: "Send verification link",
-  reset: "Send reset link",
+  reset: "Send password link",
 };
 
 export function PasswordSignIn({ onSignedIn, mode, onModeChange, emailLinks }: { onSignedIn(): Promise<boolean>; mode: PasswordMode; onModeChange(mode: PasswordMode): void; emailLinks: boolean }): React.ReactElement {
@@ -63,7 +63,7 @@ export function PasswordSignIn({ onSignedIn, mode, onModeChange, emailLinks }: {
       {(emailLinks || mode !== "login") && <button disabled={busy} type="button" onClick={() => switchMode(mode === "login" ? "register" : "login")}>{mode === "login" ? "Create an account" : "Back to sign in"}</button>}
     </form>
     {mode === "login" && (emailLinks
-      ? <button disabled={busy} type="button" onClick={() => switchMode("reset")}>Forgot your password?</button>
+      ? <button disabled={busy} type="button" onClick={() => switchMode("reset")}>Set or reset password</button>
       // Password-only mode (password configured, no email delivery -- no reset email can ever be
       // sent): a support-contact sentence replaces the now-impossible email-based reset entirely.
       : <p><SupportContact /> to reset your password.</p>)}

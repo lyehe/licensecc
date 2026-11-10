@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { createEntitlement, findEntitlement, patchEntitlement, syncEntitlement, setEntitlementCapacity } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
-import { buildPolicyStampStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
+import { buildPolicyStampStatement } from "../../../cloudflare-license-admin/src/worker/groups/entitlements/policy_store.mjs";
 import { observedExpectation } from "@licensecc/cloudflare-runtime/d1/entitlement_guards";
 
 function fixture(t, state) {

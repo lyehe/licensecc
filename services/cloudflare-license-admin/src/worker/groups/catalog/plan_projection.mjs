@@ -10,8 +10,8 @@ import {
   batchReturnedRow,
   entitlementId,
   withId,
-} from "./entitlement_mutation.mjs";
-import { d1SafeJsonObjectSql, entitlementCurrentJsonSql } from "./entitlement_json.mjs";
+} from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
+import { d1SafeJsonObjectSql, entitlementCurrentJsonSql } from "@licensecc/cloudflare-runtime/d1/entitlement_json";
 import {
   classifyPlanProjection,
   desiredPlanProjectionRow,

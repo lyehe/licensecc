@@ -1,23 +1,8 @@
+import { type BackupTriggerParams, type BackupWorkflowEnv, workflowInstanceId } from "./workflow.js";
 import { type BackupEnvLike, backupConfigFromEnv, timingSafeTokenEqual } from "./core.js";
 
-export interface BackupTriggerParams {
-  trigger?: "manual" | "scheduled";
-  reason?: string;
-}
-
-export interface WorkflowInstanceLike {
-  id: string;
-  status(): Promise<unknown>;
-}
-
-export interface WorkflowBindingLike<T> {
-  create(options?: { id?: string; params?: T }): Promise<WorkflowInstanceLike>;
-  get(id: string): Promise<WorkflowInstanceLike>;
-}
-
-export interface BackupHttpEnv extends BackupEnvLike {
+export interface BackupHttpEnv extends BackupEnvLike, BackupWorkflowEnv {
   BACKUP_TRIGGER_TOKEN?: string;
-  D1_BACKUP_WORKFLOW: WorkflowBindingLike<BackupTriggerParams>;
 }
 
 const MAX_MANUAL_BODY_BYTES = 1024;
@@ -47,11 +32,6 @@ async function requireManualTrigger(request: Request, env: BackupHttpEnv): Promi
     return json({ ok: false, code: "invalid_backup_trigger_token" }, 403);
   }
   return null;
-}
-
-export function workflowInstanceId(kind: "manual" | "scheduled", nowMs: number): string {
-  const timestamp = new Date(nowMs).toISOString().replace(/[^0-9A-Za-z]/g, "").slice(0, 17);
-  return `${kind}-${timestamp}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 async function readBoundedBody(request: Request): Promise<Uint8Array> {

@@ -33,8 +33,9 @@ export function sameSiteHeaders(extra = {}) {
   return { "content-type": "application/json", origin: "https://portal.test", "sec-fetch-site": "same-origin", ...extra };
 }
 
-export async function call(env, method, path, { cookie, body, headers, ctx = CTX } = {}) {
+export async function call(env, method, path, { cookie, body, headers, expectedCustomer, ctx = CTX } = {}) {
   const h = sameSiteHeaders(headers);
+  if (expectedCustomer !== undefined) h["x-expected-customer-id"] = encodeURIComponent(expectedCustomer);
   if (cookie) h.cookie = cookie;
   const req = new Request(`https://portal.test${path}`, {
     method,

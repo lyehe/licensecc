@@ -1,4 +1,5 @@
 import { api, parseExactApiSuccess } from '../../shared/api';
+import { decodeBase64url, encodeBase64url } from '@licensecc/licensing-domain/lease/device_protocol';
 
 export type Operator={subject:string;actor_type:'access'|'dev';role:'reader'|'admin'};
 export type Connection={binding_id:string;project:string;feature:string;license_fingerprint:string;label:string;state:'active'|'retiring'|'released';generation:number;revision:number;hold_until:number;last_proof_at:number;created_at:number};
@@ -15,8 +16,8 @@ const record=(v:unknown):v is Record<string,unknown>=>!!v && typeof v==='object'
 const keys=(v:Record<string,unknown>,expected:string[])=>Object.keys(v).sort().join(',')===expected.sort().join(',');
 const integer=(v:unknown):v is number=>Number.isSafeInteger(v) && Number(v)>=0 && !Object.is(v,-0);
 export function canonicalId(v:unknown,bytes:number):v is string {
-  if(typeof v!=='string' || !/^[A-Za-z0-9_-]+$/.test(v))return false;
-  try{const decoded=atob(v.replaceAll('-','+').replaceAll('_','/'));return decoded.length===bytes && btoa(decoded).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'')===v;}catch{return false;}
+  if(typeof v!=='string')return false;
+  try{return decodeBase64url(v,bytes).length===bytes;}catch{return false;}
 }
 export const operatorKey=(operator:Operator)=>encodeURIComponent(JSON.stringify([operator.actor_type,operator.subject]));
 const validOperator=(v:unknown):v is Operator=>record(v) && Object.keys(v).sort().join(',')==='actor_type,role,subject' && typeof v.subject==='string' && v.subject.length>0 && v.subject.length<=256
@@ -76,6 +77,6 @@ export function restorePending(customer:string):Pending|'invalid'|null {
 export function savePending(pending:Pending):boolean {try{const value=JSON.stringify(pending);sessionStorage.setItem(storageKey(pending.customer),value);return sessionStorage.getItem(storageKey(pending.customer))===value;}catch{return false;}}
 export function clearPending(customer:string):boolean {try{sessionStorage.removeItem(storageKey(customer));return sessionStorage.getItem(storageKey(customer))===null;}catch{return false;}}
 export function createPending(customer:string,row:Connection,operator:Operator):Pending {
-  const bytes=crypto.getRandomValues(new Uint8Array(32));const key=btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
+  const key=encodeBase64url(crypto.getRandomValues(new Uint8Array(32)));
   return {customer,binding:row.binding_id,revision:row.revision,key,operator:{...operator},label:row.label||'Unnamed connection',project:row.project,feature:row.feature,hold:row.hold_until};
 }

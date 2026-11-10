@@ -3,6 +3,22 @@ import test from "node:test";
 
 import { loadWorkflowModule } from "./helpers.mjs";
 
+test("saved grants confirm newer lifecycle states but never older snapshots or a different owned grant", async () => {
+  const { confirmsSavedGrant, grantConfirmationMessage } = await loadWorkflowModule("features/entitlements/grantConfirmation.ts");
+  const saved = { id: "grant", project: "APP", feature: "PRO", license_fingerprint: "a".repeat(64), customer_id: "A", license_id: "purchase", status: "active", revocation_seq: 2 };
+  assert.equal(confirmsSavedGrant(saved, { ...saved }), true);
+  assert.equal(grantConfirmationMessage(saved, saved), null);
+  for (const status of ["active", "disabled", "revoked"]) {
+    const current = { ...saved, status, revocation_seq: 3 };
+    assert.equal(confirmsSavedGrant(saved, current), true);
+    assert.match(grantConfirmationMessage(saved, current), /Access was saved and has changed since/);
+    assert.match(grantConfirmationMessage(saved, current), new RegExp(`Current status: ${status === "disabled" ? "suspended" : status}`));
+  }
+  for (const patch of [{ id: "other" }, { project: "other" }, { feature: "other" }, { license_fingerprint: "b".repeat(64) }, { customer_id: "B" }, { license_id: "other" }, { revocation_seq: 1 }, { status: "disabled", revocation_seq: 2 }]) {
+    assert.equal(confirmsSavedGrant(saved, { ...saved, ...patch }), false, JSON.stringify(patch));
+  }
+});
+
 // Each creation path sends exactly the fields its Worker route reads, and a policy create sends no
 // status: the Worker refuses any other field.
 test("protected form sends only its grant fields through either creation path and reports incompatible identifiers", async () => {
@@ -158,7 +174,7 @@ test("admin UI workflow prepares entitlement edit patch payloads", async () => {
   });
   assert.deepEqual(patch, {
     valid_from: 1709942400,
-    valid_until: 1719964800,
+    valid_until: 1720051200,
     notes: "",
     customer_id: "cus_456",
     license_id: "lic_123",
@@ -264,11 +280,11 @@ test("a finished batch reads as one sentence, with every per-row outcome in word
   assert.equal(workflow.batchResultSentence("disable", [
     { id: "a", ok: true, code: "entitlement_disabled" },
     { id: "b", ok: true, code: "entitlement_disabled" },
-  ]), "Disable finished: 2 done.");
+  ]), "Suspend finished: 2 done.");
   assert.equal(workflow.batchResultSentence("disable", [
     { id: "a", ok: true, code: "entitlement_disabled" },
     { id: "b", ok: false, code: "not_found" },
-  ]), "Disable finished: 1 done, 1 not found.");
+  ]), "Suspend finished: 1 done, 1 not found.");
   const mixed = workflow.batchResultSentence("revoke", [
     { id: "a", ok: false, code: "revoked_entitlement_is_terminal" },
     { id: "b", ok: false, code: "revoked_entitlement_is_terminal" },
@@ -280,7 +296,7 @@ test("a finished batch reads as one sentence, with every per-row outcome in word
   ]);
   assert.equal(mixed, "Revoke finished: 0 done, 2 already revoked, 1 with an invalid ID, 1 failed, 1 changed meanwhile, 2 not changed.");
   assert.doesNotMatch(mixed, /\b[a-z]+_[a-z_]+\b/);
-  assert.equal(workflow.batchResultSentence("reenable", []), "Reenable finished: 0 done.");
+  assert.equal(workflow.batchResultSentence("reenable", []), "Resume finished: 0 done.");
 });
 
 test("the entitlement record guard accepts the protected row shape", async () => {
@@ -326,9 +342,56 @@ test("entitlement date edits preserve stored instants and use UTC midnight for c
   assert.equal(unchanged.valid_from, original.valid_from);
   assert.equal(unchanged.valid_until, original.valid_until);
   const extended = workflow.normalizeEntitlementPatch({ ...edit, valid_until: "2026-09-10" }, original);
-  assert.equal(extended.valid_until, Date.parse("2026-09-10T00:00:00Z") / 1000);
+  assert.equal(extended.valid_until, Date.parse("2026-09-11T00:00:00Z") / 1000);
   assert.equal(workflow.normalizeEntitlementPatch({ ...edit, valid_until: "" }, original).valid_until, null);
   assert.deepEqual(workflow.entitlementFormErrors(edit, original), {});
-  assert.ok(workflow.entitlementFormErrors({ ...edit, valid_until: "2026-09-07" }, original).valid_until);
+  assert.ok(workflow.entitlementFormErrors({ ...edit, valid_until: "2026-09-06" }, original).valid_until);
   assert.ok(workflow.entitlementFormErrors({ ...edit, valid_until: "2026-02-30" }, original).valid_until);
+});
+
+test("inclusive entitlement expiry handles calendar boundaries and preserves custom exact instants", async () => {
+  const expiry = await loadWorkflowModule("features/entitlements/expiry.ts");
+  for (const [day, next] of [["2026-10-25","2026-10-26"],["2024-02-29","2024-03-01"],["2026-12-31","2027-01-01"],["9999-12-31","+010000-01-01"]]) {
+    const timestamp=Date.parse(`${next}T00:00:00Z`)/1000;
+    assert.equal(expiry.expiryDeadline(day), timestamp);
+    assert.equal(expiry.expiryDateInput(timestamp), day);
+    assert.equal(expiry.expiryDescription(timestamp), `Valid through ${day} UTC`);
+  }
+  for(const day of ["2026-02-30","2023-02-29","1969-12-31","10000-01-01","exact:123","2026-3-2"]) assert.throws(()=>expiry.expiryDeadline(day));
+  for(const timestamp of [0,1792938427,Number.MAX_SAFE_INTEGER]) {
+    const input=expiry.expiryDateInput(timestamp);
+    assert.ok(input.startsWith('exact:'));
+    assert.equal(expiry.expiryDeadline(input,timestamp),timestamp);
+    assert.equal(expiry.expiryDeadline('',timestamp),null);
+    assert.ok(expiry.expiryDescription(timestamp).startsWith('Expires '));
+  }
+  assert.equal(expiry.expiryDeadline(''),null);
+  assert.equal(expiry.expiryDescription(null),'No expiry');
+  assert.equal(expiry.exactExpiry(Date.parse('2026-09-08T18:42:03Z')/1000),'2026-09-08T18:42:03Z');
+});
+
+test("trial validity distinguishes a pending clock, derived expiry, and an earlier grant deadline",async()=>{
+  const validity=await loadWorkflowModule('features/entitlements/validity.ts');
+  const trial={is_trial:1,valid_until:null,trial_expiration_basis:'from_first_activation',trial_duration_sec:86400,trial_started_at:null};
+  assert.equal(validity.entitlementExpiryDescription(trial),'Trial: 1 day from first activation.');
+  assert.equal(validity.entitlementDeadline(trial),null);
+  const started={...trial,trial_started_at:Date.parse('2026-10-25T12:34:56Z')/1000};
+  assert.equal(validity.entitlementDeadline(started),Date.parse('2026-10-26T12:34:56Z')/1000);
+  assert.match(validity.entitlementExpiryDescription(started),/^Trial expires 2026-10-26T12:34:56Z \(derived from first activation\)/);
+  const capped={...started,valid_until:Date.parse('2026-10-26T00:00:00Z')/1000};
+  assert.equal(validity.entitlementDeadline(capped),capped.valid_until);
+  assert.match(validity.entitlementExpiryDescription(capped),/Trial expires 2026-10-26T00:00:00Z \(limited by grant expiry\)/);
+  assert.match(validity.entitlementExpiryDescription(capped),/Grant: Valid through 2026-10-25 UTC/);
+  assert.equal(validity.entitlementExpiryDescription({...trial,trial_duration_sec:3600,trial_expiration_basis:'from_first_use'}),'Trial: 1 hour from first use.');
+  assert.equal(validity.entitlementExpiryDescription({...trial,trial_expiration_basis:'from_issue',valid_until:capped.valid_until}),'Trial from issue. Valid through 2026-10-25 UTC.');
+  assert.equal(validity.entitlementExpiryDescription({...trial,is_trial:0}),'No expiry');
+});
+
+test("invalid trial clocks never claim perpetual access or round a precise stored deadline",async()=>{
+  const validity=await loadWorkflowModule('features/entitlements/validity.ts');
+  const trial={is_trial:1,valid_until:null,trial_expiration_basis:'from_first_activation',trial_duration_sec:0,trial_started_at:null};
+  assert.equal(validity.entitlementExpiryDescription(trial),'Trial expiry unavailable.');
+  assert.equal(validity.entitlementExpiryDescription({...trial,trial_duration_sec:86400,trial_started_at:Number.MAX_SAFE_INTEGER}),'Trial expiry unavailable.');
+  const custom=Date.parse('2026-10-26T12:34:57Z')/1000;
+  assert.match(validity.entitlementExpiryDescription({...trial,valid_until:custom}),/Grant: Expires 2026-10-26T12:34:57Z/);
 });

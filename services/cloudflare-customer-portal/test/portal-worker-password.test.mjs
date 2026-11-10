@@ -7,6 +7,20 @@ const PASSWORD = "A long testing passphrase 1!";
 const NEXT = "Another long passphrase 2!";
 const PATH = "/portal/v1/auth/password";
 const fixture = () => { const data = baseFixture({ PORTAL_PASSWORD_ENABLED: "1" }); data.db.exec("PRAGMA foreign_keys = ON"); return data; };
+
+test("account password reads and changes reject a cookie switched to another customer without changing credentials or sessions", async t => {
+  t.mock.method(Date, "now", () => NOW * 1000);
+  const { env, db } = fixture();
+  const cookie = await verifiedCookie(env, "B");
+  const sessions = db.prepare("SELECT * FROM portal_sessions").all();
+  for (const method of ["GET", "POST"]) for (const [expectedCustomer, status, code] of [[undefined, 400, "invalid_request"], ["A", 409, "account_changed"]]) {
+    const result = await call(env, method, PATH, { cookie, expectedCustomer, body: method === "POST" ? { password: NEXT } : undefined });
+    assert.equal(result.status, status); assert.equal(result.body.code, code); assert.equal(result.body.data, undefined);
+  }
+  assert.equal(db.prepare("SELECT count(*) AS n FROM portal_passwords").get().n, 0);
+  assert.deepEqual(db.prepare("SELECT * FROM portal_sessions").all(), sessions);
+  assert.equal((await call(env, "GET", PATH, { cookie, expectedCustomer: "B" })).status, 200);
+});
 const cookie = (result) => result.res.headers.get("set-cookie").split(";")[0];
 // Login/settings tests seed the admin set-password shape: an unverified login address with an empty
 // contact address.
@@ -97,7 +111,7 @@ test("a signed-in password change over its own rate limit answers 429 with no re
   const sessionCookie = cookie(result);
   const window = Math.floor(NOW / 900) * 900;
   db.prepare("INSERT INTO rate_limit_counters (namespace, rate_key, window_start, request_count, expires_at, updated_at) VALUES ('portal', 'password:change:ip:', ?, 30, ?, ?)").run(window, NOW + 1800, NOW);
-  const limited = await call(env, "POST", PATH, { cookie: sessionCookie, body: { password: NEXT, current_password: PASSWORD } });
+  const limited = await call(env, "POST", PATH, { expectedCustomer: result.body.data.customer_id, cookie: sessionCookie, body: { password: NEXT, current_password: PASSWORD } });
   assert.equal(limited.status, 429);
   assert.equal(limited.res.headers.get("retry-after"), null);
 });
@@ -106,11 +120,11 @@ test("password change requires proof, rotates sessions and prevents old-hash ses
   const first = await register(env);
   const second = await login(env);
   const credential = db.prepare("SELECT * FROM portal_passwords").get();
-  assert.equal((await call(env, "POST", PATH, { cookie: cookie(first), body: { password: NEXT } })).status, 401);
-  const changed = await call(env, "POST", PATH, { cookie: cookie(first), body: { password: NEXT, current_password: PASSWORD, customer_id: "B" } });
+  assert.equal((await call(env, "POST", PATH, { expectedCustomer: first.body.data.customer_id, cookie: cookie(first), body: { password: NEXT } })).status, 401);
+  const changed = await call(env, "POST", PATH, { expectedCustomer: first.body.data.customer_id, cookie: cookie(first), body: { password: NEXT, current_password: PASSWORD, customer_id: "B" } });
   assert.equal(changed.status, 200);
   assert.equal((await call(env, "GET", "/api/portal/me", { cookie: cookie(second) })).status, 401);
-  assert.equal((await call(env, "GET", "/api/portal/me", { cookie: cookie(first) })).status, 401);
+  assert.equal((await call(env, "GET", "/api/portal/me", { expectedCustomer: first.body.data.customer_id, cookie: cookie(first) })).status, 401);
   assert.equal((await call(env, "GET", "/api/portal/me", { cookie: cookie(changed) })).status, 200);
   assert.equal((await login(env)).status, 401);
   assert.equal((await login(env, "new@example.com", NEXT)).status, 200);
@@ -132,7 +146,7 @@ test("a raced password change preserves the winning credential and existing acce
     return batch(statements);
   });
   const result = await call(env, "POST", PATH, {
-    cookie: cookie(first), body: { password: NEXT, current_password: PASSWORD },
+    expectedCustomer: first.body.data.customer_id, cookie: cookie(first), body: { password: NEXT, current_password: PASSWORD },
   });
   assert.equal(result.status, 409);
   assert.equal(result.body.code, "password_change_conflict");
@@ -145,13 +159,13 @@ test("a raced password change preserves the winning credential and existing acce
 test("first password and recovery require recent verified sign-in", async () => {
   const { env } = fixture();
   const old = await verifiedCookie(env, "A", 700);
-  assert.equal((await call(env, "POST", PATH, { cookie: old, body: { password: PASSWORD } })).status, 403);
+  assert.equal((await call(env, "POST", PATH, { expectedCustomer: "A", cookie: old, body: { password: PASSWORD } })).status, 403);
   const fresh = await verifiedCookie(env, "A");
-  const set = await call(env, "POST", PATH, { cookie: fresh, body: { password: PASSWORD } });
+  const set = await call(env, "POST", PATH, { expectedCustomer: "A", cookie: fresh, body: { password: PASSWORD } });
   assert.equal(set.status, 200);
   assert.equal((await login(env, "a@x.com")).status, 200);
   const reauthenticated = await verifiedCookie(env, "A");
-  const reset = await call(env, "POST", PATH, { cookie: reauthenticated, body: { password: NEXT } });
+  const reset = await call(env, "POST", PATH, { expectedCustomer: "A", cookie: reauthenticated, body: { password: NEXT } });
   assert.equal(reset.status, 200);
   assert.equal((await login(env, "a@x.com", NEXT)).status, 200);
 });
@@ -161,7 +175,7 @@ test("first password and recovery require recent verified sign-in", async () => 
 // eligibility check would refuse.
 test("password settings report no recovery path before any credential exists", async () => {
   const { env } = fixture();
-  const result = await call(env, "GET", PATH, { cookie: await verifiedCookie(env, "A") });
+  const result = await call(env, "GET", PATH, { expectedCustomer: "A", cookie: await verifiedCookie(env, "A") });
   assert.equal(result.status, 200);
   assert.equal(result.body.data.has_password, false);
   assert.equal(result.body.data.recovery_available, false);
@@ -170,7 +184,7 @@ test("password settings report no recovery path before any credential exists", a
 test("password settings mark a credential eligible when it matches the customer's own verified email", async () => {
   const { env } = fixture();
   await env.DB.prepare("INSERT INTO portal_passwords (customer_id,email_lower,password_hash,created_at,updated_at) VALUES ('A','a@x.com',?,?,?)").bind(await hashPassword(PASSWORD), NOW, NOW).run();
-  const result = await call(env, "GET", PATH, { cookie: await verifiedCookie(env, "A") });
+  const result = await call(env, "GET", PATH, { expectedCustomer: "A", cookie: await verifiedCookie(env, "A") });
   assert.equal(result.body.data.has_password, true);
   assert.equal(result.body.data.email_verified, true);
   assert.equal(result.body.data.recovery_available, true);
@@ -182,7 +196,7 @@ test("password settings mark a set-password-shaped account eligible for recovery
   // covers separately.
   const { env } = fixture();
   const created = await register(env, "invited@example.com");
-  const result = await call(env, "GET", PATH, { cookie: cookie(created) });
+  const result = await call(env, "GET", PATH, { expectedCustomer: created.body.data.customer_id, cookie: cookie(created) });
   assert.equal(result.body.data.has_password, true);
   assert.equal(result.body.data.email_verified, false);
   assert.equal(result.body.data.recovery_available, true);
@@ -193,7 +207,7 @@ test("password settings never offer recovery for a set-password-shaped account w
   // sharing that same login identifier (the set-password shape) must not recover with it.
   const { env } = fixture();
   const created = await register(env, "a@x.com");
-  const result = await call(env, "GET", PATH, { cookie: cookie(created) });
+  const result = await call(env, "GET", PATH, { expectedCustomer: created.body.data.customer_id, cookie: cookie(created) });
   assert.equal(result.body.data.email_verified, false);
   assert.equal(result.body.data.recovery_available, false);
 });

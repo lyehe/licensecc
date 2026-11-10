@@ -2,6 +2,19 @@ import { expect } from "@playwright/test";
 
 import { fillProtectedOwner, makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
+async function inspectOfflineConsequence(page, testInfo, target) {
+  const dialog = page.getByRole("dialog"), originalViewport = page.viewportSize();
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect(dialog).toContainText("Existing offline access may continue until its current permission expires");
+    await expect(dialog.getByText(/Restarting the app requires an online check/)).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await dialog.screenshot({ path: testInfo.outputPath(`offline-${target}-${width}.png`) });
+  }
+  await page.setViewportSize(originalViewport);
+}
+
 // A create settles once the Worker returns the saved record.
 test("protected creation settles on the saved record", async ({ page }) => {
   const api = makeAdminApiFixture();
@@ -116,7 +129,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await expect(createForm.getByLabel(/device hash|assertion ttl/i)).toHaveCount(0);
   // Valid from / until are <input type="date"> (YYYY-MM-DD -> UTC-midnight epoch).
   await createForm.getByLabel("Valid from").fill("2024-03-09");
-  await createForm.getByLabel("Valid until").fill("");
+  await createForm.getByLabel("Valid through").fill("");
   await createForm.getByText("Enter customer ID manually", { exact: true }).click();
   await createForm.getByLabel("Customer ID").fill("cus_e2e");
   await createForm.getByText("Enter license ID manually", { exact: true }).click();
@@ -140,7 +153,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await page.getByRole("button", { name: "Edit" }).click();
   const editForm = page.locator("section.editorLayout form");
   await expect(editForm.getByLabel(/device hash|assertion ttl/i)).toHaveCount(0);
-  await editForm.getByLabel("Valid until").fill("2024-07-03");
+  await editForm.getByLabel("Valid through").fill("2024-07-03");
   await editForm.getByText("Enter customer ID manually", { exact: true }).click();
   await editForm.getByLabel("Customer ID").fill("");
   await editForm.getByLabel("Notes").fill("");
@@ -159,7 +172,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
     "license_id", "notes", "valid_from", "valid_until"]);
   expect(api.requests.patches[0]).toMatchObject({
     valid_from: 1709942400,
-    valid_until: 1719964800,
+    valid_until: 1720051200,
     notes: "",
     customer_id: "cus_e2e_moved",
     license_id: "lic_e2e",
@@ -170,12 +183,12 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await expect(patchedRow).toContainText("ent-1");
 
   const entitlementActions = page.locator(".desktopRecords tbody tr").first();
-  await clickAction(entitlementActions.getByRole("button", { name: "Disable", includeHidden: true }));
+  await clickAction(entitlementActions.getByRole("button", { name: "Suspend", includeHidden: true }));
   await page.getByRole("dialog").getByLabel(/Reason/).fill("operator pause");
   await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
   await expect(entitlementActions.locator(".status.disabled")).toHaveText("suspended");
 
-  await clickAction(entitlementActions.getByRole("button", { name: "Reenable", includeHidden: true }));
+  await clickAction(entitlementActions.getByRole("button", { name: "Resume", includeHidden: true }));
   await expect(entitlementActions.locator(".status.active")).toHaveText("active");
 
   // Revoke is irreversible -> it now opens a typed-confirm modal; the action fires only on the renamed button.
@@ -191,8 +204,8 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await revokeConfirm.click();
   await expect(entitlementActions.locator(".status.revoked")).toHaveText("revoked");
   await expect(entitlementActions.getByRole("button", { name: "Edit" })).toBeDisabled();
-  const revokedReenable = entitlementActions.getByRole("button", { name: "Reenable", includeHidden: true });
-  await expect(revokedReenable).toHaveCount(0);
+  const revokedResume = entitlementActions.getByRole("button", { name: "Resume", includeHidden: true });
+  await expect(revokedResume).toHaveCount(0);
 
   if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
   await page.getByRole("link", { name: "Events" }).click();
@@ -215,7 +228,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   expect(pageText).not.toContain("Cf-Access-Jwt-Assertion");
 });
 
-test("admin UI runs bulk transitions, global search deep-link, and CSV export", async ({ page }) => {
+test("admin UI runs bulk transitions, global search deep-link, and CSV export", async ({ page }, testInfo) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
 
@@ -236,11 +249,14 @@ test("admin UI runs bulk transitions, global search deep-link, and CSV export", 
   await createEntitlement("ent", "b".repeat(64));
   await expect(page.locator("tbody input[type=checkbox]")).toHaveCount(2);
 
-  // BULK: select all loaded rows -> the bulk bar appears -> Disable -> typed-confirm (reason) -> Confirm.
+  // BULK: select all loaded rows -> the bulk bar appears -> Suspend -> typed-confirm (reason) -> Confirm.
   await page.getByLabel(/^Select all \d+ loaded$/).check();
   await expect(page.locator(".bulkBar")).toContainText("2 selected");
-  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }));
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Suspend", includeHidden: true }));
   await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true })).toBeDisabled();
+  await inspectOfflineConsequence(page, testInfo, "bulk-suspend");
+  expect(api.requests.batches).toHaveLength(0);
   await page.getByRole("dialog").getByLabel(/Reason/).fill("quarterly audit");
   await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
 
@@ -248,7 +264,7 @@ test("admin UI runs bulk transitions, global search deep-link, and CSV export", 
   expect(api.requests.batches[0]).toMatchObject({ action: "disable", reason: "quarterly audit" });
   expect(api.requests.batches[0].rows).toHaveLength(2);
   // The per-row roll-up renders in the status line, and the rows refreshed to disabled.
-  await expect(page.getByText("Disable finished: 2 done.")).toBeVisible();
+  await expect(page.getByText("Suspend finished: 2 done.")).toBeVisible();
   await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(2);
   // Selection cleared after the batch (the bulk bar is gone).
   await expect(page.locator(".bulkBar")).toHaveCount(0);
@@ -296,7 +312,7 @@ test("admin UI retains the server-owned four-entitlement batch limit", async ({ 
   await expect(page.locator(".bulkBar")).toContainText("5 selected");
   await expect(page.locator(".bulkBar")).toContainText("2 chunks of up to 4");
   await expect(rowChecks.nth(4)).toBeEnabled();
-  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }));
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Suspend", includeHidden: true }));
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("four-row free tier proof");
   await dialog.getByRole("button", { name: "Confirm" }).click();
@@ -304,7 +320,7 @@ test("admin UI retains the server-owned four-entitlement batch limit", async ({ 
   expect(api.requests.batches.map((batch) => batch.rows.map((row) => row.id))).toEqual([["ent-1", "ent-2", "ent-3", "ent-4"], ["ent-5"]]);
 });
 
-test("admin UI gates a batch revoke behind an exact typed REVOKE phrase", async ({ page }) => {
+test("admin UI gates a batch revoke behind an exact typed REVOKE phrase", async ({ page }, testInfo) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -327,6 +343,7 @@ test("admin UI gates a batch revoke behind an exact typed REVOKE phrase", async 
   const typed = dialog.getByLabel("Type REVOKE 4 to confirm");
   // The dialog itself moves focus to the typed field when it opens (the field has no autofocus of its own).
   await expect(typed).toBeFocused();
+  await inspectOfflineConsequence(page, testInfo, "bulk-revoke");
   await dialog.getByLabel(/Reason/).fill("mass revoke test");
   await expect(confirm).toBeDisabled();
   await typed.fill("revoke 4");
@@ -374,7 +391,7 @@ test("admin UI disables twenty loaded entitlements with one confirmation, one re
   await page.getByLabel("Select all 20 loaded", { exact: true }).check();
   await expect(page.locator(".bulkBar")).toContainText("20 selected");
   await expect(page.locator(".bulkBar")).toContainText("5 chunks of up to 4");
-  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }));
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Suspend", includeHidden: true }));
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("5 chunks of up to 4");
   await dialog.getByLabel(/Reason/).fill("contract ended");
@@ -400,7 +417,7 @@ test("admin UI disables twenty loaded entitlements with one confirmation, one re
 
   const panel = page.locator(".tablePane .batchRun");
   await expect(panel.getByRole("listitem")).toHaveText(["20 done"]);
-  await expect(panel).toContainText("Disable finished");
+  await expect(panel).toContainText("Suspend finished");
   await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(20);
   await expect(page.locator(".bulkBar")).toHaveCount(0);
 });

@@ -45,6 +45,15 @@ export interface NavigationIntent {
   selectCustomerId?: string;
   customerSection?: CustomerSection;
   catalogView?: CatalogView;
+  /** Guided grant context stays in session memory, never in a URL or history.state. */
+  grantAccess?: { customer: GrantCustomer; project: string };
+}
+
+/** Display metadata from the exact customer read that opened the draft. ID remains authoritative. */
+export interface GrantCustomer {
+  readonly id: string;
+  readonly name: string;
+  readonly email: string;
 }
 
 export type NavigationTarget = Omit<NavigationIntent, "id">;

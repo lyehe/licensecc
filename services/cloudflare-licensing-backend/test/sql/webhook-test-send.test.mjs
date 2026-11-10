@@ -16,7 +16,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { loadSecretMap } from "@licensecc/cloudflare-runtime/auth/secret_map";
-import { signWebhookBody, verifyWebhookSignature } from "@licensecc/cloudflare-runtime/webhooks/webhook";
+import { signWebhookBody, verifyWebhookSignature } from "../../src/webhooks/webhook.mjs";
 import { sendWebhookTestEvent, WEBHOOK_TEST_RATE_NAMESPACE } from "../../src/webhooks/test_event.mjs";
 
 const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "migrations");

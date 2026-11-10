@@ -1,16 +1,13 @@
 #define BOOST_TEST_MODULE integration_test_hw_identifier
 
 #include <boost/test/unit_test.hpp>
-#include <fstream>
+#include <algorithm>
 #include <iostream>
-#include <stdio.h>
-#include <cstring>
-#include <boost/filesystem.hpp>
+#include <vector>
 #include <licensecc_properties.h>
 #include <licensecc_properties_test.h>
 
 #include <licensecc/licensecc.h>
-#include "../../src/library/ini/SimpleIni.h"
 #include "../../src/library/hw_identifier/hw_identifier_facade.hpp"
 #include "../../src/library/os/os.h"
 #include "../../src/library/os/network.hpp"
@@ -19,14 +16,8 @@
 
 namespace license {
 namespace test {
-namespace fs = boost::filesystem;
 using namespace std;
 using namespace hw_identifier;
-
-/**
- * If the current pc has at least one disk generate a hardware identifier using disk, generate a license, verify the license
- * is OK
- */
 
 static void generate_and_verify_license(LCC_API_HW_IDENTIFICATION_STRATEGY strategy, const string& lic_fname,
 										LCC_EVENT_TYPE expected_result = LICENSE_OK) {
@@ -54,7 +45,6 @@ static void generate_and_verify_license(LCC_API_HW_IDENTIFICATION_STRATEGY strat
 }
 
 BOOST_AUTO_TEST_CASE(volid_lic_file) {
-	HwIdentifier identifier_out;
 	vector<DiskInfo> diskInfos;
 	FUNCTION_RETURN result_diskinfos = getDiskInfos(diskInfos);
 	if ((result_diskinfos == FUNC_RET_BUFFER_TOO_SMALL || result_diskinfos == FUNC_RET_OK) && diskInfos.size() > 0) {

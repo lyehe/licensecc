@@ -38,9 +38,11 @@ export function useProviders(): ProvidersState {
   if (state === null) throw new Error("useProviders() requires an enclosing <ProvidersScope>");
   return state;
 }
-export function ProviderButtons({ providers, linked = [], link = false }: { providers: Providers; linked?: string[]; link?: boolean }): React.ReactElement {
+export function ProviderButtons({ providers, linked = [], linkCustomerId }: { providers: Providers; linked?: string[]; linkCustomerId?: string }): React.ReactElement {
+  const link = linkCustomerId !== undefined;
   return <div className="providerButtons">{(["google", "github"] as const).filter((provider) => providers[provider] && !linked.includes(provider)).map((provider) =>
       <form key={provider} method="post" action={`/portal/v1/auth/${provider}/start${link ? "?mode=link" : ""}`}>
+        {link && <input type="hidden" name="expected_customer_id" value={encodeURIComponent(linkCustomerId)} />}
         <button type="submit">{link ? "Connect" : "Continue with"} {LABELS[provider]}</button>
       </form>,
   )}</div>;
@@ -56,6 +58,8 @@ const ERRORS: Record<string, React.ReactNode> = {
   account_suspended: <>This account is suspended. <SupportContact />.</>,
   account_link_required: <>An account already uses this email. Sign in with the method you already use for it, then connect Google or GitHub under Account. <SupportContact /> if you can't sign in.</>,
   link_failed: "Unable to connect this provider. Sign in again and retry from Account.",
+  account_changed: "The signed-in account changed in another tab. Review this account before connecting a provider again.",
+  account_context_required: "Reload Account before connecting a provider. This page needs an update.",
   sign_in_failed: "Unable to complete sign-in. Please try again.",
 };
 // The query parameters a provider redirect leaves behind. Whoever renders them (ProviderResult)

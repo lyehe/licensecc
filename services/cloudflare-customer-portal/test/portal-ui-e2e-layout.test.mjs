@@ -7,6 +7,7 @@ import config from "../playwright.config.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const expectedSpecs = [
+  "portal-ui.account-context.e2e.mjs",
   "portal-ui.consent.e2e.mjs", "portal-ui.devices-search.e2e.mjs",
   "portal-ui.e2e.mjs", "portal-ui.license-lifecycle.e2e.mjs", "portal-ui.network-failures.e2e.mjs",
   "portal-ui.nodes.e2e.mjs", "portal-ui.session-expired.e2e.mjs",
@@ -29,7 +30,7 @@ test("portal browser specs are discovered by pattern, not by imports", () => {
     titles.push(...localTitles);
   }
   // This counts only top-level test( titles; loop-built and describe-nested tests are not
-  // anchored at column 0, so the Playwright run total (132) is higher than this count.
-  assert.equal(titles.length, 114);
+  // anchored at column 0, so the Playwright run total is higher than this count.
+  assert.equal(titles.length, 126);
   assert.equal(new Set(titles).size, titles.length, "browser scenario titles must be unique");
 });

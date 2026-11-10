@@ -63,7 +63,8 @@ test("email proof precedes account creation and creates verified, empty account 
   assert.equal(result.status, 200);
   assert.match(result.res.headers.get("set-cookie"), /HttpOnly; Secure; SameSite=Lax/);
   assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = ?").get(result.body.data.customer_id).email, "new@example.com");
-  const settings = await call(f.env, "GET", PATH, { cookie: cookie(result) });
+  const settings = await call(f.env, "GET", PATH, { cookie: cookie(result), expectedCustomer: result.body.data.customer_id });
+  assert.equal(settings.status, 200);
   assert.equal(settings.body.data.email_verified, true);
   assert.equal((await call(f.env, "GET", "/api/portal/entitlements", { cookie: cookie(result) })).body.data.items.length, 0);
   assert.equal((await f.complete()).body.code, "invalid_link");

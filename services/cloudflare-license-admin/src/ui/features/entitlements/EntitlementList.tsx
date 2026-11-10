@@ -8,6 +8,7 @@ import type { EntitlementBatch } from "./useEntitlementBatch";
 import { focusTargetInRow, type ConfirmActionOutcome, useOperatorControls } from "../../shared/controls";
 import { hasActiveFilter } from "../../shared/filters";
 import { formatUtcDate } from "../../shared/format";
+import { entitlementDeadline, entitlementExpiryDescription } from "./validity";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { useMediaQuery } from "../../shared/useMediaQuery";
 import { focusWorkspaceTarget } from "../../shared/workspaceFocus";
@@ -35,15 +36,16 @@ interface ListProps {
   onLoadMore: (() => void) | null;
   onTransition: (item: EntitlementRecord, action: EntitlementAction, key: string) => Promise<ConfirmActionOutcome>;
   batch: EntitlementBatch;
-  bulkConfirmBody: (action: EntitlementAction) => string;
+  bulkConfirmBody: (action: "disable" | "revoke") => string;
   isCurrent: () => boolean;
   onHistory: (item: EntitlementRecord) => void;
 }
 
 export function EntitlementValidity({ item }: { item: EntitlementRecord }): React.ReactElement {
   const now = Math.floor(Date.now() / 1000);
-  const validity = item.valid_until !== null && item.valid_until <= now ? "Expired" : item.valid_from !== null && item.valid_from > now ? "Not started" : item.valid_until !== null && item.valid_until <= now + 30 * 86400 ? "Expires soon" : null;
-  return <><span className={`status ${item.status}`}>{item.status === "disabled" ? "suspended" : item.status}</span>{validity ? <span className={`healthBadge health-${validity === "Expired" ? "expired" : validity === "Expires soon" ? "expiring" : "pending"}`}>{validity}</span> : null}<div className="muted">{item.valid_until === null ? "No expiry" : `Expires ${formatUtcDate(item.valid_until)}`}</div></>;
+  const deadline=entitlementDeadline(item);
+  const validity = deadline !== null && deadline <= now ? "Expired" : item.valid_from !== null && item.valid_from > now ? "Not started" : deadline !== null && deadline <= now + 30 * 86400 ? "Expires soon" : null;
+  return <><span className={`status ${item.status}`}>{item.status === "disabled" ? "suspended" : item.status}</span>{validity ? <span className={`healthBadge health-${validity === "Expired" ? "expired" : validity === "Expires soon" ? "expiring" : "pending"}`}>{validity}</span> : null}<div className="muted">{entitlementExpiryDescription(item)}</div></>;
 }
 
 function EntitlementDetails({ item }: { item: EntitlementRecord }): React.ReactElement {
@@ -76,8 +78,8 @@ export function EntitlementList(props: ListProps): React.ReactElement {
     return <div className="actions"><button disabled={locked || !canEditEntitlement(item.status)} onClick={() => props.onEdit(item)}>Edit</button><ActionMenu label="More actions">
       <button disabled={busy} onClick={() => props.onHistory(item)}>History</button>
       {canEditEntitlement(item.status) && <button disabled={locked} onClick={() => props.onEdit(item, true)}>Extend validity</button>}
-      {canRunAction(item.status, "disable") && <button data-focus-action="disable" className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Disable entitlement", body: disableEntitlementConfirm(item), requiresReason: true, reasonPresets: ENTITLEMENT_DISABLE_REASON_PRESETS, run: ({ idempotencyKey }) => onTransition(item, "disable", idempotencyKey), successFocusTarget: focus, isCurrent })}>Disable</button>}
-      {canRunAction(item.status, "reenable") && <button data-focus-action="reenable" disabled={locked} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }) => onTransition(item, "reenable", idempotencyKey), successFocusTarget: focus, isCurrent })}>Reenable</button>}
+      {canRunAction(item.status, "disable") && <button data-focus-action="disable" className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Suspend entitlement", body: disableEntitlementConfirm(item), requiresReason: true, reasonPresets: ENTITLEMENT_DISABLE_REASON_PRESETS, run: ({ idempotencyKey }) => onTransition(item, "disable", idempotencyKey), successFocusTarget: focus, isCurrent })}>Suspend</button>}
+      {canRunAction(item.status, "reenable") && <button data-focus-action="reenable" disabled={locked} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }) => onTransition(item, "reenable", idempotencyKey), successFocusTarget: focus, isCurrent })}>Resume</button>}
       {canRunAction(item.status, "revoke") && <button className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Revoke entitlement", body: revokeEntitlementConfirm(item), requiresReason: true, confirmLabel: "Revoke", typedConfirmation: revokeTypedConfirmation(1), run: ({ idempotencyKey }) => onTransition(item, "revoke", idempotencyKey), successFocusTarget: focus, isCurrent })}>Revoke</button>}
     </ActionMenu></div>;
   }
@@ -103,6 +105,19 @@ export function EntitlementList(props: ListProps): React.ReactElement {
     });
   }
   const capacity = (item: EntitlementRecord): React.ReactElement => <><div>{item.license_mode?.replaceAll("_", " ") || "Default mode"}</div><span className="muted">Device limit {item.max_active_devices}</span></>;
+  if (props.scoped) return <section className="tablePane" data-focus-section="entitlements" aria-label="Access details">
+    <h3>Access details</h3><p>License access for customer {filter.customer_id}.</p>
+    <button type="button" disabled={busy||props.loading} onClick={props.onRetry}>Refresh access</button>
+    <ReadNotice loading={props.loading} error={props.error} hasData={items.length > 0} label="access details" onRetry={props.onRetry} />
+    {items.map(item=><article key={item.id} className="recordCard" data-focus-row={`entitlement:${item.id}`}>
+      <h4>{item.project} / {item.feature}</h4>
+      <EntitlementValidity item={item} />
+      <dl className="recordMeta"><div><dt>Device limit</dt><dd>{item.max_active_devices}</dd></div><div><dt>Policy</dt><dd>{item.policy_id || "No policy"}</dd></div><div><dt>Notes</dt><dd>{item.notes || "None"}</dd></div></dl>
+      {actions(item)}<EntitlementDetails item={item} />
+    </article>)}
+    {ready && items.length===0 && <p>This access is no longer available in this customer workspace. Return to the app to select a current grant.</p>}
+    <p className="muted">Lifecycle and date validity are shown; other access restrictions may still apply.</p>
+  </section>;
   // "Show all" drops the customer from the filter, so a scoped (Manage access) list never offers it:
   // its only way out is "Back to app", and its rows never widen to other customers' grants.
   return <section className="tablePane" data-focus-section="entitlements" aria-label="Entitlement list">
@@ -115,7 +130,7 @@ export function EntitlementList(props: ListProps): React.ReactElement {
     <ReadNotice loading={props.loading} error={props.error} hasData={items.length > 0} label="entitlements" onRetry={props.onRetry} />
     {!ready && items.length > 0 && <p className="muted">Actions are unavailable until the current list read succeeds.</p>}
     {!props.scoped && <BatchRunPanel store={props.batch.store} onDismiss={() => props.batch.store.set(null)} />}
-    {selectedCount > 0 && <div className="bulkBar"><span>{selectedCount} selected{chunkCount > 1 && <span className="muted"> · sent as {chunkCount} chunks of up to {ENTITLEMENT_BATCH_MAX_IDS}</span>}</span><button type="button" disabled={locked} onClick={() => confirmBatch("disable", "Disable selected entitlements")}>Disable</button><button type="button" disabled={locked} onClick={() => void runConsequenceAction({ run: props.batch.begin("reenable").run, successFocusTarget: props.batch.focusTarget, isCurrent })}>Reenable</button><button type="button" className="danger" disabled={locked} onClick={() => confirmBatch("revoke", "Revoke selected entitlements")}>Revoke selected</button><button type="button" disabled={busy} onClick={props.onClearSelection}>Clear</button></div>}
+    {selectedCount > 0 && <div className="bulkBar"><span>{selectedCount} selected{chunkCount > 1 && <span className="muted"> · sent as {chunkCount} chunks of up to {ENTITLEMENT_BATCH_MAX_IDS}</span>}</span><button type="button" disabled={locked} onClick={() => confirmBatch("disable", "Suspend selected entitlements")}>Suspend</button><button type="button" disabled={locked} onClick={() => void runConsequenceAction({ run: props.batch.begin("reenable").run, successFocusTarget: props.batch.focusTarget, isCurrent })}>Resume</button><button type="button" className="danger" disabled={locked} onClick={() => confirmBatch("revoke", "Revoke selected entitlements")}>Revoke selected</button><button type="button" disabled={busy} onClick={props.onClearSelection}>Clear</button></div>}
     {narrow
       ? <div className="recordCards" aria-label="Entitlement summaries" aria-busy={props.loading}>{items.map((item) =>
           <article className="recordCard" key={item.id} data-focus-row={`entitlement:${item.id}`}><div className="listHeader"><h3>{item.project} / {item.feature}</h3>{selection(item)}</div><code>{item.customer_id}</code><div><EntitlementValidity item={item} /></div><div>{capacity(item)}</div>{actions(item)}<EntitlementDetails item={item} /></article>)}</div>

@@ -29,7 +29,6 @@ VERSION = "1"
 ISSUED_AT_FUTURE_SKEW_SECONDS = 300
 MIN_PUBLIC_KEY_BITS = 3072
 
-# Canonical payload field order — must match build_canonical_config_payload.
 _FIELDS = [
     FieldSpec("purpose"),
     FieldSpec("version"),
@@ -72,8 +71,7 @@ def _parse_canonical_payload(payload_text: str):
         return None, VerificationResult.reject(
             RejectionCode.PAYLOAD_NOT_CANONICAL, "payload is not canonical"
         )
-    # Config payload uses validate_values=False (matches the C++ call).
-    values, rejection = parse_fields_in_order(payload_text, _FIELDS, validate_values=False)
+    values, rejection = parse_fields_in_order(payload_text, _FIELDS)
     if rejection is not None:
         return None, rejection
 

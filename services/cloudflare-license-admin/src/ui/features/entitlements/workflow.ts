@@ -9,6 +9,8 @@ import type {
 import { MAX_DEVICE_LIMIT } from "../../../shared/api";
 import { dateInputToEpoch, epochToDateInput } from "../../shared/dates";
 import { shortHash } from "../../shared/format";
+import { OFFLINE_ACCESS_CONSEQUENCE } from "../../shared/accessConsequences";
+import { expiryDateInput, expiryDeadline } from "./expiry";
 
 export type EntitlementAction = "disable" | "reenable" | "revoke";
 
@@ -97,7 +99,7 @@ export function normalizeEntitlementForm(form: EntitlementFormState): AdminEntit
     feature: form.feature,
     license_fingerprint: form.license_fingerprint,
     valid_from: dateInputToEpoch(form.valid_from, "valid_from"),
-    valid_until: dateInputToEpoch(form.valid_until, "valid_until"),
+    valid_until: expiryDeadline(form.valid_until),
     notes: parseNotes(form.notes),
     customer_id: requiredOwner(form.customer_id),
     license_id: parseNullableIdentifier(form.license_id, "license_id"),
@@ -133,7 +135,7 @@ export function normalizeCreateFromPolicy(form: EntitlementFormState): Entitleme
     customer_id: requiredOwner(form.customer_id),
   };
   if (form.valid_from !== "") body.valid_from = dateInputToEpoch(form.valid_from, "valid_from");
-  if (form.valid_until !== "") body.valid_until = dateInputToEpoch(form.valid_until, "valid_until");
+  if (form.valid_until !== "") body.valid_until = expiryDeadline(form.valid_until);
   if (form.notes !== "") body.notes = parseNotes(form.notes);
   if (form.license_id !== "") body.license_id = parseNullableIdentifier(form.license_id, "license_id");
   return body;
@@ -142,7 +144,7 @@ export function normalizeCreateFromPolicy(form: EntitlementFormState): Entitleme
 export function editFormFromEntitlement(item: EntitlementRecord): EntitlementEditState {
   return {
     valid_from: epochToDateInput(item.valid_from),
-    valid_until: epochToDateInput(item.valid_until),
+    valid_until: expiryDateInput(item.valid_until),
     notes: item.notes,
     customer_id: item.customer_id,
     license_id: item.license_id ?? "",
@@ -152,7 +154,7 @@ export function editFormFromEntitlement(item: EntitlementRecord): EntitlementEdi
 export function normalizeEntitlementPatch(form: EntitlementEditState, original?: Pick<EntitlementRecord, "valid_from" | "valid_until">): EntitlementPatch {
   return {
     valid_from: original && form.valid_from === epochToDateInput(original.valid_from) ? original.valid_from : dateInputToEpoch(form.valid_from, "valid_from"),
-    valid_until: original && form.valid_until === epochToDateInput(original.valid_until) ? original.valid_until : dateInputToEpoch(form.valid_until, "valid_until"),
+    valid_until: expiryDeadline(form.valid_until, original?.valid_until),
     notes: parseNotes(form.notes),
     // Every grant has an owner: an edit can move it to another customer but never clears it.
     customer_id: requiredOwner(form.customer_id),
@@ -191,11 +193,25 @@ export function shortDeviceKeyId(deviceKeyId: string): string {
 }
 
 export function revokeEntitlementConfirm(item: { project: string; feature: string; license_fingerprint: string }): string {
-  return `Revoke the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). This is TERMINAL and cannot be undone.`;
+  return `Revoke the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). This is TERMINAL and cannot be undone. ${entitlementLifecycleConsequence("revoke")}`;
 }
 
 export function disableEntitlementConfirm(item: { project: string; feature: string; license_fingerprint: string }): string {
-  return `Disable the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). Verification and downloads stop until it is re-enabled.`;
+  return `Suspend the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). ${entitlementLifecycleConsequence("disable")}`;
+}
+
+export function bulkEntitlementConfirm(action: "disable" | "revoke", count: number): string {
+  const noun = `${count} selected entitlement${count === 1 ? "" : "s"}`;
+  if (action === "revoke") return `Revoke ${noun}. Revocation is TERMINAL and cannot be undone. ${entitlementLifecycleConsequence("revoke")} Access that is already revoked is skipped.`;
+  return `Suspend ${noun}. ${entitlementLifecycleConsequence("disable")}`;
+}
+
+/** The same consequences apply to single and bulk grant lifecycle actions. */
+export function entitlementLifecycleConsequence(action: "disable" | "revoke"): string {
+  const effect = action === "disable"
+    ? "New app authorization and renewals stop until access is resumed."
+    : "New app authorization and renewals stop for the revoked access.";
+  return `${effect} ${OFFLINE_ACCESS_CONSEQUENCE}`;
 }
 
 /** Common reasons an operator disables a license; presets fill the reason field and leave it editable. */
@@ -249,7 +265,7 @@ export function summarizeBatchResults(results: ReadonlyArray<BatchRowResult>): s
   return parts.join(", ");
 }
 
-const ACTION_NAMES: Readonly<Record<EntitlementAction, string>> = { disable: "Disable", reenable: "Reenable", revoke: "Revoke" };
+const ACTION_NAMES: Readonly<Record<EntitlementAction, string>> = { disable: "Suspend", reenable: "Resume", revoke: "Revoke" };
 
 /** Why a row of a finished batch was not changed, in words; any other code reads as "not changed". */
 function batchOutcomeWords(code: string): string {
@@ -287,12 +303,12 @@ export function entitlementFormErrors(form: EntitlementEditState | EntitlementFo
   }
   for (const field of ["valid_from", "valid_until"] as const) {
     try {
-      const epoch = dateInputToEpoch(form[field], field);
-      if (epoch !== null && epochToDateInput(epoch) !== form[field]) throw new Error("invalid_date");
+      const epoch = field === "valid_until" ? expiryDeadline(form[field], original?.valid_until) : dateInputToEpoch(form[field], field);
+      if (field === "valid_from" && epoch !== null && epochToDateInput(epoch) !== form[field]) throw new Error("invalid_date");
     } catch { errors[field] = "Enter a valid date on or after January 1, 1970."; }
   }
   if (!errors.valid_from && !errors.valid_until) {
-    const patch = { valid_from: original && form.valid_from === epochToDateInput(original.valid_from) ? original.valid_from : dateInputToEpoch(form.valid_from, "valid_from"), valid_until: original && form.valid_until === epochToDateInput(original.valid_until) ? original.valid_until : dateInputToEpoch(form.valid_until, "valid_until") };
+    const patch = { valid_from: original && form.valid_from === epochToDateInput(original.valid_from) ? original.valid_from : dateInputToEpoch(form.valid_from, "valid_from"), valid_until: expiryDeadline(form.valid_until, original?.valid_until) };
     if (patch.valid_from !== null && patch.valid_until !== null && patch.valid_until <= patch.valid_from) errors.valid_until = "Choose an expiry after the start date.";
   }
   for (const field of ["customer_id", "license_id"] as const) {

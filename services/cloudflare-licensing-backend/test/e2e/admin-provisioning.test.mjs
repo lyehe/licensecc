@@ -17,9 +17,13 @@ test("admin-created portal users can sign in, change their password, and have no
   const cookie = session.res.headers.get("set-cookie").split(";")[0];
   assert.equal((await call(env, "GET", "/api/portal/me", { cookie })).body.data.customer_id, user.id);
   assert.deepEqual((await call(env, "GET", "/api/portal/entitlements", { cookie })).body.data.items, []);
-  const settings = await call(env, "GET", "/portal/v1/auth/password", { cookie });
+  const settings = await call(env, "GET", "/portal/v1/auth/password", { cookie, expectedCustomer: user.id });
+  assert.equal(settings.status, 200);
   assert.equal(settings.body.data.email_verified, false);
   const next = "A changed personal passphrase!";
-  assert.equal((await call(env, "POST", "/portal/v1/auth/password", { cookie, body: { current_password: password, password: next } })).status, 200);
+  const request = { cookie, body: { current_password: password, password: next } };
+  assert.equal((await call(env, "POST", "/portal/v1/auth/password", request)).status, 400, "older callers fail closed without changing the password");
+  assert.equal((await login(password)).status, 200);
+  assert.equal((await call(env, "POST", "/portal/v1/auth/password", { ...request, expectedCustomer: user.id })).status, 200);
   assert.equal((await login(password)).status, 401); assert.equal((await login(next)).status, 200);
 });

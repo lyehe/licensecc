@@ -7,12 +7,9 @@
 
 #ifndef SRC_LIBRARY_PC_IDENTIFIER_HW_IDENTIFIER_FACADE_HPP_
 #define SRC_LIBRARY_PC_IDENTIFIER_HW_IDENTIFIER_FACADE_HPP_
-#include "hw_identifier_facade.hpp"
-
 #include <string>
-#include <unordered_map>
 #include <licensecc/datatypes.h>
-#include "identification_strategy.hpp"
+#include <licensecc_properties.h>
 
 namespace license {
 namespace hw_identifier {

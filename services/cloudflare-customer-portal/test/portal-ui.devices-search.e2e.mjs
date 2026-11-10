@@ -14,14 +14,22 @@ const bindingLab={binding_id:Buffer.alloc(16,3).toString('base64url'),project:'S
 const entitlementDefault={id:'ent_default',project:'DEFAULT',feature:'pro',status:'active',license_fingerprint:'a'.repeat(64),valid_from:now-10000,valid_until:null,license_mode:'node_locked',max_active_devices:1,policy_id:'pol_default',trial_ends_at:null,trial_starts_on_activation:false};
 const entitlementSecond={...entitlementDefault,id:'ent_second',project:'SECOND_APP',license_fingerprint:'b'.repeat(64),policy_id:'pol_second'};
 
-async function setup(page) {
+function devicePage(url,items) {
+  const project=url.searchParams.get('project'),cursor=url.searchParams.get('cursor')??'',query=(url.searchParams.get('q')??'').trim().toLowerCase();
+  const candidates=items.filter(row=>(project===null || row.project===project) && row.binding_id>cursor).sort((a,b)=>a.binding_id<b.binding_id?-1:1);
+  const scanned=candidates.slice(0,100),more=candidates.length>100;
+  return {customer_id:'A',items:scanned.filter(row=>[row.label||'Unnamed device',row.binding_id,row.project].some(value=>value.toLowerCase().includes(query))),has_more:more,next_cursor:more?scanned.at(-1).binding_id:null};
+}
+async function setup(page,{items=[bindingWarehouse,bindingOffice,bindingLab],read}={}) {
+  const reads=[];
   await page.route('**/api/portal/**', async route => {
     const url=new URL(route.request().url());
     if(url.pathname.endsWith('/me'))return route.fulfill({json:envelope('me',{customer_id:'A'})});
-    if(url.pathname.endsWith('/device-bindings'))return route.fulfill({json:envelope('device_bindings',{customer_id:'A',items:[bindingWarehouse,bindingOffice,bindingLab],has_more:false,next_cursor:null})});
+    if(url.pathname.endsWith('/device-bindings')){reads.push(url);return read?read(route,url):route.fulfill({json:envelope('device_bindings',devicePage(url,items))});}
     if(url.pathname.endsWith('/entitlements'))return route.fulfill({json:envelope('entitlements',{items:[entitlementDefault,entitlementSecond]})});
     return route.fulfill({json:envelope('ok',{items:[]})});
   });
+  return reads;
 }
 
 test('devices: searching a connected device label shows it and hides a non-matching one',async({page})=>{
@@ -36,25 +44,64 @@ test('devices: searching a connected device label shows it and hides a non-match
 
 // A search/app filter that empties the LOADED page must still say
 // more devices may be waiting on later pages, rather than implying "No matching devices" is final.
-test('devices: a search that empties the loaded page still hints that more devices may exist',async({page})=>{
-  const ids=Array.from({length:100},(_,i)=>{
+test('devices: search finds a match beyond the first hundred candidates without loading unrelated rows',async({page})=>{
+  const ids=Array.from({length:102},(_,i)=>{
     const buffer=Buffer.alloc(16);
     buffer.writeUInt32BE(i+1,12);
     return buffer.toString('base64url');
   }).sort();
-  const items=ids.map((id,i)=>({binding_id:id,project:'DEFAULT',feature:'pro',revision:0,hold_until:now+3600,state:'active',label:`Device ${i}`,last_proof_at:now-30,created_at:now-3600,server_time:now}));
-  await page.route('**/api/portal/**', async route => {
-    const url=new URL(route.request().url());
-    if(url.pathname.endsWith('/me'))return route.fulfill({json:envelope('me',{customer_id:'A'})});
-    if(url.pathname.endsWith('/device-bindings'))return route.fulfill({json:envelope('device_bindings',{customer_id:'A',items,has_more:true,next_cursor:ids[ids.length-1]})});
-    if(url.pathname.endsWith('/entitlements'))return route.fulfill({json:envelope('entitlements',{items:[]})});
-    return route.fulfill({json:envelope('ok',{items:[]})});
-  });
+  const items=ids.map((id,i)=>({...bindingWarehouse,binding_id:id,label:i===101?'Étage scanner':`Device ${i}`}));
+  const reads=await setup(page,{items});
   await page.goto('/#/nodes');
   await expect(page.locator('.protectedNodes tbody tr')).toHaveCount(100);
-  await page.getByRole('searchbox',{name:'Find a device'}).fill('no-such-device-anywhere');
-  await expect(page.getByRole('heading',{name:'No matching devices'})).toBeVisible();
-  await expect(page.getByText('Showing matches from loaded devices.')).toBeVisible();
+  await page.getByRole('searchbox',{name:'Find a device'}).fill('éTAGE');
+  await expect(page.locator('.protectedNodes tbody tr')).toHaveCount(1);
+  await expect(page.locator('.protectedNodes tbody tr')).toContainText('Étage scanner');
+  expect(reads.filter(url=>url.searchParams.has('q'))).toHaveLength(2);
+  await expect(page.getByRole('button',{name:'Continue search'})).toHaveCount(0);
+});
+
+test('devices: search budget exhaustion is explicit and Continue search reaches the remaining candidates',async({page})=>{
+  const ids=Array.from({length:601},(_,i)=>{const value=Buffer.alloc(16);value.writeUInt32BE(i+1,12);return value.toString('base64url');}).sort();
+  const items=ids.map((id,i)=>({...bindingWarehouse,binding_id:id,label:i===600?'Last scanner':`Device ${i}`}));
+  const reads=await setup(page,{items});
+  await page.goto('/#/nodes');await page.getByRole('searchbox',{name:'Find a device'}).fill('Last scanner');
+  await expect(page.getByRole('heading',{name:'Search incomplete'})).toBeVisible();
+  expect(reads.filter(url=>url.searchParams.has('q'))).toHaveLength(5);
+  await expect(page.getByRole('heading',{name:'No matching devices'})).toHaveCount(0);
+  await page.getByRole('button',{name:'Continue search'}).click();
+  await expect(page.locator('.protectedNodes tbody tr')).toContainText('Last scanner');
+  expect(reads.filter(url=>url.searchParams.has('q'))).toHaveLength(7);
+});
+
+test('devices: query A to B to A fences a late response from the first A',async({page})=>{
+  let release,started,officeReads=0;
+  const first=new Promise(resolve=>{started=resolve;});
+  await setup(page,{read:async(route,url)=>{
+    if(url.searchParams.get('q')==='Office' && ++officeReads===1){started();await new Promise(resolve=>{release=resolve;});return route.fulfill({json:envelope('device_bindings',{customer_id:'A',items:[{...bindingOffice,label:'Stale Office'}],has_more:false,next_cursor:null})});}
+    return route.fulfill({json:envelope('device_bindings',devicePage(url,[bindingWarehouse,bindingOffice]))});
+  }});
+  await page.goto('/#/nodes');const search=page.getByRole('searchbox',{name:'Find a device'});
+  await search.fill('Office');await first;
+  await search.fill('Warehouse');await expect(page.locator('.protectedNodes tbody tr')).toContainText('Warehouse Scanner');
+  await search.fill('Office');await expect(page.locator('.protectedNodes tbody tr')).toContainText('Office Printer');
+  const late=page.waitForResponse(response=>new URL(response.url()).searchParams.get('q')==='Office');
+  release();await (await late).finished();
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  await expect(page.getByText('Stale Office')).toHaveCount(0);
+  await expect(page.locator('.protectedNodes tbody tr')).toContainText('Office Printer');
+});
+
+test('devices: a repeated search cursor stops traversal and never reports a final empty result',async({page})=>{
+  const cursor=Buffer.alloc(16,9).toString('base64url');let searches=0;
+  await setup(page,{read:(route,url)=>{
+    if(url.searchParams.has('q')){searches++;return route.fulfill({json:envelope('device_bindings',{customer_id:'A',items:[],has_more:true,next_cursor:cursor})});}
+    return route.fulfill({json:envelope('device_bindings',devicePage(url,[bindingWarehouse]))});
+  }});
+  await page.goto('/#/nodes');await page.getByRole('searchbox',{name:'Find a device'}).fill('Missing scanner');
+  await expect(page.getByRole('alert')).toContainText('out of date');
+  expect(searches).toBe(2);
+  await expect(page.getByRole('heading',{name:'No matching devices'})).toHaveCount(0);
 });
 
 test('devices: "View devices" from an app filters to that app, and Show all apps clears it',async({page})=>{

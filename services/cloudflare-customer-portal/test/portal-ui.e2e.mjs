@@ -12,6 +12,79 @@ function makeEnvelope(code, data) {
 }
 makeEnvelope.nextRequestId = 0;
 
+test("registration confirms a saved password with GET-only recovery when the first session check fails", async ({ page }) => {
+  let writes = 0, authed = false, meAfterWrite = 0;
+  await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { password: true, email: true }) }));
+  await page.route("**/portal/v1/auth/password/complete", route => {
+    writes++; authed = true;
+    return route.fulfill({ json: makeEnvelope("signed_in", { customer_id: "new-customer" }) });
+  });
+  await page.route("**/api/portal/**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/portal/me") {
+      if (!authed) return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized", request_id: "signed-out" } });
+      if (++meAfterWrite === 1) return route.abort();
+      return route.fulfill({ json: makeEnvelope("me", { customer_id: "new-customer", email: "new@example.test" }) });
+    }
+    return route.fulfill({ json: makeEnvelope("entitlements", { items: [] }) });
+  });
+  await page.goto("/password-action#token=" + "s".repeat(43));
+  await page.getByLabel("New password", { exact: true }).fill("A new testing password 123!");
+  await page.getByLabel("Confirm password", { exact: true }).fill("A new testing password 123!");
+  await page.getByRole("button", { name: "Save password", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Password saved. We couldn't confirm your sign-in.");
+  await expect(page.getByRole("button", { name: "Save password", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Confirm sign-in", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  expect(writes).toBe(1); expect(meAfterWrite).toBe(2);
+});
+
+test("an undocumented password completion never assumes sign-in or offers to replay the consumed token", async ({ page }) => {
+  let writes = 0;
+  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized", request_id: "signed-out" } }));
+  await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { password: true }) }));
+  await page.route("**/portal/v1/auth/password/complete", route => { writes++; return route.fulfill({ json: makeEnvelope("unexpected_success") }); });
+  await page.goto("/password-action#token=" + "s".repeat(43));
+  await page.getByLabel("New password", { exact: true }).fill("A new testing password 123!");
+  await page.getByLabel("Confirm password", { exact: true }).fill("A new testing password 123!");
+  await page.getByRole("button", { name: "Save password", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("The server returned an unexpected result.");
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save password", exact: true })).toHaveCount(0);
+  expect(writes).toBe(1);
+});
+
+test("an admin-created account can set its first password through the direct setup entry", async ({ page }) => {
+  let signedIn=false;
+  await page.route('**/api/portal/**',route=>signedIn?route.fulfill({json:makeEnvelope('ok',route.request().url().endsWith('/me')?{customer_id:'cust_onboarded'}:{items:[]})}):route.fulfill({status:401,json:{ok:false,code:'unauthorized', request_id: "portal-e2e-failure" }}));
+  await page.route('**/portal/v1/auth/providers',route=>route.fulfill({json:makeEnvelope('auth_providers',{password:true,email:true,google:false,github:false})}));
+  await page.route('**/portal/v1/auth/password/reset',route=>{
+    expect(route.request().postDataJSON()).toEqual({email:'onboarded@example.test'});
+    return route.fulfill({status:202,json:makeEnvelope('verification_requested')});
+  });
+  await page.route('**/portal/v1/auth/password/complete',route=>{
+    expect(route.request().postDataJSON()).toEqual({token:'s'.repeat(43),password:'My new testing passphrase 123!'});
+    return route.fulfill({json:makeEnvelope('password_updated')});
+  });
+  await page.route('**/portal/v1/auth/password/login',route=>{signedIn=true;return route.fulfill({json:makeEnvelope('signed_in',{customer_id:'cust_onboarded'})});});
+  await page.goto('/?password_action=reset');
+  await expect(page.getByRole('heading',{name:'Set or reset password',exact:true})).toBeVisible();
+  expect(page.url()).not.toContain('password_action');
+  await page.getByLabel('Email',{exact:true}).fill('onboarded@example.test');
+  await page.getByRole('button',{name:'Send password link'}).click();
+  await expect(page.getByRole('alert')).toContainText('If this address is eligible');
+  await page.goto('/password-action#token='+'s'.repeat(43));
+  await page.getByLabel('New password',{exact:true}).fill('My new testing passphrase 123!');
+  await page.getByLabel('Confirm password',{exact:true}).fill('My new testing passphrase 123!');
+  await page.getByRole('button',{name:'Save password'}).click();
+  await expect(page.getByText('Password saved. Sign in with your new password.')).toBeVisible();
+  await page.getByRole('link',{name:'Back to sign in'}).click();
+  await page.getByLabel('Email',{exact:true}).fill('onboarded@example.test');
+  await page.getByLabel('Password',{exact:true}).fill('My new testing passphrase 123!');
+  await page.getByRole('button',{name:'Sign in',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Apps',exact:true})).toBeVisible();
+});
+
 test("registration verifies email before choosing a password and opens an empty account", async ({ page }) => {
   let authed = false;
   const submissions = [];
@@ -23,7 +96,7 @@ test("registration verifies email before choosing a password and opens an empty 
     throw new Error(`Unexpected auth route ${path}`);
   });
   await page.route("**/api/portal/**", (route) => {
-    if (!authed) return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } });
+    if (!authed) return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } });
     return route.fulfill({ json: makeEnvelope("ok", route.request().url().endsWith("/me") ? { customer_id: "new-customer" } : { items: [] }) });
   });
   await page.goto("/");
@@ -46,22 +119,22 @@ test("registration verifies email before choosing a password and opens an empty 
   expect(submissions).toHaveLength(1);
   await page.getByLabel("New password", { exact: true }).fill("A long testing passphrase 1!");
   await page.getByLabel("Confirm password", { exact: true }).fill("A different testing passphrase");
-  await page.getByRole("button", { name: "Save password and sign in" }).click();
+  await page.getByRole("button", { name: "Save password" }).click();
   await expect(page.getByRole("alert")).toHaveText("Passwords do not match.");
   // An actual auth error uses the same error colour `.statusline.error` uses.
   await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(219, 146, 146)");
   expect(submissions).toHaveLength(1);
   await page.getByLabel("Confirm password", { exact: true }).fill("A long testing passphrase 1!");
-  await page.getByRole("button", { name: "Save password and sign in" }).click();
+  await page.getByRole("button", { name: "Save password" }).click();
   await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
   expect(submissions[1]).toEqual({ token, password: "A long testing passphrase 1!" });
   await expect(page.locator('input[type="password"]')).toHaveCount(0);
 });
 
 test("password login errors clear the secret and explain recovery", async ({ page }) => {
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: true, password: true }) }));
-  await page.route("**/portal/v1/auth/password/login", (route) => route.fulfill({ status: 401, json: { ok: false, code: "invalid_credentials" } }));
+  await page.route("**/portal/v1/auth/password/login", (route) => route.fulfill({ status: 401, json: { ok: false, code: "invalid_credentials" , request_id: "portal-e2e-failure" } }));
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Continue with Google" })).toBeHidden();
   if (!await page.locator(".otherSignIn").evaluate(element => element.open)) await page.getByText("Other sign-in options", { exact: true }).click();
@@ -73,22 +146,22 @@ test("password login errors clear the secret and explain recovery", async ({ pag
   // Reuses the existing error colour token rather than a new literal.
   await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(219, 146, 146)");
   await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
-  await page.getByText("Forgot your password?", { exact: true }).click();
+  await page.getByText("Set or reset password", { exact: true }).click();
   // Reworded to drop "verified" -- an admin-invited account with an
   // unverified login email also recovers, and verifies, through this same reset.
-  await expect(page.getByText(/We'll email a reset link to your login address/)).toBeVisible();
+  await expect(page.getByText(/First time here or forgot your password/)).toBeVisible();
   await page.route("**/portal/v1/auth/password/reset", route => {
     expect(route.request().postDataJSON()).toEqual({ email: "new@example.com" });
     return route.fulfill({ status: 202, json: makeEnvelope("verification_requested") });
   });
-  await page.getByRole("button", { name: "Send reset link" }).click();
+  await page.getByRole("button", { name: "Send password link" }).click();
   await expect(page.getByRole("alert")).toContainText("Check your email");
   // A confirmation, not an error -- unaffected by the error-colour fix above.
   await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(155, 196, 155)");
 });
 
 test("a suspended account's correct password is told so, with the configured support contact", async ({ page }) => {
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false, password: true, support: "mailto:help@example.com" }) }));
   await page.route("**/portal/v1/auth/password/login", (route) => route.fulfill({ status: 403, json: { ok: false, code: "account_suspended", request_id: "portal-e2e-suspended" } }));
   await page.goto("/");
@@ -103,12 +176,12 @@ test("a suspended account's correct password is told so, with the configured sup
 });
 
 test("expired password link shows recovery guidance and reloading cannot retain the secret", async ({ page }) => {
-  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { password: true }) }));
   let attempts = 0;
   await page.route("**/portal/v1/auth/password/complete", route => {
     attempts += 1;
-    return route.fulfill({ status: 400, json: { ok: false, code: "invalid_link" } });
+    return route.fulfill({ status: 400, json: { ok: false, code: "invalid_link" , request_id: "portal-e2e-failure" } });
   });
   const token = "b".repeat(43);
   await page.goto(`/password-action#token=${token}`);
@@ -116,7 +189,7 @@ test("expired password link shows recovery guidance and reloading cannot retain 
   await expect(page.getByRole("heading", { name: "Choose your password" })).toBeFocused();
   await page.getByLabel("New password", { exact: true }).fill("A replacement passphrase 2!");
   await page.getByLabel("Confirm password", { exact: true }).fill("A replacement passphrase 2!");
-  await page.getByRole("button", { name: "Save password and sign in" }).click();
+  await page.getByRole("button", { name: "Save password" }).click();
   await expect(page.getByRole("alert")).toContainText("expired or was already used");
   // A server-reported failure (not the local validation error above) also gets the
   // error colour.
@@ -127,36 +200,36 @@ test("expired password link shows recovery guidance and reloading cannot retain 
   expect(await page.evaluate(value => [...Object.values(localStorage), ...Object.values(sessionStorage)].some(v => v.includes(value)), token)).toBe(false);
   await page.reload();
   await expect(page.getByRole("alert")).toContainText("Open the link from your email again");
-  await expect(page.getByRole("button", { name: "Save password and sign in" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save password" })).toHaveCount(0);
   expect(attempts).toBe(1);
 });
 
 // "Request a new link" (invalid_link) is an actual affordance, not inert text -- it returns to
 // sign-in with the reset form already open, reusing PasswordSignIn's own `mode`.
 test("Request a new link returns to sign-in with the reset form already open", async ({ page }) => {
-  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: true }) }));
-  await page.route("**/portal/v1/auth/password/complete", route => route.fulfill({ status: 400, json: { ok: false, code: "invalid_link" } }));
+  await page.route("**/portal/v1/auth/password/complete", route => route.fulfill({ status: 400, json: { ok: false, code: "invalid_link" , request_id: "portal-e2e-failure" } }));
   const token = "c".repeat(43);
   await page.goto(`/password-action#token=${token}`);
   await page.getByLabel("New password", { exact: true }).fill("A replacement passphrase 3!");
   await page.getByLabel("Confirm password", { exact: true }).fill("A replacement passphrase 3!");
-  await page.getByRole("button", { name: "Save password and sign in" }).click();
+  await page.getByRole("button", { name: "Save password" }).click();
   const requestNewLink = page.getByRole("link", { name: "Request a new link" });
   await expect(requestNewLink).toBeVisible();
   await requestNewLink.click();
-  await expect(page.getByRole("heading", { name: "Reset password", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Send reset link" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Set or reset password", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send password link" })).toBeVisible();
   expect(page.url()).not.toContain(token);
 });
 
 test("password sign-in hides email-only actions when email delivery is off", async ({ page }) => {
-  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, password: true, email: false }) }));
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create an account", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Forgot your password?" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Set or reset password" })).toHaveCount(0);
   // Password-only mode (password configured, no email delivery: no reset email can ever be sent) --
   // the forgot-password entry becomes a support-contact sentence instead of silently disappearing.
   // No `support` field in this fixture, so it names the administrator fallback.
@@ -166,7 +239,7 @@ test("password sign-in hides email-only actions when email delivery is off", asy
 // The same password-only mode, but with a configured support contact -- the sentence must link
 // it exactly as <SupportContact/> does everywhere else, never a bare mailto/URL string.
 test("password-only mode with a configured support contact links it in the reset-password hint", async ({ page }) => {
-  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, password: true, email: false, support: "mailto:help@example.com" }) }));
   await page.goto("/");
   const hint = page.getByText("Contact support to reset your password.", { exact: true });
@@ -175,13 +248,13 @@ test("password-only mode with a configured support contact links it in the reset
 });
 
 test("password completion enforces the server length and explains a sign-in-required success", async ({ page }) => {
-  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/password/complete", route => route.fulfill({ json: makeEnvelope("password_updated", { sign_in_required: true }) }));
   await page.goto("/password-action#token=" + "A".repeat(43));
   await expect(page.getByLabel("New password")).toHaveAttribute("maxlength", "128");
   await page.getByLabel("New password").fill("A long testing passphrase 1!");
   await page.getByLabel("Confirm password").fill("A long testing passphrase 1!");
-  await page.getByRole("button", { name: "Save password and sign in" }).click();
+  await page.getByRole("button", { name: "Save password" }).click();
   await expect(page.getByRole("alert")).toHaveText("Password saved. Sign in with your new password.");
 });
 
@@ -237,7 +310,7 @@ test("password settings point an eligible unverified email at Forgot your passwo
   await page.route("**/portal/v1/auth/identities", (route) => route.fulfill({ json: makeEnvelope("identities", { items: [] }) }));
   await page.route("**/portal/v1/auth/password", (route) => route.fulfill({ json: makeEnvelope("password_settings", { has_password: true, can_reset: false, email_verified: false, recovery_available: true, email: "invited@example.com" }) }));
   await page.goto("/#/account");
-  await expect(page.getByText("Use 'Forgot your password?' once to verify this email.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Use 'Set or reset password' once to verify this email.", { exact: true })).toBeVisible();
   await expect(page.getByText("Email not verified. Password recovery by email is unavailable.", { exact: true })).toHaveCount(0);
 });
 
@@ -248,7 +321,7 @@ test("password settings fall back to the unavailable notice when no address is e
   await page.route("**/portal/v1/auth/password", (route) => route.fulfill({ json: makeEnvelope("password_settings", { has_password: true, can_reset: false, email_verified: false, recovery_available: false, email: "claimed@example.com" }) }));
   await page.goto("/#/account");
   await expect(page.getByText("Email not verified. Password recovery by email is unavailable.", { exact: true })).toBeVisible();
-  await expect(page.getByText("Use 'Forgot your password?' once to verify this email.", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Use 'Set or reset password' once to verify this email.", { exact: true })).toHaveCount(0);
 });
 
 test("password settings hide the recovery promise when the portal has no email delivery configured", async ({ page }) => {
@@ -258,7 +331,7 @@ test("password settings hide the recovery promise when the portal has no email d
   await page.route("**/portal/v1/auth/password", (route) => route.fulfill({ json: makeEnvelope("password_settings", { has_password: true, can_reset: false, email_verified: false, recovery_available: true, email: "invited@example.com" }) }));
   await page.goto("/#/account");
   await expect(page.getByText("Email not verified. Password recovery by email is unavailable.", { exact: true })).toBeVisible();
-  await expect(page.getByText("Use 'Forgot your password?' once to verify this email.", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Use 'Set or reset password' once to verify this email.", { exact: true })).toHaveCount(0);
 });
 
 // No existing PasswordSettings fixture ever set has_password:false, so
@@ -303,7 +376,7 @@ test("password settings' recovery hint falls back to the configured support cont
 });
 
 test("social sign-in buttons submit to their own start routes and hide unavailable email", async ({ page }) => {
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: false }) }));
   await page.goto("/?auth_error=sign_in_cancelled");
   await expect(page.getByText("Sign-in was cancelled. You can try again.")).toBeVisible();
@@ -322,7 +395,7 @@ test("social sign-in buttons submit to their own start routes and hide unavailab
 });
 
 test("link_expired shows the exact expired-link sentence, never the raw code", async ({ page }) => {
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }) }));
   await page.goto("/?auth_error=link_expired");
   await expect(page.getByText("This sign-in link has expired or was already used. Request a new code.")).toBeVisible();
@@ -338,7 +411,7 @@ for (const maliciousCode of ["__proto__", "constructor"]) {
   test(`auth_error=${maliciousCode} falls back to the generic sign-in-failed sentence, never the raw code or a page error`, async ({ page }) => {
     const pageErrors = [];
     page.on("pageerror", (error) => pageErrors.push(error));
-    await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+    await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
     await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }) }));
     await page.goto(`/?auth_error=${maliciousCode}`);
     await expect(page.getByText("Unable to complete sign-in. Please try again.")).toBeVisible();
@@ -349,7 +422,7 @@ for (const maliciousCode of ["__proto__", "constructor"]) {
 }
 
 test("OAuth sign-in to a suspended account explains it and names the administrator when no contact is set", async ({ page }) => {
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   // No support field at all, as from a Worker without PORTAL_SUPPORT_CONTACT: that means no contact.
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: false }) }));
   await page.goto("/?auth_error=account_suspended");
@@ -421,7 +494,7 @@ test("a reauth_required redirect outside Account leaves no stale parameters behi
 
 test("an existing-email conflict and an unconfigured portal link the configured support contact", async ({ page }) => {
   let providers = { google: true, github: true, email: false, support: "https://support.example.com/help" };
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", providers) }));
   await page.goto("/?auth_error=account_link_required");
   const conflict = page.getByRole("status").filter({ hasText: "An account already uses this email." });
@@ -450,7 +523,7 @@ test("a signed-in user who opens an already-used magic link lands on Apps withou
 });
 
 test("unconfigured providers show a clear unavailable state", async ({ page }) => {
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false }) }));
   await page.goto("/");
   await expect(page.getByText("Sign-in is not configured yet. Contact your administrator.")).toBeVisible();
@@ -460,7 +533,7 @@ test("unconfigured providers show a clear unavailable state", async ({ page }) =
 // Providers failing once must recover through Retry sign-in
 // options, landing back on a usable sign-in form -- not a stuck "Unable to load" state.
 test("providers failing once then succeeding recovers through Retry sign-in options", async ({ page }) => {
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   let attempt = 0;
   await page.route("**/portal/v1/auth/providers", (route) => {
     attempt += 1;
@@ -478,7 +551,7 @@ test("providers failing once then succeeding recovers through Retry sign-in opti
 
 // Focus moves to the new h1 on every auth step and password-mode switch, using tabIndex={-1}.
 test("focus moves to the new heading on every sign-in step and mode switch", async ({ page }) => {
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: true }) }));
   await page.route("**/portal/v1/auth/request", (route) => route.fulfill({ json: makeEnvelope("otp_requested") }));
   await page.goto("/");
@@ -504,7 +577,7 @@ test("focus moves to the new heading on every sign-in step and mode switch", asy
 
 // One sentence, driven by the server's real retry-after header, for the OTP request path.
 test("a mocked 429 with retry-after shows the shared rate-limit sentence with minutes (OTP request)", async ({ page }) => {
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }) }));
   await page.route("**/portal/v1/auth/request", (route) => route.fulfill({ status: 429, headers: { "retry-after": "120" }, json: { ok: false, code: "rate_limited", request_id: "rl-e2e" } }));
   await page.goto("/");
@@ -519,7 +592,7 @@ test("a mocked 429 with retry-after shows the shared rate-limit sentence with mi
 // Same sentence, same header, on a password screen -- proving the UI copy is genuinely shared
 // rather than duplicated per auth surface.
 test("a mocked password-login 429 with retry-after shows the shared rate-limit sentence", async ({ page }) => {
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false, password: true }) }));
   await page.route("**/portal/v1/auth/password/login", (route) => route.fulfill({ status: 429, headers: { "retry-after": "45" }, json: { ok: false, code: "rate_limited", request_id: "rl-e2e-2" } }));
   await page.goto("/");
@@ -532,7 +605,7 @@ test("a mocked password-login 429 with retry-after shows the shared rate-limit s
 // When no header reaches the client at all (a top-level redirect from an OAuth/magic-link rate
 // limit), the sentence falls back to the same "later" wording, never the old bespoke copy.
 test("auth_error=rate_limited (redirect path, no header) shows the later-form sentence", async ({ page }) => {
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: false, email: false }) }));
   await page.goto("/?auth_error=rate_limited");
   await expect(page.getByText("Too many attempts. Try again later.", { exact: true })).toBeVisible();
@@ -543,7 +616,7 @@ test("auth_error=rate_limited (redirect path, no header) shows the later-form se
 // The resend button's client-side-only 60s cooldown counts down and re-enables at zero.
 test("the resend cooldown counts down and re-enables at zero", async ({ page }) => {
   await page.clock.install();
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }) }));
   await page.route("**/portal/v1/auth/request", (route) => route.fulfill({ json: { ok: true, code: "otp_requested", request_id: "resend-e2e" } }));
   await page.goto("/");
@@ -558,7 +631,7 @@ test("the resend cooldown counts down and re-enables at zero", async ({ page }) 
 
 test("the resend countdown stops its timer once it reaches zero", async ({ page }) => {
   await page.clock.install();
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }) }));
   await page.route("**/portal/v1/auth/request", (route) => route.fulfill({ json: { ok: true, code: "otp_requested", request_id: "resend-stop-e2e" } }));
   await page.goto("/");
@@ -750,7 +823,9 @@ function makePortalApiFixture() {
     // ---- Connected devices (protected bindings) ----
     if (method === "GET" && path === "/api/portal/device-bindings") {
       if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "portal-e2e-401" });
-      return fulfill(200, makeEnvelope("device_bindings", { customer_id: "cus_self", items: bindings.map((item) => ({ ...item })), has_more: false, next_cursor: null }));
+      const query=(url.searchParams.get("q")??"").trim().toLowerCase(),project=url.searchParams.get("project");
+      const items=bindings.filter(item=>(project===null || item.project===project) && [item.label||"Unnamed device",item.binding_id,item.project].some(value=>value.toLowerCase().includes(query)));
+      return fulfill(200, makeEnvelope("device_bindings", { customer_id: "cus_self", items: items.map((item) => ({ ...item })), has_more: false, next_cursor: null }));
     }
     if (method === "POST" && path === "/api/portal/device-bindings/retire") {
       const body = await jsonBody(request);
@@ -919,7 +994,7 @@ test("hovering a primary button keeps at least a 4.5:1 contrast between its text
     return contrastRatio(parseRgb(color), parseRgb(background));
   }
 
-  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: true }) }));
   await page.goto("/");
 
@@ -933,7 +1008,7 @@ test("hovering a primary button keeps at least a 4.5:1 contrast between its text
 
   // PasswordAction's own primary button (choosing a password from an emailed link).
   await page.goto(`/password-action#token=${"c".repeat(43)}`);
-  expect(await hoverContrast(page.getByRole("button", { name: "Save password and sign in", exact: true }))).toBeGreaterThanOrEqual(4.5);
+  expect(await hoverContrast(page.getByRole("button", { name: "Save password", exact: true }))).toBeGreaterThanOrEqual(4.5);
 });
 
 // Sign out right-aligns inside `.headerInner`, and `.signedInAs` must stay
@@ -1066,7 +1141,7 @@ test("protected access uses app enrollment; an expired license shows no action, 
 });
 
 test("sign-in headings follow the chosen method after registration and reset", async ({ page }) => {
-  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" , request_id: "portal-e2e-failure" } }));
   await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: true, password: true }) }));
   await page.goto("/");
   await page.getByRole("button", { name: "Create an account", exact: true }).click();
@@ -1077,8 +1152,8 @@ test("sign-in headings follow the chosen method after registration and reset", a
   await page.getByRole("button", { name: "Use a password instead" }).click();
   await expect(page.getByRole("heading", { name: "Create account", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Back to sign in", exact: true }).click();
-  await page.getByRole("button", { name: "Forgot your password?" }).click();
-  await expect(page.getByRole("heading", { name: "Reset password", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Set or reset password" }).click();
+  await expect(page.getByRole("heading", { name: "Set or reset password", exact: true })).toBeVisible();
   if (!await page.locator(".otherSignIn").evaluate(element => element.open)) await page.getByText("Other sign-in options", { exact: true }).click();
   await page.getByRole("button", { name: "Use an email code instead" }).click();
   await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();

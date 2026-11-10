@@ -1,21 +1,24 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { candidateFiles } from "./ci/git-files.mjs";
 
 const REPOSITORY_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
-// These are the only legacy JavaScript graphs.  They are all checked with
-// checkJs; noImplicitAny remains explicitly false until the public JSDoc
-// migration can be reviewed independently (current debt: domain 80, runtime
-// 214, backend graph 291, portal graph 52 diagnostics under noImplicitAny).
-// Keeping this closed list prevents a new unchecked JavaScript graph or a
-// silent per-file suppression from turning the quality gate false-green.
+// Relocating existing checked JavaScript does not authorize weakening strict TS.
+// Keep legacy implicit-any exceptions closed until a separate JSDoc migration.
 const LEGACY_JS_CONFIGS = new Set([
   "packages/licensing-domain/tsconfig.json",
   "packages/cloudflare-runtime/tsconfig.json",
   "services/cloudflare-licensing-backend/tsconfig.json",
   "services/cloudflare-customer-portal/tsconfig.worker.json",
+  "services/cloudflare-license-admin/tsconfig.adapters.json",
+]);
+
+const ADMIN_ADAPTER_SOURCES = new Set([
+  "services/cloudflare-license-admin/src/worker/groups/catalog/plan_projection.mjs",
+  "services/cloudflare-license-admin/src/worker/groups/entitlements/policy_store.mjs",
+  "services/cloudflare-license-admin/src/worker/persistence/idempotency_store.mjs",
 ]);
 
 const JS_SOURCE_ROOTS = [
@@ -23,6 +26,7 @@ const JS_SOURCE_ROOTS = [
   "packages/cloudflare-runtime/src/",
   "services/cloudflare-licensing-backend/src/",
   "services/cloudflare-customer-portal/src/auth/",
+  "services/cloudflare-d1-backup/src/",
 ];
 
 // Wrangler's generated bindings stay ignored, but TypeScript must consume them
@@ -49,22 +53,12 @@ const WORKER_BUILD_SCRIPTS = new Map([
   ["services/cloudflare-d1-backup/package.json", "build"],
 ]);
 
-function trackedFiles() {
-  return execFileSync("git", ["-C", REPOSITORY_ROOT, "ls-files", "-z", "--", "packages", "services", "scripts"], {
-    encoding: "buffer",
-    stdio: ["ignore", "pipe", "pipe"],
-  })
-    .toString("utf8")
-    .split("\0")
-    .filter(Boolean);
-}
-
 function fail(message) {
   console.error(`typecheck coverage: ${message}`);
   process.exitCode = 1;
 }
 
-const files = trackedFiles();
+const files = candidateFiles(REPOSITORY_ROOT, ["packages", "services", "scripts"]);
 const tsconfigs = files.filter((file) => basename(file).match(/^tsconfig(?:\.[^.]+)*\.json$/));
 const parsedConfigs = new Map();
 const configPaths = [...new Set([...tsconfigs, ...WORKER_TYPECHECK_CONFIGS])];
@@ -104,11 +98,17 @@ for (const configPath of configPaths) {
   if (options.checkJs !== true) {
     fail(`${configPath} enables allowJs without checkJs:true`);
   }
-  if (!LEGACY_JS_CONFIGS.has(configPath)) {
-    fail(`${configPath} is a new JavaScript graph; add a reviewed typecheck policy first`);
-  }
-  if (options.noImplicitAny !== false || optionOccurrences.noImplicitAny !== 1) {
+  if (LEGACY_JS_CONFIGS.has(configPath) && (options.noImplicitAny !== false || optionOccurrences.noImplicitAny !== 1)) {
     fail(`${configPath} must carry one explicit noImplicitAny:false legacy-JSDoc policy`);
+  }
+  if (!LEGACY_JS_CONFIGS.has(configPath) && (options.strict !== true || options.noImplicitAny === false)) {
+    fail(`${configPath} is a new JavaScript graph without strict implicit-any checking; add a reviewed typecheck policy first`);
+  }
+  if (configPath === "services/cloudflare-license-admin/tsconfig.adapters.json") {
+    const included = (parsed.include ?? []).map((file) => `services/cloudflare-license-admin/${file}`).sort();
+    if (JSON.stringify(included) !== JSON.stringify([...ADMIN_ADAPTER_SOURCES].sort())) {
+      fail(`${configPath} must include exactly the reviewed relocated admin adapters`);
+    }
   }
 }
 
@@ -150,17 +150,24 @@ for (const [manifestPath, buildScript] of WORKER_BUILD_SCRIPTS) {
   }
 }
 
+const adminManifest = JSON.parse(readFileSync(resolve(REPOSITORY_ROOT, "services/cloudflare-license-admin/package.json"), "utf8"));
+for (const script of ["build:worker", "typecheck"]) {
+  if (!adminManifest.scripts?.[script]?.includes("tsc -p tsconfig.adapters.json")) {
+    fail(`admin ${script} must check the relocated JavaScript adapters before strict Worker compilation`);
+  }
+}
+
 const sourceFiles = files.filter((file) => /\.(?:js|mjs|ts|tsx)$/.test(file));
 for (const file of sourceFiles) {
   const source = readFileSync(resolve(REPOSITORY_ROOT, file), "utf8");
   if (/@ts-(?:nocheck|ignore|expect-error)\b/.test(source)) {
     fail(`${file} contains a prohibited TypeScript suppression`);
   }
-  if (/\.(?:js|mjs)$/.test(file) && /^(?:packages|services)\/.*\/src\//.test(file) && !JS_SOURCE_ROOTS.some((root) => file.startsWith(root))) {
+  if (/\.(?:js|mjs)$/.test(file) && /^(?:packages|services)\/.*\/src\//.test(file) && !JS_SOURCE_ROOTS.some((root) => file.startsWith(root)) && !ADMIN_ADAPTER_SOURCES.has(file)) {
     fail(`${file} is production JavaScript outside the reviewed checkJs roots`);
   }
 }
 
 if (process.exitCode === undefined) {
-  console.log(`typecheck coverage ok (${sourceFiles.length} tracked production/source files)`);
+  console.log(`typecheck coverage ok (${sourceFiles.length} candidate production/source files)`);
 }

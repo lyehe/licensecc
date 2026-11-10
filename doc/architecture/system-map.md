@@ -49,7 +49,19 @@ another service, and no UI imports Worker implementation code.
 | `cloudflare-licensing-backend` | `@licensecc/cloudflare-runtime`, `@licensecc/licensing-domain` | Backend route and D1 ownership. |
 | `cloudflare-license-admin` | `@licensecc/cloudflare-runtime`, `@licensecc/licensing-domain` | Admin Worker and operator UI ownership. |
 | `cloudflare-customer-portal` | `@licensecc/cloudflare-runtime`, `@licensecc/licensing-domain` | Portal Worker and customer UI ownership. |
-| `cloudflare-d1-backup` | none | Backup Worker and Workflow remain service-local. |
+| `cloudflare-d1-backup` | `@licensecc/cloudflare-runtime` (types only) | Generated-binding compatibility types are shared; backup Worker and Workflow behavior remain service-local. |
+
+Single-service adapters stay with their owning deployable. Admin catalog
+projection lives in `src/worker/groups/catalog/plan_projection.mjs`, entitlement
+policy stamps in `src/worker/groups/entitlements/policy_store.mjs`, and replay
+persistence in `src/worker/persistence/idempotency_store.mjs`. Backend webhook
+delivery lives in `src/webhooks/webhook.mjs` and `webhook_delivery_store.mjs`.
+Shared HTTP/auth, entitlement SQL, capacity/trial rules, and webhook endpoint
+contracts remain in `cloudflare-runtime`.
+
+The admin service checks and emits its three relocated JavaScript adapters with
+`tsconfig.adapters.json` before its strict TypeScript Worker build. This retains
+the adapters' existing `checkJs` policy without weakening the TypeScript project.
 
 `npm run check:architecture` enforces this direction and the composition-root
 rules in `scripts/architecture-boundaries.json`. A new cross-workspace edge,
@@ -102,8 +114,8 @@ repository-owned third-party `src/library/ini/` sources are excluded.
 | --- | ---: | --- |
 | `src/library/licensecc.cpp` | 916 | C++ public API orchestration; changes pair with public ABI tests and CMake packaging. |
 | `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 1,157 | Admin contract components; API-contract ownership stays with the admin deployable. |
-| `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,006 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
-| `services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx` | 733 | Catalog list/mutation coordinator; consequence-heavy import/projection workflows and presentation stay in sibling catalog modules. |
+| `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 971 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
+| `services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx` | 633 | Catalog list/mutation coordinator; consequence-heavy import/projection workflows and presentation stay in sibling catalog modules. |
 | `services/cloudflare-d1-backup/src/core.ts` | 506 | D1 export/R2 backup orchestration; backup remains independently deployable. |
 
 Composition roots remain intentionally small. Current counts are:
@@ -113,10 +125,10 @@ Composition roots remain intentionally small. Current counts are:
 | Backend `src/index.ts` / `src/app.ts` | 4 | 63 |
 | Admin Worker `src/worker/index.ts` / `src/worker/app.ts` | 1 | 56 |
 | Admin UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 9 | 102 |
-| Portal Worker `src/worker/index.ts` / `src/worker/app.ts` | 2 | 84 |
-| Portal UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 6 | 199 |
+| Portal Worker `src/worker/index.ts` / `src/worker/app.ts` | 2 | 83 |
+| Portal UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 6 | 203 |
 
-Current production-source totals are 22,512 lines for license-admin, 5,244 lines for licensing-backend, 5,835 lines for customer-portal, and 1,344 lines for D1-backup. These counts include tracked and non-ignored, untracked
+Current production-source totals are 23,630 lines for license-admin, 5,934 lines for licensing-backend, 6,014 lines for customer-portal, and 1,332 lines for D1-backup. These counts include tracked and non-ignored, untracked
 TypeScript, TSX, JavaScript, and MJS under each service's `src` tree. They are
 evidence for responsibility review, not a reason
 to move code without a behavioral or ownership boundary.

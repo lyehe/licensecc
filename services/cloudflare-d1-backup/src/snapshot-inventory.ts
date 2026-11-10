@@ -1,39 +1,13 @@
+import { SNAPSHOT_COUNTED_TABLES, SNAPSHOT_INVENTORY_ALGORITHM } from "./snapshot-contract.mjs";
 import { createHash } from "node:crypto";
 
+export { SNAPSHOT_COUNTED_TABLES } from "./snapshot-contract.mjs";
+
 export interface BackupSnapshotInventory {
-  algorithm: "d1-export-sql-insert-count-v1";
+  algorithm: typeof SNAPSHOT_INVENTORY_ALGORITHM;
   /** Names and row counts only; no exported values are retained or logged. */
   table_counts: Record<string, number>;
 }
-
-// Keep this inventory in lockstep with restore-drill.mjs REQUIRED_TABLES. The
-// backup-local test suite compares the two exported constants so drift fails
-// before a deployment. High-churn/ephemeral tables remain schema-only checks.
-export const SNAPSHOT_COUNTED_TABLES = [
-  "device_bound_devices",
-  "device_bound_bindings",
-  "device_bound_events",
-  "device_bound_operations",
-  "entitlements",
-  "entitlement_events",
-  "mutation_idempotency",
-  "customers",
-  "licenses",
-  "orders",
-  "order_events",
-  "customer_events",
-  "entitlement_policies",
-  "policy_events",
-  "webhook_endpoints",
-  "audit_digests",
-  "catalog_features",
-  "catalog_plans",
-  "catalog_plan_features",
-  "license_plan_assignments",
-  "catalog_events",
-  "webhook_events",
-  "license_plan_assignment_events",
-] as const;
 
 const SNAPSHOT_COUNTED_TABLE_SET = new Set<string>(SNAPSHOT_COUNTED_TABLES);
 type SqlTokenKind = "word" | "identifier" | "string" | "punctuation";
@@ -203,7 +177,7 @@ class SnapshotInventoryInterpreter {
       }
     }
     return {
-      algorithm: "d1-export-sql-insert-count-v1",
+      algorithm: SNAPSHOT_INVENTORY_ALGORITHM,
       table_counts: tableCounts,
     };
   }

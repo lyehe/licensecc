@@ -16,6 +16,9 @@
     "time-travel": "node scripts/time-travel.mjs",
     "restore-drill": "node scripts/restore-drill.mjs"
   },
+  "dependencies": {
+    "@licensecc/cloudflare-runtime": "file:../../packages/cloudflare-runtime"
+  },
   "devDependencies": {
     "@types/node": "22.20.5",
     "typescript": "7.0.2",

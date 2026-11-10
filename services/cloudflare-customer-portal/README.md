@@ -14,7 +14,28 @@ and connected-device retirement.
 
 ## License access in the portal
 
+An administrator can create an account whose customer chooses a password later.
+Choose **Set or reset password** on the sign-in screen and enter the login email;
+the verification link lets both first-time and returning customers choose a password.
+The configured portal URL with "/?password_action=reset" opens this form directly.
+Account creation does not send an invitation: the operator shares setup instructions.
+Email-disabled deployments use an initial password supplied securely by the operator.
+
 Every grant is protected: app details direct customers to Connect in their application. The portal never offers a device-key field or a `.lic` download; offline `.lic` files are issued by the operator with `lccgen`.
+
+If a license is full, choose **Manage devices** on the connection screen to review
+connections for that app and confirm a disconnect. **Return and check again**
+re-inspects the same connection request without restarting its deadline. A saved
+disconnect must be resolved before approval. Disconnecting stops renewal but
+preserves outstanding lease holds: if the slot becomes available after this
+request expires, restart Connect from the app after the displayed release time.
+
+Disconnect confirmations distinguish current offline permission from slot
+release. An already-running app may retain offline access until that permission
+expires. Restarting requires a fresh online check, which the disconnected
+connection cannot pass. The displayed slot-release time includes a safety
+allowance and does not extend offline access. Portal sign-out and losing
+internet leave the device connection and its slot allocation in place.
 
 The status label preserves disabled/revoked state and marks past or future validity windows as Expired or Not started. Enabled describes the listed dates only: the backend still checks device, trial and account eligibility. The browser clock updates these labels without server polling; it does not authorize access.
 
@@ -45,10 +66,27 @@ conflicts inspect the exact binding before a separate explicit clear action.
 header. It returns at most 100 owned bindings in binding-ID order, with
 `next_cursor`/`has_more`; supply `cursor` for the next page. This is live keyset
 pagination, not a snapshot. Alternatively supply `binding_id` to inspect exactly
-one owned connection (zero or one result); the two query fields are mutually
-exclusive. Every read rechecks ownership and uses primary D1 session semantics
+one owned connection (zero or one result); this exact lookup cannot be combined
+with other query fields. Every read rechecks ownership and uses primary D1 session semantics
 when available. Database time determines logical release at the hold boundary.
 No private keys, raw proofs or license fingerprints are included.
+
+Optional **q** searches device labels (including the Unnamed device fallback),
+connection IDs, and app IDs by a literal case-insensitive substring using JavaScript
+lowercase semantics. It is trimmed and limited to 128 Unicode code points; percent,
+underscore, quotes, and backslashes have no special meaning. Empty q behaves as omitted.
+Optional **project** is an exact app ID applied before pagination. Both work with cursor;
+keep them unchanged when continuing, and restart when the query or app changes.
+Unknown or duplicate parameters are rejected, and binding_id excludes all other parameters.
+
+Search reads inspect at most 100 owned candidate connections per request. A page
+can have no matches and still have **has_more**: its **next_cursor** advances past
+the scanned candidates. The Devices and connection-recovery screens automatically
+continue sparse search pages, with at most five requests per interaction. If more
+remain, **Search incomplete** and **Continue search** make the remaining work explicit.
+No matching devices is final only when pagination ends. Existing unfiltered clients
+retain the original response shape, order, and page-size behavior. Roll out the
+extended Worker before the new UI; revert the UI first when rolling back.
 
 ## Device consent API
 
@@ -406,11 +444,48 @@ and ten per 15 minutes per action, with additional IP limits. No password or
 raw token appears in API responses or application logs. Expired action rows are
 removed on subsequent eligible email requests; audit events are unaffected.
 
+### Displayed-account preconditions and rollout
+
+The Account screen binds its reads and changes to the customer returned by
+`GET /api/portal/me`. `GET /portal/v1/auth/identities`,
+`POST /portal/v1/auth/identities/unlink`, and both methods on
+`/portal/v1/auth/password` require `x-expected-customer-id` containing
+`encodeURIComponent` of that displayed customer ID. The cookie remains the
+authentication authority. A missing precondition returns `400 invalid_request`;
+a different session customer returns `409 account_changed` with no account
+data or write. Recheck `/api/portal/me`, clear the previous account's drafts
+and confirmations, and require a new action. Never replay a refused write
+against the newly signed-in customer.
+
+Native OAuth `mode=link` forms supply the same encoded value in a hidden
+`expected_customer_id` field, form-encoded by the browser. JSON clients may
+use the header instead. Missing or malformed form fields redirect to Account
+with `auth_error=account_context_required`; a mismatched customer redirects
+with `auth_error=account_changed`. Neither creates OAuth state. Ordinary
+provider sign-in and the session-check endpoint do not need a precondition.
+The callback retains its existing binding to the exact session that started
+linking.
+
+This is an intentional fail-closed tightening of the existing portal contract,
+matching the protected-device endpoints' existing precondition. Deploy the
+portal Worker and its UI assets together. Older cached Account pages and
+custom callers must reload/update to send the precondition; allowing an
+unbound fallback would preserve the cross-account mutation defect. A rollback
+must keep this server check. Native licensing SDK contracts are unaffected.
+
+The email password-completion screen says **Save password** because its
+opaque token can represent registration or reset. `signed_in` confirms the
+session before opening Apps; if that check fails after a saved password, the
+screen offers **Confirm sign-in**, which retries only the session GET.
+`password_updated` instead confirms the save without a session and directs the
+customer to sign in. Registration and reset can return either outcome,
+depending on whether a session could be issued.
+
 Account supports changing a password with the current password, or setting or
 resetting one within ten minutes of a Google, GitHub, or email-code sign-in.
 Successful changes and emailed resets revoke old browser sessions and email
-codes, invalidate old reset links, and issue a fresh session. Concurrent link
-redemption permits one write.
+codes and invalidate old reset links. Concurrent link redemption permits one
+write.
 
 The registration API accepts `{ "email": "..." }` and returns 202; clients
 must follow the email link and POST `{ "token": "...", "password": "..." }` to

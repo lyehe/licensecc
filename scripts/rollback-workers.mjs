@@ -3,18 +3,15 @@ import { lstatSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { SafeRollbackError, VERSION_ID_PATTERN as versionIdPattern, parseDeploymentList, parseVersionView } from "./release/deployment-evidence.mjs";
+import { WORKER_CONFIGS } from "./release/worker-targets.mjs";
+
+export { SafeRollbackError, parseDeploymentList } from "./release/deployment-evidence.mjs";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 // An injected root selects configuration/cwd, never a different executable.
 const pinnedWranglerEntrypoint = resolve(repositoryRoot, "node_modules/wrangler/bin/wrangler.js");
-
-const workerDefinitions = Object.freeze({
-  backend: Object.freeze({ config: "services/cloudflare-licensing-backend/wrangler.toml" }),
-  admin: Object.freeze({ config: "services/cloudflare-license-admin/wrangler.jsonc" }),
-  portal: Object.freeze({ config: "services/cloudflare-customer-portal/wrangler.jsonc" }),
-  backup: Object.freeze({ config: "services/cloudflare-d1-backup/wrangler.jsonc" }),
-});
 
 // Reverse the normal deployment order so dependent surfaces are unwound before
 // the backend contract they call. Every target is validated before this order
@@ -29,18 +26,7 @@ const allowedFlags = new Set([
   "--portal-version",
   "--backup-version",
 ]);
-const versionIdPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/u;
-const safeIdentityPattern = /^[A-Za-z0-9_-]{1,128}$/u;
 const maxJsonBytes = 1024 * 1024;
-
-export class SafeRollbackError extends Error {
-  constructor(code, message, { worker } = {}) {
-    super(message);
-    this.name = "SafeRollbackError";
-    this.code = code;
-    this.worker = worker;
-  }
-}
 
 function fail(code, message, worker) {
   throw new SafeRollbackError(code, message, worker ? { worker } : undefined);
@@ -54,68 +40,6 @@ function platformPath(value) {
 function insideRoot(root, candidate) {
   const pathFromRoot = relative(root, candidate);
   return pathFromRoot !== "" && pathFromRoot !== ".." && !pathFromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(pathFromRoot);
-}
-
-function asTimestamp(value, code, worker) {
-  if (typeof value !== "string" || value.length > 64) fail(code, "Wrangler returned an invalid deployment timestamp.", worker);
-  const milliseconds = Date.parse(value);
-  if (!Number.isFinite(milliseconds)) fail(code, "Wrangler returned an invalid deployment timestamp.", worker);
-  return { iso: new Date(milliseconds).toISOString(), milliseconds };
-}
-
-function safeId(value, code, worker) {
-  if (typeof value !== "string" || !safeIdentityPattern.test(value)) fail(code, "Wrangler returned an invalid deployment identity.", worker);
-  return value;
-}
-
-function strictJson(stdout, code, worker) {
-  if (typeof stdout !== "string" || Buffer.byteLength(stdout, "utf8") === 0 || Buffer.byteLength(stdout, "utf8") > maxJsonBytes || stdout.includes("\0")) {
-    fail(code, "Wrangler returned malformed JSON.", worker);
-  }
-  try {
-    return JSON.parse(stdout);
-  } catch {
-    fail(code, "Wrangler returned malformed JSON.", worker);
-  }
-}
-
-function parseVersionView(stdout, expectedVersionId, worker) {
-  const parsed = strictJson(stdout, "MALFORMED_VERSION_JSON", worker);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || parsed.id !== expectedVersionId || !parsed.metadata || typeof parsed.metadata !== "object" || Array.isArray(parsed.metadata)) {
-    fail("INVALID_VERSION_RESPONSE", "Wrangler did not validate the requested Worker version.", worker);
-  }
-  const created = asTimestamp(parsed.metadata.created_on, "INVALID_VERSION_RESPONSE", worker);
-  return Object.freeze({ version_id: expectedVersionId, created_on: created.iso });
-}
-
-export function parseDeploymentList(stdout, worker) {
-  const parsed = strictJson(stdout, "MALFORMED_DEPLOYMENT_JSON", worker);
-  if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > 100) {
-    fail("INVALID_DEPLOYMENT_RESPONSE", "Wrangler returned no valid deployments.", worker);
-  }
-
-  const deployments = parsed.map((deployment) => {
-    if (!deployment || typeof deployment !== "object" || Array.isArray(deployment) || !Array.isArray(deployment.versions) || deployment.versions.length === 0 || deployment.versions.length > 2) {
-      fail("INVALID_DEPLOYMENT_RESPONSE", "Wrangler returned a malformed deployment.", worker);
-    }
-    const deploymentId = safeId(deployment.id, "INVALID_DEPLOYMENT_RESPONSE", worker);
-    const created = asTimestamp(deployment.created_on, "INVALID_DEPLOYMENT_RESPONSE", worker);
-    const versions = deployment.versions.map((version) => {
-      if (!version || typeof version !== "object" || Array.isArray(version) || !versionIdPattern.test(version.version_id) || typeof version.percentage !== "number" || !Number.isFinite(version.percentage) || version.percentage < 0 || version.percentage > 100) {
-        fail("INVALID_DEPLOYMENT_RESPONSE", "Wrangler returned a malformed deployment version.", worker);
-      }
-      return Object.freeze({ version_id: version.version_id, percentage: version.percentage });
-    }).sort((left, right) => left.version_id.localeCompare(right.version_id));
-    const totalPercentage = versions.reduce((total, version) => total + version.percentage, 0);
-    if (Math.abs(totalPercentage - 100) > 0.000001) fail("INVALID_DEPLOYMENT_RESPONSE", "Wrangler returned an invalid traffic allocation.", worker);
-    return {
-      milliseconds: created.milliseconds,
-      identity: Object.freeze({ deployment_id: deploymentId, created_on: created.iso, versions }),
-    };
-  });
-
-  deployments.sort((left, right) => left.milliseconds - right.milliseconds || left.identity.deployment_id.localeCompare(right.identity.deployment_id));
-  return deployments.at(-1).identity;
 }
 
 function isTargetDeployment(identity, targetVersionId) {
@@ -148,12 +72,12 @@ function validateRequest(request) {
   if (!Array.isArray(request.workers) || request.workers.length === 0 || request.workers.length > rollbackOrder.length) fail("INVALID_WORKER_SELECTION", "Select at least one known Worker.");
   const selected = new Set();
   for (const worker of request.workers) {
-    if (typeof worker !== "string" || !Object.hasOwn(workerDefinitions, worker) || selected.has(worker)) fail("INVALID_WORKER_SELECTION", "Worker selection is unknown or duplicated.");
+    if (typeof worker !== "string" || !Object.hasOwn(WORKER_CONFIGS, worker) || selected.has(worker)) fail("INVALID_WORKER_SELECTION", "Worker selection is unknown or duplicated.");
     selected.add(worker);
   }
   if (!request.versions || typeof request.versions !== "object" || Array.isArray(request.versions)) fail("INVALID_VERSION_SET", "Worker version IDs are required.");
   for (const worker of Object.keys(request.versions)) {
-    if (!Object.hasOwn(workerDefinitions, worker)) fail("UNEXPECTED_VERSION", "A version was supplied for an unknown Worker.");
+    if (!Object.hasOwn(WORKER_CONFIGS, worker)) fail("UNEXPECTED_VERSION", "A version was supplied for an unknown Worker.");
   }
   for (const worker of rollbackOrder) {
     const versionId = request.versions[worker];
@@ -206,8 +130,8 @@ function validateConfigPaths(root) {
     fail("INVALID_REPOSITORY_ROOT", "Repository root is not a real directory.");
   }
   const configs = {};
-  for (const [worker, definition] of Object.entries(workerDefinitions)) {
-    const candidate = resolve(absoluteRoot, definition.config);
+  for (const [worker, config] of Object.entries(WORKER_CONFIGS)) {
+    const candidate = resolve(absoluteRoot, config);
     if (!insideRoot(absoluteRoot, candidate)) fail("INVALID_CONFIG_PATH", "Worker configuration escaped the repository root.", worker);
     let stat;
     let realCandidate;
@@ -217,7 +141,7 @@ function validateConfigPaths(root) {
     } catch {
       fail("INVALID_CONFIG_PATH", "Expected Worker configuration is missing.", worker);
     }
-    const expectedRealCandidate = resolve(realRoot, definition.config);
+    const expectedRealCandidate = resolve(realRoot, config);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > 2 * 1024 * 1024 || platformPath(realCandidate) !== platformPath(expectedRealCandidate)) {
       fail("INVALID_CONFIG_PATH", "Worker configuration path is not an exact regular file.", worker);
     }

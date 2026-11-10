@@ -6,8 +6,45 @@ import { identityCustomer } from "../dist-worker/worker/oauth/accounts.js";
 import * as support from "../dist-worker/worker/support.js";
 
 const configuration = { PORTAL_GOOGLE_CLIENT_ID: "google-client", PORTAL_GOOGLE_CLIENT_SECRET: "google-secret", PORTAL_GITHUB_CLIENT_ID: "github-client", PORTAL_GITHUB_CLIENT_SECRET: "github-secret" };
-async function start(env, provider = "github", sessionCookie) {
-  const result = await call(env, "POST", `/portal/v1/auth/${provider}/start${sessionCookie ? "?mode=link" : ""}`, { cookie: sessionCookie });
+
+test("account inventory and unlink refuse a missing or switched displayed customer before reading or changing identities", async t => {
+  t.mock.method(Date, "now", () => NOW * 1000);
+  const { env, db } = baseFixture(configuration);
+  for (const owner of ["A", "B"]) for (const provider of ["google", "github"]) linkIdentity(db, owner, provider);
+  const cookie = await sessionFor(env, "B", "oauth");
+  const before = db.prepare("SELECT * FROM portal_identities ORDER BY customer_id, provider").all();
+  for (const [method, path] of [["GET", "/portal/v1/auth/identities"], ["POST", "/portal/v1/auth/identities/unlink"]]) {
+    for (const [expectedCustomer, status, code] of [[undefined, 400, "invalid_request"], ["A", 409, "account_changed"]]) {
+      const result = await call(env, method, path, { cookie, expectedCustomer, body: method === "POST" ? { provider: "google", customer_id: "B" } : undefined });
+      assert.equal(result.status, status); assert.equal(result.body.code, code);
+      assert.equal(result.body.data, undefined); assert.equal(result.res.headers.get("cache-control"), "no-store");
+    }
+  }
+  assert.deepEqual(db.prepare("SELECT * FROM portal_identities ORDER BY customer_id, provider").all(), before);
+  assert.equal(await signedIn(env, cookie), true);
+  const current = await call(env, "GET", "/portal/v1/auth/identities", { cookie, expectedCustomer: "B" });
+  assert.equal(current.status, 200); assert.equal(current.body.data.items.length, 2);
+});
+
+test("native link forms bind the displayed account, fail closed for old forms and never create OAuth state after mismatch", async t => {
+  t.mock.method(Date, "now", () => NOW * 1000);
+  const { env, db } = baseFixture(configuration);
+  const sessionCookie = await cookieFor(env, "B");
+  const submit = body => worker.fetch(new Request("https://portal.test/portal/v1/auth/github/start?mode=link", {
+    method: "POST", headers: sameSiteHeaders({ cookie: sessionCookie, "content-type": "application/x-www-form-urlencoded" }), body,
+  }), env, CTX);
+  for (const [body, code] of [["", "account_context_required"], ["expected_customer_id=A", "account_changed"], ["expected_customer_id=B&expected_customer_id=A", "account_context_required"]]) {
+    const result = await submit(body);
+    assert.equal(result.status, 303); assert.match(result.headers.get("location"), new RegExp(`auth_error=${code}`));
+    assert.equal(result.headers.get("set-cookie"), null);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM portal_oauth_states").get().n, 0);
+  }
+  const success = await submit("expected_customer_id=B");
+  assert.equal(new URL(success.headers.get("location")).origin, "https://github.com");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM portal_oauth_states").get().n, 1);
+});
+async function start(env, provider = "github", sessionCookie, expectedCustomer = "A") {
+  const result = await call(env, "POST", `/portal/v1/auth/${provider}/start${sessionCookie ? "?mode=link" : ""}`, { cookie: sessionCookie, ...(sessionCookie ? { expectedCustomer } : {}) });
   assert.equal(result.status, 303);
   const url = new URL(result.res.headers.get("location"));
   const cookie = result.res.headers.get("set-cookie").split(";")[0];
@@ -122,12 +159,12 @@ test("Existing email requires explicit linking, which cannot cross customer owne
   assert.equal(db.prepare("SELECT count(*) AS n FROM portal_identities").get().n, 0);
   const cookieA = await cookieFor(env, "A");
   assert.match((await finish(env, await start(env, "github", cookieA))).headers.get("location"), /auth_result=linked/);
-  const methods = await call(env, "GET", "/portal/v1/auth/identities", { cookie: cookieA });
+  const methods = await call(env, "GET", "/portal/v1/auth/identities", { cookie: cookieA, expectedCustomer: "A" });
   assert.equal(methods.body.data.items[0].provider, "github");
   const cookieB = await cookieFor(env, "B");
-  assert.match((await finish(env, await start(env, "github", cookieB))).headers.get("location"), /sign_in_failed/);
+  assert.match((await finish(env, await start(env, "github", cookieB, "B"))).headers.get("location"), /sign_in_failed/);
   assert.equal(db.prepare("SELECT customer_id FROM portal_identities").get().customer_id, "A");
-  assert.equal((await call(env, "GET", "/portal/v1/auth/identities", { cookie: cookieB })).body.data.items.length, 0);
+  assert.equal((await call(env, "GET", "/portal/v1/auth/identities", { cookie: cookieB, expectedCustomer: "B" })).body.data.items.length, 0);
 });
 test("A password-login account (empty customers.email, portal_passwords.email_lower set) is never duplicated by OAuth", async (t) => {
   const { env, db } = baseFixture(configuration);
@@ -163,7 +200,7 @@ test("Linking requires the initiating session at callback and rejects revoked se
   const calls = githubStub(t);
   const cookieA = await cookieFor(env, "A");
   const flow = await start(env, "github", cookieA);
-  await call(env, "POST", "/portal/v1/auth/logout", { cookie: cookieA });
+  await call(env, "POST", "/portal/v1/auth/logout", { cookie: cookieA, expectedCustomer: "A" });
   assert.match((await finish(env, flow)).headers.get("location"), /link_failed/);
   assert.equal(calls.length, 0);
   await start(env, "github", await cookieFor(env, "A"));
@@ -186,14 +223,14 @@ test("Linking with a session older than ten minutes is refused at start and reco
   const calls = githubStub(t);
   const cookieA = await cookieFor(env, "A"); // created at NOW
   clockAt(t, NOW + 601);
-  const refused = await call(env, "POST", "/portal/v1/auth/github/start?mode=link", { cookie: cookieA });
+  const refused = await call(env, "POST", "/portal/v1/auth/github/start?mode=link", { cookie: cookieA, expectedCustomer: "A" });
   assert.equal(refused.status, 303);
   assert.equal(refused.res.headers.get("location"), REAUTH_GITHUB);
   assert.equal(refused.res.headers.get("set-cookie"), null, "no browser binding is issued");
   assert.equal(db.prepare("SELECT count(*) AS n FROM portal_oauth_states").get().n, 0, "no link flow is recorded");
   assert.equal(calls.length, 0);
   // The session itself is still good for everything else.
-  assert.equal((await call(env, "GET", "/api/portal/me", { cookie: cookieA })).status, 200);
+  assert.equal((await call(env, "GET", "/api/portal/me", { cookie: cookieA, expectedCustomer: "A" })).status, 200);
 });
 
 test("A session exactly ten minutes old can still start and complete a link", async (t) => {
@@ -229,7 +266,7 @@ test("An old session keeps plain provider sign-in and disconnecting unchanged", 
   clockAt(t, NOW + 3600);
   const signIn = await finish(env, await start(env, "github", undefined));
   assert.equal(signIn.headers.get("location"), "https://portal.test/#/apps", "sign-in without mode=link is unaffected");
-  const unlinked = await call(env, "POST", "/portal/v1/auth/identities/unlink", { cookie: cookieA, body: { provider: "google" } });
+  const unlinked = await call(env, "POST", "/portal/v1/auth/identities/unlink", { cookie: cookieA, expectedCustomer: "A", body: { provider: "google" } });
   assert.equal(unlinked.status, 200, "disconnecting needs no recent sign-in");
   assert.equal(unlinked.body.code, "identity_unlinked");
 });
@@ -341,7 +378,7 @@ async function sessionFor(env, customerId, authMethod) {
   assert.equal(minted.ok, true);
   return `lccp_session=${minted.raw}`;
 }
-const unlink = (env, cookie, provider = "google", headers) => call(env, "POST", UNLINK, { cookie, body: { provider }, headers });
+const unlink = (env, cookie, provider = "google", headers) => call(env, "POST", UNLINK, { cookie, body: { provider }, headers, expectedCustomer: "A" });
 const signedIn = async (env, cookie) => (await call(env, "GET", "/api/portal/me", { cookie })).status === 200;
 // Holds each D1 batch until `count` requests have reached one, so every request passes its pre-checks
 // before any conditional DELETE runs; the batches then run one at a time, as D1 serializes them.
@@ -381,7 +418,7 @@ test("Unlink succeeds via another identity whose provider is configured", async 
   assert.equal(result.status, 200);
   assert.deepEqual(result.body.data, { provider: "github" });
   assert.deepEqual(linkedProviders(db, "A"), ["google"]);
-  const listed = await call(env, "GET", "/portal/v1/auth/identities", { cookie });
+  const listed = await call(env, "GET", "/portal/v1/auth/identities", { cookie, expectedCustomer: "A" });
   assert.deepEqual(listed.body.data.items.map((item) => item.provider), ["google"]);
 });
 
@@ -535,9 +572,9 @@ test("Unlink requires a same-site request, a session, a known provider and this 
   await call(env, "POST", "/portal/v1/auth/logout", { cookie: signedOut });
   expectCode(await unlink(env, signedOut, "google"), 401, "unauthorized");
   for (const body of [{}, { provider: "" }, { provider: "GitHub" }, { provider: "gitlab" }, { provider: ["google"] }]) {
-    expectCode(await call(env, "POST", UNLINK, { cookie: cookieA, body }), 400, "invalid_request");
+    expectCode(await call(env, "POST", UNLINK, { cookie: cookieA, expectedCustomer: "A", body }), 400, "invalid_request");
   }
-  const malformed = await worker.fetch(new Request(`https://portal.test${UNLINK}`, { method: "POST", headers: { ...sameSiteHeaders(), cookie: cookieA }, body: "{" }), env, CTX);
+  const malformed = await worker.fetch(new Request(`https://portal.test${UNLINK}`, { method: "POST", headers: { ...sameSiteHeaders(), "x-expected-customer-id": "A", cookie: cookieA }, body: "{" }), env, CTX);
   assert.equal(malformed.status, 400);
   assert.equal((await malformed.json()).code, "invalid_json");
   // Another customer's identity is the same 404 as one that does not exist.
