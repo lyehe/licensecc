@@ -9,7 +9,9 @@ the current Node executable with the repository's locked
 `node_modules/wrangler/bin/wrangler.js` entry point. They do not invoke a shell,
 an npm command shim or an installation fallback. An alternate rollback root
 selects configuration and working directory; it does not select a different
-Wrangler installation. Run `npm ci` before using these wrappers.
+Wrangler installation. The root declares Wrangler directly at the same exact
+version as every Worker so this path is independent of workspace hoisting.
+Run `npm ci` before using these wrappers.
 
 The root npm override selects Undici 7.30.1 for Miniflare to address its
 EventSource, content-encoding, and integrity-check advisories. Keep that override
